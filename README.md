@@ -1,3 +1,4 @@
+# sevenn
 # Sevenn
 
 Sevenn is an offline-first study app for organizing diseases, drugs, and concepts.
