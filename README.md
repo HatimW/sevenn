@@ -3,33 +3,24 @@
 Sevenn is an offline-first study app for organizing diseases, drugs, and concepts.
 This repository hosts the SPA implementation using vanilla JavaScript modules.
 
-## Development
 
-Install dependencies (for the optional local server and future tooling):
 
 ```bash
 npm install
 ```
 
-Start a dev server:
 
-```bash
-npm start
-```
-
-Run the placeholder test suite:
 
 ```bash
 npm test
 ```
 
-The site will be available at the URL shown in the terminal. You can also simply open
-`index.html` directly in a modern browser.
 
 The **Settings** tab lets you adjust the daily review target and manage curriculum
 blocks with their lectures. It also offers buttons to export or import the
 database as JSON and to export an Anki-compatible CSV. Data is stored locally
 using IndexedDB.
+
 
 ## Roadmap
 

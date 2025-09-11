@@ -1,5 +1,5 @@
-import { state, setTab, setSubtab, setFlashSession, setQuizSession } from './state.js';
-import { initDB, listItemsByKind } from './storage/storage.js';
+import { state, setTab, setSubtab, setFlashSession, setQuizSession, setQuery } from './state.js';
+import { initDB, findItemsByFilter } from './storage/storage.js';
 import { renderSettings } from './ui/settings.js';
 import { openEditor } from './ui/components/editor.js';
 import { renderTable } from './ui/components/table.js';
@@ -41,6 +41,13 @@ async function render() {
   });
 
   header.appendChild(nav);
+
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.placeholder = 'Search';
+  search.value = state.query;
+  search.addEventListener('input', e => { setQuery(e.target.value); render(); });
+  header.appendChild(search);
   root.appendChild(header);
 
   const main = document.createElement('main');
@@ -69,7 +76,8 @@ async function render() {
     });
     main.appendChild(subnav);
 
-    const items = await listItemsByKind(kind);
+    const filter = { ...state.filters, types:[kind], query: state.query };
+    const items = await findItemsByFilter(filter);
     if (state.subtab[state.tab] === 'Cards') {
       renderCards(main, items, kind, render);
     } else if (state.subtab[state.tab] === 'Stats') {

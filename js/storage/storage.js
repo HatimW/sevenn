@@ -60,13 +60,48 @@ export async function deleteBlock(blockId) {
   await prom(b.delete(blockId));
 }
 
-import { buildTokens } from '../search.js';
+import { buildTokens, tokenize } from '../search.js';
 import { cleanItem } from '../validators.js';
 
 export async function listItemsByKind(kind) {
   const i = await store('items');
   const idx = i.index('by_kind');
   return await prom(idx.getAll(kind));
+}
+
+function titleOf(item){
+  return item.name || item.concept || '';
+}
+
+export async function findItemsByFilter(filter) {
+  const i = await store('items');
+  let items = await prom(i.getAll());
+
+  if (filter.types && filter.types.length) {
+    items = items.filter(it => filter.types.includes(it.kind));
+  }
+  if (filter.block) {
+    items = items.filter(it => (it.blocks || []).includes(filter.block));
+  }
+  if (filter.week) {
+    items = items.filter(it => (it.weeks || []).includes(filter.week));
+  }
+  if (filter.onlyFav) {
+    items = items.filter(it => it.favorite);
+  }
+  if (filter.query && filter.query.trim()) {
+    const toks = tokenize(filter.query);
+    items = items.filter(it => {
+      const t = it.tokens || '';
+      return toks.every(tok => t.includes(tok));
+    });
+  }
+  if (filter.sort === 'name') {
+    items.sort((a,b) => titleOf(a).localeCompare(titleOf(b)));
+  } else {
+    items.sort((a,b) => b.updatedAt - a.updatedAt);
+  }
+  return items;
 }
 
 export async function getItem(id) {
