@@ -1,5 +1,4 @@
 
-# Sevenn
 
 Sevenn is an offline-first study app for organizing diseases, drugs, and concepts.
 This repository hosts the SPA implementation using vanilla JavaScript, bundled for direct use from the filesystem.

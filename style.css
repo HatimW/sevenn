@@ -26,9 +26,9 @@ body {
 
 .header {
   padding: var(--pad);
-  background: linear-gradient(90deg, var(--purple), var(--blue));
+  background: var(--panel);
   border-bottom: 1px solid var(--border);
-  color: #000;
+  color: var(--text);
 }
 
 .row {
@@ -45,7 +45,7 @@ body {
   background: var(--muted);
   border: none;
   color: var(--text);
-  padding: 4px 8px;
+  padding: 6px 12px;
   cursor: pointer;
   border-radius: var(--radius);
 }
@@ -54,6 +54,12 @@ body {
   background: var(--blue);
   color: #000;
 }
+.tab.disease { background: var(--purple); color:#000; opacity:0.7; }
+.tab.disease.active { opacity:1; }
+.tab.drug { background: var(--blue); color:#000; opacity:0.7; }
+.tab.drug.active { opacity:1; }
+.tab.concept { background: var(--green); color:#000; opacity:0.7; }
+.tab.concept.active { opacity:1; }
 
 .card {
   background: var(--panel);
@@ -113,11 +119,11 @@ body {
 }
 
 .btn {
-  background: var(--green);
+  background: var(--blue);
   color: #000;
   border: none;
   border-radius: var(--radius);
-  padding: 4px 8px;
+  padding: 6px 12px;
   cursor: pointer;
 }
 
@@ -128,6 +134,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.modal .card {
+  width: 90%;
+  max-width: 500px;
 }
 
 .table {
@@ -142,8 +153,8 @@ body {
 }
 
 .table th {
-  background: var(--purple);
-  color: #000;
+  background: var(--muted);
+  color: var(--text);
 }
 
 .table td {

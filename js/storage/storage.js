@@ -38,8 +38,13 @@ export async function saveSettings(patch) {
 }
 
 export async function listBlocks() {
-  const b = await store('blocks');
-  return await prom(b.getAll());
+  try {
+    const b = await store('blocks');
+    return await prom(b.getAll());
+  } catch (err) {
+    console.warn('listBlocks failed', err);
+    return [];
+  }
 }
 
 export async function upsertBlock(def) {

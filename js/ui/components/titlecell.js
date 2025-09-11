@@ -1,5 +1,6 @@
 import { upsertItem, deleteItem } from '../../storage/storage.js';
 import { openEditor } from './editor.js';
+import { confirmModal } from './confirm.js';
 
 export function createTitleCell(item, onChange) {
   const wrap = document.createElement('div');
@@ -44,7 +45,7 @@ export function createTitleCell(item, onChange) {
   del.className = 'btn';
   del.textContent = 'Del';
   del.addEventListener('click', async () => {
-    if (confirm('Delete this item?')) {
+    if (await confirmModal('Delete this item?')) {
       await deleteItem(item.id);
       onChange && onChange();
     }

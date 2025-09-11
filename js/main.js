@@ -31,7 +31,9 @@ async function render() {
 
   tabs.forEach(t => {
     const btn = document.createElement('button');
+    const kindClass = { Diseases:'disease', Drugs:'drug', Concepts:'concept' }[t];
     btn.className = 'tab' + (state.tab === t ? ' active' : '');
+    if (kindClass) btn.classList.add(kindClass);
     btn.textContent = t;
     btn.addEventListener('click', () => {
       setTab(t);

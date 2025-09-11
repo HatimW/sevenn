@@ -1,4 +1,5 @@
 import { getSettings, saveSettings, listBlocks, upsertBlock, deleteBlock, exportJSON, importJSON, exportAnkiCSV } from '../storage/storage.js';
+import { confirmModal } from './components/confirm.js';
 
 export async function renderSettings(root) {
   root.innerHTML = '';
@@ -48,7 +49,7 @@ export async function renderSettings(root) {
     del.className = 'btn';
     del.textContent = 'Delete';
     del.addEventListener('click', async () => {
-      if (confirm('Delete block?')) {
+      if (await confirmModal('Delete block?')) {
         await deleteBlock(b.blockId);
         await renderSettings(root);
       }

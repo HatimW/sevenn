@@ -52,7 +52,7 @@ var Sevenn = (() => {
 
   // js/storage/idb.js
   var DB_NAME = "sevenn-db";
-  var DB_VERSION = 1;
+  var DB_VERSION = 2;
   function openDB() {
     return new Promise((resolve, reject) => {
       if (!("indexedDB" in globalThis)) {
@@ -273,8 +273,13 @@ var Sevenn = (() => {
     await prom2(s.put(next));
   }
   async function listBlocks() {
-    const b = await store("blocks");
-    return await prom2(b.getAll());
+    try {
+      const b = await store("blocks");
+      return await prom2(b.getAll());
+    } catch (err) {
+      console.warn("listBlocks failed", err);
+      return [];
+    }
   }
   async function upsertBlock(def) {
     const b = await store("blocks", "readwrite");
@@ -381,6 +386,47 @@ var Sevenn = (() => {
     await prom2(e.put(next));
   }
 
+  // js/ui/components/confirm.js
+  function confirmModal(message) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.className = "modal";
+      const box = document.createElement("div");
+      box.className = "card";
+      const msg = document.createElement("p");
+      msg.textContent = message;
+      box.appendChild(msg);
+      const actions = document.createElement("div");
+      actions.className = "row";
+      const yes = document.createElement("button");
+      yes.className = "btn";
+      yes.textContent = "Yes";
+      yes.addEventListener("click", () => {
+        document.body.removeChild(overlay);
+        resolve(true);
+      });
+      const no = document.createElement("button");
+      no.className = "btn";
+      no.textContent = "No";
+      no.addEventListener("click", () => {
+        document.body.removeChild(overlay);
+        resolve(false);
+      });
+      actions.appendChild(yes);
+      actions.appendChild(no);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) {
+          document.body.removeChild(overlay);
+          resolve(false);
+        }
+      });
+      document.body.appendChild(overlay);
+      yes.focus();
+    });
+  }
+
   // js/ui/settings.js
   async function renderSettings(root) {
     root.innerHTML = "";
@@ -422,7 +468,7 @@ var Sevenn = (() => {
       del.className = "btn";
       del.textContent = "Delete";
       del.addEventListener("click", async () => {
-        if (confirm("Delete block?")) {
+        if (await confirmModal("Delete block?")) {
           await deleteBlock(b.blockId);
           await renderSettings(root);
         }
@@ -559,6 +605,37 @@ var Sevenn = (() => {
   }
 
   // js/ui/components/editor.js
+  var fieldMap = {
+    disease: [
+      ["etiology", "Etiology"],
+      ["pathophys", "Pathophys"],
+      ["clinical", "Clinical"],
+      ["diagnosis", "Diagnosis"],
+      ["treatment", "Treatment"],
+      ["complications", "Complications"],
+      ["mnemonic", "Mnemonic"],
+      ["facts", "Facts (comma separated)"]
+    ],
+    drug: [
+      ["class", "Class"],
+      ["source", "Source"],
+      ["moa", "MOA"],
+      ["uses", "Uses"],
+      ["sideEffects", "Side Effects"],
+      ["contraindications", "Contraindications"],
+      ["mnemonic", "Mnemonic"],
+      ["facts", "Facts (comma separated)"]
+    ],
+    concept: [
+      ["type", "Type"],
+      ["definition", "Definition"],
+      ["mechanism", "Mechanism"],
+      ["clinicalRelevance", "Clinical Relevance"],
+      ["example", "Example"],
+      ["mnemonic", "Mnemonic"],
+      ["facts", "Facts (comma separated)"]
+    ]
+  };
   function openEditor(kind, onSave, existing = null) {
     const overlay = document.createElement("div");
     overlay.className = "modal";
@@ -574,6 +651,31 @@ var Sevenn = (() => {
     nameInput.value = existing ? existing.name || existing.concept || "" : "";
     nameLabel.appendChild(nameInput);
     form.appendChild(nameLabel);
+    const fieldInputs = {};
+    fieldMap[kind].forEach(([field, label]) => {
+      const lbl = document.createElement("label");
+      lbl.textContent = label;
+      let inp;
+      if (field === "facts") {
+        inp = document.createElement("input");
+        inp.className = "input";
+        inp.value = existing ? (existing.facts || []).join(", ") : "";
+      } else {
+        inp = document.createElement("textarea");
+        inp.className = "input";
+        inp.value = existing ? existing[field] || "" : "";
+      }
+      lbl.appendChild(inp);
+      form.appendChild(lbl);
+      fieldInputs[field] = inp;
+    });
+    const colorLabel = document.createElement("label");
+    colorLabel.textContent = "Color";
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.value = existing?.color || "#ffffff";
+    colorLabel.appendChild(colorInput);
+    form.appendChild(colorLabel);
     const saveBtn = document.createElement("button");
     saveBtn.type = "submit";
     saveBtn.className = "btn";
@@ -591,6 +693,15 @@ var Sevenn = (() => {
       const item = existing || { id: uid(), kind };
       item[titleKey] = nameInput.value.trim();
       if (!item[titleKey]) return;
+      fieldMap[kind].forEach(([field]) => {
+        const v = fieldInputs[field].value.trim();
+        if (field === "facts") {
+          item.facts = v ? v.split(",").map((s) => s.trim()).filter(Boolean) : [];
+        } else {
+          item[field] = v;
+        }
+      });
+      item.color = colorInput.value;
       await upsertItem(item);
       document.body.removeChild(overlay);
       onSave && onSave();
@@ -607,6 +718,9 @@ var Sevenn = (() => {
   function createTitleCell(item, onChange) {
     const wrap = document.createElement("div");
     wrap.className = "title-cell";
+    const kindColors = { disease: "var(--pink)", drug: "var(--green)", concept: "var(--blue)" };
+    wrap.style.borderLeft = "4px solid " + (item.color || kindColors[item.kind] || "var(--gray)");
+    wrap.style.paddingLeft = "4px";
     const title = document.createElement("div");
     title.className = "title";
     title.textContent = item.name || item.concept || "Untitled";
@@ -638,7 +752,7 @@ var Sevenn = (() => {
     del.className = "btn";
     del.textContent = "Del";
     del.addEventListener("click", async () => {
-      if (confirm("Delete this item?")) {
+      if (await confirmModal("Delete this item?")) {
         await deleteItem(item.id);
         onChange && onChange();
       }
@@ -1362,7 +1476,9 @@ var Sevenn = (() => {
     nav.className = "tabs row";
     tabs.forEach((t) => {
       const btn = document.createElement("button");
+      const kindClass = { Diseases: "disease", Drugs: "drug", Concepts: "concept" }[t];
       btn.className = "tab" + (state.tab === t ? " active" : "");
+      if (kindClass) btn.classList.add(kindClass);
       btn.textContent = t;
       btn.addEventListener("click", () => {
         setTab(t);
