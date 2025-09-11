@@ -1,0 +1,12 @@
+{
+  "name": "sevenn",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "http-server -c-1 .",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}
