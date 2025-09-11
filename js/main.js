@@ -2,7 +2,7 @@ import { state, setTab, setSubtab, setFlashSession, setQuizSession, setQuery } f
 import { initDB, findItemsByFilter } from './storage/storage.js';
 import { renderSettings } from './ui/settings.js';
 import { openEditor } from './ui/components/editor.js';
-import { renderTable } from './ui/components/table.js';
+import { renderCardList } from './ui/components/cardlist.js';
 import { renderCards } from './ui/components/cards.js';
 import { renderStats } from './ui/components/stats.js';
 import { renderBuilder } from './ui/components/builder.js';
@@ -85,7 +85,7 @@ async function render() {
     } else if (state.subtab[state.tab] === 'Stats') {
       renderStats(main, items);
     } else {
-      await renderTable(main, items, kind, render);
+      await renderCardList(main, items, kind, render);
     }
   } else if (state.tab === 'Study') {
     if (state.flashSession) {

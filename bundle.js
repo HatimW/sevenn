@@ -714,54 +714,6 @@ var Sevenn = (() => {
     nameInput.focus();
   }
 
-  // js/ui/components/titlecell.js
-  function createTitleCell(item, onChange) {
-    const wrap = document.createElement("div");
-    wrap.className = "title-cell";
-    const kindColors = { disease: "var(--pink)", drug: "var(--green)", concept: "var(--blue)" };
-    wrap.style.borderLeft = "4px solid " + (item.color || kindColors[item.kind] || "var(--gray)");
-    wrap.style.paddingLeft = "4px";
-    const title = document.createElement("div");
-    title.className = "title";
-    title.textContent = item.name || item.concept || "Untitled";
-    wrap.appendChild(title);
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    const blocks = (item.blocks || []).join("\xB7");
-    const weeks = (item.weeks || []).map((w) => "W" + w).join("\xB7");
-    meta.textContent = [blocks, weeks].filter(Boolean).join(" \u2022 ");
-    wrap.appendChild(meta);
-    const actions = document.createElement("div");
-    actions.className = "actions row";
-    const fav = document.createElement("button");
-    fav.className = "btn";
-    fav.textContent = item.favorite ? "\u2605" : "\u2606";
-    fav.addEventListener("click", async () => {
-      item.favorite = !item.favorite;
-      await upsertItem(item);
-      fav.textContent = item.favorite ? "\u2605" : "\u2606";
-      onChange && onChange();
-    });
-    actions.appendChild(fav);
-    const edit = document.createElement("button");
-    edit.className = "btn";
-    edit.textContent = "Edit";
-    edit.addEventListener("click", () => openEditor(item.kind, onChange, item));
-    actions.appendChild(edit);
-    const del = document.createElement("button");
-    del.className = "btn";
-    del.textContent = "Del";
-    del.addEventListener("click", async () => {
-      if (await confirmModal("Delete this item?")) {
-        await deleteItem(item.id);
-        onChange && onChange();
-      }
-    });
-    actions.appendChild(del);
-    wrap.appendChild(actions);
-    return wrap;
-  }
-
   // js/ui/components/chips.js
   function chipList(values = []) {
     const box = document.createElement("div");
@@ -775,39 +727,196 @@ var Sevenn = (() => {
     return box;
   }
 
-  // js/ui/components/table.js
-  var columnMap = {
+  // js/ui/components/linker.js
+  function openLinker() {
+    alert("Linker not implemented yet");
+  }
+
+  // js/ui/components/cardlist.js
+  var kindColors = { disease: "var(--pink)", drug: "var(--blue)", concept: "var(--green)" };
+  var collapsedPref = {
+    disease: ["pathophys", "clinical"],
+    drug: ["moa", "uses"],
+    concept: ["definition", "mechanism"]
+  };
+  var fieldDefs = {
     disease: [
-      ["etiology", "Etiology"],
-      ["pathophys", "Pathophys"],
-      ["clinical", "Clinical"],
-      ["diagnosis", "Diagnosis"],
-      ["treatment", "Treatment"],
-      ["complications", "Complications"],
-      ["mnemonic", "Mnemonic"],
-      ["facts", "Facts"]
+      ["etiology", "Etiology", "\u{1F9EC}"],
+      ["pathophys", "Pathophys", "\u2699\uFE0F"],
+      ["clinical", "Clinical", "\u{1FA7A}"],
+      ["diagnosis", "Diagnosis", "\u{1F50E}"],
+      ["treatment", "Treatment", "\u{1F48A}"],
+      ["complications", "Complications", "\u26A0\uFE0F"],
+      ["mnemonic", "Mnemonic", "\u{1F9E0}"]
     ],
     drug: [
-      ["class", "Class"],
-      ["source", "Source"],
-      ["moa", "MOA"],
-      ["uses", "Uses"],
-      ["sideEffects", "Side Effects"],
-      ["contraindications", "Contraindications"],
-      ["mnemonic", "Mnemonic"],
-      ["facts", "Facts"]
+      ["class", "Class", "\u{1F3F7}\uFE0F"],
+      ["source", "Source", "\u{1F331}"],
+      ["moa", "MOA", "\u2699\uFE0F"],
+      ["uses", "Uses", "\u{1F48A}"],
+      ["sideEffects", "Side Effects", "\u26A0\uFE0F"],
+      ["contraindications", "Contraindications", "\u{1F6AB}"],
+      ["mnemonic", "Mnemonic", "\u{1F9E0}"]
     ],
     concept: [
-      ["type", "Type"],
-      ["definition", "Definition"],
-      ["mechanism", "Mechanism"],
-      ["clinicalRelevance", "Clinical Relevance"],
-      ["example", "Example"],
-      ["mnemonic", "Mnemonic"],
-      ["facts", "Facts"]
+      ["type", "Type", "\u{1F3F7}\uFE0F"],
+      ["definition", "Definition", "\u{1F4D6}"],
+      ["mechanism", "Mechanism", "\u2699\uFE0F"],
+      ["clinicalRelevance", "Clinical Relevance", "\u{1FA7A}"],
+      ["example", "Example", "\u{1F4DD}"],
+      ["mnemonic", "Mnemonic", "\u{1F9E0}"]
     ]
   };
-  async function renderTable(container, items, kind, onChange) {
+  var expanded = /* @__PURE__ */ new Set();
+  function createItemCard(item, onChange) {
+    const card = document.createElement("div");
+    card.className = `item-card card--${item.kind}`;
+    const color = item.color || kindColors[item.kind] || "var(--gray)";
+    card.style.borderTop = `3px solid ${color}`;
+    const header = document.createElement("div");
+    header.className = "card-header";
+    const mainBtn = document.createElement("button");
+    mainBtn.className = "header-main";
+    mainBtn.setAttribute("aria-expanded", expanded.has(item.id));
+    mainBtn.addEventListener("click", () => {
+      if (expanded.has(item.id)) expanded.delete(item.id);
+      else expanded.add(item.id);
+      renderBody();
+      card.classList.toggle("expanded");
+      mainBtn.setAttribute("aria-expanded", expanded.has(item.id));
+    });
+    const badge = document.createElement("span");
+    badge.className = `kind-badge ${item.kind}`;
+    badge.textContent = item.kind.charAt(0).toUpperCase() + item.kind.slice(1);
+    mainBtn.appendChild(badge);
+    const title = document.createElement("span");
+    title.className = "card-title";
+    title.textContent = item.name || item.concept || "Untitled";
+    mainBtn.appendChild(title);
+    header.appendChild(mainBtn);
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+    const fav = document.createElement("button");
+    fav.className = "icon-btn";
+    fav.textContent = item.favorite ? "\u2605" : "\u2606";
+    fav.title = "Toggle Favorite";
+    fav.setAttribute("aria-label", "Toggle Favorite");
+    fav.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      item.favorite = !item.favorite;
+      await upsertItem(item);
+      fav.textContent = item.favorite ? "\u2605" : "\u2606";
+      onChange && onChange();
+    });
+    actions.appendChild(fav);
+    const link = document.createElement("button");
+    link.className = "icon-btn";
+    link.textContent = "\u{1FAA2}";
+    link.title = "Links";
+    link.setAttribute("aria-label", "Manage links");
+    link.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openLinker();
+    });
+    actions.appendChild(link);
+    const edit = document.createElement("button");
+    edit.className = "icon-btn";
+    edit.textContent = "\u270F\uFE0F";
+    edit.title = "Edit";
+    edit.setAttribute("aria-label", "Edit");
+    edit.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openEditor(item.kind, onChange, item);
+    });
+    actions.appendChild(edit);
+    const copy = document.createElement("button");
+    copy.className = "icon-btn";
+    copy.textContent = "\u{1F4CB}";
+    copy.title = "Copy Title";
+    copy.setAttribute("aria-label", "Copy Title");
+    copy.addEventListener("click", (e) => {
+      e.stopPropagation();
+      navigator.clipboard && navigator.clipboard.writeText(item.name || item.concept || "");
+    });
+    actions.appendChild(copy);
+    const del = document.createElement("button");
+    del.className = "icon-btn";
+    del.textContent = "\u{1F5D1}\uFE0F";
+    del.title = "Delete";
+    del.setAttribute("aria-label", "Delete");
+    del.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (await confirmModal("Delete this item?")) {
+        await deleteItem(item.id);
+        onChange && onChange();
+      }
+    });
+    actions.appendChild(del);
+    header.appendChild(actions);
+    card.appendChild(header);
+    const identifiers = document.createElement("div");
+    identifiers.className = "identifiers";
+    (item.blocks || []).forEach((b) => {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = b;
+      identifiers.appendChild(chip);
+    });
+    (item.weeks || []).forEach((w) => {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = "W" + w;
+      identifiers.appendChild(chip);
+    });
+    if (item.lectures) {
+      item.lectures.forEach((l) => {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = "\u{1F4DA} " + (l.name || l.id);
+        identifiers.appendChild(chip);
+      });
+    }
+    card.appendChild(identifiers);
+    const body = document.createElement("div");
+    body.className = "card-body";
+    card.appendChild(body);
+    function renderBody() {
+      body.innerHTML = "";
+      const defs = fieldDefs[item.kind] || [];
+      const showAll = expanded.has(item.id);
+      const fields = showAll ? defs : defs.filter((d) => collapsedPref[item.kind].includes(d[0]));
+      fields.forEach(([f, label, icon]) => {
+        if (!item[f]) return;
+        const sec = document.createElement("div");
+        sec.className = "section";
+        sec.style.borderLeftColor = color;
+        const tl = document.createElement("div");
+        tl.className = "section-title";
+        tl.textContent = label;
+        if (icon) tl.prepend(icon + " ");
+        sec.appendChild(tl);
+        const txt = document.createElement("div");
+        txt.textContent = item[f];
+        sec.appendChild(txt);
+        body.appendChild(sec);
+      });
+      if (item.links && item.links.length) {
+        const lc = document.createElement("span");
+        lc.className = "chip link-chip";
+        lc.textContent = `\u{1FAA2} ${item.links.length}`;
+        body.appendChild(lc);
+      }
+      if (item.facts && item.facts.length) {
+        const facts = chipList(item.facts);
+        facts.classList.add("facts");
+        body.appendChild(facts);
+      }
+    }
+    renderBody();
+    if (expanded.has(item.id)) card.classList.add("expanded");
+    return card;
+  }
+  async function renderCardList(container, items, kind, onChange) {
     const blocks = await listBlocks();
     const blockTitle = (id) => blocks.find((b) => b.blockId === id)?.title || id;
     const groups = /* @__PURE__ */ new Map();
@@ -832,7 +941,8 @@ var Sevenn = (() => {
     sortedBlocks.forEach((b) => {
       const blockSec = document.createElement("section");
       blockSec.className = "block-section";
-      const h2 = document.createElement("h2");
+      const h2 = document.createElement("div");
+      h2.className = "block-header";
       h2.textContent = b === "_" ? "Unassigned" : `${blockTitle(b)} (${b})`;
       blockSec.appendChild(h2);
       const wkMap = groups.get(b);
@@ -847,47 +957,18 @@ var Sevenn = (() => {
         const h3 = document.createElement("h3");
         h3.textContent = w === "_" ? "Unassigned" : `Week ${w}`;
         weekSec.appendChild(h3);
-        const table = document.createElement("table");
-        table.className = "table";
-        const thead = document.createElement("thead");
-        const hr = document.createElement("tr");
-        const thTitle = document.createElement("th");
-        thTitle.textContent = "Title";
-        hr.appendChild(thTitle);
-        columnMap[kind].forEach(([, label]) => {
-          const th = document.createElement("th");
-          th.textContent = label;
-          hr.appendChild(th);
-        });
-        thead.appendChild(hr);
-        table.appendChild(thead);
-        const tbody = document.createElement("tbody");
+        const list = document.createElement("div");
+        list.className = "card-list";
         const rows = wkMap.get(w);
         function renderChunk(start = 0) {
           const slice = rows.slice(start, start + 200);
           slice.forEach((it) => {
-            const tr = document.createElement("tr");
-            const td = document.createElement("td");
-            td.appendChild(createTitleCell(it, onChange));
-            tr.appendChild(td);
-            columnMap[kind].forEach(([field]) => {
-              const td2 = document.createElement("td");
-              if (field === "facts") {
-                td2.appendChild(chipList(it.facts || []));
-              } else {
-                td2.textContent = it[field] || "";
-              }
-              tr.appendChild(td2);
-            });
-            tbody.appendChild(tr);
+            list.appendChild(createItemCard(it, onChange));
           });
-          if (start + 200 < rows.length) {
-            requestAnimationFrame(() => renderChunk(start + 200));
-          }
+          if (start + 200 < rows.length) requestAnimationFrame(() => renderChunk(start + 200));
         }
         renderChunk();
-        table.appendChild(tbody);
-        weekSec.appendChild(table);
+        weekSec.appendChild(list);
         blockSec.appendChild(weekSec);
       });
       container.appendChild(blockSec);
@@ -895,28 +976,11 @@ var Sevenn = (() => {
   }
 
   // js/ui/components/cards.js
-  function pickSummary(item, kind) {
-    const fields = {
-      disease: ["etiology", "pathophys", "clinical", "diagnosis", "treatment"],
-      drug: ["class", "moa", "uses", "sideEffects"],
-      concept: ["definition", "mechanism", "clinicalRelevance", "example"]
-    }[kind] || [];
-    for (const f of fields) {
-      if (item[f]) return item[f];
-    }
-    return "";
-  }
   function renderCards(container, items, kind, onChange) {
     const grid = document.createElement("div");
     grid.className = "card-grid";
     items.forEach((it) => {
-      const card = document.createElement("div");
-      card.className = "card";
-      card.appendChild(createTitleCell(it, onChange));
-      const summary = document.createElement("div");
-      summary.className = "summary";
-      summary.textContent = pickSummary(it, kind);
-      card.appendChild(summary);
+      const card = createItemCard(it, onChange);
       grid.appendChild(card);
     });
     container.appendChild(grid);
@@ -1529,7 +1593,7 @@ var Sevenn = (() => {
       } else if (state.subtab[state.tab] === "Stats") {
         renderStats(main, items);
       } else {
-        await renderTable(main, items, kind, render);
+        await renderCardList(main, items, kind, render);
       }
     } else if (state.tab === "Study") {
       if (state.flashSession) {

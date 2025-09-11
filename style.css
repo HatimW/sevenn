@@ -141,48 +141,12 @@ body {
   max-width: 500px;
 }
 
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.table th, .table td {
-  border: 1px solid var(--border);
-  padding: 4px 8px;
-  vertical-align: top;
-}
-
-.table th {
-  background: var(--muted);
-  color: var(--text);
-}
-
-.table td {
-  background: var(--panel);
-}
-
 .block-section {
   margin: var(--pad);
 }
 
 .week-section {
   margin-left: var(--pad);
-}
-
-.title-cell .title {
-  font-weight: 600;
-  font-size: 1.2em;
-}
-
-.title-cell .meta {
-  font-size: 0.85em;
-  color: var(--gray);
-  margin-bottom: 4px;
-}
-
-.title-cell {
-  border-left: 4px solid var(--gray);
-  padding-left: 4px;
 }
 
 .chips {
@@ -236,6 +200,120 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--pad);
+}
+
+/* Browse cards */
+.block-header {
+  background: linear-gradient(90deg, var(--purple), var(--blue));
+  padding: var(--pad);
+  border-radius: var(--radius-lg);
+  font-weight: 600;
+  color: #000;
+  margin-bottom: var(--pad);
+}
+
+.week-section h3 {
+  margin: var(--pad) 0;
+}
+
+.card-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad);
+}
+
+.item-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.item-card .card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: var(--pad);
+  cursor: pointer;
+}
+
+.header-main {
+  background: none;
+  border: none;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap:4px;
+  text-align: left;
+  flex:1;
+}
+
+.kind-badge {
+  border-radius: var(--radius);
+  padding: 2px 6px;
+  font-size: 12px;
+  color: #000;
+}
+.kind-badge.disease { background: var(--pink); }
+.kind-badge.drug { background: var(--blue); }
+.kind-badge.concept { background: var(--green); }
+
+.card-title {
+  font-weight: 600;
+  line-height: 1.2;
+  display:block;
+  max-height: 2.4em;
+  overflow: hidden;
+}
+
+.identifiers {
+  display:flex;
+  gap:4px;
+  flex-wrap:wrap;
+  padding: 0 var(--pad) var(--pad);
+}
+
+.card-actions {
+  display:flex;
+  gap:4px;
+}
+
+.icon-btn {
+  background:none;
+  border:none;
+  cursor:pointer;
+  color: var(--text);
+  padding:2px;
+}
+
+.card-body {
+  padding: 0 var(--pad) var(--pad);
+  display:none;
+}
+
+.item-card.expanded .card-body {
+  display:block;
+}
+
+.section {
+  border-left:2px solid var(--border);
+  padding-left:8px;
+  margin-top:8px;
+}
+
+.section-title {
+  font-size:12px;
+  text-transform:uppercase;
+  opacity:0.7;
+}
+
+.facts {
+  margin-top:8px;
+}
+
+.link-chip {
+  margin-top:8px;
 }
 
 .flash-answer {
