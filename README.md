@@ -43,4 +43,3 @@ matching text tokens.
 
 ## Roadmap
 
-See the implementation blueprint in the repository for planned modules and features.

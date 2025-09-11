@@ -4,6 +4,9 @@ import { openEditor } from './editor.js';
 export function createTitleCell(item, onChange) {
   const wrap = document.createElement('div');
   wrap.className = 'title-cell';
+  const kindColors = { disease: 'var(--pink)', drug: 'var(--green)', concept: 'var(--blue)' };
+  wrap.style.borderLeft = '4px solid ' + (item.color || kindColors[item.kind] || 'var(--gray)');
+  wrap.style.paddingLeft = '4px';
 
   const title = document.createElement('div');
   title.className = 'title';

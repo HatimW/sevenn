@@ -21,12 +21,14 @@ body {
   color: var(--text);
   font-family: system-ui, sans-serif;
   margin: 0;
+  font-size: 18px;
 }
 
 .header {
   padding: var(--pad);
-  background: var(--panel);
+  background: linear-gradient(90deg, var(--purple), var(--blue));
   border-bottom: 1px solid var(--border);
+  color: #000;
 }
 
 .row {
@@ -40,7 +42,7 @@ body {
 }
 
 .tabs .tab {
-  background: none;
+  background: var(--muted);
   border: none;
   color: var(--text);
   padding: 4px 8px;
@@ -49,7 +51,8 @@ body {
 }
 
 .tab.active {
-  background: var(--muted);
+  background: var(--blue);
+  color: #000;
 }
 
 .card {
@@ -110,9 +113,9 @@ body {
 }
 
 .btn {
-  background: var(--muted);
-  color: var(--text);
-  border: 1px solid var(--border);
+  background: var(--green);
+  color: #000;
+  border: none;
   border-radius: var(--radius);
   padding: 4px 8px;
   cursor: pointer;
@@ -138,6 +141,15 @@ body {
   vertical-align: top;
 }
 
+.table th {
+  background: var(--purple);
+  color: #000;
+}
+
+.table td {
+  background: var(--panel);
+}
+
 .block-section {
   margin: var(--pad);
 }
@@ -148,12 +160,18 @@ body {
 
 .title-cell .title {
   font-weight: 600;
+  font-size: 1.2em;
 }
 
 .title-cell .meta {
   font-size: 0.85em;
   color: var(--gray);
   margin-bottom: 4px;
+}
+
+.title-cell {
+  border-left: 4px solid var(--gray);
+  padding-left: 4px;
 }
 
 .chips {
