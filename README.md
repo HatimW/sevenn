@@ -1,8 +1,8 @@
-# sevenn
+
 # Sevenn
 
 Sevenn is an offline-first study app for organizing diseases, drugs, and concepts.
-This repository hosts the SPA implementation using vanilla JavaScript modules.
+This repository hosts the SPA implementation using vanilla JavaScript, bundled for direct use from the filesystem.
 
 ## Features
 
@@ -13,20 +13,22 @@ This repository hosts the SPA implementation using vanilla JavaScript modules.
 
 ## Development
 
-To run the optional test suite or future tooling, install dependencies:
+To run the optional test suite or future tooling, install dependencies and run tests:
 
 ```bash
 npm install
-```
-
-Run tests with:
-
-```bash
 npm test
 ```
 
-To use the app, simply open `index.html` directly in a modern browser—no build step
-or local server is required.
+To use the app, simply open `index.html` directly in a modern browser—no build
+step or local server is required.
+
+The repository includes a pre-built `bundle.js` so the app runs without a module
+loader. If you modify files under `js/`, regenerate the bundle:
+
+```bash
+npx esbuild js/main.js --bundle --format=iife --global-name=Sevenn --outfile=bundle.js
+```
 
 The **Settings** tab lets you adjust the daily review target and manage curriculum
 blocks with their lectures. It also offers buttons to export or import the
@@ -42,23 +44,3 @@ matching text tokens.
 ## Roadmap
 
 See the implementation blueprint in the repository for planned modules and features.
-
-## Python prototype
-
-An optional Python entry point is included for future backend experiments. It
-spins up a very small Flask application that returns a greeting.
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Start the development server:
-
-```bash
-python -m app.main
-```
-
-Then visit [http://localhost:5000/hello/world](http://localhost:5000/hello/world)
-in your browser to verify the server responds with a JSON greeting.
