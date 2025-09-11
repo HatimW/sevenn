@@ -1,3 +1,4 @@
+
 # Sevenn
 
 Sevenn is an offline-first study app for organizing diseases, drugs, and concepts.
@@ -42,4 +43,3 @@ matching text tokens.
 
 ## Roadmap
 
-See the implementation blueprint in the repository for planned modules and features.
