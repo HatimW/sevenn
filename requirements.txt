@@ -1,0 +1,2 @@
+# Dependencies for the optional Python prototype
+flask>=2.3
