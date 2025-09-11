@@ -147,6 +147,12 @@ async function render() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  await initDB();
-  render();
+  try {
+    await initDB();
+    render();
+  } catch (err) {
+    const root = document.getElementById('app');
+    if (root) root.textContent = 'Failed to load app';
+    console.error(err);
+  }
 });
