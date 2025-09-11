@@ -1,3 +1,4 @@
+# sevenn
 # Sevenn
 
 Sevenn is an offline-first study app for organizing diseases, drugs, and concepts.
@@ -31,6 +32,9 @@ The **Settings** tab lets you adjust the daily review target and manage curricul
 blocks with their lectures. It also offers buttons to export or import the
 database as JSON and to export an Anki-compatible CSV. Data is stored locally
 using IndexedDB.
+
+> **Note:** Sevenn requires a browser with IndexedDB support. If storage
+> initialization fails, the app will show “Failed to load app.”
 
 Browse views include a global search box in the header to filter items by
 matching text tokens.

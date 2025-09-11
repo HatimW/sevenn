@@ -146,7 +146,7 @@ async function render() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
+async function bootstrap() {
   try {
     await initDB();
     render();
@@ -155,4 +155,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (root) root.textContent = 'Failed to load app';
     console.error(err);
   }
-});
+}
+
+bootstrap();

@@ -3,8 +3,16 @@ const DB_VERSION = 1;
 
 export function openDB() {
   return new Promise((resolve, reject) => {
+    if (!('indexedDB' in globalThis)) {
+      reject(new Error('IndexedDB not supported'));
+      return;
+    }
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onerror = () => reject(req.error);
+    const timer = setTimeout(() => reject(new Error('IndexedDB open timeout')), 5000);
+    req.onerror = () => {
+      clearTimeout(timer);
+      reject(req.error);
+    };
     req.onupgradeneeded = () => {
       const db = req.result;
 
@@ -34,6 +42,9 @@ export function openDB() {
         db.createObjectStore('settings', { keyPath: 'id' });
       }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      clearTimeout(timer);
+      resolve(req.result);
+    };
   });
 }
