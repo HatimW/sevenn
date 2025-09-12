@@ -36,9 +36,10 @@ const fieldDefs = {
 
 const expanded = new Set();
 
-export function createItemCard(item, onChange){
+export function createItemCard(item, onChange, opts = {}){
+  const { flash = false } = opts;
   const card = document.createElement('div');
-  card.className = `item-card card--${item.kind}`;
+  card.className = `item-card card--${item.kind}${flash ? ' flash-card' : ''}`;
   const color = item.color || kindColors[item.kind] || 'var(--gray)';
   card.style.borderTop = `3px solid ${color}`;
 
@@ -53,6 +54,7 @@ export function createItemCard(item, onChange){
     if (expanded.has(item.id)) expanded.delete(item.id); else expanded.add(item.id);
     card.classList.toggle('expanded');
     mainBtn.setAttribute('aria-expanded', expanded.has(item.id));
+    flash && requestAnimationFrame(fit);
   });
   header.appendChild(mainBtn);
 
@@ -184,8 +186,20 @@ export function createItemCard(item, onChange){
     }
   }
 
+  function fit(){
+    if (!flash) return;
+    let size = 18;
+    const min = 12;
+    card.style.fontSize = size + 'px';
+    while (card.scrollHeight > card.clientHeight && size > min){
+      size--;
+      card.style.fontSize = size + 'px';
+    }
+  }
+
   renderBody();
   if (expanded.has(item.id)) card.classList.add('expanded');
+  if (flash) card.fit = fit;
   return card;
 }
 
