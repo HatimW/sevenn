@@ -52,6 +52,7 @@ async function render() {
   root.appendChild(header);
 
   const main = document.createElement('main');
+  if (state.tab === 'Map') main.className = 'map-main';
   root.appendChild(main);
   if (state.tab === 'Settings') {
     await renderSettings(main);
