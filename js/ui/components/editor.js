@@ -88,21 +88,25 @@ export async function openEditor(kind, onSave, existing = null) {
   const blockTitle = document.createElement('div');
   blockTitle.textContent = 'Blocks';
   blockWrap.appendChild(blockTitle);
+
   const blockRow = document.createElement('div');
   blockRow.className = 'tag-row';
   const blockChecks = new Map();
   blocks.forEach(b => {
     const lbl = document.createElement('label');
     lbl.className = 'tag-label';
+
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = existing?.blocks?.includes(b.blockId);
     lbl.appendChild(cb);
     lbl.appendChild(document.createTextNode(b.blockId));
+
     blockRow.appendChild(lbl);
     blockChecks.set(b.blockId, cb);
   });
   blockWrap.appendChild(blockRow);
+
   form.appendChild(blockWrap);
 
   const weekWrap = document.createElement('div');
@@ -110,12 +114,14 @@ export async function openEditor(kind, onSave, existing = null) {
   const weekTitle = document.createElement('div');
   weekTitle.textContent = 'Weeks';
   weekWrap.appendChild(weekTitle);
+
   const weekRow = document.createElement('div');
   weekRow.className = 'tag-row';
   const weekChecks = new Map();
   for (let w = 1; w <= 8; w++) {
     const lbl = document.createElement('label');
     lbl.className = 'tag-label';
+
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = existing?.weeks?.includes(w);
@@ -133,6 +139,7 @@ export async function openEditor(kind, onSave, existing = null) {
   lectureInput.className = 'input';
   lectureInput.value = existing?.lectures?.map(l => l.id).join(', ') || '';
   lecLabel.appendChild(lectureInput);
+
   form.appendChild(lecLabel);
 
   const saveBtn = document.createElement('button');
@@ -168,6 +175,7 @@ export async function openEditor(kind, onSave, existing = null) {
     });
     item.blocks = Array.from(blockChecks.entries()).filter(([,cb]) => cb.checked).map(([id]) => id);
     item.weeks = Array.from(weekChecks.entries()).filter(([,cb]) => cb.checked).map(([w]) => Number(w));
+
     const ids = lectureInput.value.split(',').map(s => Number(s.trim())).filter(Boolean);
     item.lectures = ids.map(id => {
       for (const b of blocks) {
