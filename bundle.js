@@ -1062,6 +1062,16 @@
     }
     renderBody();
     if (expanded.has(item.id)) card.classList.add("expanded");
+    function fit() {
+      const headerH = header.offsetHeight;
+      const maxH = card.clientHeight - headerH - 4;
+      let size = parseFloat(getComputedStyle(body).fontSize);
+      while (body.scrollHeight > maxH && size > 12) {
+        size -= 1;
+        body.style.fontSize = size + "px";
+      }
+    }
+    requestAnimationFrame(fit);
     return card;
   }
   async function renderCardList(container, items, kind, onChange) {
