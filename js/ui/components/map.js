@@ -109,6 +109,7 @@ export async function renderMap(root){
   const minRadius = 20;
   const radiusStep = 6;
 
+
   const center = size/2;
   const newItems = [];
   items.forEach(it => {
@@ -209,6 +210,7 @@ export async function renderMap(root){
     const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
     circle.setAttribute('cx', pos.x);
     circle.setAttribute('cy', pos.y);
+
     // Increase radius by a fixed step for each link
     const baseR = minRadius + (linkCounts[it.id] || 0) * radiusStep;
     circle.setAttribute('r', baseR);
