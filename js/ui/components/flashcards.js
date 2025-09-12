@@ -20,29 +20,21 @@ export function renderFlashcards(root, redraw) {
   }
 
   const item = items[session.idx];
+  const { question, answer, details } = buildCard(item);
 
   const card = document.createElement('section');
   card.className = 'card flashcard';
   card.tabIndex = 0;
 
-  const title = document.createElement('h2');
-  title.textContent = item.name || item.concept || '';
-  card.appendChild(title);
+  const qEl = document.createElement('div');
+  qEl.className = 'flash-question';
+  qEl.textContent = question;
+  card.appendChild(qEl);
 
-  sectionsFor(item).forEach(([label, field]) => {
-    const sec = document.createElement('div');
-    sec.className = 'flash-section';
-    const head = document.createElement('div');
-    head.className = 'flash-heading';
-    head.textContent = label;
-    const body = document.createElement('div');
-    body.className = 'flash-body';
-    body.textContent = item[field] || '';
-    sec.appendChild(head);
-    sec.appendChild(body);
-    sec.addEventListener('click', () => { sec.classList.toggle('revealed'); });
-    card.appendChild(sec);
-  });
+  const aEl = document.createElement('div');
+  aEl.className = 'flash-answer';
+  aEl.textContent = answer + (details ? '\n' + details : '');
+  card.appendChild(aEl);
 
   const controls = document.createElement('div');
   controls.className = 'row';
@@ -58,6 +50,14 @@ export function renderFlashcards(root, redraw) {
     }
   });
   controls.appendChild(prev);
+
+  const reveal = document.createElement('button');
+  reveal.className = 'btn';
+  reveal.textContent = 'Reveal';
+  reveal.addEventListener('click', () => {
+    card.classList.toggle('revealed');
+  });
+  controls.appendChild(reveal);
 
   const next = document.createElement('button');
   next.className = 'btn';
@@ -87,7 +87,10 @@ export function renderFlashcards(root, redraw) {
 
   card.focus();
   card.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowRight') {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      reveal.click();
+    } else if (e.key === 'ArrowRight') {
       next.click();
     } else if (e.key === 'ArrowLeft') {
       prev.click();
@@ -95,31 +98,31 @@ export function renderFlashcards(root, redraw) {
   });
 }
 
-function sectionsFor(item) {
-  const map = {
-    disease: [
-      ['Etiology', 'etiology'],
-      ['Pathophys', 'pathophys'],
-      ['Clinical Presentation', 'clinical'],
-      ['Diagnosis', 'diagnosis'],
-      ['Treatment', 'treatment'],
-      ['Complications', 'complications'],
-      ['Mnemonic', 'mnemonic']
-    ],
-    drug: [
-      ['Mechanism', 'moa'],
-      ['Uses', 'uses'],
-      ['Side Effects', 'sideEffects'],
-      ['Contraindications', 'contraindications'],
-      ['Mnemonic', 'mnemonic']
-    ],
-    concept: [
-      ['Definition', 'definition'],
-      ['Mechanism', 'mechanism'],
-      ['Clinical Relevance', 'clinicalRelevance'],
-      ['Example', 'example'],
-      ['Mnemonic', 'mnemonic']
-    ]
+function buildCard(item) {
+  const mainMap = {
+    disease: ['pathophys', 'clinical', 'treatment'],
+    drug: ['moa', 'uses', 'sideEffects'],
+    concept: ['definition', 'mechanism', 'clinicalRelevance']
   };
-  return map[item.kind] || [];
+  const extraMap = {
+    disease: ['mnemonic', 'diagnosis', 'complications'],
+    drug: ['mnemonic', 'contraindications'],
+    concept: ['mnemonic', 'example']
+  };
+
+  const fields = mainMap[item.kind] || [];
+  let questionField = '';
+  for (const f of fields) {
+    if (item[f]) { questionField = item[f]; break; }
+  }
+  let question = questionField || '';
+  const answers = [];
+  question = question.replace(/{{c\d+::(.*?)}}/g, (_m, p1) => { answers.push(p1); return '_____'; });
+  const answer = answers.length ? answers.join(' / ') : (item.name || item.concept || '');
+
+  const detailParts = [];
+  fields.filter(f => f !== fields[0]).forEach(f => { if (item[f]) detailParts.push(item[f]); });
+  (extraMap[item.kind] || []).forEach(f => { if (item[f]) detailParts.push(item[f]); });
+  const details = detailParts.join('\n');
+  return { question, answer, details };
 }
