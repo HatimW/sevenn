@@ -8,6 +8,7 @@ export async function renderMap(root){
     ...(await listItemsByKind('drug')),
     ...(await listItemsByKind('concept'))
   ];
+
   const base = 1000;
   const size = Math.max(base, items.length * 150);
   const viewport = base;
@@ -17,11 +18,12 @@ export async function renderMap(root){
     svg.setAttribute('viewBox', `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
     adjustScale();
   };
+
   svg.classList.add('map-svg');
 
   const g = document.createElementNS('http://www.w3.org/2000/svg','g');
   svg.appendChild(g);
-
+  
   const updateEdges = id => {
     g.querySelectorAll(`line[data-a='${id}'], line[data-b='${id}']`).forEach(line => {
       const a = line.dataset.a;
@@ -45,6 +47,7 @@ export async function renderMap(root){
       svg.style.cursor = 'grabbing';
     }
   });
+
   window.addEventListener('mousemove', async e => {
     if (nodeDrag) {
       const rect = svg.getBoundingClientRect();
@@ -61,6 +64,7 @@ export async function renderMap(root){
       nodeWasDragged = true;
       return;
     }
+
     if (!dragging) return;
     const scale = viewBox.w / svg.clientWidth;
     viewBox.x -= (e.clientX - last.x) * scale;
@@ -68,6 +72,7 @@ export async function renderMap(root){
     last = { x: e.clientX, y: e.clientY };
     updateViewBox();
   });
+
   window.addEventListener('mouseup', async () => {
     if (nodeDrag) {
       const it = itemMap[nodeDrag.id];
@@ -78,17 +83,20 @@ export async function renderMap(root){
     dragging = false;
     svg.style.cursor = 'grab';
   });
+
   svg.addEventListener('wheel', e => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 0.9 : 1.1;
     const mx = viewBox.x + (e.offsetX / svg.clientWidth) * viewBox.w;
     const my = viewBox.y + (e.offsetY / svg.clientHeight) * viewBox.h;
+
     viewBox.w = Math.min(size * 2, Math.max(100, viewBox.w * factor));
     viewBox.h = viewBox.w;
     viewBox.x = mx - (e.offsetX / svg.clientWidth) * viewBox.w;
     viewBox.y = my - (e.offsetY / svg.clientHeight) * viewBox.h;
     updateViewBox();
   });
+
 
   if (!window._mapResizeAttached) {
     window.addEventListener('resize', adjustScale);
@@ -97,6 +105,7 @@ export async function renderMap(root){
 
   const positions = {};
   const itemMap = Object.fromEntries(items.map(it => [it.id, it]));
+
   const center = size/2;
   const radius = size/2 - 100;
   items.forEach((it, idx) => {
@@ -110,11 +119,13 @@ export async function renderMap(root){
     }
   });
 
+
   autoLayout(items, positions, size);
   for (const it of items) {
     it.mapPos = positions[it.id];
     await upsertItem(it);
   }
+
 
   const defs = document.createElementNS('http://www.w3.org/2000/svg','defs');
   const marker = document.createElementNS('http://www.w3.org/2000/svg','marker');
@@ -146,6 +157,7 @@ export async function renderMap(root){
       line.setAttribute('y2', positions[l.id].y);
       line.setAttribute('class','map-edge');
       line.setAttribute('vector-effect','non-scaling-stroke');
+
       applyLineStyle(line, l);
       line.dataset.a = it.id;
       line.dataset.b = l.id;
@@ -161,6 +173,7 @@ export async function renderMap(root){
     circle.setAttribute('cy', pos.y);
     circle.setAttribute('r', 20);
     circle.setAttribute('class','map-node');
+
     circle.dataset.id = it.id;
     const kindColors = { disease: 'var(--purple)', drug: 'var(--blue)' };
     const fill = kindColors[it.kind] || it.color || 'var(--gray)';
@@ -197,6 +210,7 @@ function adjustScale(){
     if (c) t.setAttribute('y', Number(c.getAttribute('cy')) - offset);
   });
   document.querySelectorAll('.map-edge').forEach(l => l.setAttribute('stroke-width', 4 * Math.pow(unit, -0.2)));
+
 }
 
 function applyLineStyle(line, info){
@@ -286,6 +300,7 @@ async function updateLink(aId, bId, patch){
   await upsertItem(b);
 }
 
+
 function autoLayout(items, positions, size){
   const nodes = items.map(it => ({ id: it.id, x: positions[it.id].x, y: positions[it.id].y }));
   const index = Object.fromEntries(nodes.map((n,i)=>[n.id,i]));
@@ -343,4 +358,5 @@ function autoLayout(items, positions, size){
     t -= dt;
   }
   nodes.forEach(n => { positions[n.id] = { x:n.x, y:n.y }; });
+
 }

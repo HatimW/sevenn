@@ -1883,6 +1883,7 @@ var Sevenn = (() => {
       svg.setAttribute("viewBox", `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
       adjustScale();
     };
+
     svg.classList.add("map-svg");
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
     svg.appendChild(g);
@@ -1907,6 +1908,7 @@ var Sevenn = (() => {
         svg.style.cursor = "grabbing";
       }
     });
+
     window.addEventListener("mousemove", async (e) => {
       if (nodeDrag) {
         const rect = svg.getBoundingClientRect();
@@ -1930,6 +1932,7 @@ var Sevenn = (() => {
       last = { x: e.clientX, y: e.clientY };
       updateViewBox();
     });
+
     window.addEventListener("mouseup", async () => {
       if (nodeDrag) {
         const it = itemMap[nodeDrag.id];
@@ -1951,11 +1954,13 @@ var Sevenn = (() => {
       viewBox.y = my - e.offsetY / svg.clientHeight * viewBox.h;
       updateViewBox();
     });
+
     if (!window._mapResizeAttached) {
       window.addEventListener("resize", adjustScale);
       window._mapResizeAttached = true;
     }
     const positions = {};
+
     const itemMap = Object.fromEntries(items.map((it) => [it.id, it]));
     const center = size / 2;
     const radius = size / 2 - 100;
@@ -1969,11 +1974,13 @@ var Sevenn = (() => {
         positions[it.id] = { x, y };
       }
     });
+
     autoLayout(items, positions, size);
     for (const it of items) {
       it.mapPos = positions[it.id];
       await upsertItem(it);
     }
+
     const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
     const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
     marker.setAttribute("id", "arrow");
@@ -2003,6 +2010,7 @@ var Sevenn = (() => {
         line.setAttribute("y2", positions[l.id].y);
         line.setAttribute("class", "map-edge");
         line.setAttribute("vector-effect", "non-scaling-stroke");
+        
         applyLineStyle(line, l);
         line.dataset.a = it.id;
         line.dataset.b = l.id;
@@ -2020,6 +2028,7 @@ var Sevenn = (() => {
       circle.setAttribute("cy", pos.y);
       circle.setAttribute("r", 20);
       circle.setAttribute("class", "map-node");
+
       circle.dataset.id = it.id;
       const kindColors2 = { disease: "var(--purple)", drug: "var(--blue)" };
       const fill = kindColors2[it.kind] || it.color || "var(--gray)";
@@ -2052,6 +2061,7 @@ var Sevenn = (() => {
     if (!svg) return;
     const vb = svg.getAttribute("viewBox").split(" ").map(Number);
     const unit = vb[2] / svg.clientWidth;
+
     const scale = Math.pow(unit, 0.8);
     const offset = 28 * scale;
     document.querySelectorAll(".map-node").forEach((c) => c.setAttribute("r", 20 * scale));
@@ -2143,6 +2153,7 @@ var Sevenn = (() => {
     await upsertItem(a);
     await upsertItem(b);
   }
+
   function autoLayout(items, positions, size) {
     const nodes = items.map((it) => ({ id: it.id, x: positions[it.id].x, y: positions[it.id].y }));
     const index = Object.fromEntries(nodes.map((n, i) => [n.id, i]));
