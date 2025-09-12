@@ -93,7 +93,7 @@ export function createItemCard(item, onChange){
   link.textContent = '🪢';
   link.title = 'Links';
   link.setAttribute('aria-label','Manage links');
-  link.addEventListener('click', e => { e.stopPropagation(); openLinker(); });
+  link.addEventListener('click', e => { e.stopPropagation(); openLinker(item, onChange); });
   actions.appendChild(link);
 
   const edit = document.createElement('button');

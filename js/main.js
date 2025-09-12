@@ -4,7 +4,6 @@ import { renderSettings } from './ui/settings.js';
 import { openEditor } from './ui/components/editor.js';
 import { renderCardList } from './ui/components/cardlist.js';
 import { renderCards } from './ui/components/cards.js';
-import { renderStats } from './ui/components/stats.js';
 import { renderBuilder } from './ui/components/builder.js';
 import { renderFlashcards } from './ui/components/flashcards.js';
 import { renderReview } from './ui/components/review.js';
@@ -12,7 +11,7 @@ import { renderQuiz } from './ui/components/quiz.js';
 import { renderExams, renderExamRunner } from './ui/components/exams.js';
 import { renderMap } from './ui/components/map.js';
 
-const tabs = ["Diseases","Drugs","Concepts","Study","Exams","Map","Settings"];
+const tabs = ["Diseases","Drugs","Concepts","Cards","Study","Exams","Map","Settings"];
 
 async function render() {
   const root = document.getElementById('app');
@@ -64,29 +63,14 @@ async function render() {
     addBtn.textContent = 'Add ' + kind;
     addBtn.addEventListener('click', () => openEditor(kind, render));
     main.appendChild(addBtn);
-    const subnav = document.createElement('div');
-    subnav.className = 'tabs row subtabs';
-    ['Browse','Cards','Stats'].forEach(st => {
-      const sb = document.createElement('button');
-      sb.className = 'tab' + (state.subtab[state.tab] === st ? ' active' : '');
-      sb.textContent = st;
-      sb.addEventListener('click', () => {
-        setSubtab(state.tab, st);
-        render();
-      });
-      subnav.appendChild(sb);
-    });
-    main.appendChild(subnav);
 
     const filter = { ...state.filters, types:[kind], query: state.query };
     const items = await findItemsByFilter(filter);
-    if (state.subtab[state.tab] === 'Cards') {
-      renderCards(main, items, kind, render);
-    } else if (state.subtab[state.tab] === 'Stats') {
-      renderStats(main, items);
-    } else {
-      await renderCardList(main, items, kind, render);
-    }
+    await renderCardList(main, items, kind, render);
+  } else if (state.tab === 'Cards') {
+    const filter = { ...state.filters, query: state.query };
+    const items = await findItemsByFilter(filter);
+    renderCards(main, items, render);
   } else if (state.tab === 'Study') {
     if (state.flashSession) {
       renderFlashcards(main, render);
