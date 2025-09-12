@@ -107,7 +107,7 @@ export async function renderMap(root){
   const linkCounts = Object.fromEntries(items.map(it => [it.id, (it.links || []).length]));
   const maxLinks = Math.max(1, ...Object.values(linkCounts));
   const minRadius = 20;
-  const maxRadius = 40;
+  const radiusStep = 6;
 
 
   const center = size/2;
@@ -211,9 +211,8 @@ export async function renderMap(root){
     circle.setAttribute('cx', pos.x);
     circle.setAttribute('cy', pos.y);
 
-    // Scale radius between minRadius and maxRadius based on relative link count
-    const normalized = (linkCounts[it.id] || 0) / maxLinks;
-    const baseR = minRadius + normalized * (maxRadius - minRadius);
+    // Increase radius by a fixed step for each link
+    const baseR = minRadius + (linkCounts[it.id] || 0) * radiusStep;
     circle.setAttribute('r', baseR);
     circle.dataset.radius = baseR;
     circle.setAttribute('class','map-node');

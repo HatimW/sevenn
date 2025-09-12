@@ -83,8 +83,24 @@ export async function openLinker(item, onSave) {
   save.className = 'btn';
   save.textContent = 'Save';
   save.addEventListener('click', async () => {
-    item.links = Array.from(links).map(id => ({ id, type: 'assoc' }));
+    const newLinks = new Set(links);
+    const oldLinks = new Set((item.links || []).map(l => l.id));
+
+    item.links = Array.from(newLinks).map(id => ({ id, type: 'assoc' }));
     await upsertItem(item);
+
+    const affected = new Set([...oldLinks, ...newLinks]);
+    for (const id of affected) {
+      const other = idMap.get(id);
+      if (!other) continue;
+      other.links = other.links || [];
+      const has = other.links.some(l => l.id === item.id);
+      const should = newLinks.has(id);
+      if (should && !has) other.links.push({ id: item.id, type: 'assoc' });
+      if (!should && has) other.links = other.links.filter(l => l.id !== item.id);
+      await upsertItem(other);
+    }
+
     document.body.removeChild(overlay);
     onSave && onSave();
   });
