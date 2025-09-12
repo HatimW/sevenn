@@ -1,5 +1,6 @@
 /** @typedef {"disease"|"drug"|"concept"} Kind */
 /** @typedef {"assoc"|"treats"|"causes"|"mech"|"contra"} LinkType */
+/** @typedef {"solid"|"dashed"|"arrow"|"inhibit"} LinkStyle */
 
 /** @typedef {{ box:number, last:number, due:number, ease:number }} SR */
 
@@ -14,7 +15,7 @@
  * @property {string|null} color         // pastel override or null
  * @property {string[]} facts            // chips
  * @property {string[]} tags             // chips
- * @property {{id:string, type:LinkType}[]} links
+ * @property {{id:string, type:LinkType, color?:string, style?:LinkStyle, label?:string}[]} links
  * @property {string[]} blocks           // ["F1","MSK"]
  * @property {number[]} weeks            // [1,3]
  * @property {LectureRef[]} lectures     // chosen by number → resolves name+week
