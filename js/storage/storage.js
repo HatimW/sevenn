@@ -129,23 +129,11 @@ export async function upsertItem(item) {
     const other = await prom(i.get(link.id));
     if (other) {
       other.links = other.links || [];
-      const existingLink = other.links.find(l => l.id === next.id);
-      if (existingLink) {
-        existingLink.type = link.type;
-        existingLink.color = link.color;
-        existingLink.style = link.style;
-        existingLink.label = link.label;
-      } else {
-        other.links.push({
-          id: next.id,
-          type: link.type,
-          color: link.color,
-          style: link.style,
-          label: link.label
-        });
+      if (!other.links.find(l => l.id === next.id)) {
+        other.links.push({ id: next.id, type: link.type });
+        other.tokens = buildTokens(other);
+        await prom(i.put(other));
       }
-      other.tokens = buildTokens(other);
-      await prom(i.put(other));
     }
   }
   await prom(i.put(next));
