@@ -1,3 +1,5 @@
+
+/* Modern dark theme */
 :root {
   --bg:#0B0F14;
   --panel:#0F141B;
@@ -14,6 +16,10 @@
   --radius-lg:16px;
   --pad:12px;
   --pad-lg:16px;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
@@ -110,6 +116,12 @@ body {
   cursor: pointer;
 }
 
+.quiz-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad);
+}
+
 .input {
   background: var(--muted);
   color: var(--text);
@@ -139,6 +151,35 @@ body {
 .modal .card {
   width: 90%;
   max-width: 500px;
+}
+
+/* Cleaner modal form layout */
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad);
+}
+
+.modal-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modal-form .input {
+  width: 100%;
+}
+
+.modal-form textarea.input {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--pad);
+  margin-top: var(--pad);
 }
 
 .block-section {
@@ -200,6 +241,25 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--pad);
+}
+
+.flash-section {
+  margin-top: var(--pad);
+  cursor: pointer;
+}
+
+.flash-heading {
+  font-weight: 600;
+}
+
+.flash-body {
+  display: none;
+  margin-top: 4px;
+  white-space: pre-wrap;
+}
+
+.flash-section.revealed .flash-body {
+  display: block;
 }
 
 /* Browse cards */

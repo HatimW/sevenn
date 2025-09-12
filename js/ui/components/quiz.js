@@ -3,9 +3,6 @@ import { state, setQuizSession } from '../../state.js';
 function titleOf(item){
   return item.name || item.concept || '';
 }
-function questionOf(item){
-  return item.definition || item.pathophys || item.clinical || item.moa || item.uses || '';
-}
 
 export function renderQuiz(root, redraw){
   const sess = state.quizSession;
@@ -32,10 +29,22 @@ export function renderQuiz(root, redraw){
   const form = document.createElement('form');
   form.className = 'quiz-form';
 
-  const q = document.createElement('div');
-  q.className = 'quiz-question';
-  q.textContent = questionOf(item);
-  form.appendChild(q);
+  const info = document.createElement('div');
+  info.className = 'quiz-info';
+  sectionsFor(item).forEach(([label, field]) => {
+    if (!item[field]) return;
+    const sec = document.createElement('div');
+    sec.className = 'section';
+    const head = document.createElement('div');
+    head.className = 'section-title';
+    head.textContent = label;
+    const body = document.createElement('div');
+    body.textContent = item[field];
+    sec.appendChild(head);
+    sec.appendChild(body);
+    info.appendChild(sec);
+  });
+  form.appendChild(info);
 
   const input = document.createElement('input');
   input.type = 'text';
@@ -71,4 +80,33 @@ export function renderQuiz(root, redraw){
   });
 
   root.appendChild(form);
+}
+
+function sectionsFor(item){
+  const map = {
+    disease: [
+      ['Etiology','etiology'],
+      ['Pathophys','pathophys'],
+      ['Clinical Presentation','clinical'],
+      ['Diagnosis','diagnosis'],
+      ['Treatment','treatment'],
+      ['Complications','complications'],
+      ['Mnemonic','mnemonic']
+    ],
+    drug: [
+      ['Mechanism','moa'],
+      ['Uses','uses'],
+      ['Side Effects','sideEffects'],
+      ['Contraindications','contraindications'],
+      ['Mnemonic','mnemonic']
+    ],
+    concept: [
+      ['Definition','definition'],
+      ['Mechanism','mechanism'],
+      ['Clinical Relevance','clinicalRelevance'],
+      ['Example','example'],
+      ['Mnemonic','mnemonic']
+    ]
+  };
+  return map[item.kind] || [];
 }

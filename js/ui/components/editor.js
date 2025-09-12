@@ -38,7 +38,7 @@ export function openEditor(kind, onSave, existing = null) {
   overlay.className = 'modal';
 
   const form = document.createElement('form');
-  form.className = 'card';
+  form.className = 'card modal-form';
 
   const title = document.createElement('h2');
   title.textContent = (existing ? 'Edit ' : 'Add ') + kind;
@@ -75,6 +75,7 @@ export function openEditor(kind, onSave, existing = null) {
   colorLabel.textContent = 'Color';
   const colorInput = document.createElement('input');
   colorInput.type = 'color';
+  colorInput.className = 'input';
   colorInput.value = existing?.color || '#ffffff';
   colorLabel.appendChild(colorInput);
   form.appendChild(colorLabel);
@@ -83,14 +84,18 @@ export function openEditor(kind, onSave, existing = null) {
   saveBtn.type = 'submit';
   saveBtn.className = 'btn';
   saveBtn.textContent = 'Save';
-  form.appendChild(saveBtn);
 
   const cancel = document.createElement('button');
   cancel.type = 'button';
   cancel.className = 'btn';
   cancel.textContent = 'Cancel';
   cancel.addEventListener('click', () => document.body.removeChild(overlay));
-  form.appendChild(cancel);
+
+  const actions = document.createElement('div');
+  actions.className = 'modal-actions';
+  actions.appendChild(cancel);
+  actions.appendChild(saveBtn);
+  form.appendChild(actions);
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
