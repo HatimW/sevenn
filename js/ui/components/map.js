@@ -8,16 +8,17 @@ export async function renderMap(root){
     ...(await listItemsByKind('drug')),
     ...(await listItemsByKind('concept'))
   ];
-  const size = 2000;
+
+  const size = 4000;
+  const viewport = 1000;
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
-  svg.setAttribute('viewBox',`0 0 ${size} ${size}`);
+  const viewBox = { x:(size-viewport)/2, y:(size-viewport)/2, w:viewport, h:viewport };
+  const updateViewBox = () => svg.setAttribute('viewBox', `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
+  updateViewBox();
   svg.classList.add('map-svg');
 
   const g = document.createElementNS('http://www.w3.org/2000/svg','g');
   svg.appendChild(g);
-
-  // panning state
-  let panX = 0, panY = 0;
   let dragging = false;
   let last = { x:0, y:0 };
   svg.addEventListener('mousedown', e => {
@@ -29,15 +30,29 @@ export async function renderMap(root){
   });
   window.addEventListener('mousemove', e => {
     if (!dragging) return;
-    panX += e.clientX - last.x;
-    panY += e.clientY - last.y;
+    const scale = viewBox.w / svg.clientWidth;
+    viewBox.x -= (e.clientX - last.x) * scale;
+    viewBox.y -= (e.clientY - last.y) * scale;
     last = { x: e.clientX, y: e.clientY };
-    g.setAttribute('transform',`translate(${panX},${panY})`);
+    updateViewBox();
   });
   window.addEventListener('mouseup', () => {
     dragging = false;
     svg.style.cursor = 'grab';
   });
+
+  svg.addEventListener('wheel', e => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 0.9 : 1.1;
+    const mx = viewBox.x + (e.offsetX / svg.clientWidth) * viewBox.w;
+    const my = viewBox.y + (e.offsetY / svg.clientHeight) * viewBox.h;
+    viewBox.w *= factor;
+    viewBox.h *= factor;
+    viewBox.x = mx - (e.offsetX / svg.clientWidth) * viewBox.w;
+    viewBox.y = my - (e.offsetY / svg.clientHeight) * viewBox.h;
+    updateViewBox();
+  });
+
 
   const positions = {};
   const center = size/2;
@@ -91,7 +106,7 @@ export async function renderMap(root){
     const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
     circle.setAttribute('cx', pos.x);
     circle.setAttribute('cy', pos.y);
-    circle.setAttribute('r', 16);
+    circle.setAttribute('r', 20);
     circle.setAttribute('class','map-node');
     const kindColors = { disease: 'var(--purple)', drug: 'var(--blue)' };
     const fill = kindColors[it.kind] || it.color || 'var(--gray)';
@@ -100,7 +115,7 @@ export async function renderMap(root){
     g.appendChild(circle);
     const text = document.createElementNS('http://www.w3.org/2000/svg','text');
     text.setAttribute('x', pos.x);
-    text.setAttribute('y', pos.y - 20);
+    text.setAttribute('y', pos.y - 28);
     text.setAttribute('class','map-label');
     text.textContent = it.name || it.concept || '?';
     g.appendChild(text);

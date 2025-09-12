@@ -21,6 +21,24 @@
   box-sizing: border-box;
 }
 
+html, body, #app {
+  height: 100%;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+}
+
+main {
+  flex: 1;
+  overflow: auto;
+}
+
+.map-main {
+  overflow: hidden;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -586,11 +604,15 @@ button:hover {
 /* Map */
 .map-svg {
   width: 100%;
-  height: 600px;
+  height: 100%;
   cursor: grab;
+  background: var(--muted);
+  border-top: 1px solid var(--border);
 }
 .map-node {
   cursor: pointer;
+  stroke: var(--border);
+  stroke-width: 2;
 }
 .map-edge {
   stroke: var(--gray);
@@ -599,8 +621,9 @@ button:hover {
 }
 .map-label {
   fill: var(--text);
-  font-size: 10px;
+  font-size: 12px;
   text-anchor: middle;
+  pointer-events: none;
 }
 
 .line-menu {
