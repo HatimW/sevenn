@@ -59,6 +59,7 @@ export async function renderMap(root){
       nodeDrag.label.setAttribute('x', x);
       const baseR = Number(nodeDrag.circle.dataset.radius) || 20;
       nodeDrag.label.setAttribute('y', y - (baseR + 8) * nodeScale);
+
       updateEdges(nodeDrag.id);
       nodeWasDragged = true;
       return;
@@ -108,6 +109,7 @@ export async function renderMap(root){
   const maxLinks = Math.max(1, ...Object.values(linkCounts));
   const minRadius = 20;
   const maxRadius = 60;
+
 
   const center = size/2;
   const newItems = [];
@@ -209,6 +211,7 @@ export async function renderMap(root){
     const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
     circle.setAttribute('cx', pos.x);
     circle.setAttribute('cy', pos.y);
+
     // Radius grows between min and max based on normalized link count
     const linkRatio = (linkCounts[it.id] || 0) / maxLinks;
     const baseR = minRadius + linkRatio * (maxRadius - minRadius);
