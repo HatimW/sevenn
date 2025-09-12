@@ -88,7 +88,12 @@ export function renderCards(container, items, onChange){
       const current = cards[idx];
       (current.links || []).forEach(l => {
         const item = items.find(it => it.id === l.id);
-        if (item) relatedWrap.appendChild(createItemCard(item, onChange));
+        if (item) {
+          const el = createItemCard(item, onChange);
+          el.classList.add('related-card');
+          relatedWrap.appendChild(el);
+          requestAnimationFrame(() => el.classList.add('visible'));
+        }
       });
     }
 
