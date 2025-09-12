@@ -8,52 +8,74 @@ export async function renderBuilder(root) {
   wrap.className = 'builder';
   root.appendChild(wrap);
 
-  // Blocks selection
+  // Nested block -> week -> lecture selection
   const blocks = await listBlocks();
-  const blockSection = document.createElement('div');
-  blockSection.className = 'builder-section';
-  const blockTitle = document.createElement('div');
-  blockTitle.textContent = 'Blocks:';
-  blockSection.appendChild(blockTitle);
   blocks.forEach(b => {
-    const label = document.createElement('label');
-    label.className = 'row';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = state.builder.blocks.includes(b.blockId);
-    cb.addEventListener('change', () => {
-      const set = new Set(state.builder.blocks);
-      if (cb.checked) set.add(b.blockId); else set.delete(b.blockId);
-      setBuilder({ blocks: Array.from(set) });
-    });
-    label.appendChild(cb);
-    label.appendChild(document.createTextNode(b.title || b.blockId));
-    blockSection.appendChild(label);
-  });
-  wrap.appendChild(blockSection);
+    const blockDiv = document.createElement('div');
+    blockDiv.className = 'builder-section';
+    const blkLabel = document.createElement('label');
+    blkLabel.className = 'row';
+    const blkCb = document.createElement('input');
+    blkCb.type = 'checkbox';
+    blkCb.checked = state.builder.blocks.includes(b.blockId);
+    blkLabel.appendChild(blkCb);
+    blkLabel.appendChild(document.createTextNode(b.title || b.blockId));
+    blockDiv.appendChild(blkLabel);
 
-  // Week selection (1-8)
-  const weekSection = document.createElement('div');
-  weekSection.className = 'builder-section';
-  const weekTitle = document.createElement('div');
-  weekTitle.textContent = 'Weeks:';
-  weekSection.appendChild(weekTitle);
-  for (let w = 1; w <= 8; w++) {
-    const label = document.createElement('label');
-    label.className = 'row';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = state.builder.weeks.includes(w);
-    cb.addEventListener('change', () => {
-      const set = new Set(state.builder.weeks);
-      if (cb.checked) set.add(w); else set.delete(w);
-      setBuilder({ weeks: Array.from(set) });
+    const weekWrap = document.createElement('div');
+    weekWrap.className = 'builder-sub';
+    weekWrap.style.display = blkCb.checked ? 'block' : 'none';
+    blockDiv.appendChild(weekWrap);
+
+    blkCb.addEventListener('change', () => {
+      const set = new Set(state.builder.blocks);
+      if (blkCb.checked) set.add(b.blockId); else set.delete(b.blockId);
+      setBuilder({ blocks: Array.from(set) });
+      weekWrap.style.display = blkCb.checked ? 'block' : 'none';
     });
-    label.appendChild(cb);
-    label.appendChild(document.createTextNode(String(w)));
-    weekSection.appendChild(label);
-  }
-  wrap.appendChild(weekSection);
+
+    const weeks = Array.from({ length: b.weeks || 8 }, (_, i) => i + 1);
+    weeks.forEach(w => {
+      const wkLabel = document.createElement('label');
+      wkLabel.className = 'row';
+      const wkCb = document.createElement('input');
+      wkCb.type = 'checkbox';
+      const wkKey = `${b.blockId}|${w}`;
+      wkCb.checked = state.builder.weeks.includes(wkKey);
+      wkLabel.appendChild(wkCb);
+      wkLabel.appendChild(document.createTextNode(`Week ${w}`));
+      weekWrap.appendChild(wkLabel);
+
+      const lecWrap = document.createElement('div');
+      lecWrap.className = 'builder-sub';
+      lecWrap.style.display = wkCb.checked ? 'block' : 'none';
+      wkLabel.appendChild(lecWrap);
+
+      wkCb.addEventListener('change', () => {
+        const set = new Set(state.builder.weeks);
+        if (wkCb.checked) set.add(wkKey); else set.delete(wkKey);
+        setBuilder({ weeks: Array.from(set) });
+        lecWrap.style.display = wkCb.checked ? 'block' : 'none';
+      });
+
+      (b.lectures || []).filter(l => l.week === w).forEach(l => {
+        const key = `${b.blockId}|${l.id}`;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'chip' + (state.builder.lectures.includes(key) ? ' active' : '');
+        btn.textContent = l.name;
+        btn.addEventListener('click', () => {
+          const set = new Set(state.builder.lectures);
+          if (set.has(key)) set.delete(key); else set.add(key);
+          setBuilder({ lectures: Array.from(set) });
+          btn.classList.toggle('active');
+        });
+        lecWrap.appendChild(btn);
+      });
+    });
+
+    wrap.appendChild(blockDiv);
+  });
 
   // Type selection
   const typeSection = document.createElement('div');
@@ -105,7 +127,17 @@ export async function renderBuilder(root) {
     items = items.filter(it => {
       if (state.builder.onlyFav && !it.favorite) return false;
       if (state.builder.blocks.length && !it.blocks?.some(b => state.builder.blocks.includes(b))) return false;
-      if (state.builder.weeks.length && !it.weeks?.some(w => state.builder.weeks.includes(w))) return false;
+      if (state.builder.weeks.length) {
+        const ok = state.builder.weeks.some(pair => {
+          const [b, w] = pair.split('|');
+          return it.blocks?.includes(b) && it.weeks?.includes(Number(w));
+        });
+        if (!ok) return false;
+      }
+      if (state.builder.lectures.length) {
+        const ok = it.lectures?.some(l => state.builder.lectures.includes(`${l.blockId}|${l.id}`));
+        if (!ok) return false;
+      }
       return true;
     });
     setCohort(items);

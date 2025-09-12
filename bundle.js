@@ -636,11 +636,11 @@ var Sevenn = (() => {
       ["facts", "Facts (comma separated)"]
     ]
   };
-  function openEditor(kind, onSave, existing = null) {
+  async function openEditor(kind, onSave, existing = null) {
     const overlay = document.createElement("div");
     overlay.className = "modal";
     const form = document.createElement("form");
-    form.className = "card";
+    form.className = "card modal-form";
     const title = document.createElement("h2");
     title.textContent = (existing ? "Edit " : "Add ") + kind;
     form.appendChild(title);
@@ -673,20 +673,76 @@ var Sevenn = (() => {
     colorLabel.textContent = "Color";
     const colorInput = document.createElement("input");
     colorInput.type = "color";
+    colorInput.className = "input";
     colorInput.value = existing?.color || "#ffffff";
     colorLabel.appendChild(colorInput);
     form.appendChild(colorLabel);
+    const blocks = await listBlocks();
+    const blockWrap = document.createElement("div");
+    blockWrap.className = "tag-wrap";
+    const blockTitle = document.createElement("div");
+    blockTitle.textContent = "Blocks";
+    blockWrap.appendChild(blockTitle);
+    const blockChecks = /* @__PURE__ */ new Map();
+    blocks.forEach((b) => {
+      const lbl = document.createElement("label");
+      lbl.className = "row";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = existing?.blocks?.includes(b.blockId);
+      lbl.appendChild(cb);
+      lbl.appendChild(document.createTextNode(b.blockId));
+      blockWrap.appendChild(lbl);
+      blockChecks.set(b.blockId, cb);
+    });
+    form.appendChild(blockWrap);
+    const weekWrap = document.createElement("div");
+    weekWrap.className = "tag-wrap";
+    const weekTitle = document.createElement("div");
+    weekTitle.textContent = "Weeks";
+    weekWrap.appendChild(weekTitle);
+    const weekChecks = /* @__PURE__ */ new Map();
+    for (let w = 1; w <= 8; w++) {
+      const lbl = document.createElement("label");
+      lbl.className = "row";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = existing?.weeks?.includes(w);
+      lbl.appendChild(cb);
+      lbl.appendChild(document.createTextNode("W" + w));
+      weekWrap.appendChild(lbl);
+      weekChecks.set(w, cb);
+    }
+    form.appendChild(weekWrap);
+    const lecLabel = document.createElement("label");
+    lecLabel.textContent = "Lectures";
+    const lectureSel = document.createElement("select");
+    lectureSel.multiple = true;
+    blocks.forEach((b) => {
+      (b.lectures || []).forEach((l) => {
+        const opt = document.createElement("option");
+        opt.value = `${b.blockId}|${l.id}|${l.name}|${l.week}`;
+        opt.textContent = `${b.title || b.blockId}: ${l.name} (W${l.week})`;
+        if (existing?.lectures?.some((e) => e.id === l.id && e.blockId === b.blockId)) opt.selected = true;
+        lectureSel.appendChild(opt);
+      });
+    });
+    lecLabel.appendChild(lectureSel);
+    form.appendChild(lecLabel);
     const saveBtn = document.createElement("button");
     saveBtn.type = "submit";
     saveBtn.className = "btn";
     saveBtn.textContent = "Save";
-    form.appendChild(saveBtn);
     const cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "btn";
     cancel.textContent = "Cancel";
     cancel.addEventListener("click", () => document.body.removeChild(overlay));
-    form.appendChild(cancel);
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+    actions.appendChild(cancel);
+    actions.appendChild(saveBtn);
+    form.appendChild(actions);
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const titleKey = kind === "concept" ? "concept" : "name";
@@ -700,6 +756,12 @@ var Sevenn = (() => {
         } else {
           item[field] = v;
         }
+      });
+      item.blocks = Array.from(blockChecks.entries()).filter(([, cb]) => cb.checked).map(([id]) => id);
+      item.weeks = Array.from(weekChecks.entries()).filter(([, cb]) => cb.checked).map(([w]) => Number(w));
+      item.lectures = Array.from(lectureSel.selectedOptions).map((opt) => {
+        const [blockId, id, name, week] = opt.value.split("|");
+        return { blockId, id: Number(id), name, week: Number(week) };
       });
       item.color = colorInput.value;
       await upsertItem(item);
@@ -728,8 +790,94 @@ var Sevenn = (() => {
   }
 
   // js/ui/components/linker.js
-  function openLinker() {
-    alert("Linker not implemented yet");
+  async function openLinker(item, onSave) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal";
+    const card = document.createElement("div");
+    card.className = "card";
+    const title = document.createElement("h2");
+    title.textContent = `Links for ${item.name || item.concept || ""}`;
+    card.appendChild(title);
+    const all = [
+      ...await listItemsByKind("disease"),
+      ...await listItemsByKind("drug"),
+      ...await listItemsByKind("concept")
+    ];
+    const idMap = new Map(all.map((i) => [i.id, i]));
+    const links = new Set((item.links || []).map((l) => l.id));
+    const list = document.createElement("div");
+    list.className = "link-list";
+    card.appendChild(list);
+    function renderList() {
+      list.innerHTML = "";
+      links.forEach((id) => {
+        const row = document.createElement("div");
+        row.className = "row";
+        const label = document.createElement("span");
+        const it = idMap.get(id);
+        label.textContent = it ? it.name || it.concept || id : id;
+        row.appendChild(label);
+        const btn = document.createElement("button");
+        btn.className = "btn";
+        btn.textContent = "Remove";
+        btn.addEventListener("click", () => {
+          links.delete(id);
+          renderList();
+        });
+        row.appendChild(btn);
+        list.appendChild(row);
+      });
+    }
+    renderList();
+    const input = document.createElement("input");
+    input.className = "input";
+    input.placeholder = "Search items...";
+    card.appendChild(input);
+    const sug = document.createElement("ul");
+    sug.className = "quiz-suggestions";
+    card.appendChild(sug);
+    input.addEventListener("input", () => {
+      const v = input.value.toLowerCase();
+      sug.innerHTML = "";
+      if (!v) return;
+      all.filter((it) => it.id !== item.id && (it.name || it.concept || "").toLowerCase().includes(v)).slice(0, 5).forEach((it) => {
+        const li = document.createElement("li");
+        li.textContent = it.name || it.concept || "";
+        li.addEventListener("mousedown", () => {
+          links.add(it.id);
+          input.value = "";
+          sug.innerHTML = "";
+          renderList();
+        });
+        sug.appendChild(li);
+      });
+    });
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn";
+    cancel.textContent = "Close";
+    cancel.addEventListener("click", () => document.body.removeChild(overlay));
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "btn";
+    save.textContent = "Save";
+    save.addEventListener("click", async () => {
+      item.links = Array.from(links).map((id) => ({ id, type: "assoc" }));
+      await upsertItem(item);
+      document.body.removeChild(overlay);
+      onSave && onSave();
+    });
+    actions.appendChild(cancel);
+    actions.appendChild(save);
+    card.appendChild(actions);
+    overlay.appendChild(card);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) document.body.removeChild(overlay);
+    });
+    document.body.appendChild(overlay);
+    input.focus();
   }
 
   // js/ui/components/cardlist.js
@@ -816,7 +964,7 @@ var Sevenn = (() => {
     link.setAttribute("aria-label", "Manage links");
     link.addEventListener("click", (e) => {
       e.stopPropagation();
-      openLinker();
+      openLinker(item, onChange);
     });
     actions.appendChild(link);
     const edit = document.createElement("button");
@@ -1006,50 +1154,68 @@ var Sevenn = (() => {
     wrap.className = "builder";
     root.appendChild(wrap);
     const blocks = await listBlocks();
-    const blockSection = document.createElement("div");
-    blockSection.className = "builder-section";
-    const blockTitle = document.createElement("div");
-    blockTitle.textContent = "Blocks:";
-    blockSection.appendChild(blockTitle);
     blocks.forEach((b) => {
-      const label = document.createElement("label");
-      label.className = "row";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = state.builder.blocks.includes(b.blockId);
-      cb.addEventListener("change", () => {
+      const blockDiv = document.createElement("div");
+      blockDiv.className = "builder-section";
+      const blkLabel = document.createElement("label");
+      blkLabel.className = "row";
+      const blkCb = document.createElement("input");
+      blkCb.type = "checkbox";
+      blkCb.checked = state.builder.blocks.includes(b.blockId);
+      blkLabel.appendChild(blkCb);
+      blkLabel.appendChild(document.createTextNode(b.title || b.blockId));
+      blockDiv.appendChild(blkLabel);
+      const weekWrap = document.createElement("div");
+      weekWrap.className = "builder-sub";
+      weekWrap.style.display = blkCb.checked ? "block" : "none";
+      blockDiv.appendChild(weekWrap);
+      blkCb.addEventListener("change", () => {
         const set = new Set(state.builder.blocks);
-        if (cb.checked) set.add(b.blockId);
+        if (blkCb.checked) set.add(b.blockId);
         else set.delete(b.blockId);
         setBuilder({ blocks: Array.from(set) });
+        weekWrap.style.display = blkCb.checked ? "block" : "none";
       });
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(b.title || b.blockId));
-      blockSection.appendChild(label);
+      const weeks = Array.from({ length: b.weeks || 8 }, (_, i) => i + 1);
+      weeks.forEach((w) => {
+        const wkLabel = document.createElement("label");
+        wkLabel.className = "row";
+        const wkCb = document.createElement("input");
+        wkCb.type = "checkbox";
+        const wkKey = `${b.blockId}|${w}`;
+        wkCb.checked = state.builder.weeks.includes(wkKey);
+        wkLabel.appendChild(wkCb);
+        wkLabel.appendChild(document.createTextNode(`Week ${w}`));
+        weekWrap.appendChild(wkLabel);
+        const lecWrap = document.createElement("div");
+        lecWrap.className = "builder-sub";
+        lecWrap.style.display = wkCb.checked ? "block" : "none";
+        wkLabel.appendChild(lecWrap);
+        wkCb.addEventListener("change", () => {
+          const set = new Set(state.builder.weeks);
+          if (wkCb.checked) set.add(wkKey);
+          else set.delete(wkKey);
+          setBuilder({ weeks: Array.from(set) });
+          lecWrap.style.display = wkCb.checked ? "block" : "none";
+        });
+        (b.lectures || []).filter((l) => l.week === w).forEach((l) => {
+          const key = `${b.blockId}|${l.id}`;
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "chip" + (state.builder.lectures.includes(key) ? " active" : "");
+          btn.textContent = l.name;
+          btn.addEventListener("click", () => {
+            const set = new Set(state.builder.lectures);
+            if (set.has(key)) set.delete(key);
+            else set.add(key);
+            setBuilder({ lectures: Array.from(set) });
+            btn.classList.toggle("active");
+          });
+          lecWrap.appendChild(btn);
+        });
+      });
+      wrap.appendChild(blockDiv);
     });
-    wrap.appendChild(blockSection);
-    const weekSection = document.createElement("div");
-    weekSection.className = "builder-section";
-    const weekTitle = document.createElement("div");
-    weekTitle.textContent = "Weeks:";
-    weekSection.appendChild(weekTitle);
-    for (let w = 1; w <= 8; w++) {
-      const label = document.createElement("label");
-      label.className = "row";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = state.builder.weeks.includes(w);
-      cb.addEventListener("change", () => {
-        const set = new Set(state.builder.weeks);
-        if (cb.checked) set.add(w);
-        else set.delete(w);
-        setBuilder({ weeks: Array.from(set) });
-      });
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(String(w)));
-      weekSection.appendChild(label);
-    }
-    wrap.appendChild(weekSection);
     const typeSection = document.createElement("div");
     typeSection.className = "builder-section";
     const typeTitle = document.createElement("div");
@@ -1096,7 +1262,17 @@ var Sevenn = (() => {
       items = items.filter((it) => {
         if (state.builder.onlyFav && !it.favorite) return false;
         if (state.builder.blocks.length && !it.blocks?.some((b) => state.builder.blocks.includes(b))) return false;
-        if (state.builder.weeks.length && !it.weeks?.some((w) => state.builder.weeks.includes(w))) return false;
+        if (state.builder.weeks.length) {
+          const ok = state.builder.weeks.some((pair) => {
+            const [b, w] = pair.split("|");
+            return it.blocks?.includes(b) && it.weeks?.includes(Number(w));
+          });
+          if (!ok) return false;
+        }
+        if (state.builder.lectures.length) {
+          const ok = it.lectures?.some((l) => state.builder.lectures.includes(`${l.blockId}|${l.id}`));
+          if (!ok) return false;
+        }
         return true;
       });
       setCohort(items);
@@ -1123,18 +1299,28 @@ var Sevenn = (() => {
       return;
     }
     const item = items[session.idx];
-    const { question, answer, details } = buildCard(item);
     const card = document.createElement("section");
     card.className = "card flashcard";
     card.tabIndex = 0;
-    const qEl = document.createElement("div");
-    qEl.className = "flash-question";
-    qEl.textContent = question;
-    card.appendChild(qEl);
-    const aEl = document.createElement("div");
-    aEl.className = "flash-answer";
-    aEl.textContent = answer + (details ? "\n" + details : "");
-    card.appendChild(aEl);
+    const title = document.createElement("h2");
+    title.textContent = item.name || item.concept || "";
+    card.appendChild(title);
+    sectionsFor(item).forEach(([label, field]) => {
+      const sec = document.createElement("div");
+      sec.className = "flash-section";
+      const head = document.createElement("div");
+      head.className = "flash-heading";
+      head.textContent = label;
+      const body = document.createElement("div");
+      body.className = "flash-body";
+      body.textContent = item[field] || "";
+      sec.appendChild(head);
+      sec.appendChild(body);
+      sec.addEventListener("click", () => {
+        sec.classList.toggle("revealed");
+      });
+      card.appendChild(sec);
+    });
     const controls = document.createElement("div");
     controls.className = "row";
     const prev = document.createElement("button");
@@ -1148,13 +1334,6 @@ var Sevenn = (() => {
       }
     });
     controls.appendChild(prev);
-    const reveal = document.createElement("button");
-    reveal.className = "btn";
-    reveal.textContent = "Reveal";
-    reveal.addEventListener("click", () => {
-      card.classList.toggle("revealed");
-    });
-    controls.appendChild(reveal);
     const next = document.createElement("button");
     next.className = "btn";
     next.textContent = session.idx < items.length - 1 ? "Next" : "Finish";
@@ -1180,51 +1359,40 @@ var Sevenn = (() => {
     root.appendChild(card);
     card.focus();
     card.addEventListener("keydown", (e) => {
-      if (e.code === "Space") {
-        e.preventDefault();
-        reveal.click();
-      } else if (e.key === "ArrowRight") {
+      if (e.key === "ArrowRight") {
         next.click();
       } else if (e.key === "ArrowLeft") {
         prev.click();
       }
     });
   }
-  function buildCard(item) {
-    const mainMap = {
-      disease: ["pathophys", "clinical", "treatment"],
-      drug: ["moa", "uses", "sideEffects"],
-      concept: ["definition", "mechanism", "clinicalRelevance"]
+  function sectionsFor(item) {
+    const map = {
+      disease: [
+        ["Etiology", "etiology"],
+        ["Pathophys", "pathophys"],
+        ["Clinical Presentation", "clinical"],
+        ["Diagnosis", "diagnosis"],
+        ["Treatment", "treatment"],
+        ["Complications", "complications"],
+        ["Mnemonic", "mnemonic"]
+      ],
+      drug: [
+        ["Mechanism", "moa"],
+        ["Uses", "uses"],
+        ["Side Effects", "sideEffects"],
+        ["Contraindications", "contraindications"],
+        ["Mnemonic", "mnemonic"]
+      ],
+      concept: [
+        ["Definition", "definition"],
+        ["Mechanism", "mechanism"],
+        ["Clinical Relevance", "clinicalRelevance"],
+        ["Example", "example"],
+        ["Mnemonic", "mnemonic"]
+      ]
     };
-    const extraMap = {
-      disease: ["mnemonic", "diagnosis", "complications"],
-      drug: ["mnemonic", "contraindications"],
-      concept: ["mnemonic", "example"]
-    };
-    const fields = mainMap[item.kind] || [];
-    let questionField = "";
-    for (const f of fields) {
-      if (item[f]) {
-        questionField = item[f];
-        break;
-      }
-    }
-    let question = questionField || "";
-    const answers = [];
-    question = question.replace(/{{c\d+::(.*?)}}/g, (_m, p1) => {
-      answers.push(p1);
-      return "_____";
-    });
-    const answer = answers.length ? answers.join(" / ") : item.name || item.concept || "";
-    const detailParts = [];
-    fields.filter((f) => f !== fields[0]).forEach((f) => {
-      if (item[f]) detailParts.push(item[f]);
-    });
-    (extraMap[item.kind] || []).forEach((f) => {
-      if (item[f]) detailParts.push(item[f]);
-    });
-    const details = detailParts.join("\n");
-    return { question, answer, details };
+    return map[item.kind] || [];
   }
 
   // js/ui/components/review.js
@@ -1303,9 +1471,6 @@ var Sevenn = (() => {
   function titleOf2(item) {
     return item.name || item.concept || "";
   }
-  function questionOf(item) {
-    return item.definition || item.pathophys || item.clinical || item.moa || item.uses || "";
-  }
   function renderQuiz(root, redraw) {
     const sess = state.quizSession;
     if (!sess) return;
@@ -1330,10 +1495,22 @@ var Sevenn = (() => {
     }
     const form = document.createElement("form");
     form.className = "quiz-form";
-    const q = document.createElement("div");
-    q.className = "quiz-question";
-    q.textContent = questionOf(item);
-    form.appendChild(q);
+    const info = document.createElement("div");
+    info.className = "quiz-info";
+    sectionsFor2(item).forEach(([label, field]) => {
+      if (!item[field]) return;
+      const sec = document.createElement("div");
+      sec.className = "section";
+      const head = document.createElement("div");
+      head.className = "section-title";
+      head.textContent = label;
+      const body = document.createElement("div");
+      body.textContent = item[field];
+      sec.appendChild(head);
+      sec.appendChild(body);
+      info.appendChild(sec);
+    });
+    form.appendChild(info);
     const input = document.createElement("input");
     input.type = "text";
     input.autocomplete = "off";
@@ -1367,6 +1544,34 @@ var Sevenn = (() => {
       redraw();
     });
     root.appendChild(form);
+  }
+  function sectionsFor2(item) {
+    const map = {
+      disease: [
+        ["Etiology", "etiology"],
+        ["Pathophys", "pathophys"],
+        ["Clinical Presentation", "clinical"],
+        ["Diagnosis", "diagnosis"],
+        ["Treatment", "treatment"],
+        ["Complications", "complications"],
+        ["Mnemonic", "mnemonic"]
+      ],
+      drug: [
+        ["Mechanism", "moa"],
+        ["Uses", "uses"],
+        ["Side Effects", "sideEffects"],
+        ["Contraindications", "contraindications"],
+        ["Mnemonic", "mnemonic"]
+      ],
+      concept: [
+        ["Definition", "definition"],
+        ["Mechanism", "mechanism"],
+        ["Clinical Relevance", "clinicalRelevance"],
+        ["Example", "example"],
+        ["Mnemonic", "mnemonic"]
+      ]
+    };
+    return map[item.kind] || [];
   }
 
   // js/ui/components/exams.js
