@@ -8,6 +8,7 @@ export async function renderMap(root){
     ...(await listItemsByKind('drug')),
     ...(await listItemsByKind('concept'))
   ];
+
   const base = 1000;
   const size = Math.max(base, items.length * 150);
   const viewport = base;
@@ -17,12 +18,12 @@ export async function renderMap(root){
     svg.setAttribute('viewBox', `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
     adjustScale();
   };
+
   svg.classList.add('map-svg');
 
   const g = document.createElementNS('http://www.w3.org/2000/svg','g');
   svg.appendChild(g);
 
-  // pan/zoom state
   let dragging = false;
   let last = { x:0, y:0 };
   svg.addEventListener('mousedown', e => {
@@ -44,6 +45,7 @@ export async function renderMap(root){
     dragging = false;
     svg.style.cursor = 'grab';
   });
+
   svg.addEventListener('wheel', e => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 0.9 : 1.1;
@@ -55,6 +57,7 @@ export async function renderMap(root){
     viewBox.y = my - (e.offsetY / svg.clientHeight) * viewBox.h;
     updateViewBox();
   });
+
 
   if (!window._mapResizeAttached) {
     window.addEventListener('resize', adjustScale);
@@ -101,6 +104,7 @@ export async function renderMap(root){
       line.setAttribute('y2', positions[l.id].y);
       line.setAttribute('class','map-edge');
       line.setAttribute('vector-effect','non-scaling-stroke');
+
       applyLineStyle(line, l);
       line.dataset.a = it.id;
       line.dataset.b = l.id;
@@ -140,6 +144,93 @@ function adjustScale(){
   const unit = vb[2] / svg.clientWidth; // units per pixel
   document.querySelectorAll('.map-node').forEach(c => c.setAttribute('r', 20 * unit));
   document.querySelectorAll('.map-label').forEach(t => t.setAttribute('font-size', 12 * unit));
+}
+
+function applyLineStyle(line, info){
+  const color = info.color || 'var(--gray)';
+  line.setAttribute('stroke', color);
+  if (info.style === 'dashed') line.setAttribute('stroke-dasharray','4,4');
+  else line.removeAttribute('stroke-dasharray');
+  if (info.style === 'arrow') line.setAttribute('marker-end','url(#arrow)');
+  else line.removeAttribute('marker-end');
+  let title = line.querySelector('title');
+  if (!title) {
+    title = document.createElementNS('http://www.w3.org/2000/svg','title');
+    line.appendChild(title);
+  }
+  title.textContent = info.name || '';
+}
+
+async function openLineMenu(evt, line, aId, bId){
+  const existing = await getItem(aId);
+  const link = existing.links.find(l => l.id === bId) || {};
+  const menu = document.createElement('div');
+  menu.className = 'line-menu';
+  menu.style.left = evt.pageX + 'px';
+  menu.style.top = evt.pageY + 'px';
+
+  const colorLabel = document.createElement('label');
+  colorLabel.textContent = 'Color';
+  const colorInput = document.createElement('input');
+  colorInput.type = 'color';
+  colorInput.value = link.color || '#888888';
+  colorLabel.appendChild(colorInput);
+  menu.appendChild(colorLabel);
+
+  const typeLabel = document.createElement('label');
+  typeLabel.textContent = 'Style';
+  const typeSel = document.createElement('select');
+  ['solid','dashed','arrow'].forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t; opt.textContent = t;
+    typeSel.appendChild(opt);
+  });
+  typeSel.value = link.style || 'solid';
+  typeLabel.appendChild(typeSel);
+  menu.appendChild(typeLabel);
+
+  const nameLabel = document.createElement('label');
+  nameLabel.textContent = 'Label';
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.value = link.name || '';
+  nameLabel.appendChild(nameInput);
+  menu.appendChild(nameLabel);
+
+  const btn = document.createElement('button');
+  btn.className = 'btn';
+  btn.textContent = 'Save';
+  btn.addEventListener('click', async () => {
+    const patch = { color: colorInput.value, style: typeSel.value, name: nameInput.value };
+    await updateLink(aId, bId, patch);
+    applyLineStyle(line, patch);
+    document.body.removeChild(menu);
+  });
+  menu.appendChild(btn);
+
+  document.body.appendChild(menu);
+  const closer = e => {
+    if (!menu.contains(e.target)) {
+      document.body.removeChild(menu);
+      document.removeEventListener('mousedown', closer);
+    }
+  };
+  setTimeout(() => document.addEventListener('mousedown', closer), 0);
+}
+
+async function updateLink(aId, bId, patch){
+  const a = await getItem(aId);
+  const b = await getItem(bId);
+  if (!a || !b) return;
+  const apply = (item, otherId) => {
+    item.links = item.links || [];
+    const l = item.links.find(x => x.id === otherId);
+    if (l) Object.assign(l, patch);
+  };
+  apply(a, bId);
+  apply(b, aId);
+  await upsertItem(a);
+  await upsertItem(b);
 }
 
 function applyLineStyle(line, info){

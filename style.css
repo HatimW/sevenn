@@ -621,6 +621,7 @@ button:hover {
   cursor: pointer;
   vector-effect: non-scaling-stroke;
   pointer-events: stroke;
+
 }
 .map-label {
   fill: var(--text);
