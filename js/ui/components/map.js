@@ -106,6 +106,9 @@ export async function renderMap(root){
   const itemMap = Object.fromEntries(items.map(it => [it.id, it]));
   const linkCounts = Object.fromEntries(items.map(it => [it.id, (it.links || []).length]));
   const maxLinks = Math.max(1, ...Object.values(linkCounts));
+  const minRadius = 20;
+  const maxRadius = 40;
+
 
   const center = size/2;
   const newItems = [];
@@ -207,7 +210,10 @@ export async function renderMap(root){
     const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
     circle.setAttribute('cx', pos.x);
     circle.setAttribute('cy', pos.y);
-    const baseR = 20 + (linkCounts[it.id] || 0) * 2;
+
+    // Scale radius between minRadius and maxRadius based on relative link count
+    const normalized = (linkCounts[it.id] || 0) / maxLinks;
+    const baseR = minRadius + normalized * (maxRadius - minRadius);
     circle.setAttribute('r', baseR);
     circle.dataset.radius = baseR;
     circle.setAttribute('class','map-node');
