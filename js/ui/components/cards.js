@@ -32,10 +32,50 @@ export function renderCards(container, items, onChange){
   decks.forEach((cards, lecture) => {
     const deck = document.createElement('div');
     deck.className = 'deck';
-    deck.textContent = `${lecture} (${cards.length})`;
-    deck.addEventListener('click', () => openDeck(lecture, cards));
+    const title = document.createElement('div');
+    title.className = 'deck-title';
+    title.textContent = lecture;
+    const meta = document.createElement('div');
+    meta.className = 'deck-meta';
+    const blocks = Array.from(new Set(cards.flatMap(c => c.blocks || []))).join(', ');
+    const weeks = Array.from(new Set(cards.flatMap(c => c.weeks || []))).join(', ');
+    meta.textContent = `${blocks}${blocks && weeks ? ' • ' : ''}${weeks ? 'Week ' + weeks : ''}`;
+    deck.appendChild(title);
+    deck.appendChild(meta);
+    deck.addEventListener('click', () => { stopPreview(deck); openDeck(lecture, cards); });
+    let hoverTimer;
+    deck.addEventListener('mouseenter', () => {
+      hoverTimer = setTimeout(() => startPreview(deck, cards), 1000);
+    });
+    deck.addEventListener('mouseleave', () => {
+      clearTimeout(hoverTimer);
+      stopPreview(deck);
+    });
     list.appendChild(deck);
   });
+
+  function startPreview(deckEl, cards){
+    if (deckEl._preview) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'deck-preview';
+    deckEl.appendChild(overlay);
+    let i = 0;
+    overlay.textContent = cards[i].name || cards[i].concept || '';
+    const interval = setInterval(() => {
+      i = (i + 1) % cards.length;
+      overlay.textContent = cards[i].name || cards[i].concept || '';
+    }, 800);
+    deckEl._preview = { overlay, interval };
+  }
+
+  function stopPreview(deckEl){
+    const prev = deckEl._preview;
+    if (prev){
+      clearInterval(prev.interval);
+      prev.overlay.remove();
+      deckEl._preview = null;
+    }
+  }
 
   function openDeck(title, cards){
     list.classList.add('hidden');
