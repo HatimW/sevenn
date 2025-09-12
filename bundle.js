@@ -1874,6 +1874,7 @@ var Sevenn = (() => {
       ...await listItemsByKind("drug"),
       ...await listItemsByKind("concept")
     ];
+
     const size = 4e3;
     const viewport = 1e3;
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -1894,6 +1895,7 @@ var Sevenn = (() => {
     });
     window.addEventListener("mousemove", (e) => {
       if (!dragging) return;
+
       const scale = viewBox.w / svg.clientWidth;
       viewBox.x -= (e.clientX - last.x) * scale;
       viewBox.y -= (e.clientY - last.y) * scale;
@@ -1904,6 +1906,7 @@ var Sevenn = (() => {
       dragging = false;
       svg.style.cursor = "grab";
     });
+
     svg.addEventListener("wheel", (e) => {
       e.preventDefault();
       const factor = e.deltaY < 0 ? 0.9 : 1.1;
@@ -1915,6 +1918,7 @@ var Sevenn = (() => {
       viewBox.y = my - e.offsetY / svg.clientHeight * viewBox.h;
       updateViewBox();
     });
+
     const positions = {};
     const center = size / 2;
     const radius = size / 2 - 200;

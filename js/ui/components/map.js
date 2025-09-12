@@ -8,6 +8,7 @@ export async function renderMap(root){
     ...(await listItemsByKind('drug')),
     ...(await listItemsByKind('concept'))
   ];
+
   const size = 4000;
   const viewport = 1000;
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
@@ -18,8 +19,6 @@ export async function renderMap(root){
 
   const g = document.createElementNS('http://www.w3.org/2000/svg','g');
   svg.appendChild(g);
-
-  // pan/zoom state
   let dragging = false;
   let last = { x:0, y:0 };
   svg.addEventListener('mousedown', e => {
@@ -41,6 +40,7 @@ export async function renderMap(root){
     dragging = false;
     svg.style.cursor = 'grab';
   });
+
   svg.addEventListener('wheel', e => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 0.9 : 1.1;
@@ -52,6 +52,7 @@ export async function renderMap(root){
     viewBox.y = my - (e.offsetY / svg.clientHeight) * viewBox.h;
     updateViewBox();
   });
+
 
   const positions = {};
   const center = size/2;
