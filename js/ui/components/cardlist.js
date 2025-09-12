@@ -168,6 +168,7 @@ export function createItemCard(item, onChange){
       sec.appendChild(tl);
       const txt = document.createElement('div');
       txt.textContent = item[f];
+      txt.style.whiteSpace = 'pre-wrap';
       sec.appendChild(txt);
       body.appendChild(sec);
     });
@@ -186,6 +187,17 @@ export function createItemCard(item, onChange){
 
   renderBody();
   if (expanded.has(item.id)) card.classList.add('expanded');
+
+  function fit(){
+    const headerH = header.offsetHeight;
+    const maxH = card.clientHeight - headerH - 4;
+    let size = parseFloat(getComputedStyle(body).fontSize);
+    while(body.scrollHeight > maxH && size > 12){
+      size -= 1;
+      body.style.fontSize = size + 'px';
+    }
+  }
+  requestAnimationFrame(fit);
   return card;
 }
 

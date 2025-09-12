@@ -45,7 +45,7 @@ export function renderCards(container, items, onChange){
     deck.addEventListener('click', () => { stopPreview(deck); openDeck(lecture, cards); });
     let hoverTimer;
     deck.addEventListener('mouseenter', () => {
-      hoverTimer = setTimeout(() => startPreview(deck, cards), 1000);
+      hoverTimer = setTimeout(() => startPreview(deck, cards), 3000);
     });
     deck.addEventListener('mouseleave', () => {
       clearTimeout(hoverTimer);
@@ -56,23 +56,30 @@ export function renderCards(container, items, onChange){
 
   function startPreview(deckEl, cards){
     if (deckEl._preview) return;
-    const overlay = document.createElement('div');
-    overlay.className = 'deck-preview';
-    deckEl.appendChild(overlay);
-    let i = 0;
-    overlay.textContent = cards[i].name || cards[i].concept || '';
-    const interval = setInterval(() => {
-      i = (i + 1) % cards.length;
-      overlay.textContent = cards[i].name || cards[i].concept || '';
-    }, 800);
-    deckEl._preview = { overlay, interval };
+    deckEl.classList.add('pop');
+    const fan = document.createElement('div');
+    fan.className = 'deck-fan';
+    deckEl.appendChild(fan);
+    const show = cards.slice(0,5);
+    const spread = 20;
+    const offset = (show.length - 1) * spread / 2;
+    show.forEach((c,i) => {
+      const mini = document.createElement('div');
+      mini.className = 'fan-card';
+      mini.textContent = c.name || c.concept || '';
+      fan.appendChild(mini);
+      const angle = -offset + i * spread;
+      mini.style.transform = `rotate(${angle}deg) translateY(-80px)`;
+      setTimeout(() => { mini.style.opacity = 1; }, i * 100);
+    });
+    deckEl._preview = { fan };
   }
 
   function stopPreview(deckEl){
     const prev = deckEl._preview;
     if (prev){
-      clearInterval(prev.interval);
-      prev.overlay.remove();
+      prev.fan.remove();
+      deckEl.classList.remove('pop');
       deckEl._preview = null;
     }
   }

@@ -1043,6 +1043,7 @@
         sec.appendChild(tl);
         const txt = document.createElement("div");
         txt.textContent = item[f];
+        txt.style.whiteSpace = "pre-wrap";
         sec.appendChild(txt);
         body.appendChild(sec);
       });
@@ -1060,6 +1061,16 @@
     }
     renderBody();
     if (expanded.has(item.id)) card.classList.add("expanded");
+    function fit() {
+      const headerH = header.offsetHeight;
+      const maxH = card.clientHeight - headerH - 4;
+      let size = parseFloat(getComputedStyle(body).fontSize);
+      while (body.scrollHeight > maxH && size > 12) {
+        size -= 1;
+        body.style.fontSize = size + "px";
+      }
+    }
+    requestAnimationFrame(fit);
     return card;
   }
   async function renderCardList(container, items, kind, onChange) {
@@ -1161,7 +1172,8 @@
       });
       let hoverTimer;
       deck.addEventListener("mouseenter", () => {
-        hoverTimer = setTimeout(() => startPreview(deck, cards), 1e3);
+
+        hoverTimer = setTimeout(() => startPreview(deck, cards), 3e3);
       });
       deck.addEventListener("mouseleave", () => {
         clearTimeout(hoverTimer);
@@ -1171,22 +1183,31 @@
     });
     function startPreview(deckEl, cards) {
       if (deckEl._preview) return;
-      const overlay = document.createElement("div");
-      overlay.className = "deck-preview";
-      deckEl.appendChild(overlay);
-      let i = 0;
-      overlay.textContent = cards[i].name || cards[i].concept || "";
-      const interval = setInterval(() => {
-        i = (i + 1) % cards.length;
-        overlay.textContent = cards[i].name || cards[i].concept || "";
-      }, 800);
-      deckEl._preview = { overlay, interval };
+      deckEl.classList.add("pop");
+      const fan = document.createElement("div");
+      fan.className = "deck-fan";
+      deckEl.appendChild(fan);
+      const show = cards.slice(0, 5);
+      const spread = 20;
+      const offset = (show.length - 1) * spread / 2;
+      show.forEach((c, i) => {
+        const mini = document.createElement("div");
+        mini.className = "fan-card";
+        mini.textContent = c.name || c.concept || "";
+        fan.appendChild(mini);
+        const angle = -offset + i * spread;
+        mini.style.transform = `rotate(${angle}deg) translateY(-80px)`;
+        setTimeout(() => {
+          mini.style.opacity = 1;
+        }, i * 100);
+      });
+      deckEl._preview = { fan };
     }
     function stopPreview(deckEl) {
       const prev = deckEl._preview;
       if (prev) {
-        clearInterval(prev.interval);
-        prev.overlay.remove();
+        prev.fan.remove();
+        deckEl.classList.remove("pop");
         deckEl._preview = null;
       }
     }
