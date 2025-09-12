@@ -167,6 +167,7 @@ export function createItemCard(item, onChange){
       if (icon) tl.prepend(icon + ' ');
       sec.appendChild(tl);
       const txt = document.createElement('div');
+      txt.className = 'section-content';
       txt.textContent = item[f];
       txt.style.whiteSpace = 'pre-wrap';
       sec.appendChild(txt);

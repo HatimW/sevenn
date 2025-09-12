@@ -333,11 +333,8 @@ button:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-  width: 260px;
-  height: 180px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+
+  width: 100%;
 }
 
 .item-card .card-header {
@@ -354,7 +351,7 @@ button:hover {
   color: inherit;
   text-align:center;
   flex:1;
-  font-size:1.5rem;
+  font-size:2rem;
   font-weight:700;
   cursor:pointer;
 }
@@ -457,7 +454,6 @@ button:hover {
   display:flex;
   flex-direction:column;
   align-items:center;
-
   text-align:center;
   transition:transform 0.3s ease;
 }
@@ -501,8 +497,33 @@ button:hover {
   min-height: 70vh;
 }
 .deck-card {
-  max-width:400px;
   margin:0 auto;
+}
+
+.deck-card .item-card {
+  width:40vw;
+  height:20vh;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+}
+
+.deck-card .item-card.expanded {
+  height:70vh;
+}
+
+.deck-card .item-card .card-body {
+  display:none;
+  flex:1;
+  overflow:auto;
+}
+
+.deck-card .item-card.expanded .card-body {
+  display:block;
+}
+
+.deck-card .item-card.expanded .section-content {
+  overflow-y:auto;
 }
 .deck-prev, .deck-next {
   position:absolute;

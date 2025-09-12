@@ -1042,6 +1042,7 @@
         if (icon) tl.prepend(icon + " ");
         sec.appendChild(tl);
         const txt = document.createElement("div");
+        txt.className = "section-content";
         txt.textContent = item[f];
         txt.style.whiteSpace = "pre-wrap";
         sec.appendChild(txt);
@@ -1172,7 +1173,6 @@
       });
       let hoverTimer;
       deck.addEventListener("mouseenter", () => {
-
         hoverTimer = setTimeout(() => startPreview(deck, cards), 3e3);
       });
       deck.addEventListener("mouseleave", () => {
