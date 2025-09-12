@@ -1,4 +1,4 @@
-import { getSettings, saveSettings, listBlocks, upsertBlock, deleteBlock, exportJSON, importJSON, exportAnkiCSV } from '../storage/storage.js';
+import { getSettings, saveSettings, listBlocks, upsertBlock, deleteBlock, deleteLecture, updateLecture, exportJSON, importJSON, exportAnkiCSV } from '../storage/storage.js';
 import { confirmModal } from './components/confirm.js';
 
 export async function renderSettings(root) {
@@ -123,7 +123,55 @@ export async function renderSettings(root) {
     const lecList = document.createElement('ul');
     b.lectures.forEach(l => {
       const li = document.createElement('li');
-      li.textContent = `${l.id}: ${l.name} (W${l.week})`;
+      li.className = 'row';
+      const span = document.createElement('span');
+      span.textContent = `${l.id}: ${l.name} (W${l.week})`;
+      li.appendChild(span);
+
+      const editLec = document.createElement('button');
+      editLec.className = 'btn';
+      editLec.textContent = 'Edit';
+      const delLec = document.createElement('button');
+      delLec.className = 'btn';
+      delLec.textContent = 'Delete';
+
+      editLec.addEventListener('click', () => {
+        li.innerHTML = '';
+        li.className = 'row';
+        const nameInput = document.createElement('input');
+        nameInput.className = 'input';
+        nameInput.value = l.name;
+        const weekInput = document.createElement('input');
+        weekInput.className = 'input';
+        weekInput.type = 'number';
+        weekInput.value = l.week;
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'btn';
+        saveBtn.textContent = 'Save';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn';
+        cancelBtn.textContent = 'Cancel';
+        li.append(nameInput, weekInput, saveBtn, cancelBtn);
+        saveBtn.addEventListener('click', async () => {
+          const name = nameInput.value.trim();
+          const week = Number(weekInput.value);
+          if (!name || !week || week < 1 || week > b.weeks) return;
+          await updateLecture(b.blockId, { id: l.id, name, week });
+          await renderSettings(root);
+        });
+        cancelBtn.addEventListener('click', async () => {
+          await renderSettings(root);
+        });
+      });
+
+      delLec.addEventListener('click', async () => {
+        if (await confirmModal('Delete lecture?')) {
+          await deleteLecture(b.blockId, l.id);
+          await renderSettings(root);
+        }
+      });
+
+      li.append(editLec, delLec);
       lecList.appendChild(li);
     });
     wrap.appendChild(lecList);
@@ -150,6 +198,7 @@ export async function renderSettings(root) {
       e.preventDefault();
       const lecture = { id: Number(idInput.value), name: nameInput.value.trim(), week: Number(weekInput.value) };
       if (!lecture.id || !lecture.name || !lecture.week) return;
+      if (lecture.week < 1 || lecture.week > b.weeks) return;
       const updated = { ...b, lectures: [...b.lectures, lecture] };
       await upsertBlock(updated);
       await renderSettings(root);

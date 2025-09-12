@@ -70,6 +70,79 @@ export async function upsertBlock(def) {
 export async function deleteBlock(blockId) {
   const b = await store('blocks', 'readwrite');
   await prom(b.delete(blockId));
+  // remove references from items to keep them "unlabeled"
+  const i = await store('items', 'readwrite');
+  const all = await prom(i.getAll());
+  for (const it of all) {
+    const beforeBlocks = it.blocks?.length || 0;
+    const beforeLects = it.lectures?.length || 0;
+    if (beforeBlocks || beforeLects) {
+      if (it.blocks) it.blocks = it.blocks.filter(bId => bId !== blockId);
+      if (it.lectures) it.lectures = it.lectures.filter(l => l.blockId !== blockId);
+      // recompute weeks based on remaining lectures
+      if (it.weeks) {
+        const validWeeks = new Set((it.lectures || []).map(l => l.week));
+        it.weeks = Array.from(validWeeks);
+      }
+      if ((it.blocks?.length || 0) !== beforeBlocks || (it.lectures?.length || 0) !== beforeLects) {
+        it.tokens = buildTokens(it);
+        await prom(i.put(it));
+      }
+    }
+  }
+}
+
+export async function deleteLecture(blockId, lectureId) {
+  const b = await store('blocks', 'readwrite');
+  const blk = await prom(b.get(blockId));
+  if (blk) {
+    blk.lectures = (blk.lectures || []).filter(l => l.id !== lectureId);
+    await prom(b.put(blk));
+  }
+  const i = await store('items', 'readwrite');
+  const all = await prom(i.getAll());
+  for (const it of all) {
+    const before = it.lectures?.length || 0;
+    if (before) {
+      it.lectures = it.lectures.filter(l => !(l.blockId === blockId && l.id === lectureId));
+      if (it.lectures.length !== before) {
+        it.blocks = it.blocks?.filter(bid => bid !== blockId || it.lectures.some(l => l.blockId === bid));
+        const validWeeks = new Set((it.lectures || []).map(l => l.week));
+        it.weeks = Array.from(validWeeks);
+        it.tokens = buildTokens(it);
+        await prom(i.put(it));
+      }
+    }
+  }
+}
+
+export async function updateLecture(blockId, lecture) {
+  const b = await store('blocks', 'readwrite');
+  const blk = await prom(b.get(blockId));
+  if (blk) {
+    blk.lectures = (blk.lectures || []).map(l => l.id === lecture.id ? lecture : l);
+    await prom(b.put(blk));
+  }
+  const i = await store('items', 'readwrite');
+  const all = await prom(i.getAll());
+  for (const it of all) {
+    let changed = false;
+    if (it.lectures) {
+      it.lectures = it.lectures.map(l => {
+        if (l.blockId === blockId && l.id === lecture.id) {
+          changed = true;
+          return { blockId, id: lecture.id, name: lecture.name, week: lecture.week };
+        }
+        return l;
+      });
+    }
+    if (changed) {
+      const validWeeks = new Set((it.lectures || []).map(l => l.week));
+      it.weeks = Array.from(validWeeks);
+      it.tokens = buildTokens(it);
+      await prom(i.put(it));
+    }
+  }
 }
 
 import { buildTokens, tokenize } from '../search.js';
@@ -93,7 +166,11 @@ export async function findItemsByFilter(filter) {
     items = items.filter(it => filter.types.includes(it.kind));
   }
   if (filter.block) {
-    items = items.filter(it => (it.blocks || []).includes(filter.block));
+    if (filter.block === '__unlabeled') {
+      items = items.filter(it => !it.blocks || !it.blocks.length);
+    } else {
+      items = items.filter(it => (it.blocks || []).includes(filter.block));
+    }
   }
   if (filter.week) {
     items = items.filter(it => (it.weeks || []).includes(filter.week));

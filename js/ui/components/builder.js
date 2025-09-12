@@ -10,6 +10,7 @@ export async function renderBuilder(root) {
 
   // Nested block -> week -> lecture selection
   const blocks = await listBlocks();
+  blocks.push({ blockId: '__unlabeled', title: 'Unlabeled', weeks: 0, lectures: [] });
   blocks.forEach(b => {
     const blockDiv = document.createElement('div');
     blockDiv.className = 'builder-section';
@@ -126,7 +127,13 @@ export async function renderBuilder(root) {
     }
     items = items.filter(it => {
       if (state.builder.onlyFav && !it.favorite) return false;
-      if (state.builder.blocks.length && !it.blocks?.some(b => state.builder.blocks.includes(b))) return false;
+      if (state.builder.blocks.length) {
+        const wantUnlabeled = state.builder.blocks.includes('__unlabeled');
+        const hasMatch = it.blocks?.some(b => state.builder.blocks.includes(b));
+        if (!hasMatch) {
+          if (!(wantUnlabeled && (!it.blocks || !it.blocks.length))) return false;
+        }
+      }
       if (state.builder.weeks.length) {
         const ok = state.builder.weeks.some(pair => {
           const [b, w] = pair.split('|');
