@@ -913,10 +913,9 @@
     ]
   };
   var expanded = /* @__PURE__ */ new Set();
-  function createItemCard(item, onChange, opts = {}) {
-    const { flash = false } = opts;
+  function createItemCard(item, onChange) {
     const card = document.createElement("div");
-    card.className = `item-card card--${item.kind}${flash ? " flash-card" : ""}`;
+    card.className = `item-card card--${item.kind}`;
     const color = item.color || kindColors[item.kind] || "var(--gray)";
     card.style.borderTop = `3px solid ${color}`;
     const header = document.createElement("div");
@@ -930,7 +929,6 @@
       else expanded.add(item.id);
       card.classList.toggle("expanded");
       mainBtn.setAttribute("aria-expanded", expanded.has(item.id));
-      flash && requestAnimationFrame(fit);
     });
     header.appendChild(mainBtn);
     const settings = document.createElement("div");
@@ -1060,19 +1058,8 @@
         body.appendChild(facts);
       }
     }
-    function fit() {
-      if (!flash) return;
-      let size = 18;
-      const min = 12;
-      card.style.fontSize = size + "px";
-      while (card.scrollHeight > card.clientHeight && size > min) {
-        size--;
-        card.style.fontSize = size + "px";
-      }
-    }
     renderBody();
     if (expanded.has(item.id)) card.classList.add("expanded");
-    if (flash) card.fit = fit;
     return card;
   }
   async function renderCardList(container, items, kind, onChange) {
@@ -1174,8 +1161,7 @@
       });
       let hoverTimer;
       deck.addEventListener("mouseenter", () => {
-
-        hoverTimer = setTimeout(() => startPreview(deck, cards), 3e3);
+        hoverTimer = setTimeout(() => startPreview(deck, cards), 1e3);
       });
       deck.addEventListener("mouseleave", () => {
         clearTimeout(hoverTimer);
@@ -1185,28 +1171,22 @@
     });
     function startPreview(deckEl, cards) {
       if (deckEl._preview) return;
-      const fan = document.createElement("div");
-      fan.className = "deck-fan";
-      deckEl.appendChild(fan);
-      const preview = cards.slice(0, Math.min(cards.length, 5));
-      const step = 15;
-      const start = -((preview.length - 1) * step) / 2;
-      preview.forEach((c, i) => {
-        const fc = document.createElement("div");
-        fc.className = "fan-card";
-        fc.textContent = c.name || c.concept || "";
-        fan.appendChild(fc);
-        const ang = start + i * step;
-        requestAnimationFrame(() => {
-          fc.style.transform = `translate(-50%, -50%) rotate(${ang}deg) translateY(-40px)`;
-        });
-      });
-      deckEl._preview = fan;
+      const overlay = document.createElement("div");
+      overlay.className = "deck-preview";
+      deckEl.appendChild(overlay);
+      let i = 0;
+      overlay.textContent = cards[i].name || cards[i].concept || "";
+      const interval = setInterval(() => {
+        i = (i + 1) % cards.length;
+        overlay.textContent = cards[i].name || cards[i].concept || "";
+      }, 800);
+      deckEl._preview = { overlay, interval };
     }
     function stopPreview(deckEl) {
       const prev = deckEl._preview;
       if (prev) {
-        prev.remove();
+        clearInterval(prev.interval);
+        prev.overlay.remove();
         deckEl._preview = null;
       }
     }
@@ -1243,9 +1223,7 @@
       let showRelated = false;
       function renderCard() {
         cardHolder.innerHTML = "";
-        const main = createItemCard(cards[idx], onChange, { flash: true });
-        cardHolder.appendChild(main);
-        main.fit && main.fit();
+        cardHolder.appendChild(createItemCard(cards[idx], onChange));
         renderRelated();
       }
       function renderRelated() {
@@ -1255,10 +1233,9 @@
         (current.links || []).forEach((l) => {
           const item = items.find((it) => it.id === l.id);
           if (item) {
-            const el = createItemCard(item, onChange, { flash: true });
+            const el = createItemCard(item, onChange);
             el.classList.add("related-card");
             relatedWrap.appendChild(el);
-            el.fit && el.fit();
             requestAnimationFrame(() => el.classList.add("visible"));
           }
         });
