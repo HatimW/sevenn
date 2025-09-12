@@ -341,6 +341,7 @@ button:hover {
   align-items: flex-start;
   padding: var(--pad);
   cursor: pointer;
+  position: relative;
 }
 
 .header-main {
@@ -371,7 +372,7 @@ button:hover {
   display:block;
   max-height: 2.4em;
   overflow: hidden;
-  font-size:1.1rem;
+  font-size:1.3rem;
 }
 
 .identifiers {
@@ -384,7 +385,24 @@ button:hover {
 .card-actions {
   display:flex;
   gap:4px;
+  flex-direction:column;
 }
+
+.card-menu {
+  position:absolute;
+  top:100%;
+  right:0;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:4px;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  z-index:10;
+}
+
+.card-menu.hidden { display:none; }
 
 .icon-btn {
   background: var(--muted);
@@ -447,6 +465,52 @@ button:hover {
   padding:var(--pad-lg);
   cursor:pointer;
   box-shadow:0 2px 4px rgba(0,0,0,0.2);
+  width:160px;
+  height:120px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  position:relative;
+  overflow:hidden;
+}
+.deck-name {
+  font-weight:600;
+  margin-bottom:4px;
+}
+.deck-meta {
+  font-size:0.85rem;
+  opacity:0.8;
+}
+.deck-preview {
+  position:absolute;
+  inset:0;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:4px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px;
+  overflow:auto;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity 0.3s ease;
+}
+.deck.previewing .deck-preview { opacity:1; }
+.preview-card {
+  background:var(--muted);
+  border-radius:var(--radius);
+  padding:2px 4px;
+  font-size:0.75rem;
+  opacity:0;
+  transform:scale(0.9);
+  animation:deck-pop 0.3s forwards;
+}
+
+@keyframes deck-pop {
+  to { opacity:1; transform:scale(1); }
 }
 .deck-viewer {
   position: relative;
