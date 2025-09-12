@@ -129,27 +129,7 @@ export function createItemCard(item, onChange){
   });
   actions.appendChild(del);
 
-  const gear = document.createElement('button');
-  gear.className = 'icon-btn card-gear';
-  gear.textContent = '⚙️';
-  gear.title = 'More Actions';
-  gear.setAttribute('aria-label','More Actions');
-
-  const menu = document.createElement('div');
-  menu.className = 'card-menu hidden';
-  menu.appendChild(actions);
-
-  gear.addEventListener('click', e => {
-    e.stopPropagation();
-    menu.classList.toggle('hidden');
-  });
-
-  document.addEventListener('click', e => {
-    if (!menu.contains(e.target) && e.target !== gear) menu.classList.add('hidden');
-  });
-
-  header.appendChild(gear);
-  header.appendChild(menu);
+  header.appendChild(actions);
   card.appendChild(header);
 
   const identifiers = document.createElement('div');

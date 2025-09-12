@@ -1012,24 +1012,7 @@ var Sevenn = (() => {
       }
     });
     actions.appendChild(del);
-    const gear = document.createElement("button");
-    gear.className = "icon-btn card-gear";
-    gear.textContent = "\u2699\uFE0F";
-    gear.title = "More Actions";
-    gear.setAttribute("aria-label", "More Actions");
-    const menu = document.createElement("div");
-    menu.className = "card-menu hidden";
-    menu.appendChild(actions);
-    gear.addEventListener("click", (e) => {
-      e.stopPropagation();
-      menu.classList.toggle("hidden");
-    });
-    document.addEventListener("click", (e) => {
-      if (!menu.contains(e.target) && e.target !== gear)
-        menu.classList.add("hidden");
-    });
-    header.appendChild(gear);
-    header.appendChild(menu);
+    header.appendChild(actions);
     card.appendChild(header);
     const identifiers = document.createElement("div");
     identifiers.className = "identifiers";
@@ -1158,14 +1141,13 @@ var Sevenn = (() => {
     items.forEach((it) => {
       if (it.lectures && it.lectures.length) {
         it.lectures.forEach((l) => {
-          const key = `${l.blockId}|${l.id}`;
-          if (!decks.has(key)) decks.set(key, { lecture: l, cards: [] });
-          decks.get(key).cards.push(it);
+          const key = l.name || `Lecture ${l.id}`;
+          if (!decks.has(key)) decks.set(key, []);
+          decks.get(key).push(it);
         });
       } else {
-        if (!decks.has("Unassigned"))
-          decks.set("Unassigned", { lecture: { name: "Unassigned", blockId: "", week: "" }, cards: [] });
-        decks.get("Unassigned").cards.push(it);
+        if (!decks.has("Unassigned")) decks.set("Unassigned", []);
+        decks.get("Unassigned").push(it);
       }
     });
     const list = document.createElement("div");
@@ -1174,48 +1156,13 @@ var Sevenn = (() => {
     const viewer = document.createElement("div");
     viewer.className = "deck-viewer hidden";
     container.appendChild(viewer);
-    decks.forEach(({ lecture, cards }) => {
+    decks.forEach((cards, lecture) => {
       const deck = document.createElement("div");
       deck.className = "deck";
-      const nameEl = document.createElement("div");
-      nameEl.className = "deck-name";
-      nameEl.textContent = lecture.name || `Lecture ${lecture.id}`;
-      deck.appendChild(nameEl);
-      const metaEl = document.createElement("div");
-      metaEl.className = "deck-meta";
-      const blk = lecture.blockId || "";
-      const wk = lecture.week != null ? `Week ${lecture.week}` : "";
-      metaEl.textContent = [blk, wk].filter(Boolean).join(" \u00B7 ");
-      deck.appendChild(metaEl);
-      deck.addEventListener("click", () => openDeck(nameEl.textContent, cards));
-      let previewTimer;
-      deck.addEventListener("mouseenter", () => {
-        previewTimer = setTimeout(() => showPreview(deck, cards), 1500);
-      });
-      deck.addEventListener("mouseleave", () => {
-        clearTimeout(previewTimer);
-        hidePreview(deck);
-      });
+      deck.textContent = `${lecture} (${cards.length})`;
+      deck.addEventListener("click", () => openDeck(lecture, cards));
       list.appendChild(deck);
     });
-    function showPreview(deck, cards) {
-      const preview = document.createElement("div");
-      preview.className = "deck-preview";
-      cards.forEach((c, i) => {
-        const pc = document.createElement("div");
-        pc.className = "preview-card";
-        pc.textContent = c.name || c.concept || "Untitled";
-        pc.style.animationDelay = `${i * 0.05}s`;
-        preview.appendChild(pc);
-      });
-      deck.appendChild(preview);
-      deck.classList.add("previewing");
-    }
-    function hidePreview(deck) {
-      const p = deck.querySelector(".deck-preview");
-      p && p.remove();
-      deck.classList.remove("previewing");
-    }
     function openDeck(title, cards) {
       list.classList.add("hidden");
       viewer.classList.remove("hidden");
