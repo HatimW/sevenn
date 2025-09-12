@@ -1,5 +1,7 @@
 
+
 /* Modern dark theme */
+
 :root {
   --bg:#0B0F14;
   --panel:#1B1F27;
@@ -203,6 +205,35 @@ body {
   flex-direction: row;
   align-items: center;
   gap: 4px;
+}
+
+/* Cleaner modal form layout */
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad);
+}
+
+.modal-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modal-form .input {
+  width: 100%;
+}
+
+.modal-form textarea.input {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--pad);
+  margin-top: var(--pad);
 }
 
 .block-section {
