@@ -29,6 +29,20 @@ body {
   font-size: 18px;
 }
 
+button {
+  background: var(--muted);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+}
+
 .header {
   padding: var(--pad);
   background: var(--panel);
@@ -48,11 +62,11 @@ body {
 
 .tabs .tab {
   background: var(--muted);
-  border: none;
   color: var(--text);
   padding: 6px 12px;
   cursor: pointer;
   border-radius: var(--radius);
+  border: 1px solid var(--border);
 }
 
 .tab.active {
@@ -132,7 +146,7 @@ body {
 .btn {
   background: var(--blue);
   color: #000;
-  border: none;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 6px 12px;
   cursor: pointer;
@@ -324,59 +338,54 @@ body {
 .item-card .card-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   padding: var(--pad);
   cursor: pointer;
 }
 
-.header-main {
+.card-title-btn {
   background: none;
   border: none;
   color: inherit;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap:4px;
-  text-align: left;
+  text-align:left;
   flex:1;
+  font-size:1.25rem;
+  font-weight:600;
+  cursor:pointer;
 }
 
-.kind-badge {
-  border-radius: var(--radius);
-  padding: 2px 6px;
-  font-size: 12px;
-  color: #000;
-}
-.kind-badge.disease { background: var(--pink); }
-.kind-badge.drug { background: var(--blue); }
-.kind-badge.concept { background: var(--green); }
+.card-settings { position:relative; }
 
-.card-title {
-  font-weight: 600;
-  line-height: 1.2;
-  display:block;
-  max-height: 2.4em;
-  overflow: hidden;
+.card-menu {
+  position:absolute;
+  right:0;
+  top:100%;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  padding:4px;
+  z-index:5;
 }
+
+.card-menu.hidden { display:none; }
 
 .identifiers {
   display:flex;
   gap:4px;
   flex-wrap:wrap;
-  padding: 0 var(--pad) var(--pad);
-}
-
-.card-actions {
-  display:flex;
-  gap:4px;
+  margin-bottom:var(--pad);
 }
 
 .icon-btn {
-  background:none;
-  border:none;
+  background: var(--muted);
+  border: 1px solid var(--border);
   cursor:pointer;
   color: var(--text);
   padding:2px;
+  border-radius: var(--radius);
 }
 
 .card-body {
@@ -387,11 +396,44 @@ body {
 .item-card.expanded .card-body {
   display:block;
 }
+.flash-card {
+  width:300px;
+  height:200px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  overflow:hidden;
+}
+.flash-card .card-header{
+  width:100%;
+  position:relative;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  padding:var(--pad);
+}
+.flash-card .card-title-btn{
+  width:100%;
+  text-align:center;
+  font-size:1.5rem;
+}
+.flash-card .card-settings{
+  position:absolute;
+  top:var(--pad);
+  right:var(--pad);
+}
+.flash-card .card-body{
+  flex:1;
+  overflow:hidden;
+}
 
 .section {
   border-left:2px solid var(--border);
   padding-left:8px;
   margin-top:8px;
+  overflow-wrap:anywhere;
 }
 
 .section-title {
@@ -431,11 +473,48 @@ body {
   padding:var(--pad-lg);
   cursor:pointer;
   box-shadow:0 2px 4px rgba(0,0,0,0.2);
+  position:relative;
+  width:200px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  text-align:center;
+}
+.deck-title { font-weight:600; margin-bottom:4px; }
+.deck-meta { font-size:0.85rem; color:var(--gray); }
+.deck-fan {
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+}
+.fan-card {
+  position:absolute;
+  top:50%;
+  left:50%;
+  width:80%;
+  height:80%;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:600;
+  transform:translate(-50%, -50%);
+  transition:transform 0.3s ease;
+  overflow:hidden;
+  text-align:center;
+  font-size:0.9rem;
 }
 .deck-viewer {
-  position:relative;
-  text-align:center;
-  padding:var(--pad);
+  position: relative;
+  text-align: center;
+  padding: var(--pad);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 70vh;
 }
 .deck-card {
   max-width:400px;
@@ -446,25 +525,58 @@ body {
   top:50%;
   transform:translateY(-50%);
   background:var(--muted);
-  border:none;
   color:var(--text);
   padding:8px;
   border-radius:var(--radius);
   cursor:pointer;
+  border:1px solid var(--border);
 }
 .deck-prev { left:var(--pad); }
 .deck-next { right:var(--pad); }
+.deck-prev:hover, .deck-next:hover {
+  transform:translateY(calc(-50% - 2px));
+}
 .deck-related {
   display:flex;
   flex-wrap:wrap;
   gap:var(--pad);
   justify-content:center;
   margin-top:var(--pad);
+  opacity:0;
+  transform:translateY(-10px);
+  transition:opacity 0.3s ease, transform 0.3s ease;
+}
+.deck-related:not(.hidden) {
+  opacity:1;
+  transform:translateY(0);
+}
+.deck-related .related-card {
+  opacity:0;
+  transform:scale(0.95);
+  transition:opacity 0.3s ease, transform 0.3s ease;
+}
+.deck-related .related-card.visible {
+  opacity:1;
+  transform:scale(1);
 }
 .deck-close {
   margin-top:var(--pad);
 }
 .hidden { display:none !important; }
+
+.title-cell{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  margin-bottom:var(--pad);
+}
+.title-cell .title{
+  font-size:1.25rem;
+  font-weight:600;
+}
+.title-cell .actions{
+  margin-top:4px;
+}
 
 /* Map */
 .map-svg {

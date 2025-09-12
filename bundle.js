@@ -1,4 +1,4 @@
-var Sevenn = (() => {
+(() => {
   // js/state.js
   var state = {
     tab: "Diseases",
@@ -683,45 +683,38 @@ var Sevenn = (() => {
     const blockTitle = document.createElement("div");
     blockTitle.textContent = "Blocks";
     blockWrap.appendChild(blockTitle);
-
     const blockRow = document.createElement("div");
     blockRow.className = "tag-row";
     const blockChecks = /* @__PURE__ */ new Map();
     blocks.forEach((b) => {
       const lbl = document.createElement("label");
       lbl.className = "tag-label";
-
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.checked = existing?.blocks?.includes(b.blockId);
       lbl.appendChild(cb);
       lbl.appendChild(document.createTextNode(b.blockId));
-
       blockRow.appendChild(lbl);
       blockChecks.set(b.blockId, cb);
     });
     blockWrap.appendChild(blockRow);
-
     form.appendChild(blockWrap);
     const weekWrap = document.createElement("div");
     weekWrap.className = "tag-wrap";
     const weekTitle = document.createElement("div");
     weekTitle.textContent = "Weeks";
     weekWrap.appendChild(weekTitle);
-
     const weekRow = document.createElement("div");
     weekRow.className = "tag-row";
     const weekChecks = /* @__PURE__ */ new Map();
     for (let w = 1; w <= 8; w++) {
       const lbl = document.createElement("label");
       lbl.className = "tag-label";
-
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.checked = existing?.weeks?.includes(w);
       lbl.appendChild(cb);
       lbl.appendChild(document.createTextNode("W" + w));
-
       weekRow.appendChild(lbl);
       weekChecks.set(w, cb);
     }
@@ -733,7 +726,6 @@ var Sevenn = (() => {
     lectureInput.className = "input";
     lectureInput.value = existing?.lectures?.map((l) => l.id).join(", ") || "";
     lecLabel.appendChild(lectureInput);
-
     form.appendChild(lecLabel);
     const saveBtn = document.createElement("button");
     saveBtn.type = "submit";
@@ -765,7 +757,6 @@ var Sevenn = (() => {
       });
       item.blocks = Array.from(blockChecks.entries()).filter(([, cb]) => cb.checked).map(([id]) => id);
       item.weeks = Array.from(weekChecks.entries()).filter(([, cb]) => cb.checked).map(([w]) => Number(w));
-
       const ids = lectureInput.value.split(",").map((s) => Number(s.trim())).filter(Boolean);
       item.lectures = ids.map((id) => {
         for (const b of blocks) {
@@ -773,7 +764,6 @@ var Sevenn = (() => {
           if (l) return { blockId: b.blockId, id, name: l.name, week: l.week };
         }
         return { id };
-
       });
       item.color = colorInput.value;
       await upsertItem(item);
@@ -894,11 +884,6 @@ var Sevenn = (() => {
 
   // js/ui/components/cardlist.js
   var kindColors = { disease: "var(--pink)", drug: "var(--blue)", concept: "var(--green)" };
-  var collapsedPref = {
-    disease: ["pathophys", "clinical"],
-    drug: ["moa", "uses"],
-    concept: ["definition", "mechanism"]
-  };
   var fieldDefs = {
     disease: [
       ["etiology", "Etiology", "\u{1F9EC}"],
@@ -928,34 +913,40 @@ var Sevenn = (() => {
     ]
   };
   var expanded = /* @__PURE__ */ new Set();
-  function createItemCard(item, onChange) {
+  function createItemCard(item, onChange, opts = {}) {
+    const { flash = false } = opts;
     const card = document.createElement("div");
-    card.className = `item-card card--${item.kind}`;
+    card.className = `item-card card--${item.kind}${flash ? " flash-card" : ""}`;
     const color = item.color || kindColors[item.kind] || "var(--gray)";
     card.style.borderTop = `3px solid ${color}`;
     const header = document.createElement("div");
     header.className = "card-header";
     const mainBtn = document.createElement("button");
-    mainBtn.className = "header-main";
+    mainBtn.className = "card-title-btn";
+    mainBtn.textContent = item.name || item.concept || "Untitled";
     mainBtn.setAttribute("aria-expanded", expanded.has(item.id));
     mainBtn.addEventListener("click", () => {
       if (expanded.has(item.id)) expanded.delete(item.id);
       else expanded.add(item.id);
-      renderBody();
       card.classList.toggle("expanded");
       mainBtn.setAttribute("aria-expanded", expanded.has(item.id));
+      flash && requestAnimationFrame(fit);
     });
-    const badge = document.createElement("span");
-    badge.className = `kind-badge ${item.kind}`;
-    badge.textContent = item.kind.charAt(0).toUpperCase() + item.kind.slice(1);
-    mainBtn.appendChild(badge);
-    const title = document.createElement("span");
-    title.className = "card-title";
-    title.textContent = item.name || item.concept || "Untitled";
-    mainBtn.appendChild(title);
     header.appendChild(mainBtn);
-    const actions = document.createElement("div");
-    actions.className = "card-actions";
+    const settings = document.createElement("div");
+    settings.className = "card-settings";
+    const gear = document.createElement("button");
+    gear.className = "icon-btn";
+    gear.textContent = "\u2699\uFE0F";
+    const menu = document.createElement("div");
+    menu.className = "card-menu hidden";
+    gear.addEventListener("click", (e) => {
+      e.stopPropagation();
+      menu.classList.toggle("hidden");
+    });
+    settings.appendChild(gear);
+    settings.appendChild(menu);
+    header.appendChild(settings);
     const fav = document.createElement("button");
     fav.className = "icon-btn";
     fav.textContent = item.favorite ? "\u2605" : "\u2606";
@@ -968,7 +959,7 @@ var Sevenn = (() => {
       fav.textContent = item.favorite ? "\u2605" : "\u2606";
       onChange && onChange();
     });
-    actions.appendChild(fav);
+    menu.appendChild(fav);
     const link = document.createElement("button");
     link.className = "icon-btn";
     link.textContent = "\u{1FAA2}";
@@ -978,7 +969,7 @@ var Sevenn = (() => {
       e.stopPropagation();
       openLinker(item, onChange);
     });
-    actions.appendChild(link);
+    menu.appendChild(link);
     const edit = document.createElement("button");
     edit.className = "icon-btn";
     edit.textContent = "\u270F\uFE0F";
@@ -988,7 +979,7 @@ var Sevenn = (() => {
       e.stopPropagation();
       openEditor(item.kind, onChange, item);
     });
-    actions.appendChild(edit);
+    menu.appendChild(edit);
     const copy = document.createElement("button");
     copy.className = "icon-btn";
     copy.textContent = "\u{1F4CB}";
@@ -998,7 +989,7 @@ var Sevenn = (() => {
       e.stopPropagation();
       navigator.clipboard && navigator.clipboard.writeText(item.name || item.concept || "");
     });
-    actions.appendChild(copy);
+    menu.appendChild(copy);
     const del = document.createElement("button");
     del.className = "icon-btn";
     del.textContent = "\u{1F5D1}\uFE0F";
@@ -1011,41 +1002,38 @@ var Sevenn = (() => {
         onChange && onChange();
       }
     });
-    actions.appendChild(del);
-    header.appendChild(actions);
+    menu.appendChild(del);
     card.appendChild(header);
-    const identifiers = document.createElement("div");
-    identifiers.className = "identifiers";
-    (item.blocks || []).forEach((b) => {
-      const chip = document.createElement("span");
-      chip.className = "chip";
-      chip.textContent = b;
-      identifiers.appendChild(chip);
-    });
-    (item.weeks || []).forEach((w) => {
-      const chip = document.createElement("span");
-      chip.className = "chip";
-      chip.textContent = "W" + w;
-      identifiers.appendChild(chip);
-    });
-    if (item.lectures) {
-      item.lectures.forEach((l) => {
-        const chip = document.createElement("span");
-        chip.className = "chip";
-        chip.textContent = "\u{1F4DA} " + (l.name || l.id);
-        identifiers.appendChild(chip);
-      });
-    }
-    card.appendChild(identifiers);
     const body = document.createElement("div");
     body.className = "card-body";
     card.appendChild(body);
     function renderBody() {
       body.innerHTML = "";
+      const identifiers = document.createElement("div");
+      identifiers.className = "identifiers";
+      (item.blocks || []).forEach((b) => {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = b;
+        identifiers.appendChild(chip);
+      });
+      (item.weeks || []).forEach((w) => {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = "W" + w;
+        identifiers.appendChild(chip);
+      });
+      if (item.lectures) {
+        item.lectures.forEach((l) => {
+          const chip = document.createElement("span");
+          chip.className = "chip";
+          chip.textContent = "\u{1F4DA} " + (l.name || l.id);
+          identifiers.appendChild(chip);
+        });
+      }
+      body.appendChild(identifiers);
       const defs = fieldDefs[item.kind] || [];
-      const showAll = expanded.has(item.id);
-      const fields = showAll ? defs : defs.filter((d) => collapsedPref[item.kind].includes(d[0]));
-      fields.forEach(([f, label, icon]) => {
+      defs.forEach(([f, label, icon]) => {
         if (!item[f]) return;
         const sec = document.createElement("div");
         sec.className = "section";
@@ -1072,8 +1060,19 @@ var Sevenn = (() => {
         body.appendChild(facts);
       }
     }
+    function fit() {
+      if (!flash) return;
+      let size = 18;
+      const min = 12;
+      card.style.fontSize = size + "px";
+      while (card.scrollHeight > card.clientHeight && size > min) {
+        size--;
+        card.style.fontSize = size + "px";
+      }
+    }
     renderBody();
     if (expanded.has(item.id)) card.classList.add("expanded");
+    if (flash) card.fit = fit;
     return card;
   }
   async function renderCardList(container, items, kind, onChange) {
@@ -1159,10 +1158,57 @@ var Sevenn = (() => {
     decks.forEach((cards, lecture) => {
       const deck = document.createElement("div");
       deck.className = "deck";
-      deck.textContent = `${lecture} (${cards.length})`;
-      deck.addEventListener("click", () => openDeck(lecture, cards));
+      const title = document.createElement("div");
+      title.className = "deck-title";
+      title.textContent = lecture;
+      const meta = document.createElement("div");
+      meta.className = "deck-meta";
+      const blocks = Array.from(new Set(cards.flatMap((c) => c.blocks || []))).join(", ");
+      const weeks = Array.from(new Set(cards.flatMap((c) => c.weeks || []))).join(", ");
+      meta.textContent = `${blocks}${blocks && weeks ? " \u2022 " : ""}${weeks ? "Week " + weeks : ""}`;
+      deck.appendChild(title);
+      deck.appendChild(meta);
+      deck.addEventListener("click", () => {
+        stopPreview(deck);
+        openDeck(lecture, cards);
+      });
+      let hoverTimer;
+      deck.addEventListener("mouseenter", () => {
+        hoverTimer = setTimeout(() => startPreview(deck, cards), 3e3);
+      });
+      deck.addEventListener("mouseleave", () => {
+        clearTimeout(hoverTimer);
+        stopPreview(deck);
+      });
       list.appendChild(deck);
     });
+    function startPreview(deckEl, cards) {
+      if (deckEl._preview) return;
+      const fan = document.createElement("div");
+      fan.className = "deck-fan";
+      deckEl.appendChild(fan);
+      const preview = cards.slice(0, Math.min(cards.length, 5));
+      const step = 15;
+      const start = -((preview.length - 1) * step) / 2;
+      preview.forEach((c, i) => {
+        const fc = document.createElement("div");
+        fc.className = "fan-card";
+        fc.textContent = c.name || c.concept || "";
+        fan.appendChild(fc);
+        const ang = start + i * step;
+        requestAnimationFrame(() => {
+          fc.style.transform = `translate(-50%, -50%) rotate(${ang}deg) translateY(-40px)`;
+        });
+      });
+      deckEl._preview = fan;
+    }
+    function stopPreview(deckEl) {
+      const prev = deckEl._preview;
+      if (prev) {
+        prev.remove();
+        deckEl._preview = null;
+      }
+    }
     function openDeck(title, cards) {
       list.classList.add("hidden");
       viewer.classList.remove("hidden");
@@ -1196,7 +1242,9 @@ var Sevenn = (() => {
       let showRelated = false;
       function renderCard() {
         cardHolder.innerHTML = "";
-        cardHolder.appendChild(createItemCard(cards[idx], onChange));
+        const main = createItemCard(cards[idx], onChange, { flash: true });
+        cardHolder.appendChild(main);
+        main.fit && main.fit();
         renderRelated();
       }
       function renderRelated() {
@@ -1205,7 +1253,13 @@ var Sevenn = (() => {
         const current = cards[idx];
         (current.links || []).forEach((l) => {
           const item = items.find((it) => it.id === l.id);
-          if (item) relatedWrap.appendChild(createItemCard(item, onChange));
+          if (item) {
+            const el = createItemCard(item, onChange, { flash: true });
+            el.classList.add("related-card");
+            relatedWrap.appendChild(el);
+            el.fit && el.fit();
+            requestAnimationFrame(() => el.classList.add("visible"));
+          }
         });
       }
       prev.addEventListener("click", () => {
