@@ -1136,27 +1136,106 @@ var Sevenn = (() => {
   }
 
   // js/ui/components/cards.js
-  function renderCards(container, items, kind, onChange) {
-    const grid = document.createElement("div");
-    grid.className = "card-grid";
+  function renderCards(container, items, onChange) {
+    const decks = /* @__PURE__ */ new Map();
     items.forEach((it) => {
-      const card = createItemCard(it, onChange);
-      grid.appendChild(card);
+      if (it.lectures && it.lectures.length) {
+        it.lectures.forEach((l) => {
+          const key = l.name || `Lecture ${l.id}`;
+          if (!decks.has(key)) decks.set(key, []);
+          decks.get(key).push(it);
+        });
+      } else {
+        if (!decks.has("Unassigned")) decks.set("Unassigned", []);
+        decks.get("Unassigned").push(it);
+      }
     });
-    container.appendChild(grid);
-  }
-
-  // js/ui/components/stats.js
-  function renderStats(container, items) {
-    const wrap = document.createElement("div");
-    wrap.className = "stats";
-    const total = document.createElement("div");
-    total.textContent = `Total items: ${items.length}`;
-    const fav = document.createElement("div");
-    fav.textContent = `Favorites: ${items.filter((i) => i.favorite).length}`;
-    wrap.appendChild(total);
-    wrap.appendChild(fav);
-    container.appendChild(wrap);
+    const list = document.createElement("div");
+    list.className = "deck-list";
+    container.appendChild(list);
+    const viewer = document.createElement("div");
+    viewer.className = "deck-viewer hidden";
+    container.appendChild(viewer);
+    decks.forEach((cards, lecture) => {
+      const deck = document.createElement("div");
+      deck.className = "deck";
+      deck.textContent = `${lecture} (${cards.length})`;
+      deck.addEventListener("click", () => openDeck(lecture, cards));
+      list.appendChild(deck);
+    });
+    function openDeck(title, cards) {
+      list.classList.add("hidden");
+      viewer.classList.remove("hidden");
+      viewer.innerHTML = "";
+      const header = document.createElement("h2");
+      header.textContent = title;
+      viewer.appendChild(header);
+      const cardHolder = document.createElement("div");
+      cardHolder.className = "deck-card";
+      viewer.appendChild(cardHolder);
+      const prev = document.createElement("button");
+      prev.className = "deck-prev";
+      prev.textContent = "\u25C0";
+      const next = document.createElement("button");
+      next.className = "deck-next";
+      next.textContent = "\u25B6";
+      viewer.appendChild(prev);
+      viewer.appendChild(next);
+      const toggle = document.createElement("button");
+      toggle.className = "deck-related-toggle btn";
+      toggle.textContent = "Show Related";
+      viewer.appendChild(toggle);
+      const relatedWrap = document.createElement("div");
+      relatedWrap.className = "deck-related hidden";
+      viewer.appendChild(relatedWrap);
+      const close = document.createElement("button");
+      close.className = "deck-close btn";
+      close.textContent = "Close";
+      viewer.appendChild(close);
+      let idx = 0;
+      let showRelated = false;
+      function renderCard() {
+        cardHolder.innerHTML = "";
+        cardHolder.appendChild(createItemCard(cards[idx], onChange));
+        renderRelated();
+      }
+      function renderRelated() {
+        relatedWrap.innerHTML = "";
+        if (!showRelated) return;
+        const current = cards[idx];
+        (current.links || []).forEach((l) => {
+          const item = items.find((it) => it.id === l.id);
+          if (item) relatedWrap.appendChild(createItemCard(item, onChange));
+        });
+      }
+      prev.addEventListener("click", () => {
+        idx = (idx - 1 + cards.length) % cards.length;
+        renderCard();
+      });
+      next.addEventListener("click", () => {
+        idx = (idx + 1) % cards.length;
+        renderCard();
+      });
+      toggle.addEventListener("click", () => {
+        showRelated = !showRelated;
+        toggle.textContent = showRelated ? "Hide Related" : "Show Related";
+        relatedWrap.classList.toggle("hidden", !showRelated);
+        renderRelated();
+      });
+      close.addEventListener("click", () => {
+        document.removeEventListener("keydown", keyHandler);
+        viewer.classList.add("hidden");
+        viewer.innerHTML = "";
+        list.classList.remove("hidden");
+      });
+      function keyHandler(e) {
+        if (e.key === "ArrowLeft") prev.click();
+        if (e.key === "ArrowRight") next.click();
+        if (e.key === "Escape") close.click();
+      }
+      document.addEventListener("keydown", keyHandler);
+      renderCard();
+    }
   }
 
   // js/ui/components/builder.js
@@ -1743,7 +1822,7 @@ var Sevenn = (() => {
   }
 
   // js/main.js
-  var tabs = ["Diseases", "Drugs", "Concepts", "Study", "Exams", "Map", "Settings"];
+  var tabs = ["Diseases", "Drugs", "Concepts", "Cards", "Study", "Exams", "Map", "Settings"];
   async function render() {
     const root = document.getElementById("app");
     root.innerHTML = "";
@@ -1790,28 +1869,13 @@ var Sevenn = (() => {
       addBtn.textContent = "Add " + kind;
       addBtn.addEventListener("click", () => openEditor(kind, render));
       main.appendChild(addBtn);
-      const subnav = document.createElement("div");
-      subnav.className = "tabs row subtabs";
-      ["Browse", "Cards", "Stats"].forEach((st) => {
-        const sb = document.createElement("button");
-        sb.className = "tab" + (state.subtab[state.tab] === st ? " active" : "");
-        sb.textContent = st;
-        sb.addEventListener("click", () => {
-          setSubtab(state.tab, st);
-          render();
-        });
-        subnav.appendChild(sb);
-      });
-      main.appendChild(subnav);
       const filter = { ...state.filters, types: [kind], query: state.query };
       const items = await findItemsByFilter(filter);
-      if (state.subtab[state.tab] === "Cards") {
-        renderCards(main, items, kind, render);
-      } else if (state.subtab[state.tab] === "Stats") {
-        renderStats(main, items);
-      } else {
-        await renderCardList(main, items, kind, render);
-      }
+      await renderCardList(main, items, kind, render);
+    } else if (state.tab === "Cards") {
+      const filter = { ...state.filters, query: state.query };
+      const items = await findItemsByFilter(filter);
+      renderCards(main, items, render);
     } else if (state.tab === "Study") {
       if (state.flashSession) {
         renderFlashcards(main, render);

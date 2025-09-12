@@ -1,7 +1,4 @@
 
-
-/* Modern dark theme */
-
 :root {
   --bg:#0B0F14;
   --panel:#1B1F27;
@@ -205,35 +202,6 @@ body {
   flex-direction: row;
   align-items: center;
   gap: 4px;
-}
-
-/* Cleaner modal form layout */
-.modal-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--pad);
-}
-
-.modal-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.modal-form .input {
-  width: 100%;
-}
-
-.modal-form textarea.input {
-  min-height: 80px;
-  resize: vertical;
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--pad);
-  margin-top: var(--pad);
 }
 
 .block-section {
@@ -448,6 +416,55 @@ body {
 .flashcard.revealed .flash-answer {
   display: block;
 }
+
+/* Decks */
+.deck-list {
+  display:flex;
+  flex-wrap:wrap;
+  gap:var(--pad);
+  padding:var(--pad);
+}
+.deck {
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:var(--pad-lg);
+  cursor:pointer;
+  box-shadow:0 2px 4px rgba(0,0,0,0.2);
+}
+.deck-viewer {
+  position:relative;
+  text-align:center;
+  padding:var(--pad);
+}
+.deck-card {
+  max-width:400px;
+  margin:0 auto;
+}
+.deck-prev, .deck-next {
+  position:absolute;
+  top:50%;
+  transform:translateY(-50%);
+  background:var(--muted);
+  border:none;
+  color:var(--text);
+  padding:8px;
+  border-radius:var(--radius);
+  cursor:pointer;
+}
+.deck-prev { left:var(--pad); }
+.deck-next { right:var(--pad); }
+.deck-related {
+  display:flex;
+  flex-wrap:wrap;
+  gap:var(--pad);
+  justify-content:center;
+  margin-top:var(--pad);
+}
+.deck-close {
+  margin-top:var(--pad);
+}
+.hidden { display:none !important; }
 
 /* Map */
 .map-svg {

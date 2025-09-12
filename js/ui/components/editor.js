@@ -183,7 +183,6 @@ export async function openEditor(kind, onSave, existing = null) {
         if (l) return { blockId: b.blockId, id, name: l.name, week: l.week };
       }
       return { id };
-
     });
     item.color = colorInput.value;
     await upsertItem(item);
