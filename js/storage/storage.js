@@ -40,7 +40,12 @@ export async function saveSettings(patch) {
 export async function listBlocks() {
   try {
     const b = await store('blocks');
-    return await prom(b.getAll());
+    const all = await prom(b.getAll());
+    return all.sort((a,b)=>{
+      const ao = a.order ?? a.createdAt;
+      const bo = b.order ?? b.createdAt;
+      return bo - ao;
+    });
   } catch (err) {
     console.warn('listBlocks failed', err);
     return [];
@@ -54,6 +59,8 @@ export async function upsertBlock(def) {
   const next = {
     ...def,
     lectures: def.lectures || [],
+    color: def.color || existing?.color || null,
+    order: def.order || existing?.order || now,
     createdAt: existing?.createdAt || now,
     updatedAt: now
   };

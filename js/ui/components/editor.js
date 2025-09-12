@@ -80,8 +80,10 @@ export async function openEditor(kind, onSave, existing = null) {
   colorLabel.appendChild(colorInput);
   form.appendChild(colorLabel);
 
-  // tagging: blocks, weeks, lectures
+  // tagging: blocks -> weeks -> lectures
   const blocks = await listBlocks();
+  const blockMap = new Map(blocks.map(b => [b.blockId, b]));
+  const selections = new Map();
 
   const blockWrap = document.createElement('div');
   blockWrap.className = 'tag-wrap';
@@ -91,56 +93,81 @@ export async function openEditor(kind, onSave, existing = null) {
 
   const blockRow = document.createElement('div');
   blockRow.className = 'tag-row';
-  const blockChecks = new Map();
+
   blocks.forEach(b => {
-    const lbl = document.createElement('label');
-    lbl.className = 'tag-label';
+    const container = document.createElement('div');
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = b.title || b.blockId;
+    const selDiv = document.createElement('div');
+    selDiv.className = 'row';
+    selDiv.style.display = 'none';
 
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = existing?.blocks?.includes(b.blockId);
-    lbl.appendChild(cb);
-    lbl.appendChild(document.createTextNode(b.blockId));
+    const weekSel = document.createElement('select');
+    weekSel.className = 'input';
+    const wBlank = document.createElement('option');
+    wBlank.value = '';
+    wBlank.textContent = 'Week';
+    weekSel.appendChild(wBlank);
+    for (let w = 1; w <= b.weeks; w++) {
+      const opt = document.createElement('option');
+      opt.value = w;
+      opt.textContent = 'W' + w;
+      weekSel.appendChild(opt);
+    }
 
-    blockRow.appendChild(lbl);
-    blockChecks.set(b.blockId, cb);
+    const lecSel = document.createElement('select');
+    lecSel.className = 'input';
+    const lBlank = document.createElement('option');
+    lBlank.value = '';
+    lBlank.textContent = 'Lecture';
+    lecSel.appendChild(lBlank);
+
+    weekSel.addEventListener('change', () => {
+      const w = Number(weekSel.value);
+      lecSel.innerHTML = '';
+      const blank = document.createElement('option');
+      blank.value = '';
+      blank.textContent = 'Lecture';
+      lecSel.appendChild(blank);
+      if (w) {
+        (b.lectures || []).filter(l => l.week === w).forEach(l => {
+          const opt = document.createElement('option');
+          opt.value = l.id;
+          opt.textContent = l.name;
+          lecSel.appendChild(opt);
+        });
+      }
+    });
+
+    chip.addEventListener('click', () => {
+      const active = chip.classList.toggle('active');
+      selDiv.style.display = active ? 'flex' : 'none';
+      if (active) selections.set(b.blockId, { weekSel, lecSel });
+      else selections.delete(b.blockId);
+    });
+
+    container.appendChild(chip);
+    container.appendChild(selDiv);
+    selDiv.appendChild(weekSel);
+    selDiv.appendChild(lecSel);
+    blockRow.appendChild(container);
+
+    if (existing?.blocks?.includes(b.blockId)) {
+      chip.classList.add('active');
+      selDiv.style.display = 'flex';
+      selections.set(b.blockId, { weekSel, lecSel });
+      const lec = existing?.lectures?.find(l => l.blockId === b.blockId);
+      if (lec) {
+        weekSel.value = lec.week;
+        weekSel.dispatchEvent(new Event('change'));
+        lecSel.value = lec.id;
+      }
+    }
   });
+
   blockWrap.appendChild(blockRow);
-
   form.appendChild(blockWrap);
-
-  const weekWrap = document.createElement('div');
-  weekWrap.className = 'tag-wrap';
-  const weekTitle = document.createElement('div');
-  weekTitle.textContent = 'Weeks';
-  weekWrap.appendChild(weekTitle);
-
-  const weekRow = document.createElement('div');
-  weekRow.className = 'tag-row';
-  const weekChecks = new Map();
-  for (let w = 1; w <= 8; w++) {
-    const lbl = document.createElement('label');
-    lbl.className = 'tag-label';
-
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = existing?.weeks?.includes(w);
-    lbl.appendChild(cb);
-    lbl.appendChild(document.createTextNode('W' + w));
-    weekRow.appendChild(lbl);
-    weekChecks.set(w, cb);
-  }
-  weekWrap.appendChild(weekRow);
-  form.appendChild(weekWrap);
-
-  const lecLabel = document.createElement('label');
-  lecLabel.textContent = 'Lecture IDs (comma separated)';
-  const lectureInput = document.createElement('input');
-  lectureInput.className = 'input';
-  lectureInput.value = existing?.lectures?.map(l => l.id).join(', ') || '';
-  lecLabel.appendChild(lectureInput);
-
-  form.appendChild(lecLabel);
 
   const saveBtn = document.createElement('button');
   saveBtn.type = 'submit';
@@ -173,17 +200,21 @@ export async function openEditor(kind, onSave, existing = null) {
         item[field] = v;
       }
     });
-    item.blocks = Array.from(blockChecks.entries()).filter(([,cb]) => cb.checked).map(([id]) => id);
-    item.weeks = Array.from(weekChecks.entries()).filter(([,cb]) => cb.checked).map(([w]) => Number(w));
-
-    const ids = lectureInput.value.split(',').map(s => Number(s.trim())).filter(Boolean);
-    item.lectures = ids.map(id => {
-      for (const b of blocks) {
-        const l = (b.lectures || []).find(l => l.id === id);
-        if (l) return { blockId: b.blockId, id, name: l.name, week: l.week };
+    item.blocks = Array.from(selections.keys());
+    const weekSet = new Set();
+    const lectures = [];
+    selections.forEach(({ weekSel, lecSel }, blockId) => {
+      const w = Number(weekSel.value);
+      if (w) weekSet.add(w);
+      const lecId = Number(lecSel.value);
+      if (lecId) {
+        const blk = blockMap.get(blockId);
+        const l = blk?.lectures.find(l => l.id === lecId);
+        if (l) lectures.push({ blockId, id: l.id, name: l.name, week: l.week });
       }
-      return { id };
     });
+    item.weeks = Array.from(weekSet);
+    item.lectures = lectures;
     item.color = colorInput.value;
     await upsertItem(item);
     document.body.removeChild(overlay);

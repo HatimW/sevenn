@@ -41,6 +41,7 @@
 /** @typedef {Disease|Drug|Concept} Item */
 
 /** @typedef {{ blockId:string, title:string, weeks:number,
+ *              color?:string, order:number,
  *              lectures:{id:number, name:string, week:number}[],
  *              createdAt:number, updatedAt:number }} BlockDef */
 

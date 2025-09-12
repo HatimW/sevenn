@@ -38,12 +38,44 @@ export async function renderSettings(root) {
   blocksCard.appendChild(list);
 
   const blocks = await listBlocks();
-  blocks.forEach(b => {
+  blocks.forEach((b,i) => {
     const wrap = document.createElement('div');
     wrap.className = 'block';
     const title = document.createElement('h3');
     title.textContent = `${b.blockId} – ${b.title}`;
     wrap.appendChild(title);
+
+    const controls = document.createElement('div');
+    controls.className = 'row';
+
+    const upBtn = document.createElement('button');
+    upBtn.className = 'btn';
+    upBtn.textContent = '↑';
+    upBtn.disabled = i === 0;
+    upBtn.addEventListener('click', async () => {
+      const other = blocks[i-1];
+      const tmp = b.order; b.order = other.order; other.order = tmp;
+      await upsertBlock(b); await upsertBlock(other);
+      await renderSettings(root);
+    });
+    controls.appendChild(upBtn);
+
+    const downBtn = document.createElement('button');
+    downBtn.className = 'btn';
+    downBtn.textContent = '↓';
+    downBtn.disabled = i === blocks.length - 1;
+    downBtn.addEventListener('click', async () => {
+      const other = blocks[i+1];
+      const tmp = b.order; b.order = other.order; other.order = tmp;
+      await upsertBlock(b); await upsertBlock(other);
+      await renderSettings(root);
+    });
+    controls.appendChild(downBtn);
+
+    const edit = document.createElement('button');
+    edit.className = 'btn';
+    edit.textContent = 'Edit';
+    controls.appendChild(edit);
 
     const del = document.createElement('button');
     del.className = 'btn';
@@ -54,7 +86,39 @@ export async function renderSettings(root) {
         await renderSettings(root);
       }
     });
-    wrap.appendChild(del);
+    controls.appendChild(del);
+    wrap.appendChild(controls);
+
+    const editForm = document.createElement('form');
+    editForm.className = 'row';
+    editForm.style.display = 'none';
+    const titleInput = document.createElement('input');
+    titleInput.className = 'input';
+    titleInput.value = b.title;
+    const weeksInput = document.createElement('input');
+    weeksInput.className = 'input';
+    weeksInput.type = 'number';
+    weeksInput.value = b.weeks;
+    const colorInput = document.createElement('input');
+    colorInput.className = 'input';
+    colorInput.type = 'color';
+    colorInput.value = b.color || '#ffffff';
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn';
+    saveBtn.type = 'submit';
+    saveBtn.textContent = 'Save';
+    editForm.append(titleInput, weeksInput, colorInput, saveBtn);
+    editForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const updated = { ...b, title: titleInput.value.trim(), weeks: Number(weeksInput.value), color: colorInput.value };
+      await upsertBlock(updated);
+      await renderSettings(root);
+    });
+    wrap.appendChild(editForm);
+
+    edit.addEventListener('click', () => {
+      editForm.style.display = editForm.style.display === 'none' ? 'flex' : 'none';
+    });
 
     const lecList = document.createElement('ul');
     b.lectures.forEach(l => {
@@ -107,17 +171,22 @@ export async function renderSettings(root) {
   weeks.className = 'input';
   weeks.type = 'number';
   weeks.placeholder = 'Weeks';
+  const color = document.createElement('input');
+  color.className = 'input';
+  color.type = 'color';
+  color.value = '#ffffff';
   const add = document.createElement('button');
   add.className = 'btn';
   add.type = 'submit';
   add.textContent = 'Add block';
-  form.append(id, titleInput, weeks, add);
+  form.append(id, titleInput, weeks, color, add);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const def = {
       blockId: id.value.trim(),
       title: titleInput.value.trim(),
       weeks: Number(weeks.value),
+      color: color.value,
       lectures: [],
     };
     if (!def.blockId || !def.title || !def.weeks) return;

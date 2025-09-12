@@ -275,7 +275,12 @@ var Sevenn = (() => {
   async function listBlocks() {
     try {
       const b = await store("blocks");
-      return await prom2(b.getAll());
+      const all = await prom2(b.getAll());
+      return all.sort((a, b2) => {
+        const ao = a.order ?? a.createdAt;
+        const bo = b2.order ?? b2.createdAt;
+        return bo - ao;
+      });
     } catch (err) {
       console.warn("listBlocks failed", err);
       return [];
@@ -288,6 +293,8 @@ var Sevenn = (() => {
     const next = {
       ...def,
       lectures: def.lectures || [],
+      color: def.color || existing?.color || null,
+      order: def.order || existing?.order || now,
       createdAt: existing?.createdAt || now,
       updatedAt: now
     };
@@ -462,12 +469,46 @@ var Sevenn = (() => {
     list.className = "block-list";
     blocksCard.appendChild(list);
     const blocks = await listBlocks();
-    blocks.forEach((b) => {
+    blocks.forEach((b, i) => {
       const wrap = document.createElement("div");
       wrap.className = "block";
       const title = document.createElement("h3");
       title.textContent = `${b.blockId} \u2013 ${b.title}`;
       wrap.appendChild(title);
+      const controls = document.createElement("div");
+      controls.className = "row";
+      const upBtn = document.createElement("button");
+      upBtn.className = "btn";
+      upBtn.textContent = "\u2191";
+      upBtn.disabled = i === 0;
+      upBtn.addEventListener("click", async () => {
+        const other = blocks[i - 1];
+        const tmp = b.order;
+        b.order = other.order;
+        other.order = tmp;
+        await upsertBlock(b);
+        await upsertBlock(other);
+        await renderSettings(root);
+      });
+      controls.appendChild(upBtn);
+      const downBtn = document.createElement("button");
+      downBtn.className = "btn";
+      downBtn.textContent = "\u2193";
+      downBtn.disabled = i === blocks.length - 1;
+      downBtn.addEventListener("click", async () => {
+        const other = blocks[i + 1];
+        const tmp = b.order;
+        b.order = other.order;
+        other.order = tmp;
+        await upsertBlock(b);
+        await upsertBlock(other);
+        await renderSettings(root);
+      });
+      controls.appendChild(downBtn);
+      const edit = document.createElement("button");
+      edit.className = "btn";
+      edit.textContent = "Edit";
+      controls.appendChild(edit);
       const del = document.createElement("button");
       del.className = "btn";
       del.textContent = "Delete";
@@ -477,7 +518,37 @@ var Sevenn = (() => {
           await renderSettings(root);
         }
       });
-      wrap.appendChild(del);
+      controls.appendChild(del);
+      wrap.appendChild(controls);
+      const editForm = document.createElement("form");
+      editForm.className = "row";
+      editForm.style.display = "none";
+      const titleInput2 = document.createElement("input");
+      titleInput2.className = "input";
+      titleInput2.value = b.title;
+      const weeksInput = document.createElement("input");
+      weeksInput.className = "input";
+      weeksInput.type = "number";
+      weeksInput.value = b.weeks;
+      const colorInput = document.createElement("input");
+      colorInput.className = "input";
+      colorInput.type = "color";
+      colorInput.value = b.color || "#ffffff";
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "btn";
+      saveBtn.type = "submit";
+      saveBtn.textContent = "Save";
+      editForm.append(titleInput2, weeksInput, colorInput, saveBtn);
+      editForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const updated = { ...b, title: titleInput2.value.trim(), weeks: Number(weeksInput.value), color: colorInput.value };
+        await upsertBlock(updated);
+        await renderSettings(root);
+      });
+      wrap.appendChild(editForm);
+      edit.addEventListener("click", () => {
+        editForm.style.display = editForm.style.display === "none" ? "flex" : "none";
+      });
       const lecList = document.createElement("ul");
       b.lectures.forEach((l) => {
         const li = document.createElement("li");
@@ -526,17 +597,22 @@ var Sevenn = (() => {
     weeks.className = "input";
     weeks.type = "number";
     weeks.placeholder = "Weeks";
+    const color = document.createElement("input");
+    color.className = "input";
+    color.type = "color";
+    color.value = "#ffffff";
     const add = document.createElement("button");
     add.className = "btn";
     add.type = "submit";
     add.textContent = "Add block";
-    form.append(id, titleInput, weeks, add);
+    form.append(id, titleInput, weeks, color, add);
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const def = {
         blockId: id.value.trim(),
         title: titleInput.value.trim(),
         weeks: Number(weeks.value),
+        color: color.value,
         lectures: []
       };
       if (!def.blockId || !def.title || !def.weeks) return;
@@ -682,6 +758,8 @@ var Sevenn = (() => {
     colorLabel.appendChild(colorInput);
     form.appendChild(colorLabel);
     const blocks = await listBlocks();
+    const blockMap = new Map(blocks.map((b) => [b.blockId, b]));
+    const selections = /* @__PURE__ */ new Map();
     const blockWrap = document.createElement("div");
     blockWrap.className = "tag-wrap";
     const blockTitle = document.createElement("div");
@@ -689,48 +767,73 @@ var Sevenn = (() => {
     blockWrap.appendChild(blockTitle);
     const blockRow = document.createElement("div");
     blockRow.className = "tag-row";
-    const blockChecks = /* @__PURE__ */ new Map();
     blocks.forEach((b) => {
-      const lbl = document.createElement("label");
-      lbl.className = "tag-label";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = existing?.blocks?.includes(b.blockId);
-      lbl.appendChild(cb);
-      lbl.appendChild(document.createTextNode(b.blockId));
-      blockRow.appendChild(lbl);
-      blockChecks.set(b.blockId, cb);
+      const container = document.createElement("div");
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = b.title || b.blockId;
+      const selDiv = document.createElement("div");
+      selDiv.className = "row";
+      selDiv.style.display = "none";
+      const weekSel = document.createElement("select");
+      weekSel.className = "input";
+      const wBlank = document.createElement("option");
+      wBlank.value = "";
+      wBlank.textContent = "Week";
+      weekSel.appendChild(wBlank);
+      for (let w = 1; w <= b.weeks; w++) {
+        const opt = document.createElement("option");
+        opt.value = w;
+        opt.textContent = "W" + w;
+        weekSel.appendChild(opt);
+      }
+      const lecSel = document.createElement("select");
+      lecSel.className = "input";
+      const lBlank = document.createElement("option");
+      lBlank.value = "";
+      lBlank.textContent = "Lecture";
+      lecSel.appendChild(lBlank);
+      weekSel.addEventListener("change", () => {
+        const w = Number(weekSel.value);
+        lecSel.innerHTML = "";
+        const blank = document.createElement("option");
+        blank.value = "";
+        blank.textContent = "Lecture";
+        lecSel.appendChild(blank);
+        if (w) {
+          (b.lectures || []).filter((l) => l.week === w).forEach((l) => {
+            const opt = document.createElement("option");
+            opt.value = l.id;
+            opt.textContent = l.name;
+            lecSel.appendChild(opt);
+          });
+        }
+      });
+      chip.addEventListener("click", () => {
+        const active = chip.classList.toggle("active");
+        selDiv.style.display = active ? "flex" : "none";
+        if (active) selections.set(b.blockId, { weekSel, lecSel });
+        else selections.delete(b.blockId);
+      });
+      container.appendChild(chip);
+      container.appendChild(selDiv);
+      selDiv.appendChild(weekSel);
+      selDiv.appendChild(lecSel);
+      blockRow.appendChild(container);
+      if (existing?.blocks?.includes(b.blockId)) {
+        chip.classList.add("active");
+        selDiv.style.display = "flex";
+        selections.set(b.blockId, { weekSel, lecSel });
+        const lec = existing?.lectures?.find((l) => l.blockId === b.blockId);
+        if (lec) {
+          weekSel.value = lec.week;
+          weekSel.dispatchEvent(new Event("change"));
+          lecSel.value = lec.id;
+        }
+      }
     });
     blockWrap.appendChild(blockRow);
     form.appendChild(blockWrap);
-    const weekWrap = document.createElement("div");
-    weekWrap.className = "tag-wrap";
-    const weekTitle = document.createElement("div");
-    weekTitle.textContent = "Weeks";
-    weekWrap.appendChild(weekTitle);
-    const weekRow = document.createElement("div");
-    weekRow.className = "tag-row";
-    const weekChecks = /* @__PURE__ */ new Map();
-    for (let w = 1; w <= 8; w++) {
-      const lbl = document.createElement("label");
-      lbl.className = "tag-label";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = existing?.weeks?.includes(w);
-      lbl.appendChild(cb);
-      lbl.appendChild(document.createTextNode("W" + w));
-      weekRow.appendChild(lbl);
-      weekChecks.set(w, cb);
-    }
-    weekWrap.appendChild(weekRow);
-    form.appendChild(weekWrap);
-    const lecLabel = document.createElement("label");
-    lecLabel.textContent = "Lecture IDs (comma separated)";
-    const lectureInput = document.createElement("input");
-    lectureInput.className = "input";
-    lectureInput.value = existing?.lectures?.map((l) => l.id).join(", ") || "";
-    lecLabel.appendChild(lectureInput);
-    form.appendChild(lecLabel);
     const saveBtn = document.createElement("button");
     saveBtn.type = "submit";
     saveBtn.className = "btn";
@@ -759,16 +862,21 @@ var Sevenn = (() => {
           item[field] = v;
         }
       });
-      item.blocks = Array.from(blockChecks.entries()).filter(([, cb]) => cb.checked).map(([id]) => id);
-      item.weeks = Array.from(weekChecks.entries()).filter(([, cb]) => cb.checked).map(([w]) => Number(w));
-      const ids = lectureInput.value.split(",").map((s) => Number(s.trim())).filter(Boolean);
-      item.lectures = ids.map((id) => {
-        for (const b of blocks) {
-          const l = (b.lectures || []).find((l2) => l2.id === id);
-          if (l) return { blockId: b.blockId, id, name: l.name, week: l.week };
+      item.blocks = Array.from(selections.keys());
+      const weekSet = /* @__PURE__ */ new Set();
+      const lectures = [];
+      selections.forEach(({ weekSel, lecSel }, blockId) => {
+        const w = Number(weekSel.value);
+        if (w) weekSet.add(w);
+        const lecId = Number(lecSel.value);
+        if (lecId) {
+          const blk = blockMap.get(blockId);
+          const l = blk?.lectures.find((l2) => l2.id === lecId);
+          if (l) lectures.push({ blockId, id: l.id, name: l.name, week: l.week });
         }
-        return { id };
       });
+      item.weeks = Array.from(weekSet);
+      item.lectures = lectures;
       item.color = colorInput.value;
       await upsertItem(item);
       document.body.removeChild(overlay);
@@ -870,8 +978,21 @@ var Sevenn = (() => {
     save.className = "btn";
     save.textContent = "Save";
     save.addEventListener("click", async () => {
-      item.links = Array.from(links).map((id) => ({ id, type: "assoc" }));
+      const newLinks = new Set(links);
+      const oldLinks = new Set((item.links || []).map((l) => l.id));
+      item.links = Array.from(newLinks).map((id) => ({ id, type: "assoc" }));
       await upsertItem(item);
+      const affected = /* @__PURE__ */ new Set([...oldLinks, ...newLinks]);
+      for (const id of affected) {
+        const other = idMap.get(id);
+        if (!other) continue;
+        other.links = other.links || [];
+        const has = other.links.some((l) => l.id === item.id);
+        const should = newLinks.has(id);
+        if (should && !has) other.links.push({ id: item.id, type: "assoc" });
+        if (!should && has) other.links = other.links.filter((l) => l.id !== item.id);
+        await upsertItem(other);
+      }
       document.body.removeChild(overlay);
       onSave && onSave();
     });
@@ -1081,24 +1202,29 @@ var Sevenn = (() => {
   async function renderCardList(container, items, kind, onChange) {
     const blocks = await listBlocks();
     const blockTitle = (id) => blocks.find((b) => b.blockId === id)?.title || id;
+    const orderMap = new Map(blocks.map((b, i) => [b.blockId, i]));
     const groups = /* @__PURE__ */ new Map();
     items.forEach((it) => {
-      const bs = it.blocks && it.blocks.length ? it.blocks : ["_"];
-      const ws = it.weeks && it.weeks.length ? it.weeks : ["_"];
-      bs.forEach((b) => {
-        if (!groups.has(b)) groups.set(b, /* @__PURE__ */ new Map());
-        const wkMap = groups.get(b);
-        ws.forEach((w) => {
-          const arr = wkMap.get(w) || [];
-          arr.push(it);
-          wkMap.set(w, arr);
-        });
+      let block = "_";
+      let best = Infinity;
+      (it.blocks || []).forEach((id) => {
+        const ord = orderMap.has(id) ? orderMap.get(id) : Infinity;
+        if (ord < best) {
+          block = id;
+          best = ord;
+        }
       });
+      const week = it.weeks && it.weeks.length ? Math.max(...it.weeks) : "_";
+      if (!groups.has(block)) groups.set(block, /* @__PURE__ */ new Map());
+      const wkMap = groups.get(block);
+      const arr = wkMap.get(week) || [];
+      arr.push(it);
+      wkMap.set(week, arr);
     });
     const sortedBlocks = Array.from(groups.keys()).sort((a, b) => {
-      if (a === "_" && b !== "_") return 1;
-      if (b === "_" && a !== "_") return -1;
-      return a.localeCompare(b);
+      const ao = orderMap.has(a) ? orderMap.get(a) : Infinity;
+      const bo = orderMap.has(b) ? orderMap.get(b) : Infinity;
+      return ao - bo;
     });
     sortedBlocks.forEach((b) => {
       const blockSec = document.createElement("section");
@@ -1106,6 +1232,8 @@ var Sevenn = (() => {
       const h2 = document.createElement("div");
       h2.className = "block-header";
       h2.textContent = b === "_" ? "Unassigned" : `${blockTitle(b)} (${b})`;
+      const bdef = blocks.find((bl) => bl.blockId === b);
+      if (bdef?.color) h2.style.background = bdef.color;
       blockSec.appendChild(h2);
       const wkMap = groups.get(b);
       const sortedWeeks = Array.from(wkMap.keys()).sort((a, b2) => {
@@ -1883,14 +2011,12 @@ var Sevenn = (() => {
       svg.setAttribute("viewBox", `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
       adjustScale();
     };
-
     svg.classList.add("map-svg");
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
     svg.appendChild(g);
     const updateEdges = (id) => {
       g.querySelectorAll(`path[data-a='${id}'], path[data-b='${id}']`).forEach((edge) => {
         edge.setAttribute("d", calcPath(edge.dataset.a, edge.dataset.b));
-
       });
     };
     let dragging = false;
@@ -1904,22 +2030,19 @@ var Sevenn = (() => {
         svg.style.cursor = "grabbing";
       }
     });
-
     window.addEventListener("mousemove", async (e) => {
       if (nodeDrag) {
         const rect = svg.getBoundingClientRect();
         const unit = viewBox.w / svg.clientWidth;
-        const scale2 = Math.pow(unit, 0.8);
-
+        const nodeScale = Math.pow(unit, 0.8);
         const x = viewBox.x + (e.clientX - rect.left) / svg.clientWidth * viewBox.w - nodeDrag.offset.x;
         const y = viewBox.y + (e.clientY - rect.top) / svg.clientHeight * viewBox.h - nodeDrag.offset.y;
-
         positions[nodeDrag.id] = { x, y };
         nodeDrag.circle.setAttribute("cx", x);
         nodeDrag.circle.setAttribute("cy", y);
         nodeDrag.label.setAttribute("x", x);
         const baseR = Number(nodeDrag.circle.dataset.radius) || 20;
-        nodeDrag.label.setAttribute("y", y - (baseR + 8) * scale2);
+        nodeDrag.label.setAttribute("y", y - (baseR + 8) * scale);
         updateEdges(nodeDrag.id);
         nodeWasDragged = true;
         return;
@@ -1931,7 +2054,6 @@ var Sevenn = (() => {
       last = { x: e.clientX, y: e.clientY };
       updateViewBox();
     });
-
     window.addEventListener("mouseup", async () => {
       if (nodeDrag) {
         const it = itemMap[nodeDrag.id];
@@ -1953,13 +2075,11 @@ var Sevenn = (() => {
       viewBox.y = my - e.offsetY / svg.clientHeight * viewBox.h;
       updateViewBox();
     });
-
     if (!window._mapResizeAttached) {
       window.addEventListener("resize", adjustScale);
       window._mapResizeAttached = true;
     }
     const positions = {};
-
     const itemMap = Object.fromEntries(items.map((it) => [it.id, it]));
     const linkCounts = Object.fromEntries(items.map((it) => [it.id, (it.links || []).length]));
     const maxLinks = Math.max(1, ...Object.values(linkCounts));
@@ -2018,7 +2138,6 @@ var Sevenn = (() => {
       }
       return `M${x1} ${y1} Q${cx} ${cy} ${x2} ${y2}`;
     }
-
     const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
     const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
     marker.setAttribute("id", "arrow");
@@ -2054,7 +2173,6 @@ var Sevenn = (() => {
           openLineMenu(e, path2, it.id, l.id);
         });
         g.appendChild(path2);
-
       });
     });
     items.forEach((it) => {
@@ -2066,7 +2184,6 @@ var Sevenn = (() => {
       circle.setAttribute("r", baseR);
       circle.dataset.radius = baseR;
       circle.setAttribute("class", "map-node");
-
       circle.dataset.id = it.id;
       const kindColors2 = { disease: "var(--purple)", drug: "var(--blue)" };
       const fill = kindColors2[it.kind] || it.color || "var(--gray)";
@@ -2078,12 +2195,10 @@ var Sevenn = (() => {
       });
       circle.addEventListener("mousedown", (e) => {
         e.stopPropagation();
-
         const rect = svg.getBoundingClientRect();
         const mouseX = viewBox.x + (e.clientX - rect.left) / svg.clientWidth * viewBox.w;
         const mouseY = viewBox.y + (e.clientY - rect.top) / svg.clientHeight * viewBox.h;
         nodeDrag = { id: it.id, circle, label: text, offset: { x: mouseX - pos.x, y: mouseY - pos.y } };
-
         nodeWasDragged = false;
         svg.style.cursor = "grabbing";
       });
@@ -2123,9 +2238,7 @@ var Sevenn = (() => {
   }
   function applyLineStyle(line, info) {
     const color = info.color || "var(--gray)";
-
     line.style.stroke = color;
-
     if (info.style === "dashed") line.setAttribute("stroke-dasharray", "4,4");
     else line.removeAttribute("stroke-dasharray");
     if (info.style === "arrow") line.setAttribute("marker-end", "url(#arrow)");
