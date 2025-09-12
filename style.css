@@ -613,11 +613,15 @@ button:hover {
   cursor: pointer;
   stroke: var(--border);
   stroke-width: 2;
+  vector-effect: non-scaling-stroke;
 }
 .map-edge {
   stroke: var(--gray);
-  stroke-width: 2;
+  stroke-width: 4;
   cursor: pointer;
+  vector-effect: non-scaling-stroke;
+  pointer-events: stroke;
+
 }
 .map-label {
   fill: var(--text);

@@ -1874,13 +1874,16 @@ var Sevenn = (() => {
       ...await listItemsByKind("drug"),
       ...await listItemsByKind("concept")
     ];
-
-    const size = 4e3;
-    const viewport = 1e3;
+    const base = 1e3;
+    const size = Math.max(base, items.length * 150);
+    const viewport = base;
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     const viewBox = { x: (size - viewport) / 2, y: (size - viewport) / 2, w: viewport, h: viewport };
-    const updateViewBox = () => svg.setAttribute("viewBox", `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
-    updateViewBox();
+    const updateViewBox = () => {
+      svg.setAttribute("viewBox", `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
+      adjustScale();
+    };
+
     svg.classList.add("map-svg");
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
     svg.appendChild(g);
@@ -1912,16 +1915,22 @@ var Sevenn = (() => {
       const factor = e.deltaY < 0 ? 0.9 : 1.1;
       const mx = viewBox.x + e.offsetX / svg.clientWidth * viewBox.w;
       const my = viewBox.y + e.offsetY / svg.clientHeight * viewBox.h;
-      viewBox.w *= factor;
-      viewBox.h *= factor;
+
+      viewBox.w = Math.min(size, Math.max(200, viewBox.w * factor));
+      viewBox.h = viewBox.w;
       viewBox.x = mx - e.offsetX / svg.clientWidth * viewBox.w;
       viewBox.y = my - e.offsetY / svg.clientHeight * viewBox.h;
       updateViewBox();
     });
 
+    if (!window._mapResizeAttached) {
+      window.addEventListener("resize", adjustScale);
+      window._mapResizeAttached = true;
+    }
     const positions = {};
     const center = size / 2;
-    const radius = size / 2 - 200;
+    const radius = size / 2 - 100;
+
     items.forEach((it, idx) => {
       const angle = 2 * Math.PI * idx / items.length;
       const x = center + radius * Math.cos(angle);
@@ -1956,6 +1965,9 @@ var Sevenn = (() => {
         line.setAttribute("x2", positions[l.id].x);
         line.setAttribute("y2", positions[l.id].y);
         line.setAttribute("class", "map-edge");
+
+        line.setAttribute("vector-effect", "non-scaling-stroke");
+
         applyLineStyle(line, l);
         line.dataset.a = it.id;
         line.dataset.b = l.id;
@@ -1986,6 +1998,95 @@ var Sevenn = (() => {
       g.appendChild(text);
     });
     root.appendChild(svg);
+    updateViewBox();
+  }
+  function adjustScale() {
+    const svg = document.querySelector(".map-svg");
+    if (!svg) return;
+    const vb = svg.getAttribute("viewBox").split(" ").map(Number);
+    const unit = vb[2] / svg.clientWidth;
+    document.querySelectorAll(".map-node").forEach((c) => c.setAttribute("r", 20 * unit));
+    document.querySelectorAll(".map-label").forEach((t) => t.setAttribute("font-size", 12 * unit));
+  }
+  function applyLineStyle(line, info) {
+    const color = info.color || "var(--gray)";
+    line.setAttribute("stroke", color);
+    if (info.style === "dashed") line.setAttribute("stroke-dasharray", "4,4");
+    else line.removeAttribute("stroke-dasharray");
+    if (info.style === "arrow") line.setAttribute("marker-end", "url(#arrow)");
+    else line.removeAttribute("marker-end");
+    let title = line.querySelector("title");
+    if (!title) {
+      title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+      line.appendChild(title);
+    }
+    title.textContent = info.name || "";
+  }
+  async function openLineMenu(evt, line, aId, bId) {
+    const existing = await getItem(aId);
+    const link = existing.links.find((l) => l.id === bId) || {};
+    const menu = document.createElement("div");
+    menu.className = "line-menu";
+    menu.style.left = evt.pageX + "px";
+    menu.style.top = evt.pageY + "px";
+    const colorLabel = document.createElement("label");
+    colorLabel.textContent = "Color";
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.value = link.color || "#888888";
+    colorLabel.appendChild(colorInput);
+    menu.appendChild(colorLabel);
+    const typeLabel = document.createElement("label");
+    typeLabel.textContent = "Style";
+    const typeSel = document.createElement("select");
+    ["solid", "dashed", "arrow"].forEach((t) => {
+      const opt = document.createElement("option");
+      opt.value = t;
+      opt.textContent = t;
+      typeSel.appendChild(opt);
+    });
+    typeSel.value = link.style || "solid";
+    typeLabel.appendChild(typeSel);
+    menu.appendChild(typeLabel);
+    const nameLabel = document.createElement("label");
+    nameLabel.textContent = "Label";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.value = link.name || "";
+    nameLabel.appendChild(nameInput);
+    menu.appendChild(nameLabel);
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.textContent = "Save";
+    btn.addEventListener("click", async () => {
+      const patch = { color: colorInput.value, style: typeSel.value, name: nameInput.value };
+      await updateLink(aId, bId, patch);
+      applyLineStyle(line, patch);
+      document.body.removeChild(menu);
+    });
+    menu.appendChild(btn);
+    document.body.appendChild(menu);
+    const closer = (e) => {
+      if (!menu.contains(e.target)) {
+        document.body.removeChild(menu);
+        document.removeEventListener("mousedown", closer);
+      }
+    };
+    setTimeout(() => document.addEventListener("mousedown", closer), 0);
+  }
+  async function updateLink(aId, bId, patch) {
+    const a = await getItem(aId);
+    const b = await getItem(bId);
+    if (!a || !b) return;
+    const apply = (item, otherId) => {
+      item.links = item.links || [];
+      const l = item.links.find((x) => x.id === otherId);
+      if (l) Object.assign(l, patch);
+    };
+    apply(a, bId);
+    apply(b, aId);
+    await upsertItem(a);
+    await upsertItem(b);
   }
   function applyLineStyle(line, info) {
     const color = info.color || "var(--gray)";
