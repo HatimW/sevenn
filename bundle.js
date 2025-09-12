@@ -1888,13 +1888,9 @@ var Sevenn = (() => {
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
     svg.appendChild(g);
     const updateEdges = (id) => {
-      g.querySelectorAll(`line[data-a='${id}'], line[data-b='${id}']`).forEach((line) => {
-        const a = line.dataset.a;
-        const b = line.dataset.b;
-        line.setAttribute("x1", positions[a].x);
-        line.setAttribute("y1", positions[a].y);
-        line.setAttribute("x2", positions[b].x);
-        line.setAttribute("y2", positions[b].y);
+      g.querySelectorAll(`path[data-a='${id}'], path[data-b='${id}']`).forEach((edge) => {
+        edge.setAttribute("d", calcPath(edge.dataset.a, edge.dataset.b));
+
       });
     };
     let dragging = false;
@@ -1914,8 +1910,10 @@ var Sevenn = (() => {
         const rect = svg.getBoundingClientRect();
         const unit = viewBox.w / svg.clientWidth;
         const scale2 = Math.pow(unit, 0.8);
-        const x = viewBox.x + (e.clientX - rect.left) / svg.clientWidth * viewBox.w;
-        const y = viewBox.y + (e.clientY - rect.top) / svg.clientHeight * viewBox.h;
+
+        const x = viewBox.x + (e.clientX - rect.left) / svg.clientWidth * viewBox.w - nodeDrag.offset.x;
+        const y = viewBox.y + (e.clientY - rect.top) / svg.clientHeight * viewBox.h - nodeDrag.offset.y;
+
         positions[nodeDrag.id] = { x, y };
         nodeDrag.circle.setAttribute("cx", x);
         nodeDrag.circle.setAttribute("cy", y);
@@ -1963,22 +1961,54 @@ var Sevenn = (() => {
 
     const itemMap = Object.fromEntries(items.map((it) => [it.id, it]));
     const center = size / 2;
-    const radius = size / 2 - 100;
-    items.forEach((it, idx) => {
-      if (it.mapPos) {
-        positions[it.id] = { ...it.mapPos };
-      } else {
-        const angle = 2 * Math.PI * idx / items.length;
-        const x = center + radius * Math.cos(angle);
-        const y = center + radius * Math.sin(angle);
-        positions[it.id] = { x, y };
-      }
+    const newItems = [];
+    items.forEach((it) => {
+      if (it.mapPos) positions[it.id] = { ...it.mapPos };
+      else newItems.push(it);
     });
-
-    autoLayout(items, positions, size);
-    for (const it of items) {
+    const step = 2 * Math.PI / Math.max(newItems.length, 1);
+    newItems.forEach((it, idx) => {
+      const angle = idx * step;
+      const x = center + 100 * Math.cos(angle);
+      const y = center + 100 * Math.sin(angle);
+      positions[it.id] = { x, y };
       it.mapPos = positions[it.id];
-      await upsertItem(it);
+    });
+    for (const it of newItems) await upsertItem(it);
+    function pointToSeg(px, py, x1, y1, x2, y2) {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const l2 = dx * dx + dy * dy;
+      if (!l2) return Math.hypot(px - x1, py - y1);
+      let t = ((px - x1) * dx + (py - y1) * dy) / l2;
+      t = Math.max(0, Math.min(1, t));
+      const projX = x1 + t * dx;
+      const projY = y1 + t * dy;
+      return Math.hypot(px - projX, py - projY);
+    }
+    function calcPath(aId, bId) {
+      const a = positions[aId];
+      const b = positions[bId];
+      const x1 = a.x, y1 = a.y;
+      const x2 = b.x, y2 = b.y;
+      let cx = (x1 + x2) / 2;
+      let cy = (y1 + y2) / 2;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.hypot(dx, dy) || 1;
+      for (const id in positions) {
+        if (id === aId || id === bId) continue;
+        const p = positions[id];
+        if (pointToSeg(p.x, p.y, x1, y1, x2, y2) < 40) {
+          const nx = -dy / len;
+          const ny = dx / len;
+          const side = (p.x - x1) * nx + (p.y - y1) * ny > 0 ? 1 : -1;
+          cx += nx * 80 * side;
+          cy += ny * 80 * side;
+          break;
+        }
+      }
+      return `M${x1} ${y1} Q${cx} ${cy} ${x2} ${y2}`;
     }
 
     const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
@@ -2003,22 +2033,20 @@ var Sevenn = (() => {
         const key = it.id < l.id ? it.id + "|" + l.id : l.id + "|" + it.id;
         if (drawn.has(key)) return;
         drawn.add(key);
-        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        line.setAttribute("x1", positions[it.id].x);
-        line.setAttribute("y1", positions[it.id].y);
-        line.setAttribute("x2", positions[l.id].x);
-        line.setAttribute("y2", positions[l.id].y);
-        line.setAttribute("class", "map-edge");
-        line.setAttribute("vector-effect", "non-scaling-stroke");
-        
-        applyLineStyle(line, l);
-        line.dataset.a = it.id;
-        line.dataset.b = l.id;
-        line.addEventListener("click", (e) => {
+        const path2 = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path2.setAttribute("d", calcPath(it.id, l.id));
+        path2.setAttribute("fill", "none");
+        path2.setAttribute("class", "map-edge");
+        path2.setAttribute("vector-effect", "non-scaling-stroke");
+        applyLineStyle(path2, l);
+        path2.dataset.a = it.id;
+        path2.dataset.b = l.id;
+        path2.addEventListener("click", (e) => {
           e.stopPropagation();
-          openLineMenu(e, line, it.id, l.id);
+          openLineMenu(e, path2, it.id, l.id);
         });
-        g.appendChild(line);
+        g.appendChild(path2);
+
       });
     });
     items.forEach((it) => {
@@ -2040,7 +2068,12 @@ var Sevenn = (() => {
       });
       circle.addEventListener("mousedown", (e) => {
         e.stopPropagation();
-        nodeDrag = { id: it.id, circle, label: text };
+
+        const rect = svg.getBoundingClientRect();
+        const mouseX = viewBox.x + (e.clientX - rect.left) / svg.clientWidth * viewBox.w;
+        const mouseY = viewBox.y + (e.clientY - rect.top) / svg.clientHeight * viewBox.h;
+        nodeDrag = { id: it.id, circle, label: text, offset: { x: mouseX - pos.x, y: mouseY - pos.y } };
+
         nodeWasDragged = false;
         svg.style.cursor = "grabbing";
       });
@@ -2075,7 +2108,9 @@ var Sevenn = (() => {
   }
   function applyLineStyle(line, info) {
     const color = info.color || "var(--gray)";
-    line.setAttribute("stroke", color);
+
+    line.style.stroke = color;
+
     if (info.style === "dashed") line.setAttribute("stroke-dasharray", "4,4");
     else line.removeAttribute("stroke-dasharray");
     if (info.style === "arrow") line.setAttribute("marker-end", "url(#arrow)");
@@ -2152,71 +2187,6 @@ var Sevenn = (() => {
     apply(b, aId);
     await upsertItem(a);
     await upsertItem(b);
-  }
-
-  function autoLayout(items, positions, size) {
-    const nodes = items.map((it) => ({ id: it.id, x: positions[it.id].x, y: positions[it.id].y }));
-    const index = Object.fromEntries(nodes.map((n, i) => [n.id, i]));
-    const links = [];
-    const seen = /* @__PURE__ */ new Set();
-    items.forEach((it) => {
-      (it.links || []).forEach((l) => {
-        const key = it.id < l.id ? it.id + "|" + l.id : l.id + "|" + it.id;
-        if (seen.has(key)) return;
-        seen.add(key);
-        if (index[l.id] !== void 0) links.push({ source: index[it.id], target: index[l.id] });
-      });
-    });
-    const area = size * size;
-    const k = Math.sqrt(area / nodes.length);
-    let t = size / 10;
-    const dt = t / 200;
-    const rep = (dist) => k * k / dist;
-    const attr = (dist) => dist * dist / k;
-    for (let iter = 0; iter < 200; iter++) {
-      const disp = nodes.map(() => ({ x: 0, y: 0 }));
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const dx = nodes[i].x - nodes[j].x;
-          const dy = nodes[i].y - nodes[j].y;
-          let dist = Math.hypot(dx, dy) || 0.01;
-          const force = rep(dist);
-          const fx = dx / dist * force;
-          const fy = dy / dist * force;
-          disp[i].x += fx;
-          disp[i].y += fy;
-          disp[j].x -= fx;
-          disp[j].y -= fy;
-        }
-      }
-      for (const l of links) {
-        const dx = nodes[l.source].x - nodes[l.target].x;
-        const dy = nodes[l.source].y - nodes[l.target].y;
-        let dist = Math.hypot(dx, dy) || 0.01;
-        const force = attr(dist);
-        const fx = dx / dist * force;
-        const fy = dy / dist * force;
-        disp[l.source].x -= fx;
-        disp[l.source].y -= fy;
-        disp[l.target].x += fx;
-        disp[l.target].y += fy;
-      }
-      for (let i = 0; i < nodes.length; i++) {
-        const d = disp[i];
-        const dist = Math.hypot(d.x, d.y);
-        if (dist > 0) {
-          const limit = Math.min(dist, t);
-          nodes[i].x += d.x / dist * limit;
-          nodes[i].y += d.y / dist * limit;
-        }
-        nodes[i].x = Math.min(size, Math.max(0, nodes[i].x));
-        nodes[i].y = Math.min(size, Math.max(0, nodes[i].y));
-      }
-      t -= dt;
-    }
-    nodes.forEach((n) => {
-      positions[n.id] = { x: n.x, y: n.y };
-    });
   }
 
   // js/main.js
