@@ -1,21 +1,20 @@
 
-/* Modern light theme */
 :root {
-  --bg: #f8fafc;
-  --panel: #ffffff;
-  --muted: #f1f5f9;
-  --border: #e2e8f0;
-  --text: #0f172a;
-  --pink: #fbcfe8;
-  --blue: #bfdbfe;
-  --green: #bbf7d0;
-  --purple: #e9d5ff;
-  --yellow: #fde68a;
-  --gray: #94a3b8;
-  --radius: 12px;
-  --radius-lg: 16px;
-  --pad: 12px;
-  --pad-lg: 16px;
+  --bg:#0B0F14;
+  --panel:#1B1F27;
+  --muted:#242B37;
+  --border:#2E3644;
+  --text:#F1F5F9;
+  --pink:#FF90C2;
+  --blue:#A6D9FF;
+  --green:#A4FBC4;
+  --purple:#DAB8FF;
+  --yellow:#FFE3A3;
+  --gray:#94A3B8;
+  --radius:12px;
+  --radius-lg:16px;
+  --pad:12px;
+  --pad-lg:16px;
 }
 
 * {
@@ -116,6 +115,12 @@ body {
   cursor: pointer;
 }
 
+.quiz-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad);
+}
+
 .input {
   background: var(--muted);
   color: var(--text);
@@ -196,6 +201,11 @@ body {
   padding: 2px 6px;
 }
 
+.chip.active {
+  background: var(--blue);
+  color: #000;
+}
+
 .chip-remove {
   background: none;
   border: none;
@@ -226,6 +236,11 @@ body {
   border-radius: var(--radius);
 }
 
+.builder-sub {
+  margin-left: var(--pad);
+  margin-top: 4px;
+}
+
 .builder-count {
   margin-top: var(--pad);
 }
@@ -235,6 +250,25 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--pad);
+}
+
+.flash-section {
+  margin-top: var(--pad);
+  cursor: pointer;
+}
+
+.flash-heading {
+  font-weight: 600;
+}
+
+.flash-body {
+  display: none;
+  margin-top: 4px;
+  white-space: pre-wrap;
+}
+
+.flash-section.revealed .flash-body {
+  display: block;
 }
 
 /* Browse cards */
