@@ -1127,18 +1127,28 @@ var Sevenn = (() => {
       return;
     }
     const item = items[session.idx];
-    const { question, answer, details } = buildCard(item);
     const card = document.createElement("section");
     card.className = "card flashcard";
     card.tabIndex = 0;
-    const qEl = document.createElement("div");
-    qEl.className = "flash-question";
-    qEl.textContent = question;
-    card.appendChild(qEl);
-    const aEl = document.createElement("div");
-    aEl.className = "flash-answer";
-    aEl.textContent = answer + (details ? "\n" + details : "");
-    card.appendChild(aEl);
+    const title = document.createElement("h2");
+    title.textContent = item.name || item.concept || "";
+    card.appendChild(title);
+    sectionsFor(item).forEach(([label, field]) => {
+      const sec = document.createElement("div");
+      sec.className = "flash-section";
+      const head = document.createElement("div");
+      head.className = "flash-heading";
+      head.textContent = label;
+      const body = document.createElement("div");
+      body.className = "flash-body";
+      body.textContent = item[field] || "";
+      sec.appendChild(head);
+      sec.appendChild(body);
+      sec.addEventListener("click", () => {
+        sec.classList.toggle("revealed");
+      });
+      card.appendChild(sec);
+    });
     const controls = document.createElement("div");
     controls.className = "row";
     const prev = document.createElement("button");
@@ -1152,13 +1162,6 @@ var Sevenn = (() => {
       }
     });
     controls.appendChild(prev);
-    const reveal = document.createElement("button");
-    reveal.className = "btn";
-    reveal.textContent = "Reveal";
-    reveal.addEventListener("click", () => {
-      card.classList.toggle("revealed");
-    });
-    controls.appendChild(reveal);
     const next = document.createElement("button");
     next.className = "btn";
     next.textContent = session.idx < items.length - 1 ? "Next" : "Finish";
@@ -1184,51 +1187,40 @@ var Sevenn = (() => {
     root.appendChild(card);
     card.focus();
     card.addEventListener("keydown", (e) => {
-      if (e.code === "Space") {
-        e.preventDefault();
-        reveal.click();
-      } else if (e.key === "ArrowRight") {
+      if (e.key === "ArrowRight") {
         next.click();
       } else if (e.key === "ArrowLeft") {
         prev.click();
       }
     });
   }
-  function buildCard(item) {
-    const mainMap = {
-      disease: ["pathophys", "clinical", "treatment"],
-      drug: ["moa", "uses", "sideEffects"],
-      concept: ["definition", "mechanism", "clinicalRelevance"]
+  function sectionsFor(item) {
+    const map = {
+      disease: [
+        ["Etiology", "etiology"],
+        ["Pathophys", "pathophys"],
+        ["Clinical Presentation", "clinical"],
+        ["Diagnosis", "diagnosis"],
+        ["Treatment", "treatment"],
+        ["Complications", "complications"],
+        ["Mnemonic", "mnemonic"]
+      ],
+      drug: [
+        ["Mechanism", "moa"],
+        ["Uses", "uses"],
+        ["Side Effects", "sideEffects"],
+        ["Contraindications", "contraindications"],
+        ["Mnemonic", "mnemonic"]
+      ],
+      concept: [
+        ["Definition", "definition"],
+        ["Mechanism", "mechanism"],
+        ["Clinical Relevance", "clinicalRelevance"],
+        ["Example", "example"],
+        ["Mnemonic", "mnemonic"]
+      ]
     };
-    const extraMap = {
-      disease: ["mnemonic", "diagnosis", "complications"],
-      drug: ["mnemonic", "contraindications"],
-      concept: ["mnemonic", "example"]
-    };
-    const fields = mainMap[item.kind] || [];
-    let questionField = "";
-    for (const f of fields) {
-      if (item[f]) {
-        questionField = item[f];
-        break;
-      }
-    }
-    let question = questionField || "";
-    const answers = [];
-    question = question.replace(/{{c\d+::(.*?)}}/g, (_m, p1) => {
-      answers.push(p1);
-      return "_____";
-    });
-    const answer = answers.length ? answers.join(" / ") : item.name || item.concept || "";
-    const detailParts = [];
-    fields.filter((f) => f !== fields[0]).forEach((f) => {
-      if (item[f]) detailParts.push(item[f]);
-    });
-    (extraMap[item.kind] || []).forEach((f) => {
-      if (item[f]) detailParts.push(item[f]);
-    });
-    const details = detailParts.join("\n");
-    return { question, answer, details };
+    return map[item.kind] || [];
   }
 
   // js/ui/components/review.js
@@ -1307,9 +1299,6 @@ var Sevenn = (() => {
   function titleOf2(item) {
     return item.name || item.concept || "";
   }
-  function questionOf(item) {
-    return item.definition || item.pathophys || item.clinical || item.moa || item.uses || "";
-  }
   function renderQuiz(root, redraw) {
     const sess = state.quizSession;
     if (!sess) return;
@@ -1334,10 +1323,22 @@ var Sevenn = (() => {
     }
     const form = document.createElement("form");
     form.className = "quiz-form";
-    const q = document.createElement("div");
-    q.className = "quiz-question";
-    q.textContent = questionOf(item);
-    form.appendChild(q);
+    const info = document.createElement("div");
+    info.className = "quiz-info";
+    sectionsFor2(item).forEach(([label, field]) => {
+      if (!item[field]) return;
+      const sec = document.createElement("div");
+      sec.className = "section";
+      const head = document.createElement("div");
+      head.className = "section-title";
+      head.textContent = label;
+      const body = document.createElement("div");
+      body.textContent = item[field];
+      sec.appendChild(head);
+      sec.appendChild(body);
+      info.appendChild(sec);
+    });
+    form.appendChild(info);
     const input = document.createElement("input");
     input.type = "text";
     input.autocomplete = "off";
@@ -1371,6 +1372,34 @@ var Sevenn = (() => {
       redraw();
     });
     root.appendChild(form);
+  }
+  function sectionsFor2(item) {
+    const map = {
+      disease: [
+        ["Etiology", "etiology"],
+        ["Pathophys", "pathophys"],
+        ["Clinical Presentation", "clinical"],
+        ["Diagnosis", "diagnosis"],
+        ["Treatment", "treatment"],
+        ["Complications", "complications"],
+        ["Mnemonic", "mnemonic"]
+      ],
+      drug: [
+        ["Mechanism", "moa"],
+        ["Uses", "uses"],
+        ["Side Effects", "sideEffects"],
+        ["Contraindications", "contraindications"],
+        ["Mnemonic", "mnemonic"]
+      ],
+      concept: [
+        ["Definition", "definition"],
+        ["Mechanism", "mechanism"],
+        ["Clinical Relevance", "clinicalRelevance"],
+        ["Example", "example"],
+        ["Mnemonic", "mnemonic"]
+      ]
+    };
+    return map[item.kind] || [];
   }
 
   // js/ui/components/exams.js

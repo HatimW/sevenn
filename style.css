@@ -1,21 +1,20 @@
-
-/* Modern light theme */
+/* Modern dark theme */
 :root {
-  --bg: #f8fafc;
-  --panel: #ffffff;
-  --muted: #f1f5f9;
-  --border: #e2e8f0;
-  --text: #0f172a;
-  --pink: #fbcfe8;
-  --blue: #bfdbfe;
-  --green: #bbf7d0;
-  --purple: #e9d5ff;
-  --yellow: #fde68a;
-  --gray: #94a3b8;
-  --radius: 12px;
-  --radius-lg: 16px;
-  --pad: 12px;
-  --pad-lg: 16px;
+  --bg:#0B0F14;
+  --panel:#0F141B;
+  --muted:#131923;
+  --border:#212936;
+  --text:#E5E7EB;
+  --pink:#FFAFCC;
+  --blue:#BDE0FE;
+  --green:#B9FBC0;
+  --purple:#CDB4DB;
+  --yellow:#FFD6A5;
+  --gray:#94A3B8;
+  --radius:12px;
+  --radius-lg:16px;
+  --pad:12px;
+  --pad-lg:16px;
 }
 
 * {
@@ -47,50 +46,7 @@ body {
   font-weight: 600;
 }
 
-.tabs .tab {
-  background: var(--muted);
-  border: none;
-  color: var(--text);
-  padding: 6px 12px;
-  cursor: pointer;
-  border-radius: var(--radius);
-}
-
-.tab.active {
-  background: var(--blue);
-  color: #000;
-}
-.tab.disease { background: var(--purple); color:#000; opacity:0.7; }
-.tab.disease.active { opacity:1; }
-.tab.drug { background: var(--blue); color:#000; opacity:0.7; }
-.tab.drug.active { opacity:1; }
-.tab.concept { background: var(--green); color:#000; opacity:0.7; }
-.tab.concept.active { opacity:1; }
-
-.card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--pad);
-  margin: var(--pad);
-}
-
-.card-grid {
-  display: flex;
-  flex-wrap: wrap;
-}
-
-.card-grid .card {
-  flex: 1 1 250px;
-}
-
-.summary {
-  margin-top: 8px;
-}
-
-.stats {
-  margin: var(--pad);
-}
+@@ -88,81 +94,116 @@ body {
 
 .quiz-form {
   display: flex;
@@ -114,6 +70,12 @@ body {
   margin-top: 4px;
   padding: 4px 8px;
   cursor: pointer;
+}
+
+.quiz-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad);
 }
 
 .input {
@@ -201,17 +163,7 @@ body {
   border: none;
   margin-left: 4px;
   cursor: pointer;
-  color: var(--text);
-}
-
-.chip-input {
-  background: var(--muted);
-  border: none;
-  color: var(--text);
-  padding: 2px 4px;
-  outline: none;
-}
-
+@@ -180,50 +221,69 @@ body {
 /* Study Builder */
 .builder {
   display: flex;
@@ -235,6 +187,25 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--pad);
+}
+
+.flash-section {
+  margin-top: var(--pad);
+  cursor: pointer;
+}
+
+.flash-heading {
+  font-weight: 600;
+}
+
+.flash-body {
+  display: none;
+  margin-top: 4px;
+  white-space: pre-wrap;
+}
+
+.flash-section.revealed .flash-body {
+  display: block;
 }
 
 /* Browse cards */
@@ -262,119 +233,3 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-}
-
-.item-card .card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: var(--pad);
-  cursor: pointer;
-}
-
-.header-main {
-  background: none;
-  border: none;
-  color: inherit;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap:4px;
-  text-align: left;
-  flex:1;
-}
-
-.kind-badge {
-  border-radius: var(--radius);
-  padding: 2px 6px;
-  font-size: 12px;
-  color: #000;
-}
-.kind-badge.disease { background: var(--pink); }
-.kind-badge.drug { background: var(--blue); }
-.kind-badge.concept { background: var(--green); }
-
-.card-title {
-  font-weight: 600;
-  line-height: 1.2;
-  display:block;
-  max-height: 2.4em;
-  overflow: hidden;
-}
-
-.identifiers {
-  display:flex;
-  gap:4px;
-  flex-wrap:wrap;
-  padding: 0 var(--pad) var(--pad);
-}
-
-.card-actions {
-  display:flex;
-  gap:4px;
-}
-
-.icon-btn {
-  background:none;
-  border:none;
-  cursor:pointer;
-  color: var(--text);
-  padding:2px;
-}
-
-.card-body {
-  padding: 0 var(--pad) var(--pad);
-  display:none;
-}
-
-.item-card.expanded .card-body {
-  display:block;
-}
-
-.section {
-  border-left:2px solid var(--border);
-  padding-left:8px;
-  margin-top:8px;
-}
-
-.section-title {
-  font-size:12px;
-  text-transform:uppercase;
-  opacity:0.7;
-}
-
-.facts {
-  margin-top:8px;
-}
-
-.link-chip {
-  margin-top:8px;
-}
-
-.flash-answer {
-  display: none;
-  white-space: pre-wrap;
-}
-
-.flashcard.revealed .flash-answer {
-  display: block;
-}
-
-/* Map */
-.map-svg {
-  width: 100%;
-  height: 600px;
-}
-.map-node {
-  fill: var(--blue);
-  cursor: pointer;
-}
-.map-edge {
-  stroke: var(--gray);
-  stroke-width: 1;
-}
-.map-label {
-  fill: var(--text);
-  font-size: 10px;
-  text-anchor: middle;
-}
