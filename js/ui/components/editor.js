@@ -80,93 +80,84 @@ export async function openEditor(kind, onSave, existing = null) {
   colorLabel.appendChild(colorInput);
   form.appendChild(colorLabel);
 
-  // tagging: blocks -> weeks -> lectures
+  // tagging: blocks -> weeks -> lectures (multi-select)
   const blocks = await listBlocks();
   const blockMap = new Map(blocks.map(b => [b.blockId, b]));
-  const selections = new Map();
+  const blockSet = new Set(existing?.blocks || []);
+  const weekSet = new Set();
+  const lectSet = new Set();
+  existing?.lectures?.forEach(l => {
+    blockSet.add(l.blockId);
+    weekSet.add(`${l.blockId}|${l.week}`);
+    lectSet.add(`${l.blockId}|${l.id}`);
+  });
 
   const blockWrap = document.createElement('div');
   blockWrap.className = 'tag-wrap';
   const blockTitle = document.createElement('div');
-  blockTitle.textContent = 'Blocks';
+  blockTitle.textContent = 'Tags';
   blockWrap.appendChild(blockTitle);
 
-  const blockRow = document.createElement('div');
-  blockRow.className = 'tag-row';
-
   blocks.forEach(b => {
-    const container = document.createElement('div');
-    const chip = document.createElement('span');
-    chip.className = 'chip';
-    chip.textContent = b.title || b.blockId;
-    const selDiv = document.createElement('div');
-    selDiv.className = 'row';
-    selDiv.style.display = 'none';
+    const blockDiv = document.createElement('div');
+    const blkLabel = document.createElement('label');
+    blkLabel.className = 'row';
+    const blkCb = document.createElement('input');
+    blkCb.type = 'checkbox';
+    blkCb.checked = blockSet.has(b.blockId);
+    blkLabel.appendChild(blkCb);
+    blkLabel.appendChild(document.createTextNode(b.title || b.blockId));
+    blockDiv.appendChild(blkLabel);
 
-    const weekSel = document.createElement('select');
-    weekSel.className = 'input';
-    const wBlank = document.createElement('option');
-    wBlank.value = '';
-    wBlank.textContent = 'Week';
-    weekSel.appendChild(wBlank);
-    for (let w = 1; w <= b.weeks; w++) {
-      const opt = document.createElement('option');
-      opt.value = w;
-      opt.textContent = 'W' + w;
-      weekSel.appendChild(opt);
-    }
+    const weekWrap = document.createElement('div');
+    weekWrap.className = 'builder-sub';
+    weekWrap.style.display = blkCb.checked ? 'block' : 'none';
+    blockDiv.appendChild(weekWrap);
 
-    const lecSel = document.createElement('select');
-    lecSel.className = 'input';
-    const lBlank = document.createElement('option');
-    lBlank.value = '';
-    lBlank.textContent = 'Lecture';
-    lecSel.appendChild(lBlank);
+    blkCb.addEventListener('change', () => {
+      if (blkCb.checked) blockSet.add(b.blockId); else blockSet.delete(b.blockId);
+      weekWrap.style.display = blkCb.checked ? 'block' : 'none';
+    });
 
-    weekSel.addEventListener('change', () => {
-      const w = Number(weekSel.value);
-      lecSel.innerHTML = '';
-      const blank = document.createElement('option');
-      blank.value = '';
-      blank.textContent = 'Lecture';
-      lecSel.appendChild(blank);
-      if (w) {
-        (b.lectures || []).filter(l => l.week === w).forEach(l => {
-          const opt = document.createElement('option');
-          opt.value = l.id;
-          opt.textContent = l.name;
-          lecSel.appendChild(opt);
+    const weeks = Array.from({ length: b.weeks || 0 }, (_, i) => i + 1);
+    weeks.forEach(w => {
+      const wkLabel = document.createElement('label');
+      wkLabel.className = 'row';
+      const wkCb = document.createElement('input');
+      wkCb.type = 'checkbox';
+      const wkKey = `${b.blockId}|${w}`;
+      wkCb.checked = weekSet.has(wkKey);
+      wkLabel.appendChild(wkCb);
+      wkLabel.appendChild(document.createTextNode(`Week ${w}`));
+      weekWrap.appendChild(wkLabel);
+
+      const lecWrap = document.createElement('div');
+      lecWrap.className = 'builder-sub';
+      lecWrap.style.display = wkCb.checked ? 'block' : 'none';
+      wkLabel.appendChild(lecWrap);
+
+      wkCb.addEventListener('change', () => {
+        if (wkCb.checked) weekSet.add(wkKey); else weekSet.delete(wkKey);
+        lecWrap.style.display = wkCb.checked ? 'block' : 'none';
+      });
+
+      (b.lectures || []).filter(l => l.week === w).forEach(l => {
+        const key = `${b.blockId}|${l.id}`;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'chip' + (lectSet.has(key) ? ' active' : '');
+        btn.textContent = l.name;
+        btn.addEventListener('click', () => {
+          if (lectSet.has(key)) lectSet.delete(key); else lectSet.add(key);
+          btn.classList.toggle('active');
         });
-      }
+        lecWrap.appendChild(btn);
+      });
     });
 
-    chip.addEventListener('click', () => {
-      const active = chip.classList.toggle('active');
-      selDiv.style.display = active ? 'flex' : 'none';
-      if (active) selections.set(b.blockId, { weekSel, lecSel });
-      else selections.delete(b.blockId);
-    });
-
-    container.appendChild(chip);
-    container.appendChild(selDiv);
-    selDiv.appendChild(weekSel);
-    selDiv.appendChild(lecSel);
-    blockRow.appendChild(container);
-
-    if (existing?.blocks?.includes(b.blockId)) {
-      chip.classList.add('active');
-      selDiv.style.display = 'flex';
-      selections.set(b.blockId, { weekSel, lecSel });
-      const lec = existing?.lectures?.find(l => l.blockId === b.blockId);
-      if (lec) {
-        weekSel.value = lec.week;
-        weekSel.dispatchEvent(new Event('change'));
-        lecSel.value = lec.id;
-      }
-    }
+    blockWrap.appendChild(blockDiv);
   });
 
-  blockWrap.appendChild(blockRow);
   form.appendChild(blockWrap);
 
   const saveBtn = document.createElement('button');
@@ -200,20 +191,17 @@ export async function openEditor(kind, onSave, existing = null) {
         item[field] = v;
       }
     });
-    item.blocks = Array.from(selections.keys());
-    const weekSet = new Set();
+    item.blocks = Array.from(blockSet);
+    const weekNums = new Set(Array.from(weekSet).map(k => Number(k.split('|')[1])));
+    item.weeks = Array.from(weekNums);
     const lectures = [];
-    selections.forEach(({ weekSel, lecSel }, blockId) => {
-      const w = Number(weekSel.value);
-      if (w) weekSet.add(w);
-      const lecId = Number(lecSel.value);
-      if (lecId) {
-        const blk = blockMap.get(blockId);
-        const l = blk?.lectures.find(l => l.id === lecId);
-        if (l) lectures.push({ blockId, id: l.id, name: l.name, week: l.week });
-      }
-    });
-    item.weeks = Array.from(weekSet);
+    for (const key of lectSet) {
+      const [blockId, lecIdStr] = key.split('|');
+      const lecId = Number(lecIdStr);
+      const blk = blockMap.get(blockId);
+      const l = blk?.lectures.find(l => l.id === lecId);
+      if (l) lectures.push({ blockId, id: l.id, name: l.name, week: l.week });
+    }
     item.lectures = lectures;
     item.color = colorInput.value;
     await upsertItem(item);
