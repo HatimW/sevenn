@@ -1883,12 +1883,14 @@ var Sevenn = (() => {
       svg.setAttribute("viewBox", `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
       adjustScale();
     };
+
     svg.classList.add("map-svg");
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
     svg.appendChild(g);
     const updateEdges = (id) => {
       g.querySelectorAll(`path[data-a='${id}'], path[data-b='${id}']`).forEach((edge) => {
         edge.setAttribute("d", calcPath(edge.dataset.a, edge.dataset.b));
+
       });
     };
     let dragging = false;
@@ -1902,13 +1904,16 @@ var Sevenn = (() => {
         svg.style.cursor = "grabbing";
       }
     });
+
     window.addEventListener("mousemove", async (e) => {
       if (nodeDrag) {
         const rect = svg.getBoundingClientRect();
         const unit = viewBox.w / svg.clientWidth;
         const scale2 = Math.pow(unit, 0.8);
+
         const x = viewBox.x + (e.clientX - rect.left) / svg.clientWidth * viewBox.w - nodeDrag.offset.x;
         const y = viewBox.y + (e.clientY - rect.top) / svg.clientHeight * viewBox.h - nodeDrag.offset.y;
+
         positions[nodeDrag.id] = { x, y };
         nodeDrag.circle.setAttribute("cx", x);
         nodeDrag.circle.setAttribute("cy", y);
@@ -1925,6 +1930,7 @@ var Sevenn = (() => {
       last = { x: e.clientX, y: e.clientY };
       updateViewBox();
     });
+
     window.addEventListener("mouseup", async () => {
       if (nodeDrag) {
         const it = itemMap[nodeDrag.id];
@@ -1946,11 +1952,13 @@ var Sevenn = (() => {
       viewBox.y = my - e.offsetY / svg.clientHeight * viewBox.h;
       updateViewBox();
     });
+
     if (!window._mapResizeAttached) {
       window.addEventListener("resize", adjustScale);
       window._mapResizeAttached = true;
     }
     const positions = {};
+
     const itemMap = Object.fromEntries(items.map((it) => [it.id, it]));
     const center = size / 2;
     const newItems = [];
@@ -2002,6 +2010,7 @@ var Sevenn = (() => {
       }
       return `M${x1} ${y1} Q${cx} ${cy} ${x2} ${y2}`;
     }
+
     const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
     const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
     marker.setAttribute("id", "arrow");
@@ -2037,6 +2046,7 @@ var Sevenn = (() => {
           openLineMenu(e, path2, it.id, l.id);
         });
         g.appendChild(path2);
+
       });
     });
     items.forEach((it) => {
@@ -2046,6 +2056,7 @@ var Sevenn = (() => {
       circle.setAttribute("cy", pos.y);
       circle.setAttribute("r", 20);
       circle.setAttribute("class", "map-node");
+
       circle.dataset.id = it.id;
       const kindColors2 = { disease: "var(--purple)", drug: "var(--blue)" };
       const fill = kindColors2[it.kind] || it.color || "var(--gray)";
@@ -2057,10 +2068,12 @@ var Sevenn = (() => {
       });
       circle.addEventListener("mousedown", (e) => {
         e.stopPropagation();
+
         const rect = svg.getBoundingClientRect();
         const mouseX = viewBox.x + (e.clientX - rect.left) / svg.clientWidth * viewBox.w;
         const mouseY = viewBox.y + (e.clientY - rect.top) / svg.clientHeight * viewBox.h;
         nodeDrag = { id: it.id, circle, label: text, offset: { x: mouseX - pos.x, y: mouseY - pos.y } };
+
         nodeWasDragged = false;
         svg.style.cursor = "grabbing";
       });
@@ -2081,6 +2094,7 @@ var Sevenn = (() => {
     if (!svg) return;
     const vb = svg.getAttribute("viewBox").split(" ").map(Number);
     const unit = vb[2] / svg.clientWidth;
+
     const scale = Math.pow(unit, 0.8);
     const offset = 28 * scale;
     document.querySelectorAll(".map-node").forEach((c) => c.setAttribute("r", 20 * scale));
@@ -2094,7 +2108,9 @@ var Sevenn = (() => {
   }
   function applyLineStyle(line, info) {
     const color = info.color || "var(--gray)";
+
     line.style.stroke = color;
+
     if (info.style === "dashed") line.setAttribute("stroke-dasharray", "4,4");
     else line.removeAttribute("stroke-dasharray");
     if (info.style === "arrow") line.setAttribute("marker-end", "url(#arrow)");

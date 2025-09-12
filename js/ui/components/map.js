@@ -8,6 +8,7 @@ export async function renderMap(root){
     ...(await listItemsByKind('drug')),
     ...(await listItemsByKind('concept'))
   ];
+
   const base = 1000;
   const size = Math.max(base, items.length * 150);
   const viewport = base;
@@ -17,14 +18,17 @@ export async function renderMap(root){
     svg.setAttribute('viewBox', `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
     adjustScale();
   };
+
   svg.classList.add('map-svg');
 
   const g = document.createElementNS('http://www.w3.org/2000/svg','g');
   svg.appendChild(g);
 
+
   const updateEdges = id => {
     g.querySelectorAll(`path[data-a='${id}'], path[data-b='${id}']`).forEach(edge => {
       edge.setAttribute('d', calcPath(edge.dataset.a, edge.dataset.b));
+
     });
   };
 
@@ -40,6 +44,7 @@ export async function renderMap(root){
       svg.style.cursor = 'grabbing';
     }
   });
+
   window.addEventListener('mousemove', async e => {
     if (nodeDrag) {
       const rect = svg.getBoundingClientRect();
@@ -47,6 +52,7 @@ export async function renderMap(root){
       const scale = Math.pow(unit, 0.8);
       const x = viewBox.x + ((e.clientX - rect.left) / svg.clientWidth) * viewBox.w - nodeDrag.offset.x;
       const y = viewBox.y + ((e.clientY - rect.top) / svg.clientHeight) * viewBox.h - nodeDrag.offset.y;
+
       positions[nodeDrag.id] = { x, y };
       nodeDrag.circle.setAttribute('cx', x);
       nodeDrag.circle.setAttribute('cy', y);
@@ -56,6 +62,7 @@ export async function renderMap(root){
       nodeWasDragged = true;
       return;
     }
+
     if (!dragging) return;
     const scale = viewBox.w / svg.clientWidth;
     viewBox.x -= (e.clientX - last.x) * scale;
@@ -63,6 +70,7 @@ export async function renderMap(root){
     last = { x: e.clientX, y: e.clientY };
     updateViewBox();
   });
+
   window.addEventListener('mouseup', async () => {
     if (nodeDrag) {
       const it = itemMap[nodeDrag.id];
@@ -73,17 +81,20 @@ export async function renderMap(root){
     dragging = false;
     svg.style.cursor = 'grab';
   });
+
   svg.addEventListener('wheel', e => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 0.9 : 1.1;
     const mx = viewBox.x + (e.offsetX / svg.clientWidth) * viewBox.w;
     const my = viewBox.y + (e.offsetY / svg.clientHeight) * viewBox.h;
+
     viewBox.w = Math.min(size * 2, Math.max(100, viewBox.w * factor));
     viewBox.h = viewBox.w;
     viewBox.x = mx - (e.offsetX / svg.clientWidth) * viewBox.w;
     viewBox.y = my - (e.offsetY / svg.clientHeight) * viewBox.h;
     updateViewBox();
   });
+
 
   if (!window._mapResizeAttached) {
     window.addEventListener('resize', adjustScale);
@@ -92,6 +103,7 @@ export async function renderMap(root){
 
   const positions = {};
   const itemMap = Object.fromEntries(items.map(it => [it.id, it]));
+
   const center = size/2;
   const newItems = [];
   items.forEach(it => {
@@ -145,6 +157,7 @@ export async function renderMap(root){
     return `M${x1} ${y1} Q${cx} ${cy} ${x2} ${y2}`;
   }
 
+
   const defs = document.createElementNS('http://www.w3.org/2000/svg','defs');
   const marker = document.createElementNS('http://www.w3.org/2000/svg','marker');
   marker.setAttribute('id','arrow');
@@ -168,6 +181,7 @@ export async function renderMap(root){
       const key = it.id < l.id ? it.id + '|' + l.id : l.id + '|' + it.id;
       if (drawn.has(key)) return;
       drawn.add(key);
+
       const path = document.createElementNS('http://www.w3.org/2000/svg','path');
       path.setAttribute('d', calcPath(it.id, l.id));
       path.setAttribute('fill','none');
@@ -178,6 +192,7 @@ export async function renderMap(root){
       path.dataset.b = l.id;
       path.addEventListener('click', e => { e.stopPropagation(); openLineMenu(e, path, it.id, l.id); });
       g.appendChild(path);
+
     });
   });
 
@@ -188,6 +203,7 @@ export async function renderMap(root){
     circle.setAttribute('cy', pos.y);
     circle.setAttribute('r', 20);
     circle.setAttribute('class','map-node');
+
     circle.dataset.id = it.id;
     const kindColors = { disease: 'var(--purple)', drug: 'var(--blue)' };
     const fill = kindColors[it.kind] || it.color || 'var(--gray)';
@@ -203,6 +219,7 @@ export async function renderMap(root){
       nodeWasDragged = false;
       svg.style.cursor = 'grabbing';
     });
+
     g.appendChild(circle);
     text = document.createElementNS('http://www.w3.org/2000/svg','text');
     text.setAttribute('x', pos.x);
@@ -232,11 +249,13 @@ function adjustScale(){
     if (c) t.setAttribute('y', Number(c.getAttribute('cy')) - offset);
   });
   document.querySelectorAll('.map-edge').forEach(l => l.setAttribute('stroke-width', 4 * Math.pow(unit, -0.2)));
+
 }
 
 function applyLineStyle(line, info){
   const color = info.color || 'var(--gray)';
   line.style.stroke = color;
+
   if (info.style === 'dashed') line.setAttribute('stroke-dasharray','4,4');
   else line.removeAttribute('stroke-dasharray');
   if (info.style === 'arrow') line.setAttribute('marker-end','url(#arrow)');
