@@ -1172,6 +1172,7 @@
       });
       let hoverTimer;
       deck.addEventListener("mouseenter", () => {
+
         hoverTimer = setTimeout(() => startPreview(deck, cards), 3e3);
       });
       deck.addEventListener("mouseleave", () => {
