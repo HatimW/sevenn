@@ -1,19 +1,25 @@
+
+/* Modern light theme */
 :root {
-  --bg:#0B0F14;
-  --panel:#0F141B;
-  --muted:#131923;
-  --border:#212936;
-  --text:#E5E7EB;
-  --pink:#FFAFCC;
-  --blue:#BDE0FE;
-  --green:#B9FBC0;
-  --purple:#CDB4DB;
-  --yellow:#FFD6A5;
-  --gray:#94A3B8;
-  --radius:12px;
-  --radius-lg:16px;
-  --pad:12px;
-  --pad-lg:16px;
+  --bg: #f8fafc;
+  --panel: #ffffff;
+  --muted: #f1f5f9;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --pink: #fbcfe8;
+  --blue: #bfdbfe;
+  --green: #bbf7d0;
+  --purple: #e9d5ff;
+  --yellow: #fde68a;
+  --gray: #94a3b8;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --pad: 12px;
+  --pad-lg: 16px;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
@@ -139,6 +145,35 @@ body {
 .modal .card {
   width: 90%;
   max-width: 500px;
+}
+
+/* Cleaner modal form layout */
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad);
+}
+
+.modal-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modal-form .input {
+  width: 100%;
+}
+
+.modal-form textarea.input {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--pad);
+  margin-top: var(--pad);
 }
 
 .block-section {
