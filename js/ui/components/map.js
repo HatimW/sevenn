@@ -49,7 +49,7 @@ export async function renderMap(root){
     if (nodeDrag) {
       const rect = svg.getBoundingClientRect();
       const unit = viewBox.w / svg.clientWidth;
-      const scale = Math.pow(unit, 0.8);
+      const nodeScale = Math.pow(unit, 0.8);
       const x = viewBox.x + ((e.clientX - rect.left) / svg.clientWidth) * viewBox.w - nodeDrag.offset.x;
       const y = viewBox.y + ((e.clientY - rect.top) / svg.clientHeight) * viewBox.h - nodeDrag.offset.y;
 
@@ -58,7 +58,8 @@ export async function renderMap(root){
       nodeDrag.circle.setAttribute('cy', y);
       nodeDrag.label.setAttribute('x', x);
       const baseR = Number(nodeDrag.circle.dataset.radius) || 20;
-      nodeDrag.label.setAttribute('y', y - (baseR + 8) * scale);
+      nodeDrag.label.setAttribute('y', y - (baseR + 8) * nodeScale);
+
       updateEdges(nodeDrag.id);
       nodeWasDragged = true;
       return;
@@ -107,7 +108,7 @@ export async function renderMap(root){
   const linkCounts = Object.fromEntries(items.map(it => [it.id, (it.links || []).length]));
   const maxLinks = Math.max(1, ...Object.values(linkCounts));
   const minRadius = 20;
-  const radiusStep = 6;
+  const maxRadius = 60;
 
 
   const center = size/2;
@@ -211,8 +212,9 @@ export async function renderMap(root){
     circle.setAttribute('cx', pos.x);
     circle.setAttribute('cy', pos.y);
 
-    // Increase radius by a fixed step for each link
-    const baseR = minRadius + (linkCounts[it.id] || 0) * radiusStep;
+    // Radius grows between min and max based on normalized link count
+    const linkRatio = (linkCounts[it.id] || 0) / maxLinks;
+    const baseR = minRadius + linkRatio * (maxRadius - minRadius);
     circle.setAttribute('r', baseR);
     circle.dataset.radius = baseR;
     circle.setAttribute('class','map-node');
@@ -252,18 +254,19 @@ function adjustScale(){
   if (!svg) return;
   const vb = svg.getAttribute('viewBox').split(' ').map(Number);
   const unit = vb[2] / svg.clientWidth; // units per pixel
-  const scale = Math.pow(unit, 0.8);
+  const nodeScale = Math.pow(unit, 0.8);
+  const labelScale = Math.pow(unit, 1);
   document.querySelectorAll('.map-node').forEach(c => {
     const baseR = Number(c.dataset.radius) || 20;
-    c.setAttribute('r', baseR * scale);
+    c.setAttribute('r', baseR * nodeScale);
   });
   document.querySelectorAll('.map-label').forEach(t => {
-    t.setAttribute('font-size', 12 * scale);
+    t.setAttribute('font-size', 12 * labelScale);
     const id = t.dataset.id;
     const c = document.querySelector(`circle[data-id='${id}']`);
     if (c) {
       const baseR = Number(c.dataset.radius) || 20;
-      t.setAttribute('y', Number(c.getAttribute('cy')) - (baseR + 8) * scale);
+      t.setAttribute('y', Number(c.getAttribute('cy')) - (baseR + 8) * nodeScale);
     }
   });
   document.querySelectorAll('.map-edge').forEach(l => l.setAttribute('stroke-width', 4 * Math.pow(unit, -0.2)));
