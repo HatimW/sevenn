@@ -58,8 +58,8 @@ export async function renderMap(root){
       nodeDrag.circle.setAttribute('cy', y);
       nodeDrag.label.setAttribute('x', x);
       const baseR = Number(nodeDrag.circle.dataset.radius) || 20;
-      nodeDrag.label.setAttribute('y', y - (baseR + 8) * nodeScale);
 
+      nodeDrag.label.setAttribute('y', y - (baseR + 8) * scale);
       updateEdges(nodeDrag.id);
       nodeWasDragged = true;
       return;
@@ -109,7 +109,6 @@ export async function renderMap(root){
   const maxLinks = Math.max(1, ...Object.values(linkCounts));
   const minRadius = 20;
   const maxRadius = 60;
-
 
   const center = size/2;
   const newItems = [];
@@ -212,9 +211,9 @@ export async function renderMap(root){
     circle.setAttribute('cx', pos.x);
     circle.setAttribute('cy', pos.y);
 
-    // Radius grows between min and max based on normalized link count
-    const linkRatio = (linkCounts[it.id] || 0) / maxLinks;
-    const baseR = minRadius + linkRatio * (maxRadius - minRadius);
+    // Scale radius between min and max based on link count
+    const baseR = minRadius + ((maxRadius - minRadius) * (linkCounts[it.id] || 0) / maxLinks);
+
     circle.setAttribute('r', baseR);
     circle.dataset.radius = baseR;
     circle.setAttribute('class','map-node');
@@ -255,7 +254,8 @@ function adjustScale(){
   const vb = svg.getAttribute('viewBox').split(' ').map(Number);
   const unit = vb[2] / svg.clientWidth; // units per pixel
   const nodeScale = Math.pow(unit, 0.8);
-  const labelScale = Math.pow(unit, 1);
+  const labelScale = Math.pow(unit, 1.1);
+
   document.querySelectorAll('.map-node').forEach(c => {
     const baseR = Number(c.dataset.radius) || 20;
     c.setAttribute('r', baseR * nodeScale);
