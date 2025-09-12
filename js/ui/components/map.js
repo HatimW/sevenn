@@ -109,6 +109,7 @@ export async function renderMap(root){
   const minRadius = 20;
   const maxRadius = 40;
 
+
   const center = size/2;
   const newItems = [];
   items.forEach(it => {
@@ -209,6 +210,7 @@ export async function renderMap(root){
     const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
     circle.setAttribute('cx', pos.x);
     circle.setAttribute('cy', pos.y);
+
     // Scale radius between minRadius and maxRadius based on relative link count
     const normalized = (linkCounts[it.id] || 0) / maxLinks;
     const baseR = minRadius + normalized * (maxRadius - minRadius);
