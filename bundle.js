@@ -1918,7 +1918,8 @@ var Sevenn = (() => {
         nodeDrag.circle.setAttribute("cx", x);
         nodeDrag.circle.setAttribute("cy", y);
         nodeDrag.label.setAttribute("x", x);
-        nodeDrag.label.setAttribute("y", y - 28 * scale2);
+        const baseR = Number(nodeDrag.circle.dataset.radius) || 20;
+        nodeDrag.label.setAttribute("y", y - (baseR + 8) * scale2);
         updateEdges(nodeDrag.id);
         nodeWasDragged = true;
         return;
@@ -1960,17 +1961,24 @@ var Sevenn = (() => {
     const positions = {};
 
     const itemMap = Object.fromEntries(items.map((it) => [it.id, it]));
+    const linkCounts = Object.fromEntries(items.map((it) => [it.id, (it.links || []).length]));
+    const maxLinks = Math.max(1, ...Object.values(linkCounts));
+    const minRadius = 20;
+    const maxRadius = 60;
     const center = size / 2;
     const newItems = [];
     items.forEach((it) => {
       if (it.mapPos) positions[it.id] = { ...it.mapPos };
       else newItems.push(it);
     });
+    newItems.sort((a, b) => linkCounts[b.id] - linkCounts[a.id]);
     const step = 2 * Math.PI / Math.max(newItems.length, 1);
     newItems.forEach((it, idx) => {
       const angle = idx * step;
-      const x = center + 100 * Math.cos(angle);
-      const y = center + 100 * Math.sin(angle);
+      const degree = linkCounts[it.id];
+      const dist = 100 - degree / maxLinks * 50;
+      const x = center + dist * Math.cos(angle);
+      const y = center + dist * Math.sin(angle);
       positions[it.id] = { x, y };
       it.mapPos = positions[it.id];
     });
@@ -2054,7 +2062,9 @@ var Sevenn = (() => {
       const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       circle.setAttribute("cx", pos.x);
       circle.setAttribute("cy", pos.y);
-      circle.setAttribute("r", 20);
+      const baseR = minRadius + (maxRadius - minRadius) * (linkCounts[it.id] || 0) / maxLinks;
+      circle.setAttribute("r", baseR);
+      circle.dataset.radius = baseR;
       circle.setAttribute("class", "map-node");
 
       circle.dataset.id = it.id;
@@ -2080,7 +2090,7 @@ var Sevenn = (() => {
       g.appendChild(circle);
       text = document.createElementNS("http://www.w3.org/2000/svg", "text");
       text.setAttribute("x", pos.x);
-      text.setAttribute("y", pos.y - 28);
+      text.setAttribute("y", pos.y - (baseR + 8));
       text.setAttribute("class", "map-label");
       text.dataset.id = it.id;
       text.textContent = it.name || it.concept || "?";
@@ -2094,15 +2104,20 @@ var Sevenn = (() => {
     if (!svg) return;
     const vb = svg.getAttribute("viewBox").split(" ").map(Number);
     const unit = vb[2] / svg.clientWidth;
-
-    const scale = Math.pow(unit, 0.8);
-    const offset = 28 * scale;
-    document.querySelectorAll(".map-node").forEach((c) => c.setAttribute("r", 20 * scale));
+    const nodeScale = Math.pow(unit, 0.8);
+    const labelScale = Math.pow(unit, 1.1);
+    document.querySelectorAll(".map-node").forEach((c) => {
+      const baseR = Number(c.dataset.radius) || 20;
+      c.setAttribute("r", baseR * nodeScale);
+    });
     document.querySelectorAll(".map-label").forEach((t) => {
-      t.setAttribute("font-size", 12 * scale);
+      t.setAttribute("font-size", 12 * labelScale);
       const id = t.dataset.id;
       const c = document.querySelector(`circle[data-id='${id}']`);
-      if (c) t.setAttribute("y", Number(c.getAttribute("cy")) - offset);
+      if (c) {
+        const baseR = Number(c.dataset.radius) || 20;
+        t.setAttribute("y", Number(c.getAttribute("cy")) - (baseR + 8) * nodeScale);
+      }
     });
     document.querySelectorAll(".map-edge").forEach((l) => l.setAttribute("stroke-width", 4 * Math.pow(unit, -0.2)));
   }
