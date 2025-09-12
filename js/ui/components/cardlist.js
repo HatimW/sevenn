@@ -5,11 +5,6 @@ import { confirmModal } from './confirm.js';
 import { openLinker } from './linker.js';
 
 const kindColors = { disease: 'var(--pink)', drug: 'var(--blue)', concept: 'var(--green)' };
-const collapsedPref = {
-  disease: ['pathophys','clinical'],
-  drug: ['moa','uses'],
-  concept: ['definition','mechanism']
-};
 const fieldDefs = {
   disease: [
     ['etiology','Etiology','🧬'],
@@ -51,28 +46,27 @@ export function createItemCard(item, onChange){
   header.className = 'card-header';
 
   const mainBtn = document.createElement('button');
-  mainBtn.className = 'header-main';
+  mainBtn.className = 'card-title-btn';
+  mainBtn.textContent = item.name || item.concept || 'Untitled';
   mainBtn.setAttribute('aria-expanded', expanded.has(item.id));
   mainBtn.addEventListener('click', () => {
     if (expanded.has(item.id)) expanded.delete(item.id); else expanded.add(item.id);
-    renderBody();
     card.classList.toggle('expanded');
     mainBtn.setAttribute('aria-expanded', expanded.has(item.id));
   });
-
-  const badge = document.createElement('span');
-  badge.className = `kind-badge ${item.kind}`;
-  badge.textContent = item.kind.charAt(0).toUpperCase() + item.kind.slice(1);
-  mainBtn.appendChild(badge);
-
-  const title = document.createElement('span');
-  title.className = 'card-title';
-  title.textContent = item.name || item.concept || 'Untitled';
-  mainBtn.appendChild(title);
   header.appendChild(mainBtn);
 
-  const actions = document.createElement('div');
-  actions.className = 'card-actions';
+  const settings = document.createElement('div');
+  settings.className = 'card-settings';
+  const gear = document.createElement('button');
+  gear.className = 'icon-btn';
+  gear.textContent = '⚙️';
+  const menu = document.createElement('div');
+  menu.className = 'card-menu hidden';
+  gear.addEventListener('click', e => { e.stopPropagation(); menu.classList.toggle('hidden'); });
+  settings.appendChild(gear);
+  settings.appendChild(menu);
+  header.appendChild(settings);
 
   const fav = document.createElement('button');
   fav.className = 'icon-btn';
@@ -86,7 +80,7 @@ export function createItemCard(item, onChange){
     fav.textContent = item.favorite ? '★' : '☆';
     onChange && onChange();
   });
-  actions.appendChild(fav);
+  menu.appendChild(fav);
 
   const link = document.createElement('button');
   link.className = 'icon-btn';
@@ -94,7 +88,7 @@ export function createItemCard(item, onChange){
   link.title = 'Links';
   link.setAttribute('aria-label','Manage links');
   link.addEventListener('click', e => { e.stopPropagation(); openLinker(item, onChange); });
-  actions.appendChild(link);
+  menu.appendChild(link);
 
   const edit = document.createElement('button');
   edit.className = 'icon-btn';
@@ -102,7 +96,7 @@ export function createItemCard(item, onChange){
   edit.title = 'Edit';
   edit.setAttribute('aria-label','Edit');
   edit.addEventListener('click', e => { e.stopPropagation(); openEditor(item.kind, onChange, item); });
-  actions.appendChild(edit);
+  menu.appendChild(edit);
 
   const copy = document.createElement('button');
   copy.className = 'icon-btn';
@@ -113,7 +107,7 @@ export function createItemCard(item, onChange){
     e.stopPropagation();
     navigator.clipboard && navigator.clipboard.writeText(item.name || item.concept || '');
   });
-  actions.appendChild(copy);
+  menu.appendChild(copy);
 
   const del = document.createElement('button');
   del.className = 'icon-btn';
@@ -127,34 +121,9 @@ export function createItemCard(item, onChange){
       onChange && onChange();
     }
   });
-  actions.appendChild(del);
+  menu.appendChild(del);
 
-  header.appendChild(actions);
   card.appendChild(header);
-
-  const identifiers = document.createElement('div');
-  identifiers.className = 'identifiers';
-  (item.blocks || []).forEach(b => {
-    const chip = document.createElement('span');
-    chip.className = 'chip';
-    chip.textContent = b;
-    identifiers.appendChild(chip);
-  });
-  (item.weeks || []).forEach(w => {
-    const chip = document.createElement('span');
-    chip.className = 'chip';
-    chip.textContent = 'W' + w;
-    identifiers.appendChild(chip);
-  });
-  if (item.lectures) {
-    item.lectures.forEach(l => {
-      const chip = document.createElement('span');
-      chip.className = 'chip';
-      chip.textContent = '📚 ' + (l.name || l.id);
-      identifiers.appendChild(chip);
-    });
-  }
-  card.appendChild(identifiers);
 
   const body = document.createElement('div');
   body.className = 'card-body';
@@ -162,10 +131,32 @@ export function createItemCard(item, onChange){
 
   function renderBody(){
     body.innerHTML = '';
+    const identifiers = document.createElement('div');
+    identifiers.className = 'identifiers';
+    (item.blocks || []).forEach(b => {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = b;
+      identifiers.appendChild(chip);
+    });
+    (item.weeks || []).forEach(w => {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = 'W' + w;
+      identifiers.appendChild(chip);
+    });
+    if (item.lectures) {
+      item.lectures.forEach(l => {
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.textContent = '📚 ' + (l.name || l.id);
+        identifiers.appendChild(chip);
+      });
+    }
+    body.appendChild(identifiers);
+
     const defs = fieldDefs[item.kind] || [];
-    const showAll = expanded.has(item.id);
-    const fields = showAll ? defs : defs.filter(d => collapsedPref[item.kind].includes(d[0]));
-    fields.forEach(([f,label,icon]) => {
+    defs.forEach(([f,label,icon]) => {
       if (!item[f]) return;
       const sec = document.createElement('div');
       sec.className = 'section';
