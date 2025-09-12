@@ -205,24 +205,26 @@ export function createItemCard(item, onChange){
 export async function renderCardList(container, items, kind, onChange){
   const blocks = await listBlocks();
   const blockTitle = id => blocks.find(b => b.blockId === id)?.title || id;
+  const orderMap = new Map(blocks.map((b,i)=>[b.blockId,i]));
   const groups = new Map();
   items.forEach(it => {
-    const bs = it.blocks && it.blocks.length ? it.blocks : ['_'];
-    const ws = it.weeks && it.weeks.length ? it.weeks : ['_'];
-    bs.forEach(b => {
-      if (!groups.has(b)) groups.set(b, new Map());
-      const wkMap = groups.get(b);
-      ws.forEach(w => {
-        const arr = wkMap.get(w) || [];
-        arr.push(it);
-        wkMap.set(w, arr);
-      });
+    let block = '_';
+    let best = Infinity;
+    (it.blocks || []).forEach(id => {
+      const ord = orderMap.has(id) ? orderMap.get(id) : Infinity;
+      if (ord < best) { block = id; best = ord; }
     });
+    const week = it.weeks && it.weeks.length ? Math.max(...it.weeks) : '_';
+    if (!groups.has(block)) groups.set(block, new Map());
+    const wkMap = groups.get(block);
+    const arr = wkMap.get(week) || [];
+    arr.push(it);
+    wkMap.set(week, arr);
   });
   const sortedBlocks = Array.from(groups.keys()).sort((a,b)=>{
-    if (a === '_' && b !== '_') return 1;
-    if (b === '_' && a !== '_') return -1;
-    return a.localeCompare(b);
+    const ao = orderMap.has(a) ? orderMap.get(a) : Infinity;
+    const bo = orderMap.has(b) ? orderMap.get(b) : Infinity;
+    return ao - bo;
   });
   sortedBlocks.forEach(b => {
     const blockSec = document.createElement('section');
@@ -230,6 +232,8 @@ export async function renderCardList(container, items, kind, onChange){
     const h2 = document.createElement('div');
     h2.className = 'block-header';
     h2.textContent = b === '_' ? 'Unassigned' : `${blockTitle(b)} (${b})`;
+    const bdef = blocks.find(bl => bl.blockId === b);
+    if (bdef?.color) h2.style.background = bdef.color;
     blockSec.appendChild(h2);
     const wkMap = groups.get(b);
     const sortedWeeks = Array.from(wkMap.keys()).sort((a,b)=>{
