@@ -59,7 +59,7 @@ export async function renderMap(root){
       nodeDrag.label.setAttribute('x', x);
       const baseR = Number(nodeDrag.circle.dataset.radius) || 20;
 
-      nodeDrag.label.setAttribute('y', y - (baseR + 8) * scale);
+      nodeDrag.label.setAttribute('y', y - (baseR + 8) * nodeScale);
       updateEdges(nodeDrag.id);
       nodeWasDragged = true;
       return;
