@@ -374,20 +374,18 @@ button:hover {
   cursor:pointer;
 }
 
-.card-settings { position:absolute; right:var(--pad); top:50%; transform:translateY(-50%); }
+.card-settings {
+  position:absolute;
+  top:var(--pad);
+  right:var(--pad);
+  display:flex;
+  flex-direction:row;
+  gap:4px;
+}
 
 .card-menu {
-  position:absolute;
-  right:0;
-  top:100%;
-  background:var(--panel);
-  border:1px solid var(--border);
-  border-radius:var(--radius);
   display:flex;
-  flex-direction:column;
   gap:4px;
-  padding:4px;
-  z-index:5;
 }
 
 .card-menu.hidden { display:none; }

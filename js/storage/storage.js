@@ -56,9 +56,33 @@ export async function upsertBlock(def) {
   const b = await store('blocks', 'readwrite');
   const existing = await prom(b.get(def.blockId));
   const now = Date.now();
+  let lectures = def.lectures || existing?.lectures || [];
+  if (existing && typeof def.weeks === 'number' && def.weeks < existing.weeks) {
+    const maxWeek = def.weeks;
+    lectures = lectures.filter(l => l.week <= maxWeek);
+    const i = await store('items', 'readwrite');
+    const all = await prom(i.getAll());
+    for (const it of all) {
+      let changed = false;
+      if (it.lectures) {
+        const before = it.lectures.length;
+        it.lectures = it.lectures.filter(l => !(l.blockId === def.blockId && l.week > maxWeek));
+        if (it.lectures.length !== before) changed = true;
+      }
+      if (it.weeks) {
+        const beforeW = it.weeks.length;
+        it.weeks = it.weeks.filter(w => w <= maxWeek);
+        if (it.weeks.length !== beforeW) changed = true;
+      }
+      if (changed) {
+        it.tokens = buildTokens(it);
+        await prom(i.put(it));
+      }
+    }
+  }
   const next = {
     ...def,
-    lectures: def.lectures || [],
+    lectures,
     color: def.color || existing?.color || null,
     order: def.order || existing?.order || now,
     createdAt: existing?.createdAt || now,
