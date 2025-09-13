@@ -290,9 +290,33 @@ var Sevenn = (() => {
     const b = await store("blocks", "readwrite");
     const existing = await prom2(b.get(def.blockId));
     const now = Date.now();
+    let lectures = def.lectures || existing?.lectures || [];
+    if (existing && typeof def.weeks === "number" && def.weeks < existing.weeks) {
+      const maxWeek = def.weeks;
+      lectures = lectures.filter((l) => l.week <= maxWeek);
+      const i = await store("items", "readwrite");
+      const all = await prom2(i.getAll());
+      for (const it of all) {
+        let changed = false;
+        if (it.lectures) {
+          const before = it.lectures.length;
+          it.lectures = it.lectures.filter((l) => !(l.blockId === def.blockId && l.week > maxWeek));
+          if (it.lectures.length !== before) changed = true;
+        }
+        if (it.weeks) {
+          const beforeW = it.weeks.length;
+          it.weeks = it.weeks.filter((w) => w <= maxWeek);
+          if (it.weeks.length !== beforeW) changed = true;
+        }
+        if (changed) {
+          it.tokens = buildTokens(it);
+          await prom2(i.put(it));
+        }
+      }
+    }
     const next = {
       ...def,
-      lectures: def.lectures || [],
+      lectures,
       color: def.color || existing?.color || null,
       order: def.order || existing?.order || now,
       createdAt: existing?.createdAt || now,
@@ -303,6 +327,75 @@ var Sevenn = (() => {
   async function deleteBlock(blockId) {
     const b = await store("blocks", "readwrite");
     await prom2(b.delete(blockId));
+    const i = await store("items", "readwrite");
+    const all = await prom2(i.getAll());
+    for (const it of all) {
+      const beforeBlocks = it.blocks?.length || 0;
+      const beforeLects = it.lectures?.length || 0;
+      if (beforeBlocks || beforeLects) {
+        if (it.blocks) it.blocks = it.blocks.filter((bId) => bId !== blockId);
+        if (it.lectures) it.lectures = it.lectures.filter((l) => l.blockId !== blockId);
+        if (it.weeks) {
+          const validWeeks = new Set((it.lectures || []).map((l) => l.week));
+          it.weeks = Array.from(validWeeks);
+        }
+        if ((it.blocks?.length || 0) !== beforeBlocks || (it.lectures?.length || 0) !== beforeLects) {
+          it.tokens = buildTokens(it);
+          await prom2(i.put(it));
+        }
+      }
+    }
+  }
+  async function deleteLecture(blockId, lectureId) {
+    const b = await store("blocks", "readwrite");
+    const blk = await prom2(b.get(blockId));
+    if (blk) {
+      blk.lectures = (blk.lectures || []).filter((l) => l.id !== lectureId);
+      await prom2(b.put(blk));
+    }
+    const i = await store("items", "readwrite");
+    const all = await prom2(i.getAll());
+    for (const it of all) {
+      const before = it.lectures?.length || 0;
+      if (before) {
+        it.lectures = it.lectures.filter((l) => !(l.blockId === blockId && l.id === lectureId));
+        if (it.lectures.length !== before) {
+          it.blocks = it.blocks?.filter((bid) => bid !== blockId || it.lectures.some((l) => l.blockId === bid));
+          const validWeeks = new Set((it.lectures || []).map((l) => l.week));
+          it.weeks = Array.from(validWeeks);
+          it.tokens = buildTokens(it);
+          await prom2(i.put(it));
+        }
+      }
+    }
+  }
+  async function updateLecture(blockId, lecture) {
+    const b = await store("blocks", "readwrite");
+    const blk = await prom2(b.get(blockId));
+    if (blk) {
+      blk.lectures = (blk.lectures || []).map((l) => l.id === lecture.id ? lecture : l);
+      await prom2(b.put(blk));
+    }
+    const i = await store("items", "readwrite");
+    const all = await prom2(i.getAll());
+    for (const it of all) {
+      let changed = false;
+      if (it.lectures) {
+        it.lectures = it.lectures.map((l) => {
+          if (l.blockId === blockId && l.id === lecture.id) {
+            changed = true;
+            return { blockId, id: lecture.id, name: lecture.name, week: lecture.week };
+          }
+          return l;
+        });
+      }
+      if (changed) {
+        const validWeeks = new Set((it.lectures || []).map((l) => l.week));
+        it.weeks = Array.from(validWeeks);
+        it.tokens = buildTokens(it);
+        await prom2(i.put(it));
+      }
+    }
   }
   async function listItemsByKind(kind) {
     const i = await store("items");
@@ -319,7 +412,11 @@ var Sevenn = (() => {
       items = items.filter((it) => filter.types.includes(it.kind));
     }
     if (filter.block) {
-      items = items.filter((it) => (it.blocks || []).includes(filter.block));
+      if (filter.block === "__unlabeled") {
+        items = items.filter((it) => !it.blocks || !it.blocks.length);
+      } else {
+        items = items.filter((it) => (it.blocks || []).includes(filter.block));
+      }
     }
     if (filter.week) {
       items = items.filter((it) => (it.weeks || []).includes(filter.week));
@@ -475,6 +572,9 @@ var Sevenn = (() => {
       const title = document.createElement("h3");
       title.textContent = `${b.blockId} \u2013 ${b.title}`;
       wrap.appendChild(title);
+      const wkInfo = document.createElement("div");
+      wkInfo.textContent = `Weeks: ${b.weeks}`;
+      wrap.appendChild(wkInfo);
       const controls = document.createElement("div");
       controls.className = "row";
       const upBtn = document.createElement("button");
@@ -550,9 +650,53 @@ var Sevenn = (() => {
         editForm.style.display = editForm.style.display === "none" ? "flex" : "none";
       });
       const lecList = document.createElement("ul");
-      b.lectures.forEach((l) => {
+      (b.lectures || []).slice().sort((a, b2) => b2.week - a.week || b2.id - a.id).forEach((l) => {
         const li = document.createElement("li");
-        li.textContent = `${l.id}: ${l.name} (W${l.week})`;
+        li.className = "row";
+        const span = document.createElement("span");
+        span.textContent = `${l.id}: ${l.name} (W${l.week})`;
+        li.appendChild(span);
+        const editLec = document.createElement("button");
+        editLec.className = "btn";
+        editLec.textContent = "Edit";
+        const delLec = document.createElement("button");
+        delLec.className = "btn";
+        delLec.textContent = "Delete";
+        editLec.addEventListener("click", () => {
+          li.innerHTML = "";
+          li.className = "row";
+          const nameInput2 = document.createElement("input");
+          nameInput2.className = "input";
+          nameInput2.value = l.name;
+          const weekInput2 = document.createElement("input");
+          weekInput2.className = "input";
+          weekInput2.type = "number";
+          weekInput2.value = l.week;
+          const saveBtn2 = document.createElement("button");
+          saveBtn2.className = "btn";
+          saveBtn2.textContent = "Save";
+          const cancelBtn = document.createElement("button");
+          cancelBtn.className = "btn";
+          cancelBtn.textContent = "Cancel";
+          li.append(nameInput2, weekInput2, saveBtn2, cancelBtn);
+          saveBtn2.addEventListener("click", async () => {
+            const name = nameInput2.value.trim();
+            const week = Number(weekInput2.value);
+            if (!name || !week || week < 1 || week > b.weeks) return;
+            await updateLecture(b.blockId, { id: l.id, name, week });
+            await renderSettings(root);
+          });
+          cancelBtn.addEventListener("click", async () => {
+            await renderSettings(root);
+          });
+        });
+        delLec.addEventListener("click", async () => {
+          if (await confirmModal("Delete lecture?")) {
+            await deleteLecture(b.blockId, l.id);
+            await renderSettings(root);
+          }
+        });
+        li.append(editLec, delLec);
         lecList.appendChild(li);
       });
       wrap.appendChild(lecList);
@@ -578,6 +722,7 @@ var Sevenn = (() => {
         e.preventDefault();
         const lecture = { id: Number(idInput.value), name: nameInput.value.trim(), week: Number(weekInput.value) };
         if (!lecture.id || !lecture.name || !lecture.week) return;
+        if (lecture.week < 1 || lecture.week > b.weeks) return;
         const updated = { ...b, lectures: [...b.lectures, lecture] };
         await upsertBlock(updated);
         await renderSettings(root);
@@ -759,80 +904,74 @@ var Sevenn = (() => {
     form.appendChild(colorLabel);
     const blocks = await listBlocks();
     const blockMap = new Map(blocks.map((b) => [b.blockId, b]));
-    const selections = /* @__PURE__ */ new Map();
+    const blockSet = new Set(existing?.blocks || []);
+    const weekSet = /* @__PURE__ */ new Set();
+    const lectSet = /* @__PURE__ */ new Set();
+    existing?.lectures?.forEach((l) => {
+      blockSet.add(l.blockId);
+      weekSet.add(`${l.blockId}|${l.week}`);
+      lectSet.add(`${l.blockId}|${l.id}`);
+    });
     const blockWrap = document.createElement("div");
     blockWrap.className = "tag-wrap";
     const blockTitle = document.createElement("div");
-    blockTitle.textContent = "Blocks";
+    blockTitle.textContent = "Tags";
     blockWrap.appendChild(blockTitle);
-    const blockRow = document.createElement("div");
-    blockRow.className = "tag-row";
     blocks.forEach((b) => {
-      const container = document.createElement("div");
-      const chip = document.createElement("span");
-      chip.className = "chip";
-      chip.textContent = b.title || b.blockId;
-      const selDiv = document.createElement("div");
-      selDiv.className = "row";
-      selDiv.style.display = "none";
-      const weekSel = document.createElement("select");
-      weekSel.className = "input";
-      const wBlank = document.createElement("option");
-      wBlank.value = "";
-      wBlank.textContent = "Week";
-      weekSel.appendChild(wBlank);
-      for (let w = 1; w <= b.weeks; w++) {
-        const opt = document.createElement("option");
-        opt.value = w;
-        opt.textContent = "W" + w;
-        weekSel.appendChild(opt);
-      }
-      const lecSel = document.createElement("select");
-      lecSel.className = "input";
-      const lBlank = document.createElement("option");
-      lBlank.value = "";
-      lBlank.textContent = "Lecture";
-      lecSel.appendChild(lBlank);
-      weekSel.addEventListener("change", () => {
-        const w = Number(weekSel.value);
-        lecSel.innerHTML = "";
-        const blank = document.createElement("option");
-        blank.value = "";
-        blank.textContent = "Lecture";
-        lecSel.appendChild(blank);
-        if (w) {
-          (b.lectures || []).filter((l) => l.week === w).forEach((l) => {
-            const opt = document.createElement("option");
-            opt.value = l.id;
-            opt.textContent = l.name;
-            lecSel.appendChild(opt);
+      const blockDiv = document.createElement("div");
+      const blkLabel = document.createElement("label");
+      blkLabel.className = "row";
+      const blkCb = document.createElement("input");
+      blkCb.type = "checkbox";
+      blkCb.checked = blockSet.has(b.blockId);
+      blkLabel.appendChild(blkCb);
+      blkLabel.appendChild(document.createTextNode(b.title || b.blockId));
+      blockDiv.appendChild(blkLabel);
+      const weekWrap = document.createElement("div");
+      weekWrap.className = "builder-sub";
+      weekWrap.style.display = blkCb.checked ? "block" : "none";
+      blockDiv.appendChild(weekWrap);
+      blkCb.addEventListener("change", () => {
+        if (blkCb.checked) blockSet.add(b.blockId);
+        else blockSet.delete(b.blockId);
+        weekWrap.style.display = blkCb.checked ? "block" : "none";
+      });
+      const weeks = Array.from({ length: b.weeks || 0 }, (_, i) => i + 1);
+      weeks.forEach((w) => {
+        const wkLabel = document.createElement("label");
+        wkLabel.className = "row";
+        const wkCb = document.createElement("input");
+        wkCb.type = "checkbox";
+        const wkKey = `${b.blockId}|${w}`;
+        wkCb.checked = weekSet.has(wkKey);
+        wkLabel.appendChild(wkCb);
+        wkLabel.appendChild(document.createTextNode(`Week ${w}`));
+        weekWrap.appendChild(wkLabel);
+        const lecWrap = document.createElement("div");
+        lecWrap.className = "builder-sub";
+        lecWrap.style.display = wkCb.checked ? "block" : "none";
+        wkLabel.appendChild(lecWrap);
+        wkCb.addEventListener("change", () => {
+          if (wkCb.checked) weekSet.add(wkKey);
+          else weekSet.delete(wkKey);
+          lecWrap.style.display = wkCb.checked ? "block" : "none";
+        });
+        (b.lectures || []).filter((l) => l.week === w).forEach((l) => {
+          const key = `${b.blockId}|${l.id}`;
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "chip" + (lectSet.has(key) ? " active" : "");
+          btn.textContent = l.name;
+          btn.addEventListener("click", () => {
+            if (lectSet.has(key)) lectSet.delete(key);
+            else lectSet.add(key);
+            btn.classList.toggle("active");
           });
-        }
+          lecWrap.appendChild(btn);
+        });
       });
-      chip.addEventListener("click", () => {
-        const active = chip.classList.toggle("active");
-        selDiv.style.display = active ? "flex" : "none";
-        if (active) selections.set(b.blockId, { weekSel, lecSel });
-        else selections.delete(b.blockId);
-      });
-      container.appendChild(chip);
-      container.appendChild(selDiv);
-      selDiv.appendChild(weekSel);
-      selDiv.appendChild(lecSel);
-      blockRow.appendChild(container);
-      if (existing?.blocks?.includes(b.blockId)) {
-        chip.classList.add("active");
-        selDiv.style.display = "flex";
-        selections.set(b.blockId, { weekSel, lecSel });
-        const lec = existing?.lectures?.find((l) => l.blockId === b.blockId);
-        if (lec) {
-          weekSel.value = lec.week;
-          weekSel.dispatchEvent(new Event("change"));
-          lecSel.value = lec.id;
-        }
-      }
+      blockWrap.appendChild(blockDiv);
     });
-    blockWrap.appendChild(blockRow);
     form.appendChild(blockWrap);
     const saveBtn = document.createElement("button");
     saveBtn.type = "submit";
@@ -862,20 +1001,17 @@ var Sevenn = (() => {
           item[field] = v;
         }
       });
-      item.blocks = Array.from(selections.keys());
-      const weekSet = /* @__PURE__ */ new Set();
+      item.blocks = Array.from(blockSet);
+      const weekNums = new Set(Array.from(weekSet).map((k) => Number(k.split("|")[1])));
+      item.weeks = Array.from(weekNums);
       const lectures = [];
-      selections.forEach(({ weekSel, lecSel }, blockId) => {
-        const w = Number(weekSel.value);
-        if (w) weekSet.add(w);
-        const lecId = Number(lecSel.value);
-        if (lecId) {
-          const blk = blockMap.get(blockId);
-          const l = blk?.lectures.find((l2) => l2.id === lecId);
-          if (l) lectures.push({ blockId, id: l.id, name: l.name, week: l.week });
-        }
-      });
-      item.weeks = Array.from(weekSet);
+      for (const key of lectSet) {
+        const [blockId, lecIdStr] = key.split("|");
+        const lecId = Number(lecIdStr);
+        const blk = blockMap.get(blockId);
+        const l = blk?.lectures.find((l2) => l2.id === lecId);
+        if (l) lectures.push({ blockId, id: l.id, name: l.name, week: l.week });
+      }
       item.lectures = lectures;
       item.color = colorInput.value;
       await upsertItem(item);
@@ -1058,17 +1194,16 @@ var Sevenn = (() => {
     header.appendChild(mainBtn);
     const settings = document.createElement("div");
     settings.className = "card-settings";
+    const menu = document.createElement("div");
+    menu.className = "card-menu hidden";
     const gear = document.createElement("button");
     gear.className = "icon-btn";
     gear.textContent = "\u2699\uFE0F";
-    const menu = document.createElement("div");
-    menu.className = "card-menu hidden";
     gear.addEventListener("click", (e) => {
       e.stopPropagation();
       menu.classList.toggle("hidden");
     });
-    settings.appendChild(gear);
-    settings.appendChild(menu);
+    settings.append(menu, gear);
     header.appendChild(settings);
     const fav = document.createElement("button");
     fav.className = "icon-btn";
@@ -1206,15 +1341,30 @@ var Sevenn = (() => {
     const groups = /* @__PURE__ */ new Map();
     items.forEach((it) => {
       let block = "_";
-      let best = Infinity;
-      (it.blocks || []).forEach((id) => {
-        const ord = orderMap.has(id) ? orderMap.get(id) : Infinity;
-        if (ord < best) {
-          block = id;
-          best = ord;
-        }
-      });
-      const week = it.weeks && it.weeks.length ? Math.max(...it.weeks) : "_";
+      let week = "_";
+      if (it.lectures && it.lectures.length) {
+        let bestOrd = Infinity, bestWeek = -Infinity, bestLec = -Infinity;
+        it.lectures.forEach((l) => {
+          const ord = orderMap.has(l.blockId) ? orderMap.get(l.blockId) : Infinity;
+          if (ord < bestOrd || ord === bestOrd && (l.week > bestWeek || l.week === bestWeek && l.id > bestLec)) {
+            block = l.blockId;
+            week = l.week;
+            bestOrd = ord;
+            bestWeek = l.week;
+            bestLec = l.id;
+          }
+        });
+      } else {
+        let bestOrd = Infinity;
+        (it.blocks || []).forEach((id) => {
+          const ord = orderMap.has(id) ? orderMap.get(id) : Infinity;
+          if (ord < bestOrd) {
+            block = id;
+            bestOrd = ord;
+          }
+        });
+        if (it.weeks && it.weeks.length) week = Math.max(...it.weeks);
+      }
       if (!groups.has(block)) groups.set(block, /* @__PURE__ */ new Map());
       const wkMap = groups.get(block);
       const arr = wkMap.get(week) || [];
@@ -1231,7 +1381,7 @@ var Sevenn = (() => {
       blockSec.className = "block-section";
       const h2 = document.createElement("div");
       h2.className = "block-header";
-      h2.textContent = b === "_" ? "Unassigned" : `${blockTitle(b)} (${b})`;
+      h2.textContent = b === "_" ? "Unassigned" : blockTitle(b);
       const bdef = blocks.find((bl) => bl.blockId === b);
       if (bdef?.color) h2.style.background = bdef.color;
       blockSec.appendChild(h2);
@@ -1239,7 +1389,7 @@ var Sevenn = (() => {
       const sortedWeeks = Array.from(wkMap.keys()).sort((a, b2) => {
         if (a === "_" && b2 !== "_") return 1;
         if (b2 === "_" && a !== "_") return -1;
-        return Number(a) - Number(b2);
+        return Number(b2) - Number(a);
       });
       sortedWeeks.forEach((w) => {
         const weekSec = document.createElement("div");
@@ -1430,6 +1580,7 @@ var Sevenn = (() => {
     wrap.className = "builder";
     root.appendChild(wrap);
     const blocks = await listBlocks();
+    blocks.push({ blockId: "__unlabeled", title: "Unlabeled", weeks: 0, lectures: [] });
     blocks.forEach((b) => {
       const blockDiv = document.createElement("div");
       blockDiv.className = "builder-section";
@@ -1537,7 +1688,13 @@ var Sevenn = (() => {
       }
       items = items.filter((it) => {
         if (state.builder.onlyFav && !it.favorite) return false;
-        if (state.builder.blocks.length && !it.blocks?.some((b) => state.builder.blocks.includes(b))) return false;
+        if (state.builder.blocks.length) {
+          const wantUnlabeled = state.builder.blocks.includes("__unlabeled");
+          const hasMatch = it.blocks?.some((b) => state.builder.blocks.includes(b));
+          if (!hasMatch) {
+            if (!(wantUnlabeled && (!it.blocks || !it.blocks.length))) return false;
+          }
+        }
         if (state.builder.weeks.length) {
           const ok = state.builder.weeks.some((pair) => {
             const [b, w] = pair.split("|");

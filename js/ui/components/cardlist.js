@@ -58,14 +58,13 @@ export function createItemCard(item, onChange){
 
   const settings = document.createElement('div');
   settings.className = 'card-settings';
+  const menu = document.createElement('div');
+  menu.className = 'card-menu hidden';
   const gear = document.createElement('button');
   gear.className = 'icon-btn';
   gear.textContent = '⚙️';
-  const menu = document.createElement('div');
-  menu.className = 'card-menu hidden';
   gear.addEventListener('click', e => { e.stopPropagation(); menu.classList.toggle('hidden'); });
-  settings.appendChild(gear);
-  settings.appendChild(menu);
+  settings.append(menu, gear);
   header.appendChild(settings);
 
   const fav = document.createElement('button');
@@ -209,12 +208,30 @@ export async function renderCardList(container, items, kind, onChange){
   const groups = new Map();
   items.forEach(it => {
     let block = '_';
-    let best = Infinity;
-    (it.blocks || []).forEach(id => {
-      const ord = orderMap.has(id) ? orderMap.get(id) : Infinity;
-      if (ord < best) { block = id; best = ord; }
-    });
-    const week = it.weeks && it.weeks.length ? Math.max(...it.weeks) : '_';
+    let week = '_';
+    if (it.lectures && it.lectures.length) {
+      let bestOrd = Infinity, bestWeek = -Infinity, bestLec = -Infinity;
+      it.lectures.forEach(l => {
+        const ord = orderMap.has(l.blockId) ? orderMap.get(l.blockId) : Infinity;
+        if (
+          ord < bestOrd ||
+          (ord === bestOrd && (l.week > bestWeek || (l.week === bestWeek && l.id > bestLec)))
+        ) {
+          block = l.blockId;
+          week = l.week;
+          bestOrd = ord;
+          bestWeek = l.week;
+          bestLec = l.id;
+        }
+      });
+    } else {
+      let bestOrd = Infinity;
+      (it.blocks || []).forEach(id => {
+        const ord = orderMap.has(id) ? orderMap.get(id) : Infinity;
+        if (ord < bestOrd) { block = id; bestOrd = ord; }
+      });
+      if (it.weeks && it.weeks.length) week = Math.max(...it.weeks);
+    }
     if (!groups.has(block)) groups.set(block, new Map());
     const wkMap = groups.get(block);
     const arr = wkMap.get(week) || [];
@@ -231,7 +248,7 @@ export async function renderCardList(container, items, kind, onChange){
     blockSec.className = 'block-section';
     const h2 = document.createElement('div');
     h2.className = 'block-header';
-    h2.textContent = b === '_' ? 'Unassigned' : `${blockTitle(b)} (${b})`;
+    h2.textContent = b === '_' ? 'Unassigned' : blockTitle(b);
     const bdef = blocks.find(bl => bl.blockId === b);
     if (bdef?.color) h2.style.background = bdef.color;
     blockSec.appendChild(h2);
@@ -239,7 +256,7 @@ export async function renderCardList(container, items, kind, onChange){
     const sortedWeeks = Array.from(wkMap.keys()).sort((a,b)=>{
       if (a === '_' && b !== '_') return 1;
       if (b === '_' && a !== '_') return -1;
-      return Number(a) - Number(b);
+      return Number(b) - Number(a);
     });
     sortedWeeks.forEach(w => {
       const weekSec = document.createElement('div');

@@ -64,7 +64,7 @@ export async function renderTable(container, items, kind, onChange) {
     const blockSec = document.createElement('section');
     blockSec.className = 'block-section';
     const h2 = document.createElement('h2');
-    h2.textContent = b === '_' ? 'Unassigned' : `${blockTitle(b)} (${b})`;
+    h2.textContent = b === '_' ? 'Unassigned' : blockTitle(b);
     const bdef = blocks.find(bl => bl.blockId === b);
     if (bdef?.color) h2.style.background = bdef.color;
     blockSec.appendChild(h2);

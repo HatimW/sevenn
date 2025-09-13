@@ -15,6 +15,7 @@
   --radius-lg:16px;
   --pad:12px;
   --pad-lg:16px;
+  --pad-sm:8px;
 }
 
 * {
@@ -161,6 +162,35 @@ button:hover {
   padding: 4px 8px;
 }
 
+input[type="checkbox"] {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--muted);
+  cursor: pointer;
+  display: inline-block;
+  position: relative;
+}
+
+input[type="checkbox"]:checked {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  width: 4px;
+  height: 8px;
+  border: solid #000;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
 .btn {
   background: var(--blue);
   color: #000;
@@ -237,11 +267,11 @@ button:hover {
 }
 
 .block-section {
-  margin: var(--pad);
+  margin: var(--pad-sm) 0;
 }
 
 .week-section {
-  margin-left: var(--pad);
+  margin-left: var(--pad-sm);
 }
 
 .chips {
@@ -329,27 +359,28 @@ button:hover {
 /* Browse cards */
 .block-header {
   background: linear-gradient(90deg, var(--purple), var(--blue));
-  padding: var(--pad);
-  border-radius: var(--radius-lg);
+  padding: var(--pad-sm);
+  border-radius: var(--radius);
   font-weight: 600;
   color: #000;
-  margin-bottom: var(--pad);
+  margin-bottom: var(--pad-sm);
 }
 
 .week-section h3 {
-  margin: var(--pad) 0;
+  margin: var(--pad-sm) 0;
+  font-size: 1rem;
 }
 
 .card-list {
   display: flex;
   flex-direction: column;
-  gap: var(--pad);
+  gap: var(--pad-sm);
 }
 
 .item-card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 
   width: 100%;
@@ -359,7 +390,7 @@ button:hover {
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: var(--pad);
+  padding: var(--pad-sm);
   position: relative;
 }
 
@@ -369,25 +400,25 @@ button:hover {
   color: inherit;
   text-align:center;
   flex:1;
-  font-size:2rem;
+  font-size:1.5rem;
   font-weight:700;
   cursor:pointer;
 }
 
-.card-settings { position:absolute; right:var(--pad); top:50%; transform:translateY(-50%); }
+.card-settings {
+  position:absolute;
+  top:var(--pad-sm);
+  right:var(--pad-sm);
+  display:flex;
+  flex-direction:row-reverse;
+  gap:4px;
+  z-index:5;
+}
 
 .card-menu {
-  position:absolute;
-  right:0;
-  top:100%;
-  background:var(--panel);
-  border:1px solid var(--border);
-  border-radius:var(--radius);
   display:flex;
-  flex-direction:column;
   gap:4px;
-  padding:4px;
-  z-index:5;
+  margin-right:4px;
 }
 
 .card-menu.hidden { display:none; }
@@ -396,7 +427,7 @@ button:hover {
   display:flex;
   gap:4px;
   flex-wrap:wrap;
-  margin-bottom:var(--pad);
+  margin-bottom:var(--pad-sm);
 }
 
 .icon-btn {
@@ -406,10 +437,16 @@ button:hover {
   color: var(--text);
   padding:2px;
   border-radius: var(--radius);
+  width:24px;
+  height:24px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:16px;
 }
 
 .card-body {
-  padding: 0 var(--pad) var(--pad);
+  padding: 0 var(--pad-sm) var(--pad-sm);
   display:none;
   flex:1;
   overflow:auto;
