@@ -45,6 +45,10 @@ export async function renderSettings(root) {
     title.textContent = `${b.blockId} – ${b.title}`;
     wrap.appendChild(title);
 
+    const wkInfo = document.createElement('div');
+    wkInfo.textContent = `Weeks: ${b.weeks}`;
+    wrap.appendChild(wkInfo);
+
     const controls = document.createElement('div');
     controls.className = 'row';
 
@@ -121,7 +125,7 @@ export async function renderSettings(root) {
     });
 
     const lecList = document.createElement('ul');
-    b.lectures.forEach(l => {
+    (b.lectures || []).slice().sort((a,b)=> b.week - a.week || b.id - a.id).forEach(l => {
       const li = document.createElement('li');
       li.className = 'row';
       const span = document.createElement('span');
