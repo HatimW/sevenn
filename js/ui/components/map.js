@@ -53,7 +53,8 @@ export async function renderMap(root){
       const x = viewBox.x + ((e.clientX - rect.left) / svg.clientWidth) * viewBox.w - nodeDrag.offset.x;
       const y = viewBox.y + ((e.clientY - rect.top) / svg.clientHeight) * viewBox.h - nodeDrag.offset.y;
 
-      positions[nodeDrag.id] = { x, y };
+      nodeDrag.pos.x = x;
+      nodeDrag.pos.y = y;
       nodeDrag.circle.setAttribute('cx', x);
       nodeDrag.circle.setAttribute('cy', y);
       nodeDrag.label.setAttribute('x', x);
@@ -76,7 +77,7 @@ export async function renderMap(root){
   window.addEventListener('mouseup', async () => {
     if (nodeDrag) {
       const it = itemMap[nodeDrag.id];
-      it.mapPos = positions[nodeDrag.id];
+      it.mapPos = { ...nodeDrag.pos };
       await upsertItem(it);
       nodeDrag = null;
     }
@@ -229,7 +230,7 @@ export async function renderMap(root){
       const rect = svg.getBoundingClientRect();
       const mouseX = viewBox.x + ((e.clientX - rect.left) / svg.clientWidth) * viewBox.w;
       const mouseY = viewBox.y + ((e.clientY - rect.top) / svg.clientHeight) * viewBox.h;
-      nodeDrag = { id: it.id, circle, label: text, offset: { x: mouseX - pos.x, y: mouseY - pos.y } };
+      nodeDrag = { id: it.id, circle, label: text, pos, offset: { x: mouseX - pos.x, y: mouseY - pos.y } };
       nodeWasDragged = false;
       svg.style.cursor = 'grabbing';
     });
