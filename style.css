@@ -407,6 +407,7 @@ input[type="checkbox"]:checked::after {
 
 .card-settings {
   position:absolute;
+
   top:var(--pad-sm);
   right:var(--pad-sm);
   display:flex;
