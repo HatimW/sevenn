@@ -9,6 +9,7 @@ export function cleanItem(item) {
     blocks: item.blocks || [],
     weeks: item.weeks || [],
     lectures: item.lectures || [],
+    mapPos: item.mapPos || null,
     sr: item.sr || { box:0, last:0, due:0, ease:2.5 }
   };
 }
