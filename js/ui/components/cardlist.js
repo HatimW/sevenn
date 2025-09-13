@@ -248,7 +248,7 @@ export async function renderCardList(container, items, kind, onChange){
     blockSec.className = 'block-section';
     const h2 = document.createElement('div');
     h2.className = 'block-header';
-    h2.textContent = b === '_' ? 'Unassigned' : `${blockTitle(b)} (${b})`;
+    h2.textContent = b === '_' ? 'Unassigned' : blockTitle(b);
     const bdef = blocks.find(bl => bl.blockId === b);
     if (bdef?.color) h2.style.background = bdef.color;
     blockSec.appendChild(h2);
