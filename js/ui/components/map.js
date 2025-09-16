@@ -37,7 +37,9 @@ const mapState = {
   selectionBox: null,
   sizeLimit: 2000,
   minView: 100,
-  lastPointer: { x: 0, y: 0 }
+  lastPointer: { x: 0, y: 0 },
+  autoPan: null,
+  autoPanFrame: null
 };
 
 export async function renderMap(root) {
@@ -50,6 +52,7 @@ export async function renderMap(root) {
   mapState.selectionRect = null;
   mapState.previewSelection = null;
   mapState.nodeWasDragged = false;
+  stopAutoPan();
 
   ensureListeners();
 
@@ -77,12 +80,30 @@ export async function renderMap(root) {
 
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.classList.add('map-svg');
-  const viewBox = {
+  const defaultView = {
     x: (size - viewport) / 2,
     y: (size - viewport) / 2,
     w: viewport,
     h: viewport
   };
+  let viewBox;
+  if (mapState.viewBox) {
+    const current = mapState.viewBox;
+    const cx = Number.isFinite(current.x) && Number.isFinite(current.w) ? current.x + current.w / 2 : defaultView.x + defaultView.w / 2;
+    const cy = Number.isFinite(current.y) && Number.isFinite(current.h) ? current.y + current.h / 2 : defaultView.y + defaultView.h / 2;
+    const minSize = mapState.minView || defaultView.w;
+    const maxSize = mapState.sizeLimit || defaultView.w;
+    const desiredSize = Number.isFinite(current.w) ? current.w : defaultView.w;
+    const clamped = Math.min(Math.max(desiredSize, minSize), maxSize);
+    viewBox = {
+      x: cx - clamped / 2,
+      y: cy - clamped / 2,
+      w: clamped,
+      h: clamped
+    };
+  } else {
+    viewBox = { ...defaultView };
+  }
 
   mapState.svg = svg;
   mapState.viewBox = viewBox;
@@ -269,7 +290,7 @@ function ensureListeners() {
 function attachSvgEvents(svg) {
   svg.addEventListener('mousedown', e => {
     if (e.target !== svg) return;
-    if (mapState.tool === TOOL.NAVIGATE) {
+    if (mapState.tool !== TOOL.AREA) {
       mapState.draggingView = true;
       mapState.lastPointer = { x: e.clientX, y: e.clientY };
       svg.style.cursor = 'grabbing';
@@ -327,6 +348,7 @@ function handleMouseMove(e) {
   }
 
   if (mapState.areaDrag) {
+    updateAutoPanFromPointer(e.clientX, e.clientY);
     const { x, y } = clientToMap(e.clientX, e.clientY);
     const dx = x - mapState.areaDrag.start.x;
     const dy = y - mapState.areaDrag.start.y;
@@ -359,6 +381,7 @@ function handleMouseMove(e) {
   }
 
   if (mapState.selectionRect) {
+    updateAutoPanFromPointer(e.clientX, e.clientY);
     mapState.selectionRect.current = { x: e.clientX, y: e.clientY };
     updateSelectionBox();
   }
@@ -391,6 +414,7 @@ async function handleMouseUp(e) {
       await Promise.all(ids.map(id => persistNodePosition(id)));
     }
     mapState.nodeWasDragged = false;
+    stopAutoPan();
   }
 
   if (mapState.draggingView) {
@@ -405,6 +429,7 @@ async function handleMouseUp(e) {
     mapState.selectionRect = null;
     mapState.selectionBox.classList.add('hidden');
     updateSelectionHighlight();
+    stopAutoPan();
   }
 }
 
@@ -443,6 +468,85 @@ function updateSelectionBox() {
   });
   mapState.previewSelection = preview;
   updateSelectionHighlight();
+}
+
+function updateAutoPanFromPointer(clientX, clientY) {
+  if (!mapState.svg || mapState.tool !== TOOL.AREA) return;
+  const vector = computeAutoPanVector(clientX, clientY);
+  if (vector) {
+    startAutoPan(vector);
+  } else {
+    stopAutoPan();
+  }
+}
+
+function computeAutoPanVector(clientX, clientY) {
+  const rect = mapState.svg.getBoundingClientRect();
+  const threshold = 40;
+  const baseSpeed = 25;
+  let dx = 0;
+  let dy = 0;
+
+  const leftDist = clientX - rect.left;
+  const rightDist = rect.right - clientX;
+  const topDist = clientY - rect.top;
+  const bottomDist = rect.bottom - clientY;
+
+  if (leftDist < threshold) {
+    const intensity = Math.min(1, Math.max(0, threshold - leftDist) / threshold);
+    dx -= intensity * baseSpeed;
+  } else if (rightDist < threshold) {
+    const intensity = Math.min(1, Math.max(0, threshold - rightDist) / threshold);
+    dx += intensity * baseSpeed;
+  }
+
+  if (topDist < threshold) {
+    const intensity = Math.min(1, Math.max(0, threshold - topDist) / threshold);
+    dy -= intensity * baseSpeed;
+  } else if (bottomDist < threshold) {
+    const intensity = Math.min(1, Math.max(0, threshold - bottomDist) / threshold);
+    dy += intensity * baseSpeed;
+  }
+
+  if (dx || dy) {
+    return { dx, dy };
+  }
+  return null;
+}
+
+function startAutoPan(vector) {
+  mapState.autoPan = vector;
+  applyAutoPan(vector);
+  if (typeof window === 'undefined') return;
+  if (mapState.autoPanFrame) return;
+  const step = () => {
+    if (!mapState.autoPan) {
+      mapState.autoPanFrame = null;
+      return;
+    }
+    applyAutoPan(mapState.autoPan);
+    mapState.autoPanFrame = window.requestAnimationFrame(step);
+  };
+  mapState.autoPanFrame = window.requestAnimationFrame(step);
+}
+
+function applyAutoPan(vector) {
+  if (!mapState.svg || !mapState.viewBox || !mapState.updateViewBox) return;
+  const rect = mapState.svg.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const scaleX = mapState.viewBox.w / rect.width;
+  const scaleY = mapState.viewBox.h / rect.height;
+  mapState.viewBox.x += vector.dx * scaleX;
+  mapState.viewBox.y += vector.dy * scaleY;
+  mapState.updateViewBox();
+}
+
+function stopAutoPan() {
+  mapState.autoPan = null;
+  if (mapState.autoPanFrame && typeof window !== 'undefined') {
+    window.cancelAnimationFrame(mapState.autoPanFrame);
+  }
+  mapState.autoPanFrame = null;
 }
 
 function computeSelectionFromRect() {
