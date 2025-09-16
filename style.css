@@ -747,6 +747,7 @@ input[type="checkbox"]:checked::after {
   left: 16px;
   display: flex;
   flex-direction: column;
+
   gap: 10px;
   background: rgba(15, 23, 42, 0.55);
   border: 1px solid rgba(148, 163, 184, 0.35);
