@@ -2258,10 +2258,12 @@ var Sevenn = (() => {
     lastPointer: { x: 0, y: 0 },
     autoPan: null,
     autoPanFrame: null,
+
     toolboxPos: { x: 16, y: 16 },
     toolboxDrag: null,
     toolboxEl: null,
     toolboxContainer: null,
+
     baseCursor: "grab",
     cursorOverride: null
   };
@@ -2280,6 +2282,7 @@ var Sevenn = (() => {
     stopToolboxDrag();
     mapState.toolboxEl = null;
     mapState.toolboxContainer = null;
+
     stopAutoPan();
     ensureListeners();
     const items = [
@@ -2848,6 +2851,7 @@ var Sevenn = (() => {
     ];
     const box = document.createElement("div");
     box.className = "map-toolbox";
+
     box.style.left = `${mapState.toolboxPos.x}px`;
     box.style.top = `${mapState.toolboxPos.y}px`;
     mapState.toolboxEl = box;
@@ -2893,6 +2897,7 @@ var Sevenn = (() => {
       list.appendChild(btn);
     });
     box.appendChild(list);
+
     const badges = document.createElement("div");
     badges.className = "map-tool-badges";
     const nodeBadge = document.createElement("span");
