@@ -2787,6 +2787,7 @@ var Sevenn = (() => {
       case TOOL.NAVIGATE:
         return "grab";
       case TOOL.HIDE:
+
       case TOOL.BREAK:
       case TOOL.ADD_LINK:
         return "grab";
