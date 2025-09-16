@@ -747,13 +747,84 @@ input[type="checkbox"]:checked::after {
   left: 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 8px;
+  padding: 12px;
   z-index: 10;
   box-shadow: 0 10px 24px rgba(0,0,0,0.45);
+  min-width: 160px;
+}
+
+.map-toolbox.collapsed {
+  padding: 10px 12px;
+  gap: 8px;
+}
+
+.map-toolbox.collapsed .map-tool-list,
+.map-toolbox.collapsed .map-tool-status {
+  display: none;
+}
+
+.map-toolbox-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: grab;
+  user-select: none;
+}
+
+.map-toolbox-header:active {
+  cursor: grabbing;
+}
+
+.map-toolbox-handle {
+  font-size: 14px;
+  color: var(--gray);
+  line-height: 1;
+  letter-spacing: 1px;
+}
+
+.map-toolbox-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--gray);
+  font-weight: 600;
+  flex: 1;
+}
+
+.map-toolbox-title-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.map-toolbox-toggle {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  color: var(--text);
+  padding: 0;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.map-toolbox-toggle:hover {
+  background: rgba(148,163,184,0.2);
+  transform: none;
+  box-shadow: none;
+}
+
+.map-tool-list {
+  display: grid;
+  gap: 8px;
 }
 
 .map-tool {
@@ -764,15 +835,20 @@ input[type="checkbox"]:checked::after {
   border: 1px solid var(--border);
   color: var(--text);
   font-size: 20px;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   transition: background 0.2s ease, transform 0.2s ease;
+  padding: 0;
+  line-height: 1;
+  box-shadow: none;
 }
 
 .map-tool:hover {
   background: rgba(148,163,184,0.2);
   transform: translateY(-1px);
+  box-shadow: none;
 }
 
 .map-tool.active {
@@ -909,6 +985,11 @@ input[type="checkbox"]:checked::after {
   padding: 8px 12px;
   cursor: pointer;
   z-index: 9;
+}
+
+body.map-toolbox-dragging {
+  user-select: none;
+  cursor: grabbing;
 }
 
 .map-drag-ghost {
