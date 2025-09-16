@@ -364,11 +364,56 @@ input[type="checkbox"]:checked::after {
   font-weight: 600;
   color: #000;
   margin-bottom: var(--pad-sm);
+  border: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  transition: none;
+  display: block;
+}
+
+.block-header:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.block-section.collapsed .week-section {
+  display: none;
 }
 
 .week-section h3 {
   margin: var(--pad-sm) 0;
   font-size: 1rem;
+}
+
+.week-header {
+  margin: var(--pad-sm) 0;
+  font-size: 1rem;
+  background: none;
+  border: none;
+  color: inherit;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+  border-radius: var(--radius);
+  transition: none;
+  font-weight: 600;
+}
+
+.week-header:hover {
+  background: rgba(255, 255, 255, 0.06);
+  transform: none;
+  box-shadow: none;
+}
+
+.week-section.collapsed .card-list {
+  display: none;
 }
 
 .card-list {

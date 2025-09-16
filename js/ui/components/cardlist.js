@@ -35,6 +35,8 @@ const fieldDefs = {
 };
 
 const expanded = new Set();
+const collapsedBlocks = new Set();
+const collapsedWeeks = new Set();
 
 export function createItemCard(item, onChange){
   const card = document.createElement('div');
@@ -246,12 +248,25 @@ export async function renderCardList(container, items, kind, onChange){
   sortedBlocks.forEach(b => {
     const blockSec = document.createElement('section');
     blockSec.className = 'block-section';
-    const h2 = document.createElement('div');
-    h2.className = 'block-header';
-    h2.textContent = b === '_' ? 'Unassigned' : blockTitle(b);
+    const blockHeader = document.createElement('button');
+    blockHeader.type = 'button';
+    blockHeader.className = 'block-header';
+    const blockLabel = b === '_' ? 'Unassigned' : blockTitle(b);
+    const blockKey = String(b);
     const bdef = blocks.find(bl => bl.blockId === b);
-    if (bdef?.color) h2.style.background = bdef.color;
-    blockSec.appendChild(h2);
+    if (bdef?.color) blockHeader.style.background = bdef.color;
+    function updateBlockState(){
+      const isCollapsed = collapsedBlocks.has(blockKey);
+      blockSec.classList.toggle('collapsed', isCollapsed);
+      blockHeader.textContent = `${isCollapsed ? '▸' : '▾'} ${blockLabel}`;
+      blockHeader.setAttribute('aria-expanded', String(!isCollapsed));
+    }
+    updateBlockState();
+    blockHeader.addEventListener('click', () => {
+      if (collapsedBlocks.has(blockKey)) collapsedBlocks.delete(blockKey); else collapsedBlocks.add(blockKey);
+      updateBlockState();
+    });
+    blockSec.appendChild(blockHeader);
     const wkMap = groups.get(b);
     const sortedWeeks = Array.from(wkMap.keys()).sort((a,b)=>{
       if (a === '_' && b !== '_') return 1;
@@ -261,9 +276,23 @@ export async function renderCardList(container, items, kind, onChange){
     sortedWeeks.forEach(w => {
       const weekSec = document.createElement('div');
       weekSec.className = 'week-section';
-      const h3 = document.createElement('h3');
-      h3.textContent = w === '_' ? 'Unassigned' : `Week ${w}`;
-      weekSec.appendChild(h3);
+      const weekHeader = document.createElement('button');
+      weekHeader.type = 'button';
+      weekHeader.className = 'week-header';
+      const weekLabel = w === '_' ? 'Unassigned' : `Week ${w}`;
+      const weekKey = `${blockKey}__${w}`;
+      function updateWeekState(){
+        const isCollapsed = collapsedWeeks.has(weekKey);
+        weekSec.classList.toggle('collapsed', isCollapsed);
+        weekHeader.textContent = `${isCollapsed ? '▸' : '▾'} ${weekLabel}`;
+        weekHeader.setAttribute('aria-expanded', String(!isCollapsed));
+      }
+      updateWeekState();
+      weekHeader.addEventListener('click', () => {
+        if (collapsedWeeks.has(weekKey)) collapsedWeeks.delete(weekKey); else collapsedWeeks.add(weekKey);
+        updateWeekState();
+      });
+      weekSec.appendChild(weekHeader);
       const list = document.createElement('div');
       list.className = 'card-list';
       const rows = wkMap.get(w);
