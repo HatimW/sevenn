@@ -45,13 +45,13 @@
  *              lectures:{id:number, name:string, week:number}[],
  *              createdAt:number, updatedAt:number }} BlockDef */
 
-/** @typedef {{ id:string, stem:string, options:{id:string,text:string}[], answer:string, explanation?:string, tags?:string[] }} Question */
+/** @typedef {{ id:string, stem:string, options:{id:string,text:string}[], answer:string, explanation?:string, tags?:string[], media?:string }} Question */
 
 /** @typedef {{ id:string, examTitle:string, block?:string, week?:string,
  *   timerMode:"timed"|"untimed", secondsPerQuestion:number,
  *   questions:Question[], results:ExamResult[] }} Exam */
 
-/** @typedef {{ when:number, correct:number, total:number, answers:Record<number,string> }} ExamResult */
+/** @typedef {{ id:string, when:number, correct:number, total:number, answers:Record<number,string>, flagged:number[], durationMs:number, answered:number }} ExamResult */
 
 /** @typedef {{ dailyCount:number, theme:"dark" }} Settings */
 
