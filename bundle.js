@@ -2198,32 +2198,17 @@ var Sevenn = (() => {
   }
   var CURSOR_STYLE = {
     hide: createCursor(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">' +
-        '<path d="M6 19.5l9-9a3 3 0 0 1 4.24 0l6.5 6.5a3 3 0 0 1 0 4.24l-9 9H9a3 3 0 0 1-3-3z" fill="#f97316" />' +
-        '<path d="M8.2 21.2l8.6 8.6" stroke="#fed7aa" stroke-width="3" stroke-linecap="round" />' +
-        '<path d="M11.3 24.5l4 4" stroke="#fff7ed" stroke-width="2" stroke-linecap="round" />' +
-        "</svg>",
+      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M6 19.5l9-9a3 3 0 0 1 4.24 0l6.5 6.5a3 3 0 0 1 0 4.24l-9 9H9a3 3 0 0 1-3-3z" fill="#f97316" /><path d="M8.2 21.2l8.6 8.6" stroke="#fed7aa" stroke-width="3" stroke-linecap="round" /><path d="M11.3 24.5l4 4" stroke="#fff7ed" stroke-width="2" stroke-linecap="round" /></svg>',
       7,
       26
     ),
     break: createCursor(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">' +
-        '<circle cx="11" cy="11" r="4" fill="none" stroke="#f97316" stroke-width="2.2" />' +
-        '<circle cx="11" cy="21" r="4" fill="none" stroke="#f97316" stroke-width="2.2" />' +
-        '<path d="M14.5 13L24 3.5" stroke="#fbbf24" stroke-width="2.6" stroke-linecap="round" />' +
-        '<path d="M14.5 19L24 28.5" stroke="#fbbf24" stroke-width="2.6" stroke-linecap="round" />' +
-        '<path d="M6 6l7 7" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" />' +
-        '<path d="M6 26l7-7" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" />' +
-        "</svg>",
+      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><circle cx="11" cy="11" r="4" fill="none" stroke="#f97316" stroke-width="2.2" /><circle cx="11" cy="21" r="4" fill="none" stroke="#f97316" stroke-width="2.2" /><path d="M14.5 13L24 3.5" stroke="#fbbf24" stroke-width="2.6" stroke-linecap="round" /><path d="M14.5 19L24 28.5" stroke="#fbbf24" stroke-width="2.6" stroke-linecap="round" /><path d="M6 6l7 7" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" /><path d="M6 26l7-7" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" /></svg>',
       18,
       18
     ),
     link: createCursor(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">' +
-        '<path d="M12 11h5a4.5 4.5 0 0 1 0 9h-3" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />' +
-        '<path d="M14 15h-4a4.5 4.5 0 0 0 0 9h5" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />' +
-        '<path d="M13 19h6" stroke="#bae6fd" stroke-width="2" stroke-linecap="round" />' +
-        "</svg>",
+      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M12 11h5a4.5 4.5 0 0 1 0 9h-3" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" /><path d="M14 15h-4a4.5 4.5 0 0 0 0 9h5" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" /><path d="M13 19h6" stroke="#bae6fd" stroke-width="2" stroke-linecap="round" /></svg>',
       9,
       23
     )
@@ -2258,16 +2243,22 @@ var Sevenn = (() => {
     lastPointer: { x: 0, y: 0 },
     autoPan: null,
     autoPanFrame: null,
-
     toolboxPos: { x: 16, y: 16 },
     toolboxDrag: null,
     toolboxEl: null,
     toolboxContainer: null,
-
     baseCursor: "grab",
-    cursorOverride: null
+    cursorOverride: null,
+    defaultViewSize: null
   };
+  function setAreaInteracting(active) {
+    if (!mapState.root) return;
+    mapState.root.classList.toggle("map-area-interacting", Boolean(active));
+  }
   async function renderMap(root) {
+    if (mapState.root && mapState.root !== root) {
+      mapState.root.classList.remove("map-area-interacting");
+    }
     mapState.root = root;
     root.innerHTML = "";
     mapState.nodeDrag = null;
@@ -2277,13 +2268,12 @@ var Sevenn = (() => {
     mapState.selectionRect = null;
     mapState.previewSelection = null;
     mapState.nodeWasDragged = false;
-    mapState.cursorOverride = null;
-    mapState.baseCursor = "grab";
     stopToolboxDrag();
     mapState.toolboxEl = null;
     mapState.toolboxContainer = null;
-
+    mapState.cursorOverride = null;
     stopAutoPan();
+    setAreaInteracting(false);
     ensureListeners();
     const items = [
       ...await listItemsByKind("disease"),
@@ -2330,6 +2320,9 @@ var Sevenn = (() => {
     }
     mapState.svg = svg;
     mapState.viewBox = viewBox;
+    if (!Number.isFinite(mapState.defaultViewSize)) {
+      mapState.defaultViewSize = viewBox.w;
+    }
     const updateViewBox = () => {
       svg.setAttribute("viewBox", `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
       adjustScale();
@@ -2440,27 +2433,37 @@ var Sevenn = (() => {
       const kindColors2 = { disease: "var(--purple)", drug: "var(--blue)" };
       const fill = kindColors2[it.kind] || it.color || "var(--gray)";
       circle.setAttribute("fill", fill);
-      circle.addEventListener("mousedown", (e) => {
+      const handleNodePointerDown = (e) => {
+        if (e.button !== 0) return;
+        const isNavigateTool = mapState.tool === TOOL.NAVIGATE;
+        const isAreaDrag = mapState.tool === TOOL.AREA && mapState.selectionIds.includes(it.id);
+        if (!isNavigateTool && !isAreaDrag) return;
         e.stopPropagation();
-        if (mapState.tool === TOOL.NAVIGATE) {
-          const { x, y } = clientToMap(e.clientX, e.clientY);
+        e.preventDefault();
+        const { x, y } = clientToMap(e.clientX, e.clientY);
+        const current = mapState.positions[it.id] || pos;
+        if (isNavigateTool) {
           mapState.nodeDrag = {
             id: it.id,
-            offset: { x: x - pos.x, y: y - pos.y }
+            offset: { x: x - current.x, y: y - current.y }
           };
           mapState.nodeWasDragged = false;
-          refreshCursor({ keepOverride: false });
-        } else if (mapState.tool === TOOL.AREA && mapState.selectionIds.includes(it.id)) {
-          const { x, y } = clientToMap(e.clientX, e.clientY);
+        } else {
           mapState.areaDrag = {
             ids: [...mapState.selectionIds],
             start: { x, y },
-            origin: mapState.selectionIds.map((id) => ({ id, pos: { ...mapState.positions[id] } })),
+            origin: mapState.selectionIds.map((id) => {
+              const source = mapState.positions[id] || positions[id] || { x: 0, y: 0 };
+              return { id, pos: { ...source } };
+            }),
             moved: false
           };
-          refreshCursor({ keepOverride: false });
+          mapState.nodeWasDragged = false;
+          setAreaInteracting(true);
         }
-      });
+        refreshCursor({ keepOverride: false });
+      };
+      circle.addEventListener("mousedown", handleNodePointerDown);
       circle.addEventListener("click", async (e) => {
         e.stopPropagation();
         if (mapState.tool === TOOL.NAVIGATE) {
@@ -2497,6 +2500,7 @@ var Sevenn = (() => {
       text.setAttribute("class", "map-label");
       text.dataset.id = it.id;
       text.textContent = it.name || it.concept || "?";
+      text.addEventListener("mousedown", handleNodePointerDown);
       g.appendChild(text);
       mapState.elements.set(it.id, { circle, label: text });
     });
@@ -2521,17 +2525,20 @@ var Sevenn = (() => {
   }
   function attachSvgEvents(svg) {
     svg.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
       if (e.target !== svg) return;
       if (mapState.tool !== TOOL.AREA) {
         mapState.draggingView = true;
         mapState.lastPointer = { x: e.clientX, y: e.clientY };
         refreshCursor({ keepOverride: false });
       } else if (mapState.tool === TOOL.AREA) {
+        e.preventDefault();
         mapState.selectionRect = {
           start: { x: e.clientX, y: e.clientY },
           current: { x: e.clientX, y: e.clientY }
         };
         mapState.selectionBox.classList.remove("hidden");
+        setAreaInteracting(true);
       }
     });
     svg.addEventListener("wheel", (e) => {
@@ -2617,7 +2624,9 @@ var Sevenn = (() => {
   }
   async function handleMouseUp(e) {
     if (!mapState.svg) return;
-    stopToolboxDrag();
+    if (mapState.toolboxDrag) {
+      stopToolboxDrag();
+    }
     if (mapState.menuDrag) {
       await finishMenuDrag(e.clientX, e.clientY);
       return;
@@ -2642,6 +2651,7 @@ var Sevenn = (() => {
       }
       mapState.nodeWasDragged = false;
       stopAutoPan();
+      setAreaInteracting(false);
     }
     if (mapState.draggingView) {
       mapState.draggingView = false;
@@ -2655,6 +2665,7 @@ var Sevenn = (() => {
       mapState.selectionBox.classList.add("hidden");
       updateSelectionHighlight();
       stopAutoPan();
+      setAreaInteracting(false);
     }
     if (cursorNeedsRefresh) {
       refreshCursor({ keepOverride: true });
@@ -2798,49 +2809,6 @@ var Sevenn = (() => {
       edge.setAttribute("d", calcPath(edge.dataset.a, edge.dataset.b));
     });
   }
-  function determineBaseCursor() {
-    if (mapState.draggingView || mapState.nodeDrag || mapState.areaDrag) return "grabbing";
-    switch (mapState.tool) {
-      case TOOL.AREA:
-        return "crosshair";
-      case TOOL.NAVIGATE:
-        return "grab";
-      case TOOL.HIDE:
-      case TOOL.BREAK:
-      case TOOL.ADD_LINK:
-        return "grab";
-      default:
-        return "pointer";
-    }
-  }
-  function refreshCursor(options = {}) {
-    if (!mapState.svg) return;
-    const { keepOverride = false } = options;
-    const base = determineBaseCursor();
-    mapState.baseCursor = base;
-    if (mapState.cursorOverride) {
-      const overrideStyle = CURSOR_STYLE[mapState.cursorOverride];
-      if (keepOverride && overrideStyle) {
-        mapState.svg.style.cursor = overrideStyle;
-        return;
-      }
-      mapState.cursorOverride = null;
-    }
-    mapState.svg.style.cursor = base;
-  }
-  function applyCursorOverride(kind) {
-    if (!mapState.svg) return;
-    if (mapState.nodeDrag || mapState.areaDrag || mapState.draggingView) return;
-    const style = CURSOR_STYLE[kind];
-    if (!style) return;
-    mapState.cursorOverride = kind;
-    mapState.svg.style.cursor = style;
-  }
-  function clearCursorOverride(kind) {
-    if (mapState.cursorOverride !== kind) return;
-    mapState.cursorOverride = null;
-    refreshCursor();
-  }
   function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
     const tools = [
       { id: TOOL.NAVIGATE, icon: "\u{1F9ED}", label: "Navigate" },
@@ -2851,7 +2819,6 @@ var Sevenn = (() => {
     ];
     const box = document.createElement("div");
     box.className = "map-toolbox";
-
     box.style.left = `${mapState.toolboxPos.x}px`;
     box.style.top = `${mapState.toolboxPos.y}px`;
     mapState.toolboxEl = box;
@@ -2865,7 +2832,7 @@ var Sevenn = (() => {
     handle.type = "button";
     handle.className = "map-toolbox-drag";
     handle.setAttribute("aria-label", "Drag toolbar");
-    handle.innerHTML = "<span>⋮</span>";
+    handle.innerHTML = "<span>\u22EE</span>";
     handle.addEventListener("mousedown", startToolboxDrag);
     box.appendChild(handle);
     const list = document.createElement("div");
@@ -2897,18 +2864,17 @@ var Sevenn = (() => {
       list.appendChild(btn);
     });
     box.appendChild(list);
-
     const badges = document.createElement("div");
     badges.className = "map-tool-badges";
     const nodeBadge = document.createElement("span");
     nodeBadge.className = "map-tool-badge";
     nodeBadge.setAttribute("title", `${hiddenNodeCount} hidden node${hiddenNodeCount === 1 ? "" : "s"}`);
-    nodeBadge.innerHTML = `<span>🙈</span><strong>${hiddenNodeCount}</strong>`;
+    nodeBadge.innerHTML = `<span>\u{1F648}</span><strong>${hiddenNodeCount}</strong>`;
     badges.appendChild(nodeBadge);
     const linkBadge = document.createElement("span");
     linkBadge.className = "map-tool-badge";
     linkBadge.setAttribute("title", `${hiddenLinkCount} hidden link${hiddenLinkCount === 1 ? "" : "s"}`);
-    linkBadge.innerHTML = `<span>🕸️</span><strong>${hiddenLinkCount}</strong>`;
+    linkBadge.innerHTML = `<span>\u{1F578}\uFE0F</span><strong>${hiddenLinkCount}</strong>`;
     badges.appendChild(linkBadge);
     box.appendChild(badges);
     container.appendChild(box);
@@ -3054,6 +3020,7 @@ var Sevenn = (() => {
   function startToolboxDrag(event) {
     if (event.button !== 0) return;
     if (!mapState.toolboxEl || !mapState.toolboxContainer) return;
+    if (event.target.closest(".map-toolbox-toggle")) return;
     event.preventDefault();
     const boxRect = mapState.toolboxEl.getBoundingClientRect();
     const containerRect = mapState.toolboxContainer.getBoundingClientRect();
@@ -3107,11 +3074,54 @@ var Sevenn = (() => {
     if (!width || !height) return;
     const maxX = Math.max(0, width - boxRect.width);
     const maxY = Math.max(0, height - boxRect.height);
-    const x = clamp(mapState.toolboxPos?.x ?? 0, 0, maxX);
-    const y = clamp(mapState.toolboxPos?.y ?? 0, 0, maxY);
+    const x = clamp(mapState.toolboxPos.x, 0, maxX);
+    const y = clamp(mapState.toolboxPos.y, 0, maxY);
     mapState.toolboxPos = { x, y };
     box.style.left = `${x}px`;
     box.style.top = `${y}px`;
+  }
+  function determineBaseCursor() {
+    if (mapState.draggingView || mapState.nodeDrag || mapState.areaDrag) return "grabbing";
+    switch (mapState.tool) {
+      case TOOL.AREA:
+        return "crosshair";
+      case TOOL.NAVIGATE:
+        return "grab";
+      case TOOL.HIDE:
+      case TOOL.BREAK:
+      case TOOL.ADD_LINK:
+        return "grab";
+      default:
+        return "pointer";
+    }
+  }
+  function refreshCursor(options = {}) {
+    if (!mapState.svg) return;
+    const { keepOverride = false } = options;
+    const base = determineBaseCursor();
+    mapState.baseCursor = base;
+    if (mapState.cursorOverride) {
+      const overrideStyle = CURSOR_STYLE[mapState.cursorOverride];
+      if (keepOverride && overrideStyle) {
+        mapState.svg.style.cursor = overrideStyle;
+        return;
+      }
+      mapState.cursorOverride = null;
+    }
+    mapState.svg.style.cursor = base;
+  }
+  function applyCursorOverride(kind) {
+    if (!mapState.svg) return;
+    if (mapState.nodeDrag || mapState.areaDrag || mapState.draggingView) return;
+    const style = CURSOR_STYLE[kind];
+    if (!style) return;
+    mapState.cursorOverride = kind;
+    mapState.svg.style.cursor = style;
+  }
+  function clearCursorOverride(kind) {
+    if (mapState.cursorOverride !== kind) return;
+    mapState.cursorOverride = null;
+    refreshCursor();
   }
   async function persistNodePosition(id) {
     const item = mapState.itemMap[id];
@@ -3198,20 +3208,25 @@ var Sevenn = (() => {
     const vb = svg.getAttribute("viewBox");
     if (!vb) return;
     const [, , w] = vb.split(" ").map(Number);
-    const unit = w / svg.clientWidth;
-    const nodeScale = Math.pow(unit, 0.8);
-    const labelScale = Math.pow(unit, 1.1);
+    if (!Number.isFinite(w) || w <= 0) return;
+    const defaultSize = Number.isFinite(mapState.defaultViewSize) ? mapState.defaultViewSize : w;
+    const zoomInRatio = defaultSize / w;
+    const zoomOutRatio = w / defaultSize;
+    const nodeScale = clamp(Math.pow(zoomInRatio, 0.3), 0.5, 1.6);
+    const labelScale = clamp(Math.pow(zoomOutRatio, 0.3), 1, 1.7);
+    const lineScale = clamp(Math.pow(zoomInRatio, 0.2), 0.6, 1.8);
     mapState.elements.forEach(({ circle, label }) => {
       const baseR = Number(circle.dataset.radius) || 20;
-      circle.setAttribute("r", baseR * nodeScale);
+      const scaledRadius = baseR * nodeScale;
+      circle.setAttribute("r", scaledRadius);
       const pos = mapState.positions[circle.dataset.id];
-      if (pos) {
+      if (pos && label) {
         label.setAttribute("font-size", 12 * labelScale);
         label.setAttribute("y", pos.y - (baseR + 8) * nodeScale);
       }
     });
     svg.querySelectorAll(".map-edge").forEach((line) => {
-      line.setAttribute("stroke-width", 4 * Math.pow(unit, -0.2));
+      line.setAttribute("stroke-width", 4 * lineScale);
     });
   }
   function pointToSegment(px, py, x1, y1, x2, y2) {
@@ -3224,9 +3239,6 @@ var Sevenn = (() => {
     const projX = x1 + t * dx;
     const projY = y1 + t * dy;
     return Math.hypot(px - projX, py - projY);
-  }
-  function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
   }
   function calcPath(aId, bId) {
     const positions = mapState.positions;
@@ -3267,6 +3279,9 @@ var Sevenn = (() => {
       line.appendChild(title);
     }
     title.textContent = info.name || "";
+  }
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
   }
   async function setNodeHidden(id, hidden) {
     const item = await getItem(id);

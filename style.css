@@ -743,6 +743,11 @@ input[type="checkbox"]:checked::after {
   height: 100%;
 }
 
+.map-area-interacting {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .map-toolbox {
   position: absolute;
   top: 16px;

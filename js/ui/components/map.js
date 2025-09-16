@@ -88,7 +88,15 @@ const mapState = {
   defaultViewSize: null
 };
 
+function setAreaInteracting(active) {
+  if (!mapState.root) return;
+  mapState.root.classList.toggle('map-area-interacting', Boolean(active));
+}
+
 export async function renderMap(root) {
+  if (mapState.root && mapState.root !== root) {
+    mapState.root.classList.remove('map-area-interacting');
+  }
   mapState.root = root;
   root.innerHTML = '';
   mapState.nodeDrag = null;
@@ -103,6 +111,7 @@ export async function renderMap(root) {
   mapState.toolboxContainer = null;
   mapState.cursorOverride = null;
   stopAutoPan();
+  setAreaInteracting(false);
 
   ensureListeners();
 
@@ -287,27 +296,38 @@ export async function renderMap(root) {
     const fill = kindColors[it.kind] || it.color || 'var(--gray)';
     circle.setAttribute('fill', fill);
 
-    circle.addEventListener('mousedown', e => {
+    const handleNodePointerDown = e => {
+      if (e.button !== 0) return;
+      const isNavigateTool = mapState.tool === TOOL.NAVIGATE;
+      const isAreaDrag = mapState.tool === TOOL.AREA && mapState.selectionIds.includes(it.id);
+      if (!isNavigateTool && !isAreaDrag) return;
       e.stopPropagation();
-      if (mapState.tool === TOOL.NAVIGATE) {
-        const { x, y } = clientToMap(e.clientX, e.clientY);
+      e.preventDefault();
+      const { x, y } = clientToMap(e.clientX, e.clientY);
+      const current = mapState.positions[it.id] || pos;
+      if (isNavigateTool) {
         mapState.nodeDrag = {
           id: it.id,
-          offset: { x: x - pos.x, y: y - pos.y }
+          offset: { x: x - current.x, y: y - current.y }
         };
         mapState.nodeWasDragged = false;
-        refreshCursor({ keepOverride: false });
-      } else if (mapState.tool === TOOL.AREA && mapState.selectionIds.includes(it.id)) {
-        const { x, y } = clientToMap(e.clientX, e.clientY);
+      } else {
         mapState.areaDrag = {
           ids: [...mapState.selectionIds],
           start: { x, y },
-          origin: mapState.selectionIds.map(id => ({ id, pos: { ...mapState.positions[id] } })),
+          origin: mapState.selectionIds.map(id => {
+            const source = mapState.positions[id] || positions[id] || { x: 0, y: 0 };
+            return { id, pos: { ...source } };
+          }),
           moved: false
         };
-        refreshCursor({ keepOverride: false });
+        mapState.nodeWasDragged = false;
+        setAreaInteracting(true);
       }
-    });
+      refreshCursor({ keepOverride: false });
+    };
+
+    circle.addEventListener('mousedown', handleNodePointerDown);
 
     circle.addEventListener('click', async e => {
       e.stopPropagation();
@@ -349,6 +369,7 @@ export async function renderMap(root) {
     text.setAttribute('class', 'map-label');
     text.dataset.id = it.id;
     text.textContent = it.name || it.concept || '?';
+    text.addEventListener('mousedown', handleNodePointerDown);
     g.appendChild(text);
 
     mapState.elements.set(it.id, { circle, label: text });
@@ -378,17 +399,20 @@ function ensureListeners() {
 
 function attachSvgEvents(svg) {
   svg.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
     if (e.target !== svg) return;
     if (mapState.tool !== TOOL.AREA) {
       mapState.draggingView = true;
       mapState.lastPointer = { x: e.clientX, y: e.clientY };
       refreshCursor({ keepOverride: false });
     } else if (mapState.tool === TOOL.AREA) {
+      e.preventDefault();
       mapState.selectionRect = {
         start: { x: e.clientX, y: e.clientY },
         current: { x: e.clientX, y: e.clientY }
       };
       mapState.selectionBox.classList.remove('hidden');
+      setAreaInteracting(true);
     }
   });
 
@@ -515,6 +539,7 @@ async function handleMouseUp(e) {
     }
     mapState.nodeWasDragged = false;
     stopAutoPan();
+    setAreaInteracting(false);
   }
 
   if (mapState.draggingView) {
@@ -530,6 +555,7 @@ async function handleMouseUp(e) {
     mapState.selectionBox.classList.add('hidden');
     updateSelectionHighlight();
     stopAutoPan();
+    setAreaInteracting(false);
   }
 
   if (cursorNeedsRefresh) {
