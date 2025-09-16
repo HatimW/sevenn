@@ -2787,11 +2787,10 @@ var Sevenn = (() => {
       case TOOL.NAVIGATE:
         return "grab";
       case TOOL.HIDE:
-        return CURSOR_STYLE.hide;
+
       case TOOL.BREAK:
-        return CURSOR_STYLE.break;
       case TOOL.ADD_LINK:
-        return CURSOR_STYLE.link;
+        return "grab";
       default:
         return "pointer";
     }
