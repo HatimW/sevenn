@@ -734,3 +734,224 @@ input[type="checkbox"]:checked::after {
   font-size: 12px;
   gap: 2px;
 }
+
+.map-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.map-toolbox {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 8px;
+  z-index: 10;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.45);
+}
+
+.map-tool {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 20px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.map-tool:hover {
+  background: rgba(148,163,184,0.2);
+  transform: translateY(-1px);
+}
+
+.map-tool.active {
+  background: var(--blue);
+  color: #000;
+  border-color: var(--border);
+}
+
+.map-tool-status {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--gray);
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  text-align: left;
+}
+
+.map-hidden-panel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 260px;
+  max-height: calc(100% - 32px);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.45);
+  z-index: 10;
+}
+
+.map-hidden-panel.hidden {
+  display: none;
+}
+
+.map-hidden-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.map-hidden-tabs {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.map-hidden-tabs button {
+  flex: 1;
+  background: var(--muted);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.map-hidden-tabs button.active {
+  background: var(--blue);
+  color: #000;
+}
+
+.map-hidden-close {
+  background: transparent;
+  color: var(--gray);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.map-hidden-body {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.map-hidden-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.map-hidden-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font-size: 14px;
+}
+
+.map-hidden-item.draggable {
+  cursor: grab;
+}
+
+.map-hidden-item.draggable:active {
+  cursor: grabbing;
+}
+
+.map-hidden-item button {
+  background: var(--blue);
+  color: #000;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.map-hidden-empty {
+  text-align: center;
+  color: var(--gray);
+  padding: 16px 0;
+  font-size: 14px;
+}
+
+.map-hidden-toggle {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 8px 12px;
+  cursor: pointer;
+  z-index: 9;
+}
+
+.map-drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.45);
+  color: var(--text);
+  font-size: 14px;
+  z-index: 1000;
+}
+
+.map-selection {
+  position: absolute;
+  border: 1px dashed var(--blue);
+  background: rgba(166, 217, 255, 0.12);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.map-selection.hidden {
+  display: none;
+}
+
+.map-node.selected {
+  stroke: var(--yellow);
+  stroke-width: 3;
+}
+
+.map-label.selected {
+  fill: var(--yellow);
+  font-weight: 600;
+}
+
+.map-node.pending {
+  stroke: var(--pink);
+  stroke-width: 4;
+}
+
+.map-label.pending {
+  fill: var(--pink);
+  font-weight: 600;
+}
