@@ -708,6 +708,14 @@ function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
   header.className = 'map-toolbox-header';
   header.addEventListener('mousedown', startToolboxDrag);
 
+  header.setAttribute('title', 'Drag to move. Double-click to minimize or maximize.');
+  header.addEventListener('dblclick', evt => {
+    if (evt.target.closest('.map-toolbox-toggle')) return;
+    mapState.toolboxCollapsed = !mapState.toolboxCollapsed;
+    renderMap(mapState.root);
+  });
+
+
   const handle = document.createElement('span');
   handle.className = 'map-toolbox-handle';
   handle.textContent = '⠿';
@@ -732,8 +740,12 @@ function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
   const toggle = document.createElement('button');
   toggle.type = 'button';
   toggle.className = 'map-toolbox-toggle';
-  toggle.setAttribute('aria-label', mapState.toolboxCollapsed ? 'Expand tools' : 'Collapse tools');
-  toggle.textContent = mapState.toolboxCollapsed ? '+' : '−';
+
+  const toggleLabel = mapState.toolboxCollapsed ? 'Maximize toolbar' : 'Minimize toolbar';
+  toggle.setAttribute('aria-label', toggleLabel);
+  toggle.title = toggleLabel;
+  toggle.textContent = mapState.toolboxCollapsed ? '⤢' : '—';
+
   toggle.addEventListener('click', evt => {
     evt.stopPropagation();
     mapState.toolboxCollapsed = !mapState.toolboxCollapsed;
@@ -775,7 +787,10 @@ function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
 
   const status = document.createElement('div');
   status.className = 'map-tool-status';
-  status.innerHTML = `Hidden nodes: <strong>${hiddenNodeCount}</strong><br/>Hidden links: <strong>${hiddenLinkCount}</strong>`;
+  status.innerHTML = `
+    <div class="map-tool-status-row"><span>Nodes hidden</span><strong>${hiddenNodeCount}</strong></div>
+    <div class="map-tool-status-row"><span>Links hidden</span><strong>${hiddenLinkCount}</strong></div>
+  `.trim();
   box.appendChild(status);
 
   container.appendChild(box);
@@ -1008,7 +1023,9 @@ function ensureToolboxWithinBounds() {
 function determineBaseCursor() {
   if (mapState.draggingView || mapState.nodeDrag || mapState.areaDrag) return 'grabbing';
   if (mapState.tool === TOOL.AREA) return 'crosshair';
-  return 'grab';
+
+  if (mapState.tool === TOOL.NAVIGATE) return 'grab';
+  return 'pointer';
 }
 
 function refreshCursor(options = {}) {
