@@ -3,11 +3,46 @@ import { showPopup } from './popup.js';
 
 const TOOL = {
   NAVIGATE: 'navigate',
-  NODES: 'nodes',
+  HIDE: 'hide',
   BREAK: 'break-link',
   ADD_LINK: 'add-link',
-  HIDE_LINK: 'hide-link',
   AREA: 'area'
+};
+
+function createCursor(svg, hotX = 8, hotY = 8) {
+  const encoded = encodeURIComponent(svg.trim())
+    .replace(/%0A/g, '')
+    .replace(/%20/g, ' ');
+  return `url("data:image/svg+xml,${encoded}") ${hotX} ${hotY}, pointer`;
+}
+
+const CURSOR_STYLE = {
+  hide: createCursor(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">'
+    + '<rect x="8" y="12" width="16" height="10" rx="2" fill="#f97316" transform="rotate(-30 16 17)" />'
+    + '<rect x="12" y="20" width="10" height="6" rx="1.5" fill="#fed7aa" transform="rotate(-30 17 23)" />'
+    + '</svg>',
+    6,
+    26
+  ),
+  break: createCursor(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">'
+    + '<circle cx="10" cy="12" r="4" fill="none" stroke="#f97316" stroke-width="2" />'
+    + '<circle cx="10" cy="20" r="4" fill="none" stroke="#f97316" stroke-width="2" />'
+    + '<path d="M6 7l20 18" stroke="#f97316" stroke-width="3" stroke-linecap="round" />'
+    + '<path d="M6 25l20-18" stroke="#f97316" stroke-width="3" stroke-linecap="round" />'
+    + '</svg>',
+    8,
+    26
+  ),
+  link: createCursor(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">'
+    + '<path d="M12 11h6a5 5 0 0 1 0 10h-3" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />'
+    + '<path d="M14 15h-4a5 5 0 0 0 0 10h5" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />'
+    + '</svg>',
+    8,
+    24
+  )
 };
 
 const DEFAULT_LINK_COLOR = '#888888';
@@ -39,7 +74,15 @@ const mapState = {
   minView: 100,
   lastPointer: { x: 0, y: 0 },
   autoPan: null,
-  autoPanFrame: null
+  autoPanFrame: null,
+  toolboxPos: { x: 16, y: 16 },
+  toolboxCollapsed: false,
+  toolboxDrag: null,
+  toolboxEl: null,
+  toolboxContainer: null,
+  baseCursor: 'grab',
+  cursorOverride: null,
+  defaultViewSize: null
 };
 
 export async function renderMap(root) {
@@ -52,6 +95,10 @@ export async function renderMap(root) {
   mapState.selectionRect = null;
   mapState.previewSelection = null;
   mapState.nodeWasDragged = false;
+  stopToolboxDrag();
+  mapState.toolboxEl = null;
+  mapState.toolboxContainer = null;
+  mapState.cursorOverride = null;
   stopAutoPan();
 
   ensureListeners();
@@ -107,6 +154,9 @@ export async function renderMap(root) {
 
   mapState.svg = svg;
   mapState.viewBox = viewBox;
+  if (!Number.isFinite(mapState.defaultViewSize)) {
+    mapState.defaultViewSize = viewBox.w;
+  }
 
   const updateViewBox = () => {
     svg.setAttribute('viewBox', `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
@@ -199,6 +249,21 @@ export async function renderMap(root) {
         e.stopPropagation();
         handleEdgeClick(path, it.id, l.id, e);
       });
+      path.addEventListener('mouseenter', () => {
+        if (mapState.tool === TOOL.HIDE) {
+          applyCursorOverride('hide');
+        } else if (mapState.tool === TOOL.BREAK) {
+          applyCursorOverride('break');
+        }
+      });
+      path.addEventListener('mouseleave', () => {
+        if (mapState.tool === TOOL.HIDE) {
+          clearCursorOverride('hide');
+        }
+        if (mapState.tool === TOOL.BREAK) {
+          clearCursorOverride('break');
+        }
+      });
       g.appendChild(path);
     });
   });
@@ -228,7 +293,7 @@ export async function renderMap(root) {
           offset: { x: x - pos.x, y: y - pos.y }
         };
         mapState.nodeWasDragged = false;
-        mapState.svg.style.cursor = 'grabbing';
+        refreshCursor({ keepOverride: false });
       } else if (mapState.tool === TOOL.AREA && mapState.selectionIds.includes(it.id)) {
         const { x, y } = clientToMap(e.clientX, e.clientY);
         mapState.areaDrag = {
@@ -237,7 +302,7 @@ export async function renderMap(root) {
           origin: mapState.selectionIds.map(id => ({ id, pos: { ...mapState.positions[id] } })),
           moved: false
         };
-        mapState.svg.style.cursor = 'grabbing';
+        refreshCursor({ keepOverride: false });
       }
     });
 
@@ -246,13 +311,30 @@ export async function renderMap(root) {
       if (mapState.tool === TOOL.NAVIGATE) {
         if (!mapState.nodeWasDragged) showPopup(it);
         mapState.nodeWasDragged = false;
-      } else if (mapState.tool === TOOL.NODES) {
+      } else if (mapState.tool === TOOL.HIDE) {
         if (confirm(`Remove ${titleOf(it)} from the map?`)) {
           await setNodeHidden(it.id, true);
           await renderMap(root);
         }
       } else if (mapState.tool === TOOL.ADD_LINK) {
         await handleAddLinkClick(it.id);
+      }
+    });
+
+    circle.addEventListener('mouseenter', () => {
+      if (mapState.tool === TOOL.HIDE) {
+        applyCursorOverride('hide');
+      } else if (mapState.tool === TOOL.ADD_LINK) {
+        applyCursorOverride('link');
+      }
+    });
+
+    circle.addEventListener('mouseleave', () => {
+      if (mapState.tool === TOOL.HIDE) {
+        clearCursorOverride('hide');
+      }
+      if (mapState.tool === TOOL.ADD_LINK) {
+        clearCursorOverride('link');
       }
     });
 
@@ -273,7 +355,7 @@ export async function renderMap(root) {
   updatePendingHighlight();
 
   updateViewBox();
-  svg.style.cursor = 'grab';
+  refreshCursor();
 }
 
 function ensureListeners() {
@@ -285,6 +367,10 @@ function ensureListeners() {
     window.addEventListener('resize', adjustScale);
     window._mapResizeAttached = true;
   }
+  if (!window._mapToolboxResizeAttached) {
+    window.addEventListener('resize', ensureToolboxWithinBounds);
+    window._mapToolboxResizeAttached = true;
+  }
 }
 
 function attachSvgEvents(svg) {
@@ -293,7 +379,7 @@ function attachSvgEvents(svg) {
     if (mapState.tool !== TOOL.AREA) {
       mapState.draggingView = true;
       mapState.lastPointer = { x: e.clientX, y: e.clientY };
-      svg.style.cursor = 'grabbing';
+      refreshCursor({ keepOverride: false });
     } else if (mapState.tool === TOOL.AREA) {
       mapState.selectionRect = {
         start: { x: e.clientX, y: e.clientY },
@@ -322,6 +408,11 @@ function attachSvgEvents(svg) {
 
 function handleMouseMove(e) {
   if (!mapState.svg) return;
+
+  if (mapState.toolboxDrag) {
+    moveToolboxDrag(e.clientX, e.clientY);
+    return;
+  }
 
   if (mapState.menuDrag) {
     updateMenuDragPosition(e.clientX, e.clientY);
@@ -390,15 +481,21 @@ function handleMouseMove(e) {
 async function handleMouseUp(e) {
   if (!mapState.svg) return;
 
+  if (mapState.toolboxDrag) {
+    stopToolboxDrag();
+  }
+
   if (mapState.menuDrag) {
     await finishMenuDrag(e.clientX, e.clientY);
     return;
   }
 
+  let cursorNeedsRefresh = false;
+
   if (mapState.nodeDrag) {
     const id = mapState.nodeDrag.id;
     mapState.nodeDrag = null;
-    mapState.svg.style.cursor = 'grab';
+    cursorNeedsRefresh = true;
     if (mapState.nodeWasDragged) {
       await persistNodePosition(id);
     }
@@ -409,7 +506,7 @@ async function handleMouseUp(e) {
     const moved = mapState.areaDrag.moved;
     const ids = mapState.areaDrag.ids;
     mapState.areaDrag = null;
-    mapState.svg.style.cursor = 'grab';
+    cursorNeedsRefresh = true;
     if (moved) {
       await Promise.all(ids.map(id => persistNodePosition(id)));
     }
@@ -419,7 +516,7 @@ async function handleMouseUp(e) {
 
   if (mapState.draggingView) {
     mapState.draggingView = false;
-    mapState.svg.style.cursor = 'grab';
+    cursorNeedsRefresh = true;
   }
 
   if (mapState.selectionRect) {
@@ -430,6 +527,10 @@ async function handleMouseUp(e) {
     mapState.selectionBox.classList.add('hidden');
     updateSelectionHighlight();
     stopAutoPan();
+  }
+
+  if (cursorNeedsRefresh) {
+    refreshCursor({ keepOverride: true });
   }
 }
 
@@ -590,14 +691,68 @@ function updateEdgesFor(id) {
 function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
   const tools = [
     { id: TOOL.NAVIGATE, icon: '🧭', label: 'Navigate' },
-    { id: TOOL.NODES, icon: '🧩', label: 'Nodes' },
+    { id: TOOL.HIDE, icon: '🧽', label: 'Hide' },
     { id: TOOL.BREAK, icon: '✂️', label: 'Break link' },
-    { id: TOOL.ADD_LINK, icon: '➕', label: 'Add link' },
-    { id: TOOL.HIDE_LINK, icon: '🙈', label: 'Hide link' },
+    { id: TOOL.ADD_LINK, icon: '🔗', label: 'Add link' },
     { id: TOOL.AREA, icon: '📦', label: 'Select area' }
   ];
+
   const box = document.createElement('div');
-  box.className = 'map-toolbox';
+  box.className = 'map-toolbox' + (mapState.toolboxCollapsed ? ' collapsed' : '');
+  box.style.left = `${mapState.toolboxPos.x}px`;
+  box.style.top = `${mapState.toolboxPos.y}px`;
+  mapState.toolboxEl = box;
+  mapState.toolboxContainer = container;
+
+  const header = document.createElement('div');
+  header.className = 'map-toolbox-header';
+  header.addEventListener('mousedown', startToolboxDrag);
+  header.setAttribute('title', 'Drag to move. Double-click to minimize or maximize.');
+  header.addEventListener('dblclick', evt => {
+    if (evt.target.closest('.map-toolbox-toggle')) return;
+    mapState.toolboxCollapsed = !mapState.toolboxCollapsed;
+    renderMap(mapState.root);
+  });
+
+  const handle = document.createElement('span');
+  handle.className = 'map-toolbox-handle';
+  handle.textContent = '⠿';
+  header.appendChild(handle);
+
+  const title = document.createElement('div');
+  title.className = 'map-toolbox-title';
+  const activeTool = tools.find(tool => tool.id === mapState.tool);
+  if (activeTool) {
+    const icon = document.createElement('span');
+    icon.className = 'map-toolbox-title-icon';
+    icon.textContent = activeTool.icon;
+    title.appendChild(icon);
+    const label = document.createElement('span');
+    label.textContent = activeTool.label;
+    title.appendChild(label);
+  } else {
+    title.textContent = 'Tools';
+  }
+  header.appendChild(title);
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'map-toolbox-toggle';
+  const toggleLabel = mapState.toolboxCollapsed ? 'Maximize toolbar' : 'Minimize toolbar';
+  toggle.setAttribute('aria-label', toggleLabel);
+  toggle.title = toggleLabel;
+  toggle.textContent = mapState.toolboxCollapsed ? '⤢' : '—';
+  toggle.addEventListener('click', evt => {
+    evt.stopPropagation();
+    mapState.toolboxCollapsed = !mapState.toolboxCollapsed;
+    renderMap(mapState.root);
+  });
+  header.appendChild(toggle);
+
+  box.appendChild(header);
+
+  const list = document.createElement('div');
+  list.className = 'map-tool-list';
   tools.forEach(tool => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -607,8 +762,6 @@ function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
     btn.addEventListener('click', () => {
       if (mapState.tool !== tool.id) {
         mapState.tool = tool.id;
-        if (tool.id === TOOL.NODES) mapState.hiddenMenuTab = 'nodes';
-        if (tool.id === TOOL.HIDE_LINK) mapState.hiddenMenuTab = 'links';
         if (tool.id !== TOOL.AREA) {
           mapState.selectionIds = [];
           mapState.previewSelection = null;
@@ -616,25 +769,32 @@ function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
         if (tool.id !== TOOL.ADD_LINK) {
           mapState.pendingLink = null;
         }
-        if (tool.id === TOOL.NODES || tool.id === TOOL.HIDE_LINK) {
+        if (tool.id === TOOL.HIDE) {
+          mapState.hiddenMenuTab = mapState.hiddenMenuTab === 'links' ? 'links' : 'nodes';
           mapState.panelVisible = true;
         }
+        mapState.cursorOverride = null;
         renderMap(mapState.root);
       }
     });
-    box.appendChild(btn);
+    list.appendChild(btn);
   });
+  box.appendChild(list);
 
   const status = document.createElement('div');
   status.className = 'map-tool-status';
-  status.innerHTML = `Hidden nodes: <strong>${hiddenNodeCount}</strong><br/>Hidden links: <strong>${hiddenLinkCount}</strong>`;
+  status.innerHTML = `
+    <div class="map-tool-status-row"><span>Nodes hidden</span><strong>${hiddenNodeCount}</strong></div>
+    <div class="map-tool-status-row"><span>Links hidden</span><strong>${hiddenLinkCount}</strong></div>
+  `.trim();
   box.appendChild(status);
 
   container.appendChild(box);
+  ensureToolboxWithinBounds();
 }
 
 function buildHiddenPanel(container, hiddenNodes, hiddenLinks) {
-  const allowPanel = mapState.tool === TOOL.NODES || mapState.tool === TOOL.HIDE_LINK;
+  const allowPanel = mapState.tool === TOOL.HIDE;
   const panel = document.createElement('div');
   panel.className = 'map-hidden-panel';
   if (!(allowPanel && mapState.panelVisible)) {
@@ -702,7 +862,7 @@ function buildHiddenPanel(container, hiddenNodes, hiddenLinks) {
           item.classList.add('draggable');
           item.textContent = titleOf(it) || it.id;
           item.addEventListener('mousedown', e => {
-            if (mapState.tool !== TOOL.NODES) return;
+            if (mapState.tool !== TOOL.HIDE) return;
             startMenuDrag(it, e);
           });
           list.appendChild(item);
@@ -789,6 +949,111 @@ function updateMenuDragPosition(clientX, clientY) {
   mapState.menuDrag.ghost.style.top = `${clientY + 12}px`;
 }
 
+function startToolboxDrag(event) {
+  if (event.button !== 0) return;
+  if (!mapState.toolboxEl || !mapState.toolboxContainer) return;
+  if (event.target.closest('.map-toolbox-toggle')) return;
+  event.preventDefault();
+  const boxRect = mapState.toolboxEl.getBoundingClientRect();
+  const containerRect = mapState.toolboxContainer.getBoundingClientRect();
+  mapState.toolboxDrag = {
+    offsetX: event.clientX - boxRect.left,
+    offsetY: event.clientY - boxRect.top,
+    boxWidth: boxRect.width,
+    boxHeight: boxRect.height,
+    containerRect
+  };
+  if (typeof document !== 'undefined') {
+    document.body.classList.add('map-toolbox-dragging');
+  }
+}
+
+function moveToolboxDrag(clientX, clientY) {
+  const drag = mapState.toolboxDrag;
+  if (!drag || !mapState.toolboxEl) return;
+  const { containerRect, offsetX, offsetY, boxWidth, boxHeight } = drag;
+  const width = containerRect.width;
+  const height = containerRect.height;
+  if (!width || !height) return;
+  let x = clientX - containerRect.left - offsetX;
+  let y = clientY - containerRect.top - offsetY;
+  const maxX = Math.max(0, width - boxWidth);
+  const maxY = Math.max(0, height - boxHeight);
+  x = clamp(x, 0, maxX);
+  y = clamp(y, 0, maxY);
+  mapState.toolboxPos = { x, y };
+  mapState.toolboxEl.style.left = `${x}px`;
+  mapState.toolboxEl.style.top = `${y}px`;
+}
+
+function stopToolboxDrag() {
+  if (typeof document !== 'undefined') {
+    document.body.classList.remove('map-toolbox-dragging');
+  }
+  if (!mapState.toolboxDrag) {
+    ensureToolboxWithinBounds();
+    return;
+  }
+  mapState.toolboxDrag = null;
+  ensureToolboxWithinBounds();
+}
+
+function ensureToolboxWithinBounds() {
+  const box = mapState.toolboxEl;
+  const container = mapState.toolboxContainer;
+  if (!box || !container || !box.isConnected || !container.isConnected) return;
+  const containerRect = container.getBoundingClientRect();
+  const boxRect = box.getBoundingClientRect();
+  const width = containerRect.width;
+  const height = containerRect.height;
+  if (!width || !height) return;
+  const maxX = Math.max(0, width - boxRect.width);
+  const maxY = Math.max(0, height - boxRect.height);
+  const x = clamp(mapState.toolboxPos.x, 0, maxX);
+  const y = clamp(mapState.toolboxPos.y, 0, maxY);
+  mapState.toolboxPos = { x, y };
+  box.style.left = `${x}px`;
+  box.style.top = `${y}px`;
+}
+
+function determineBaseCursor() {
+  if (mapState.draggingView || mapState.nodeDrag || mapState.areaDrag) return 'grabbing';
+  if (mapState.tool === TOOL.AREA) return 'crosshair';
+  if (mapState.tool === TOOL.NAVIGATE) return 'grab';
+  return 'pointer';
+}
+
+function refreshCursor(options = {}) {
+  if (!mapState.svg) return;
+  const { keepOverride = false } = options;
+  const base = determineBaseCursor();
+  mapState.baseCursor = base;
+  if (mapState.cursorOverride) {
+    const overrideStyle = CURSOR_STYLE[mapState.cursorOverride];
+    if (keepOverride && overrideStyle) {
+      mapState.svg.style.cursor = overrideStyle;
+      return;
+    }
+    mapState.cursorOverride = null;
+  }
+  mapState.svg.style.cursor = base;
+}
+
+function applyCursorOverride(kind) {
+  if (!mapState.svg) return;
+  if (mapState.nodeDrag || mapState.areaDrag || mapState.draggingView) return;
+  const style = CURSOR_STYLE[kind];
+  if (!style) return;
+  mapState.cursorOverride = kind;
+  mapState.svg.style.cursor = style;
+}
+
+function clearCursorOverride(kind) {
+  if (mapState.cursorOverride !== kind) return;
+  mapState.cursorOverride = null;
+  refreshCursor();
+}
+
 async function persistNodePosition(id) {
   const item = mapState.itemMap[id];
   if (!item) return;
@@ -865,7 +1130,7 @@ function handleEdgeClick(path, aId, bId, evt) {
     if (confirm('Are you sure you want to delete this link?')) {
       removeLink(aId, bId).then(() => renderMap(mapState.root));
     }
-  } else if (mapState.tool === TOOL.HIDE_LINK) {
+  } else if (mapState.tool === TOOL.HIDE) {
     if (confirm('Hide this link on the map?')) {
       setLinkHidden(aId, bId, true).then(() => renderMap(mapState.root));
     }
@@ -878,21 +1143,26 @@ function adjustScale() {
   const vb = svg.getAttribute('viewBox');
   if (!vb) return;
   const [,, w] = vb.split(' ').map(Number);
-  const unit = w / svg.clientWidth;
-  const nodeScale = Math.pow(unit, 0.8);
-  const labelScale = Math.pow(unit, 1.1);
+  if (!Number.isFinite(w) || w <= 0) return;
+  const defaultSize = Number.isFinite(mapState.defaultViewSize) ? mapState.defaultViewSize : w;
+  const zoomInRatio = defaultSize / w;
+  const zoomOutRatio = w / defaultSize;
+  const nodeScale = clamp(Math.pow(zoomInRatio, 0.3), 0.5, 1.6);
+  const labelScale = clamp(Math.pow(zoomOutRatio, 0.3), 1, 1.7);
+  const lineScale = clamp(Math.pow(zoomInRatio, 0.2), 0.6, 1.8);
 
   mapState.elements.forEach(({ circle, label }) => {
     const baseR = Number(circle.dataset.radius) || 20;
-    circle.setAttribute('r', baseR * nodeScale);
+    const scaledRadius = baseR * nodeScale;
+    circle.setAttribute('r', scaledRadius);
     const pos = mapState.positions[circle.dataset.id];
-    if (pos) {
+    if (pos && label) {
       label.setAttribute('font-size', 12 * labelScale);
       label.setAttribute('y', pos.y - (baseR + 8) * nodeScale);
     }
   });
   svg.querySelectorAll('.map-edge').forEach(line => {
-    line.setAttribute('stroke-width', 4 * Math.pow(unit, -0.2));
+    line.setAttribute('stroke-width', 4 * lineScale);
   });
 }
 
@@ -948,6 +1218,10 @@ function applyLineStyle(line, info) {
     line.appendChild(title);
   }
   title.textContent = info.name || '';
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
 }
 
 async function setNodeHidden(id, hidden) {

@@ -693,7 +693,7 @@ input[type="checkbox"]:checked::after {
   border-top: 1px solid var(--border);
 }
 .map-node {
-  cursor: pointer;
+  cursor: inherit;
   stroke: var(--border);
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
@@ -701,7 +701,7 @@ input[type="checkbox"]:checked::after {
 .map-edge {
   stroke: var(--gray);
   stroke-width: 4;
-  cursor: pointer;
+  cursor: inherit;
   vector-effect: non-scaling-stroke;
   pointer-events: stroke;
 
@@ -747,47 +747,164 @@ input[type="checkbox"]:checked::after {
   left: 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  background: var(--panel);
-  border: 1px solid var(--border);
+  gap: 10px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: var(--radius-lg);
-  padding: 8px;
+  padding: 12px 14px;
   z-index: 10;
-  box-shadow: 0 10px 24px rgba(0,0,0,0.45);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.45);
+  min-width: 136px;
+  max-width: 220px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: background 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.map-toolbox.collapsed {
+  padding: 10px 12px;
+  gap: 6px;
+  min-width: auto;
+  max-width: none;
+}
+
+.map-toolbox.collapsed .map-tool-list,
+.map-toolbox.collapsed .map-tool-status {
+  display: none;
+}
+
+.map-toolbox-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: grab;
+  user-select: none;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: rgba(148, 163, 184, 0.08);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.map-toolbox-header:hover {
+  background: rgba(148, 163, 184, 0.16);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.26);
+}
+
+.map-toolbox-header:active {
+  cursor: grabbing;
+}
+
+.map-toolbox-handle {
+  font-size: 14px;
+  color: rgba(148, 163, 184, 0.75);
+  line-height: 1;
+  letter-spacing: 1px;
+}
+
+.map-toolbox-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex: 1;
+}
+
+.map-toolbox-title-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.map-toolbox-toggle {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.16);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  color: var(--text);
+  padding: 0;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.map-toolbox-toggle:hover {
+  background: rgba(148, 163, 184, 0.28);
+  border-color: rgba(148, 163, 184, 0.45);
+  transform: none;
+  box-shadow: 0 6px 12px rgba(15, 23, 42, 0.24);
+}
+
+.map-tool-list {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  justify-items: center;
 }
 
 .map-tool {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  background: var(--muted);
-  border: 1px solid var(--border);
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.14);
+  border: 1px solid rgba(148, 163, 184, 0.25);
   color: var(--text);
-  font-size: 20px;
-  display: grid;
-  place-items: center;
+  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  transition: background 0.2s ease, transform 0.2s ease;
+  transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  padding: 0;
+  line-height: 1;
+  box-shadow: none;
 }
 
 .map-tool:hover {
-  background: rgba(148,163,184,0.2);
+  background: rgba(148, 163, 184, 0.28);
+  border-color: rgba(148, 163, 184, 0.45);
   transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.26);
 }
 
 .map-tool.active {
-  background: var(--blue);
-  color: #000;
-  border-color: var(--border);
+  background: rgba(166, 217, 255, 0.85);
+  color: #0b1120;
+  border-color: rgba(166, 217, 255, 0.9);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.32);
 }
 
 .map-tool-status {
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
-  color: var(--gray);
-  border-top: 1px solid var(--border);
-  padding-top: 6px;
+  color: rgba(226, 232, 240, 0.85);
+  border-top: 1px solid rgba(148, 163, 184, 0.28);
+  padding-top: 8px;
   text-align: left;
+  display: grid;
+  gap: 4px;
+}
+
+.map-tool-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.map-tool-status-row span {
+  color: rgba(148, 163, 184, 0.9);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.map-tool-status-row strong {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .map-hidden-panel {
@@ -909,6 +1026,11 @@ input[type="checkbox"]:checked::after {
   padding: 8px 12px;
   cursor: pointer;
   z-index: 9;
+}
+
+body.map-toolbox-dragging {
+  user-select: none;
+  cursor: grabbing;
 }
 
 .map-drag-ghost {
