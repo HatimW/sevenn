@@ -747,167 +747,112 @@ input[type="checkbox"]:checked::after {
   position: absolute;
   top: 16px;
   left: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background: rgba(15, 23, 42, 0.32);
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: var(--radius-lg);
-  padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.28);
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  box-shadow: 0 18px 38px rgba(8, 15, 28, 0.42);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
   z-index: 10;
-  box-shadow: 0 20px 45px rgba(8, 15, 28, 0.45);
-  min-width: 118px;
-  max-width: 180px;
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-  transition: background 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.map-toolbox.collapsed {
-  padding: 8px 10px;
-  gap: 4px;
-  min-width: auto;
-  max-width: none;
+.map-toolbox:hover {
+  background: rgba(15, 23, 42, 0.36);
+  border-color: rgba(203, 213, 225, 0.45);
+  box-shadow: 0 20px 42px rgba(8, 15, 28, 0.48);
 }
 
-.map-toolbox.collapsed .map-tool-list,
-.map-toolbox.collapsed .map-tool-status {
-  display: none;
-}
-
-.map-toolbox-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: grab;
-  user-select: none;
-  padding: 6px 8px;
-  border-radius: var(--radius);
-  background: rgba(148, 163, 184, 0.12);
-  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
-}
-
-.map-toolbox-header:hover {
-  background: rgba(148, 163, 184, 0.2);
-  box-shadow: 0 10px 22px rgba(8, 15, 28, 0.38);
-}
-
-.map-toolbox-header:active {
-  cursor: grabbing;
-}
-
-.map-toolbox-handle {
-  font-size: 14px;
-  color: rgba(148, 163, 184, 0.75);
-  line-height: 1;
-  letter-spacing: 1px;
-}
-
-.map-toolbox-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  color: rgba(226, 232, 240, 0.92);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  flex: 1;
-}
-
-.map-toolbox-title-icon {
-  font-size: 17px;
-  line-height: 1;
-}
-
-.map-toolbox-toggle {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  background: rgba(148, 163, 184, 0.18);
-  border: 1px solid rgba(148, 163, 184, 0.28);
+.map-toolbox-drag {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  border: 1px solid rgba(148, 163, 184, 0.35);
   display: grid;
   place-items: center;
-  font-size: 15px;
-  color: rgba(226, 232, 240, 0.92);
+  font-size: 14px;
+  color: rgba(226, 232, 240, 0.85);
+  cursor: grab;
   padding: 0;
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.map-toolbox-toggle:hover {
-  background: rgba(148, 163, 184, 0.3);
-  border-color: rgba(148, 163, 184, 0.5);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 14px rgba(8, 15, 28, 0.32);
+.map-toolbox-drag:hover {
+  background: rgba(148, 163, 184, 0.26);
+  border-color: rgba(203, 213, 225, 0.45);
+  box-shadow: 0 10px 24px rgba(8, 15, 28, 0.35);
+}
+
+.map-toolbox-drag:active {
+  cursor: grabbing;
+  transform: scale(0.96);
 }
 
 .map-tool-list {
-  display: grid;
+  display: inline-flex;
   gap: 6px;
-  grid-template-columns: repeat(2, 40px);
-  justify-content: center;
 }
 
 .map-tool {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 12px;
   background: rgba(148, 163, 184, 0.14);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  color: rgba(226, 232, 240, 0.9);
-  font-size: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  color: rgba(226, 232, 240, 0.92);
+  font-size: 17px;
+  display: grid;
+  place-items: center;
   cursor: pointer;
-  transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   padding: 0;
-  line-height: 1;
-  box-shadow: none;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .map-tool:hover {
-  background: rgba(148, 163, 184, 0.26);
-  border-color: rgba(148, 163, 184, 0.45);
+  background: rgba(148, 163, 184, 0.28);
+  border-color: rgba(203, 213, 225, 0.5);
+  box-shadow: 0 10px 20px rgba(8, 15, 28, 0.34);
   transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(8, 15, 28, 0.32);
 }
 
 .map-tool.active {
-  background: rgba(166, 217, 255, 0.9);
+  background: rgba(166, 217, 255, 0.95);
   color: #041026;
-  border-color: rgba(166, 217, 255, 0.95);
-  box-shadow: 0 10px 22px rgba(8, 15, 28, 0.36);
-  transform: translateY(-1px);
+  border-color: rgba(166, 217, 255, 1);
+  box-shadow: 0 12px 26px rgba(8, 15, 28, 0.4);
 }
 
-.map-tool-status {
-  font-size: 10.5px;
-  line-height: 1.35;
-  color: rgba(226, 232, 240, 0.82);
-  border-top: 1px solid rgba(148, 163, 184, 0.24);
-  padding-top: 6px;
-  text-align: left;
-  display: grid;
-  gap: 3px;
-}
-
-.map-tool-status-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.map-tool-badges {
+  display: inline-flex;
   gap: 6px;
 }
 
-.map-tool-status-row span {
-  color: rgba(148, 163, 184, 0.78);
-  font-weight: 500;
-  letter-spacing: 0.03em;
+.map-tool-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: rgba(226, 232, 240, 0.88);
+  font-size: 11px;
+  line-height: 1;
 }
 
-.map-tool-status-row strong {
-  color: rgba(226, 232, 240, 0.95);
+.map-tool-badge span {
+  font-size: 12px;
+}
+
+.map-tool-badge strong {
   font-weight: 600;
+  color: rgba(226, 232, 240, 0.96);
+  font-size: 11px;
 }
 
 .map-hidden-panel {

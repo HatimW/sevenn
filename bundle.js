@@ -2258,6 +2258,12 @@ var Sevenn = (() => {
     lastPointer: { x: 0, y: 0 },
     autoPan: null,
     autoPanFrame: null,
+
+    toolboxPos: { x: 16, y: 16 },
+    toolboxDrag: null,
+    toolboxEl: null,
+    toolboxContainer: null,
+
     baseCursor: "grab",
     cursorOverride: null
   };
@@ -2273,6 +2279,10 @@ var Sevenn = (() => {
     mapState.nodeWasDragged = false;
     mapState.cursorOverride = null;
     mapState.baseCursor = "grab";
+    stopToolboxDrag();
+    mapState.toolboxEl = null;
+    mapState.toolboxContainer = null;
+
     stopAutoPan();
     ensureListeners();
     const items = [
@@ -2504,6 +2514,10 @@ var Sevenn = (() => {
       window.addEventListener("resize", adjustScale);
       window._mapResizeAttached = true;
     }
+    if (!window._mapToolboxResizeAttached) {
+      window.addEventListener("resize", ensureToolboxWithinBounds);
+      window._mapToolboxResizeAttached = true;
+    }
   }
   function attachSvgEvents(svg) {
     svg.addEventListener("mousedown", (e) => {
@@ -2538,6 +2552,10 @@ var Sevenn = (() => {
   }
   function handleMouseMove(e) {
     if (!mapState.svg) return;
+    if (mapState.toolboxDrag) {
+      moveToolboxDrag(e.clientX, e.clientY);
+      return;
+    }
     if (mapState.menuDrag) {
       updateMenuDragPosition(e.clientX, e.clientY);
       return;
@@ -2599,6 +2617,7 @@ var Sevenn = (() => {
   }
   async function handleMouseUp(e) {
     if (!mapState.svg) return;
+    stopToolboxDrag();
     if (mapState.menuDrag) {
       await finishMenuDrag(e.clientX, e.clientY);
       return;
@@ -2787,7 +2806,6 @@ var Sevenn = (() => {
       case TOOL.NAVIGATE:
         return "grab";
       case TOOL.HIDE:
-
       case TOOL.BREAK:
       case TOOL.ADD_LINK:
         return "grab";
@@ -2826,13 +2844,30 @@ var Sevenn = (() => {
   function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
     const tools = [
       { id: TOOL.NAVIGATE, icon: "\u{1F9ED}", label: "Navigate" },
-      { id: TOOL.HIDE, icon: "\u{1F9FD}", label: "Hide" },
+      { id: TOOL.HIDE, icon: "\u{1FA84}", label: "Hide" },
       { id: TOOL.BREAK, icon: "\u2702\uFE0F", label: "Break link" },
       { id: TOOL.ADD_LINK, icon: "\u{1F517}", label: "Add link" },
       { id: TOOL.AREA, icon: "\u{1F4E6}", label: "Select area" }
     ];
     const box = document.createElement("div");
     box.className = "map-toolbox";
+
+    box.style.left = `${mapState.toolboxPos.x}px`;
+    box.style.top = `${mapState.toolboxPos.y}px`;
+    mapState.toolboxEl = box;
+    mapState.toolboxContainer = container;
+    box.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) return;
+      if (event.target.closest(".map-tool") || event.target.closest(".map-toolbox-drag")) return;
+      startToolboxDrag(event);
+    });
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "map-toolbox-drag";
+    handle.setAttribute("aria-label", "Drag toolbar");
+    handle.innerHTML = "<span>⋮</span>";
+    handle.addEventListener("mousedown", startToolboxDrag);
+    box.appendChild(handle);
     const list = document.createElement("div");
     list.className = "map-tool-list";
     tools.forEach((tool) => {
@@ -2852,6 +2887,7 @@ var Sevenn = (() => {
             mapState.pendingLink = null;
           }
           if (tool.id === TOOL.HIDE) {
+            mapState.hiddenMenuTab = mapState.hiddenMenuTab === "links" ? "links" : "nodes";
             mapState.panelVisible = true;
           }
           mapState.cursorOverride = null;
@@ -2861,11 +2897,22 @@ var Sevenn = (() => {
       list.appendChild(btn);
     });
     box.appendChild(list);
-    const status = document.createElement("div");
-    status.className = "map-tool-status";
-    status.innerHTML = `Hidden nodes: <strong>${hiddenNodeCount}</strong><br/>Hidden links: <strong>${hiddenLinkCount}</strong>`;
-    box.appendChild(status);
+
+    const badges = document.createElement("div");
+    badges.className = "map-tool-badges";
+    const nodeBadge = document.createElement("span");
+    nodeBadge.className = "map-tool-badge";
+    nodeBadge.setAttribute("title", `${hiddenNodeCount} hidden node${hiddenNodeCount === 1 ? "" : "s"}`);
+    nodeBadge.innerHTML = `<span>🙈</span><strong>${hiddenNodeCount}</strong>`;
+    badges.appendChild(nodeBadge);
+    const linkBadge = document.createElement("span");
+    linkBadge.className = "map-tool-badge";
+    linkBadge.setAttribute("title", `${hiddenLinkCount} hidden link${hiddenLinkCount === 1 ? "" : "s"}`);
+    linkBadge.innerHTML = `<span>🕸️</span><strong>${hiddenLinkCount}</strong>`;
+    badges.appendChild(linkBadge);
+    box.appendChild(badges);
     container.appendChild(box);
+    ensureToolboxWithinBounds();
   }
   function buildHiddenPanel(container, hiddenNodes, hiddenLinks) {
     const allowPanel = mapState.tool === TOOL.HIDE;
@@ -3004,6 +3051,68 @@ var Sevenn = (() => {
     mapState.menuDrag.ghost.style.left = `${clientX + 12}px`;
     mapState.menuDrag.ghost.style.top = `${clientY + 12}px`;
   }
+  function startToolboxDrag(event) {
+    if (event.button !== 0) return;
+    if (!mapState.toolboxEl || !mapState.toolboxContainer) return;
+    event.preventDefault();
+    const boxRect = mapState.toolboxEl.getBoundingClientRect();
+    const containerRect = mapState.toolboxContainer.getBoundingClientRect();
+    mapState.toolboxDrag = {
+      offsetX: event.clientX - boxRect.left,
+      offsetY: event.clientY - boxRect.top,
+      boxWidth: boxRect.width,
+      boxHeight: boxRect.height,
+      containerRect
+    };
+    if (typeof document !== "undefined") {
+      document.body.classList.add("map-toolbox-dragging");
+    }
+  }
+  function moveToolboxDrag(clientX, clientY) {
+    const drag = mapState.toolboxDrag;
+    if (!drag || !mapState.toolboxEl) return;
+    const { containerRect, offsetX, offsetY, boxWidth, boxHeight } = drag;
+    const width = containerRect.width;
+    const height = containerRect.height;
+    if (!width || !height) return;
+    let x = clientX - containerRect.left - offsetX;
+    let y = clientY - containerRect.top - offsetY;
+    const maxX = Math.max(0, width - boxWidth);
+    const maxY = Math.max(0, height - boxHeight);
+    x = clamp(x, 0, maxX);
+    y = clamp(y, 0, maxY);
+    mapState.toolboxPos = { x, y };
+    mapState.toolboxEl.style.left = `${x}px`;
+    mapState.toolboxEl.style.top = `${y}px`;
+  }
+  function stopToolboxDrag() {
+    if (typeof document !== "undefined") {
+      document.body.classList.remove("map-toolbox-dragging");
+    }
+    if (!mapState.toolboxDrag) {
+      ensureToolboxWithinBounds();
+      return;
+    }
+    mapState.toolboxDrag = null;
+    ensureToolboxWithinBounds();
+  }
+  function ensureToolboxWithinBounds() {
+    const box = mapState.toolboxEl;
+    const container = mapState.toolboxContainer;
+    if (!box || !container || !box.isConnected || !container.isConnected) return;
+    const containerRect = container.getBoundingClientRect();
+    const boxRect = box.getBoundingClientRect();
+    const width = containerRect.width;
+    const height = containerRect.height;
+    if (!width || !height) return;
+    const maxX = Math.max(0, width - boxRect.width);
+    const maxY = Math.max(0, height - boxRect.height);
+    const x = clamp(mapState.toolboxPos?.x ?? 0, 0, maxX);
+    const y = clamp(mapState.toolboxPos?.y ?? 0, 0, maxY);
+    mapState.toolboxPos = { x, y };
+    box.style.left = `${x}px`;
+    box.style.top = `${y}px`;
+  }
   async function persistNodePosition(id) {
     const item = mapState.itemMap[id];
     if (!item) return;
@@ -3115,6 +3224,9 @@ var Sevenn = (() => {
     const projX = x1 + t * dx;
     const projY = y1 + t * dy;
     return Math.hypot(px - projX, py - projY);
+  }
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
   }
   function calcPath(aId, bId) {
     const positions = mapState.positions;

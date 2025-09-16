@@ -80,7 +80,6 @@ const mapState = {
   autoPan: null,
   autoPanFrame: null,
   toolboxPos: { x: 16, y: 16 },
-  toolboxCollapsed: false,
   toolboxDrag: null,
   toolboxEl: null,
   toolboxContainer: null,
@@ -695,69 +694,32 @@ function updateEdgesFor(id) {
 function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
   const tools = [
     { id: TOOL.NAVIGATE, icon: '🧭', label: 'Navigate' },
-    { id: TOOL.HIDE, icon: '🧽', label: 'Hide' },
+    { id: TOOL.HIDE, icon: '🪄', label: 'Hide' },
     { id: TOOL.BREAK, icon: '✂️', label: 'Break link' },
     { id: TOOL.ADD_LINK, icon: '🔗', label: 'Add link' },
     { id: TOOL.AREA, icon: '📦', label: 'Select area' }
   ];
 
   const box = document.createElement('div');
-  box.className = 'map-toolbox' + (mapState.toolboxCollapsed ? ' collapsed' : '');
+  box.className = 'map-toolbox';
   box.style.left = `${mapState.toolboxPos.x}px`;
   box.style.top = `${mapState.toolboxPos.y}px`;
   mapState.toolboxEl = box;
   mapState.toolboxContainer = container;
 
-  const header = document.createElement('div');
-  header.className = 'map-toolbox-header';
-  header.addEventListener('mousedown', startToolboxDrag);
-
-  header.setAttribute('title', 'Drag to move. Double-click to minimize or maximize.');
-  header.addEventListener('dblclick', evt => {
-    if (evt.target.closest('.map-toolbox-toggle')) return;
-    mapState.toolboxCollapsed = !mapState.toolboxCollapsed;
-    renderMap(mapState.root);
+  box.addEventListener('mousedown', event => {
+    if (event.button !== 0) return;
+    if (event.target.closest('.map-tool') || event.target.closest('.map-toolbox-drag')) return;
+    startToolboxDrag(event);
   });
 
-
-  const handle = document.createElement('span');
-  handle.className = 'map-toolbox-handle';
-  handle.textContent = '⠿';
-  header.appendChild(handle);
-
-  const title = document.createElement('div');
-  title.className = 'map-toolbox-title';
-  const activeTool = tools.find(tool => tool.id === mapState.tool);
-  if (activeTool) {
-    const icon = document.createElement('span');
-    icon.className = 'map-toolbox-title-icon';
-    icon.textContent = activeTool.icon;
-    title.appendChild(icon);
-    const label = document.createElement('span');
-    label.textContent = activeTool.label;
-    title.appendChild(label);
-  } else {
-    title.textContent = 'Tools';
-  }
-  header.appendChild(title);
-
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.className = 'map-toolbox-toggle';
-
-  const toggleLabel = mapState.toolboxCollapsed ? 'Maximize toolbar' : 'Minimize toolbar';
-  toggle.setAttribute('aria-label', toggleLabel);
-  toggle.title = toggleLabel;
-  toggle.textContent = mapState.toolboxCollapsed ? '⤢' : '—';
-
-  toggle.addEventListener('click', evt => {
-    evt.stopPropagation();
-    mapState.toolboxCollapsed = !mapState.toolboxCollapsed;
-    renderMap(mapState.root);
-  });
-  header.appendChild(toggle);
-
-  box.appendChild(header);
+  const handle = document.createElement('button');
+  handle.type = 'button';
+  handle.className = 'map-toolbox-drag';
+  handle.setAttribute('aria-label', 'Drag toolbar');
+  handle.innerHTML = '<span>⋮</span>';
+  handle.addEventListener('mousedown', startToolboxDrag);
+  box.appendChild(handle);
 
   const list = document.createElement('div');
   list.className = 'map-tool-list';
@@ -789,13 +751,21 @@ function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
   });
   box.appendChild(list);
 
-  const status = document.createElement('div');
-  status.className = 'map-tool-status';
-  status.innerHTML = `
-    <div class="map-tool-status-row"><span>Nodes hidden</span><strong>${hiddenNodeCount}</strong></div>
-    <div class="map-tool-status-row"><span>Links hidden</span><strong>${hiddenLinkCount}</strong></div>
-  `.trim();
-  box.appendChild(status);
+  const badges = document.createElement('div');
+  badges.className = 'map-tool-badges';
+  const nodeBadge = document.createElement('span');
+  nodeBadge.className = 'map-tool-badge';
+  nodeBadge.setAttribute('title', `${hiddenNodeCount} hidden node${hiddenNodeCount === 1 ? '' : 's'}`);
+  nodeBadge.innerHTML = `<span>🙈</span><strong>${hiddenNodeCount}</strong>`;
+  badges.appendChild(nodeBadge);
+
+  const linkBadge = document.createElement('span');
+  linkBadge.className = 'map-tool-badge';
+  linkBadge.setAttribute('title', `${hiddenLinkCount} hidden link${hiddenLinkCount === 1 ? '' : 's'}`);
+  linkBadge.innerHTML = `<span>🕸️</span><strong>${hiddenLinkCount}</strong>`;
+  badges.appendChild(linkBadge);
+
+  box.appendChild(badges);
 
   container.appendChild(box);
   ensureToolboxWithinBounds();
@@ -1032,11 +1002,9 @@ function determineBaseCursor() {
     case TOOL.NAVIGATE:
       return 'grab';
     case TOOL.HIDE:
-
     case TOOL.BREAK:
     case TOOL.ADD_LINK:
       return 'grab';
-
     default:
       return 'pointer';
   }
