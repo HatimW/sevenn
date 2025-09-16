@@ -2187,11 +2187,46 @@ var Sevenn = (() => {
   // js/ui/components/map.js
   var TOOL = {
     NAVIGATE: "navigate",
-    NODES: "nodes",
+    HIDE: "hide",
     BREAK: "break-link",
     ADD_LINK: "add-link",
-    HIDE_LINK: "hide-link",
     AREA: "area"
+  };
+  function createCursor(svg, hotX = 8, hotY = 8) {
+    const encoded = encodeURIComponent(svg.trim()).replace(/%0A/g, "").replace(/%20/g, " ");
+    return `url("data:image/svg+xml,${encoded}") ${hotX} ${hotY}, pointer`;
+  }
+  var CURSOR_STYLE = {
+    hide: createCursor(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">' +
+        '<path d="M6 19.5l9-9a3 3 0 0 1 4.24 0l6.5 6.5a3 3 0 0 1 0 4.24l-9 9H9a3 3 0 0 1-3-3z" fill="#f97316" />' +
+        '<path d="M8.2 21.2l8.6 8.6" stroke="#fed7aa" stroke-width="3" stroke-linecap="round" />' +
+        '<path d="M11.3 24.5l4 4" stroke="#fff7ed" stroke-width="2" stroke-linecap="round" />' +
+        "</svg>",
+      7,
+      26
+    ),
+    break: createCursor(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">' +
+        '<circle cx="11" cy="11" r="4" fill="none" stroke="#f97316" stroke-width="2.2" />' +
+        '<circle cx="11" cy="21" r="4" fill="none" stroke="#f97316" stroke-width="2.2" />' +
+        '<path d="M14.5 13L24 3.5" stroke="#fbbf24" stroke-width="2.6" stroke-linecap="round" />' +
+        '<path d="M14.5 19L24 28.5" stroke="#fbbf24" stroke-width="2.6" stroke-linecap="round" />' +
+        '<path d="M6 6l7 7" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" />' +
+        '<path d="M6 26l7-7" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" />' +
+        "</svg>",
+      18,
+      18
+    ),
+    link: createCursor(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">' +
+        '<path d="M12 11h5a4.5 4.5 0 0 1 0 9h-3" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />' +
+        '<path d="M14 15h-4a4.5 4.5 0 0 0 0 9h5" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />' +
+        '<path d="M13 19h6" stroke="#bae6fd" stroke-width="2" stroke-linecap="round" />' +
+        "</svg>",
+      9,
+      23
+    )
   };
   var DEFAULT_LINK_COLOR = "#888888";
   var mapState = {
@@ -2222,7 +2257,13 @@ var Sevenn = (() => {
     minView: 100,
     lastPointer: { x: 0, y: 0 },
     autoPan: null,
-    autoPanFrame: null
+    autoPanFrame: null,
+    toolboxPos: { x: 16, y: 16 },
+    toolboxDrag: null,
+    toolboxEl: null,
+    toolboxContainer: null,
+    baseCursor: "grab",
+    cursorOverride: null
   };
   async function renderMap(root) {
     mapState.root = root;
@@ -2234,6 +2275,11 @@ var Sevenn = (() => {
     mapState.selectionRect = null;
     mapState.previewSelection = null;
     mapState.nodeWasDragged = false;
+    mapState.cursorOverride = null;
+    mapState.baseCursor = "grab";
+    stopToolboxDrag();
+    mapState.toolboxEl = null;
+    mapState.toolboxContainer = null;
     stopAutoPan();
     ensureListeners();
     const items = [
@@ -2359,6 +2405,21 @@ var Sevenn = (() => {
           e.stopPropagation();
           handleEdgeClick(path, it.id, l.id, e);
         });
+        path.addEventListener("mouseenter", () => {
+          if (mapState.tool === TOOL.HIDE) {
+            applyCursorOverride("hide");
+          } else if (mapState.tool === TOOL.BREAK) {
+            applyCursorOverride("break");
+          }
+        });
+        path.addEventListener("mouseleave", () => {
+          if (mapState.tool === TOOL.HIDE) {
+            clearCursorOverride("hide");
+          }
+          if (mapState.tool === TOOL.BREAK) {
+            clearCursorOverride("break");
+          }
+        });
         g.appendChild(path);
       });
     });
@@ -2385,7 +2446,7 @@ var Sevenn = (() => {
             offset: { x: x - pos.x, y: y - pos.y }
           };
           mapState.nodeWasDragged = false;
-          mapState.svg.style.cursor = "grabbing";
+          refreshCursor({ keepOverride: false });
         } else if (mapState.tool === TOOL.AREA && mapState.selectionIds.includes(it.id)) {
           const { x, y } = clientToMap(e.clientX, e.clientY);
           mapState.areaDrag = {
@@ -2394,7 +2455,7 @@ var Sevenn = (() => {
             origin: mapState.selectionIds.map((id) => ({ id, pos: { ...mapState.positions[id] } })),
             moved: false
           };
-          mapState.svg.style.cursor = "grabbing";
+          refreshCursor({ keepOverride: false });
         }
       });
       circle.addEventListener("click", async (e) => {
@@ -2402,13 +2463,28 @@ var Sevenn = (() => {
         if (mapState.tool === TOOL.NAVIGATE) {
           if (!mapState.nodeWasDragged) showPopup(it);
           mapState.nodeWasDragged = false;
-        } else if (mapState.tool === TOOL.NODES) {
+        } else if (mapState.tool === TOOL.HIDE) {
           if (confirm(`Remove ${titleOf3(it)} from the map?`)) {
             await setNodeHidden(it.id, true);
             await renderMap(root);
           }
         } else if (mapState.tool === TOOL.ADD_LINK) {
           await handleAddLinkClick(it.id);
+        }
+      });
+      circle.addEventListener("mouseenter", () => {
+        if (mapState.tool === TOOL.HIDE) {
+          applyCursorOverride("hide");
+        } else if (mapState.tool === TOOL.ADD_LINK) {
+          applyCursorOverride("link");
+        }
+      });
+      circle.addEventListener("mouseleave", () => {
+        if (mapState.tool === TOOL.HIDE) {
+          clearCursorOverride("hide");
+        }
+        if (mapState.tool === TOOL.ADD_LINK) {
+          clearCursorOverride("link");
         }
       });
       g.appendChild(circle);
@@ -2424,7 +2500,7 @@ var Sevenn = (() => {
     updateSelectionHighlight();
     updatePendingHighlight();
     updateViewBox();
-    svg.style.cursor = "grab";
+    refreshCursor();
   }
   function ensureListeners() {
     if (mapState.listenersAttached || typeof window === "undefined") return;
@@ -2435,6 +2511,10 @@ var Sevenn = (() => {
       window.addEventListener("resize", adjustScale);
       window._mapResizeAttached = true;
     }
+    if (!window._mapToolboxResizeAttached) {
+      window.addEventListener("resize", ensureToolboxWithinBounds);
+      window._mapToolboxResizeAttached = true;
+    }
   }
   function attachSvgEvents(svg) {
     svg.addEventListener("mousedown", (e) => {
@@ -2442,7 +2522,7 @@ var Sevenn = (() => {
       if (mapState.tool !== TOOL.AREA) {
         mapState.draggingView = true;
         mapState.lastPointer = { x: e.clientX, y: e.clientY };
-        svg.style.cursor = "grabbing";
+        refreshCursor({ keepOverride: false });
       } else if (mapState.tool === TOOL.AREA) {
         mapState.selectionRect = {
           start: { x: e.clientX, y: e.clientY },
@@ -2469,6 +2549,10 @@ var Sevenn = (() => {
   }
   function handleMouseMove(e) {
     if (!mapState.svg) return;
+    if (mapState.toolboxDrag) {
+      moveToolboxDrag(e.clientX, e.clientY);
+      return;
+    }
     if (mapState.menuDrag) {
       updateMenuDragPosition(e.clientX, e.clientY);
       return;
@@ -2530,14 +2614,16 @@ var Sevenn = (() => {
   }
   async function handleMouseUp(e) {
     if (!mapState.svg) return;
+    stopToolboxDrag();
     if (mapState.menuDrag) {
       await finishMenuDrag(e.clientX, e.clientY);
       return;
     }
+    let cursorNeedsRefresh = false;
     if (mapState.nodeDrag) {
       const id = mapState.nodeDrag.id;
       mapState.nodeDrag = null;
-      mapState.svg.style.cursor = "grab";
+      cursorNeedsRefresh = true;
       if (mapState.nodeWasDragged) {
         await persistNodePosition(id);
       }
@@ -2547,7 +2633,7 @@ var Sevenn = (() => {
       const moved = mapState.areaDrag.moved;
       const ids = mapState.areaDrag.ids;
       mapState.areaDrag = null;
-      mapState.svg.style.cursor = "grab";
+      cursorNeedsRefresh = true;
       if (moved) {
         await Promise.all(ids.map((id) => persistNodePosition(id)));
       }
@@ -2556,7 +2642,7 @@ var Sevenn = (() => {
     }
     if (mapState.draggingView) {
       mapState.draggingView = false;
-      mapState.svg.style.cursor = "grab";
+      cursorNeedsRefresh = true;
     }
     if (mapState.selectionRect) {
       const selected = computeSelectionFromRect();
@@ -2566,6 +2652,9 @@ var Sevenn = (() => {
       mapState.selectionBox.classList.add("hidden");
       updateSelectionHighlight();
       stopAutoPan();
+    }
+    if (cursorNeedsRefresh) {
+      refreshCursor({ keepOverride: true });
     }
   }
   function clientToMap(clientX, clientY) {
@@ -2706,17 +2795,77 @@ var Sevenn = (() => {
       edge.setAttribute("d", calcPath(edge.dataset.a, edge.dataset.b));
     });
   }
+  function determineBaseCursor() {
+    if (mapState.draggingView || mapState.nodeDrag || mapState.areaDrag) return "grabbing";
+    switch (mapState.tool) {
+      case TOOL.AREA:
+        return "crosshair";
+      case TOOL.NAVIGATE:
+        return "grab";
+      case TOOL.HIDE:
+      case TOOL.BREAK:
+      case TOOL.ADD_LINK:
+        return "grab";
+      default:
+        return "pointer";
+    }
+  }
+  function refreshCursor(options = {}) {
+    if (!mapState.svg) return;
+    const { keepOverride = false } = options;
+    const base = determineBaseCursor();
+    mapState.baseCursor = base;
+    if (mapState.cursorOverride) {
+      const overrideStyle = CURSOR_STYLE[mapState.cursorOverride];
+      if (keepOverride && overrideStyle) {
+        mapState.svg.style.cursor = overrideStyle;
+        return;
+      }
+      mapState.cursorOverride = null;
+    }
+    mapState.svg.style.cursor = base;
+  }
+  function applyCursorOverride(kind) {
+    if (!mapState.svg) return;
+    if (mapState.nodeDrag || mapState.areaDrag || mapState.draggingView) return;
+    const style = CURSOR_STYLE[kind];
+    if (!style) return;
+    mapState.cursorOverride = kind;
+    mapState.svg.style.cursor = style;
+  }
+  function clearCursorOverride(kind) {
+    if (mapState.cursorOverride !== kind) return;
+    mapState.cursorOverride = null;
+    refreshCursor();
+  }
   function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
     const tools = [
       { id: TOOL.NAVIGATE, icon: "\u{1F9ED}", label: "Navigate" },
-      { id: TOOL.NODES, icon: "\u{1F9E9}", label: "Nodes" },
+      { id: TOOL.HIDE, icon: "\u{1FA84}", label: "Hide" },
       { id: TOOL.BREAK, icon: "\u2702\uFE0F", label: "Break link" },
-      { id: TOOL.ADD_LINK, icon: "\u2795", label: "Add link" },
-      { id: TOOL.HIDE_LINK, icon: "\u{1F648}", label: "Hide link" },
+      { id: TOOL.ADD_LINK, icon: "\u{1F517}", label: "Add link" },
       { id: TOOL.AREA, icon: "\u{1F4E6}", label: "Select area" }
     ];
     const box = document.createElement("div");
     box.className = "map-toolbox";
+    box.style.left = `${mapState.toolboxPos.x}px`;
+    box.style.top = `${mapState.toolboxPos.y}px`;
+    mapState.toolboxEl = box;
+    mapState.toolboxContainer = container;
+    box.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) return;
+      if (event.target.closest(".map-tool") || event.target.closest(".map-toolbox-drag")) return;
+      startToolboxDrag(event);
+    });
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "map-toolbox-drag";
+    handle.setAttribute("aria-label", "Drag toolbar");
+    handle.innerHTML = "<span>⋮</span>";
+    handle.addEventListener("mousedown", startToolboxDrag);
+    box.appendChild(handle);
+    const list = document.createElement("div");
+    list.className = "map-tool-list";
     tools.forEach((tool) => {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -2726,8 +2875,6 @@ var Sevenn = (() => {
       btn.addEventListener("click", () => {
         if (mapState.tool !== tool.id) {
           mapState.tool = tool.id;
-          if (tool.id === TOOL.NODES) mapState.hiddenMenuTab = "nodes";
-          if (tool.id === TOOL.HIDE_LINK) mapState.hiddenMenuTab = "links";
           if (tool.id !== TOOL.AREA) {
             mapState.selectionIds = [];
             mapState.previewSelection = null;
@@ -2735,22 +2882,35 @@ var Sevenn = (() => {
           if (tool.id !== TOOL.ADD_LINK) {
             mapState.pendingLink = null;
           }
-          if (tool.id === TOOL.NODES || tool.id === TOOL.HIDE_LINK) {
+          if (tool.id === TOOL.HIDE) {
+            mapState.hiddenMenuTab = mapState.hiddenMenuTab === "links" ? "links" : "nodes";
             mapState.panelVisible = true;
           }
+          mapState.cursorOverride = null;
           renderMap(mapState.root);
         }
       });
-      box.appendChild(btn);
+      list.appendChild(btn);
     });
-    const status = document.createElement("div");
-    status.className = "map-tool-status";
-    status.innerHTML = `Hidden nodes: <strong>${hiddenNodeCount}</strong><br/>Hidden links: <strong>${hiddenLinkCount}</strong>`;
-    box.appendChild(status);
+    box.appendChild(list);
+    const badges = document.createElement("div");
+    badges.className = "map-tool-badges";
+    const nodeBadge = document.createElement("span");
+    nodeBadge.className = "map-tool-badge";
+    nodeBadge.setAttribute("title", `${hiddenNodeCount} hidden node${hiddenNodeCount === 1 ? "" : "s"}`);
+    nodeBadge.innerHTML = `<span>🙈</span><strong>${hiddenNodeCount}</strong>`;
+    badges.appendChild(nodeBadge);
+    const linkBadge = document.createElement("span");
+    linkBadge.className = "map-tool-badge";
+    linkBadge.setAttribute("title", `${hiddenLinkCount} hidden link${hiddenLinkCount === 1 ? "" : "s"}`);
+    linkBadge.innerHTML = `<span>🕸️</span><strong>${hiddenLinkCount}</strong>`;
+    badges.appendChild(linkBadge);
+    box.appendChild(badges);
     container.appendChild(box);
+    ensureToolboxWithinBounds();
   }
   function buildHiddenPanel(container, hiddenNodes, hiddenLinks) {
-    const allowPanel = mapState.tool === TOOL.NODES || mapState.tool === TOOL.HIDE_LINK;
+    const allowPanel = mapState.tool === TOOL.HIDE;
     const panel = document.createElement("div");
     panel.className = "map-hidden-panel";
     if (!(allowPanel && mapState.panelVisible)) {
@@ -2806,7 +2966,7 @@ var Sevenn = (() => {
           item.classList.add("draggable");
           item.textContent = titleOf3(it) || it.id;
           item.addEventListener("mousedown", (e) => {
-            if (mapState.tool !== TOOL.NODES) return;
+            if (mapState.tool !== TOOL.HIDE) return;
             startMenuDrag(it, e);
           });
           list.appendChild(item);
@@ -2886,6 +3046,68 @@ var Sevenn = (() => {
     mapState.menuDrag.ghost.style.left = `${clientX + 12}px`;
     mapState.menuDrag.ghost.style.top = `${clientY + 12}px`;
   }
+  function startToolboxDrag(event) {
+    if (event.button !== 0) return;
+    if (!mapState.toolboxEl || !mapState.toolboxContainer) return;
+    event.preventDefault();
+    const boxRect = mapState.toolboxEl.getBoundingClientRect();
+    const containerRect = mapState.toolboxContainer.getBoundingClientRect();
+    mapState.toolboxDrag = {
+      offsetX: event.clientX - boxRect.left,
+      offsetY: event.clientY - boxRect.top,
+      boxWidth: boxRect.width,
+      boxHeight: boxRect.height,
+      containerRect
+    };
+    if (typeof document !== "undefined") {
+      document.body.classList.add("map-toolbox-dragging");
+    }
+  }
+  function moveToolboxDrag(clientX, clientY) {
+    const drag = mapState.toolboxDrag;
+    if (!drag || !mapState.toolboxEl) return;
+    const { containerRect, offsetX, offsetY, boxWidth, boxHeight } = drag;
+    const width = containerRect.width;
+    const height = containerRect.height;
+    if (!width || !height) return;
+    let x = clientX - containerRect.left - offsetX;
+    let y = clientY - containerRect.top - offsetY;
+    const maxX = Math.max(0, width - boxWidth);
+    const maxY = Math.max(0, height - boxHeight);
+    x = clamp(x, 0, maxX);
+    y = clamp(y, 0, maxY);
+    mapState.toolboxPos = { x, y };
+    mapState.toolboxEl.style.left = `${x}px`;
+    mapState.toolboxEl.style.top = `${y}px`;
+  }
+  function stopToolboxDrag() {
+    if (typeof document !== "undefined") {
+      document.body.classList.remove("map-toolbox-dragging");
+    }
+    if (!mapState.toolboxDrag) {
+      ensureToolboxWithinBounds();
+      return;
+    }
+    mapState.toolboxDrag = null;
+    ensureToolboxWithinBounds();
+  }
+  function ensureToolboxWithinBounds() {
+    const box = mapState.toolboxEl;
+    const container = mapState.toolboxContainer;
+    if (!box || !container || !box.isConnected || !container.isConnected) return;
+    const containerRect = container.getBoundingClientRect();
+    const boxRect = box.getBoundingClientRect();
+    const width = containerRect.width;
+    const height = containerRect.height;
+    if (!width || !height) return;
+    const maxX = Math.max(0, width - boxRect.width);
+    const maxY = Math.max(0, height - boxRect.height);
+    const x = clamp(mapState.toolboxPos?.x ?? 0, 0, maxX);
+    const y = clamp(mapState.toolboxPos?.y ?? 0, 0, maxY);
+    mapState.toolboxPos = { x, y };
+    box.style.left = `${x}px`;
+    box.style.top = `${y}px`;
+  }
   async function persistNodePosition(id) {
     const item = mapState.itemMap[id];
     if (!item) return;
@@ -2959,7 +3181,7 @@ var Sevenn = (() => {
       if (confirm("Are you sure you want to delete this link?")) {
         removeLink(aId, bId).then(() => renderMap(mapState.root));
       }
-    } else if (mapState.tool === TOOL.HIDE_LINK) {
+    } else if (mapState.tool === TOOL.HIDE) {
       if (confirm("Hide this link on the map?")) {
         setLinkHidden(aId, bId, true).then(() => renderMap(mapState.root));
       }
@@ -2997,6 +3219,9 @@ var Sevenn = (() => {
     const projX = x1 + t * dx;
     const projY = y1 + t * dy;
     return Math.hypot(px - projX, py - projY);
+  }
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
   }
   function calcPath(aId, bId) {
     const positions = mapState.positions;
