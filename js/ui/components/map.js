@@ -19,29 +19,33 @@ function createCursor(svg, hotX = 8, hotY = 8) {
 const CURSOR_STYLE = {
   hide: createCursor(
     '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">'
-    + '<rect x="8" y="12" width="16" height="10" rx="2" fill="#f97316" transform="rotate(-30 16 17)" />'
-    + '<rect x="12" y="20" width="10" height="6" rx="1.5" fill="#fed7aa" transform="rotate(-30 17 23)" />'
+    + '<path d="M6 19.5l9-9a3 3 0 0 1 4.24 0l6.5 6.5a3 3 0 0 1 0 4.24l-9 9H9a3 3 0 0 1-3-3z" fill="#f97316" />'
+    + '<path d="M8.2 21.2l8.6 8.6" stroke="#fed7aa" stroke-width="3" stroke-linecap="round" />'
+    + '<path d="M11.3 24.5l4 4" stroke="#fff7ed" stroke-width="2" stroke-linecap="round" />'
     + '</svg>',
-    6,
+    7,
     26
   ),
   break: createCursor(
     '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">'
-    + '<circle cx="10" cy="12" r="4" fill="none" stroke="#f97316" stroke-width="2" />'
-    + '<circle cx="10" cy="20" r="4" fill="none" stroke="#f97316" stroke-width="2" />'
-    + '<path d="M6 7l20 18" stroke="#f97316" stroke-width="3" stroke-linecap="round" />'
-    + '<path d="M6 25l20-18" stroke="#f97316" stroke-width="3" stroke-linecap="round" />'
+    + '<circle cx="11" cy="11" r="4" fill="none" stroke="#f97316" stroke-width="2.2" />'
+    + '<circle cx="11" cy="21" r="4" fill="none" stroke="#f97316" stroke-width="2.2" />'
+    + '<path d="M14.5 13L24 3.5" stroke="#fbbf24" stroke-width="2.6" stroke-linecap="round" />'
+    + '<path d="M14.5 19L24 28.5" stroke="#fbbf24" stroke-width="2.6" stroke-linecap="round" />'
+    + '<path d="M6 6l7 7" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" />'
+    + '<path d="M6 26l7-7" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" />'
     + '</svg>',
-    8,
-    26
+    18,
+    18
   ),
   link: createCursor(
     '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">'
-    + '<path d="M12 11h6a5 5 0 0 1 0 10h-3" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />'
-    + '<path d="M14 15h-4a5 5 0 0 0 0 10h5" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />'
+    + '<path d="M12 11h5a4.5 4.5 0 0 1 0 9h-3" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />'
+    + '<path d="M14 15h-4a4.5 4.5 0 0 0 0 9h5" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />'
+    + '<path d="M13 19h6" stroke="#bae6fd" stroke-width="2" stroke-linecap="round" />'
     + '</svg>',
-    8,
-    24
+    9,
+    23
   )
 };
 
@@ -1022,10 +1026,18 @@ function ensureToolboxWithinBounds() {
 
 function determineBaseCursor() {
   if (mapState.draggingView || mapState.nodeDrag || mapState.areaDrag) return 'grabbing';
-  if (mapState.tool === TOOL.AREA) return 'crosshair';
-
-  if (mapState.tool === TOOL.NAVIGATE) return 'grab';
-  return 'pointer';
+  switch (mapState.tool) {
+    case TOOL.AREA:
+      return 'crosshair';
+    case TOOL.NAVIGATE:
+      return 'grab';
+    case TOOL.HIDE:
+    case TOOL.BREAK:
+    case TOOL.ADD_LINK:
+      return 'grab';
+    default:
+      return 'pointer';
+  }
 }
 
 function refreshCursor(options = {}) {
