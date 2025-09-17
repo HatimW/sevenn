@@ -1,6 +1,7 @@
 import { uid } from '../../utils.js';
 import { upsertItem, listBlocks } from '../../storage/storage.js';
 import { createFloatingWindow } from './window-manager.js';
+import { createRichTextEditor } from './rich-text.js';
 
 const fieldMap = {
   disease: [
@@ -64,14 +65,16 @@ export async function openEditor(kind, onSave, existing = null) {
       inp = document.createElement('input');
       inp.className = 'input';
       inp.value = existing ? (existing.facts || []).join(', ') : '';
+      fieldInputs[field] = {
+        getValue: () => inp.value.trim()
+      };
     } else {
-      inp = document.createElement('textarea');
-      inp.className = 'input';
-      inp.value = existing ? existing[field] || '' : '';
+      const editor = createRichTextEditor({ value: existing ? existing[field] || '' : '' });
+      inp = editor.element;
+      fieldInputs[field] = editor;
     }
     lbl.appendChild(inp);
     form.appendChild(lbl);
-    fieldInputs[field] = inp;
   });
 
   const colorLabel = document.createElement('label');
@@ -182,7 +185,8 @@ export async function openEditor(kind, onSave, existing = null) {
     const item = existing || { id: uid(), kind };
     item[titleKey] = trimmed;
     fieldMap[kind].forEach(([field]) => {
-      const v = fieldInputs[field].value.trim();
+      const control = fieldInputs[field];
+      const v = control?.getValue ? control.getValue() : '';
       if (field === 'facts') {
         item.facts = v ? v.split(',').map(s => s.trim()).filter(Boolean) : [];
       } else {

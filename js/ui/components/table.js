@@ -1,6 +1,7 @@
 import { listBlocks } from '../../storage/storage.js';
 import { createTitleCell } from './titlecell.js';
 import { chipList } from './chips.js';
+import { renderRichText } from './rich-text.js';
 
 const columnMap = {
   disease: [
@@ -114,7 +115,7 @@ export async function renderTable(container, items, kind, onChange) {
             if (field === 'facts') {
               td2.appendChild(chipList(it.facts || []));
             } else {
-              td2.textContent = it[field] || '';
+              renderRichText(td2, it[field] || '');
             }
             tr.appendChild(td2);
           });

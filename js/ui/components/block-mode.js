@@ -1,4 +1,5 @@
 import { state, setBlockMode } from '../../state.js';
+import { sanitizeHtml } from './rich-text.js';
 import { sectionDefsForKind } from './sections.js';
 
 export function renderBlockMode(root) {
@@ -371,7 +372,10 @@ function entryIdFor(itemId, sectionKey) {
 function sectionValue(raw) {
   if (raw == null) return '';
   const text = typeof raw === 'string' ? raw : String(raw);
-  return text.trim();
+  const sanitized = sanitizeHtml(text);
+  const template = document.createElement('template');
+  template.innerHTML = sanitized;
+  return template.content.textContent?.trim() || '';
 }
 
 function normalized(text) {

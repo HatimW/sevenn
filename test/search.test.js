@@ -13,3 +13,11 @@ test('buildTokens gathers fields', () => {
     assert(tokens.includes(tok));
   });
 });
+
+test('buildTokens includes rich text content', () => {
+  const item = { etiology: '<p>Heart <strong>Failure</strong> &amp; Shock</p>' };
+  const tokens = buildTokens(item).split(' ');
+  ['heart','failure','shock'].forEach(tok => {
+    assert(tokens.includes(tok));
+  });
+});

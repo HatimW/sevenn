@@ -1,5 +1,6 @@
 import { state, setFlashSession } from '../../state.js';
 import { sectionDefsForKind } from './sections.js';
+import { renderRichText } from './rich-text.js';
 
 // Render flashcards session. Uses session.pool if provided, else state.cohort
 export function renderFlashcards(root, redraw) {
@@ -38,7 +39,7 @@ export function renderFlashcards(root, redraw) {
     head.textContent = label;
     const body = document.createElement('div');
     body.className = 'flash-body';
-    body.textContent = item[field] || '';
+    renderRichText(body, item[field] || '');
     sec.appendChild(head);
     sec.appendChild(body);
     sec.addEventListener('click', () => { sec.classList.toggle('revealed'); });
