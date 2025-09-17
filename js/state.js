@@ -18,7 +18,8 @@ export const state = {
   flashSession: null,
   examSession: null,
   examAttemptExpanded: {},
-  map: { panzoom:false }
+  map: { panzoom:false },
+  blockMode: { section:"", assignments:{}, reveal:{}, order:{} }
 };
 
 export function setTab(t){ state.tab = t; }
@@ -35,3 +36,5 @@ export function setExamSession(sess){ state.examSession = sess; }
 export function setExamAttemptExpanded(examId, expanded){
   state.examAttemptExpanded[examId] = expanded;
 }
+export function setBlockMode(patch){ Object.assign(state.blockMode, patch); }
+export function resetBlockMode(){ state.blockMode = { section:"", assignments:{}, reveal:{}, order:{} }; }

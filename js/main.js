@@ -8,6 +8,7 @@ import { renderBuilder } from './ui/components/builder.js';
 import { renderFlashcards } from './ui/components/flashcards.js';
 import { renderReview } from './ui/components/review.js';
 import { renderQuiz } from './ui/components/quiz.js';
+import { renderBlockMode } from './ui/components/block-mode.js';
 import { renderExams, renderExamRunner } from './ui/components/exams.js';
 import { renderMap } from './ui/components/map.js';
 
@@ -84,7 +85,7 @@ async function render() {
 
       const subnav = document.createElement('div');
       subnav.className = 'tabs row subtabs';
-      ['Flashcards','Review','Quiz'].forEach(st => {
+      ['Flashcards','Review','Quiz','Blocks'].forEach(st => {
         const sb = document.createElement('button');
         sb.className = 'tab' + (state.subtab.Study === st ? ' active' : '');
         sb.textContent = st;
@@ -108,7 +109,7 @@ async function render() {
           main.appendChild(startBtn);
         } else if (state.subtab.Study === 'Review') {
           renderReview(main, render);
-        } else {
+        } else if (state.subtab.Study === 'Quiz') {
           const startBtn = document.createElement('button');
           startBtn.className = 'btn';
           startBtn.textContent = 'Start Quiz';
@@ -117,6 +118,8 @@ async function render() {
             render();
           });
           main.appendChild(startBtn);
+        } else if (state.subtab.Study === 'Blocks') {
+          renderBlockMode(main);
         }
       }
     }

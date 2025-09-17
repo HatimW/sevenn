@@ -1,4 +1,5 @@
 import { state, setFlashSession } from '../../state.js';
+import { sectionDefsForKind } from './sections.js';
 
 // Render flashcards session. Uses session.pool if provided, else state.cohort
 export function renderFlashcards(root, redraw) {
@@ -96,30 +97,5 @@ export function renderFlashcards(root, redraw) {
 }
 
 function sectionsFor(item) {
-  const map = {
-    disease: [
-      ['Etiology', 'etiology'],
-      ['Pathophys', 'pathophys'],
-      ['Clinical Presentation', 'clinical'],
-      ['Diagnosis', 'diagnosis'],
-      ['Treatment', 'treatment'],
-      ['Complications', 'complications'],
-      ['Mnemonic', 'mnemonic']
-    ],
-    drug: [
-      ['Mechanism', 'moa'],
-      ['Uses', 'uses'],
-      ['Side Effects', 'sideEffects'],
-      ['Contraindications', 'contraindications'],
-      ['Mnemonic', 'mnemonic']
-    ],
-    concept: [
-      ['Definition', 'definition'],
-      ['Mechanism', 'mechanism'],
-      ['Clinical Relevance', 'clinicalRelevance'],
-      ['Example', 'example'],
-      ['Mnemonic', 'mnemonic']
-    ]
-  };
-  return map[item.kind] || [];
+  return sectionDefsForKind(item.kind).map(def => [def.label, def.key]);
 }
