@@ -54,6 +54,18 @@ function renderBlockPanel(block, rerender) {
 
   const header = document.createElement('div');
   header.className = 'builder-block-header';
+
+  const blockCollapseBtn = createCollapseToggle({
+    collapsed: blockCollapsed,
+    label: blockCollapsed ? 'Show weeks' : 'Hide weeks',
+    onToggle: () => {
+      toggleBlockCollapsed(blockId);
+      rerender();
+    },
+    variant: 'block'
+  });
+  header.appendChild(blockCollapseBtn);
+
   const title = document.createElement('h3');
   title.textContent = block.title || blockId;
   header.appendChild(title);
@@ -78,12 +90,6 @@ function renderBlockPanel(block, rerender) {
   actions.appendChild(toggleBlockBtn);
 
   if (lectures.length) {
-    const toggleCollapseBtn = createAction(blockCollapsed ? 'Show weeks' : 'Hide weeks', () => {
-      toggleBlockCollapsed(blockId);
-      rerender();
-    });
-    actions.appendChild(toggleCollapseBtn);
-
     const allBtn = createAction('Select all lectures', () => {
       selectEntireBlock(block);
       rerender();
@@ -139,6 +145,16 @@ function renderWeek(block, week, lectures, rerender) {
   const header = document.createElement('div');
   header.className = 'builder-week-header';
 
+  const weekCollapseBtn = createCollapseToggle({
+    collapsed: weekCollapsed,
+    label: weekCollapsed ? 'Show lectures' : 'Hide lectures',
+    onToggle: () => {
+      toggleWeekCollapsed(blockId, week);
+      rerender();
+    }
+  });
+  header.appendChild(weekCollapseBtn);
+
   const label = createPill(selected, formatWeekLabel(week), () => {
     toggleWeek(block, week);
     rerender();
@@ -152,11 +168,6 @@ function renderWeek(block, week, lectures, rerender) {
 
   const actions = document.createElement('div');
   actions.className = 'builder-week-actions';
-  const toggleBtn = createAction(weekCollapsed ? 'Show lectures' : 'Hide lectures', () => {
-    toggleWeekCollapsed(blockId, week);
-    rerender();
-  });
-  actions.appendChild(toggleBtn);
   const allBtn = createAction('Select all', () => {
     selectWeek(block, week);
     rerender();
@@ -522,5 +533,17 @@ function createAction(label, onClick) {
   btn.className = 'builder-action';
   btn.textContent = label;
   btn.addEventListener('click', onClick);
+  return btn;
+}
+
+function createCollapseToggle({ collapsed, label, onToggle, variant = 'week' }) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'builder-collapse-toggle';
+  if (variant === 'block') btn.classList.add('builder-collapse-toggle-block');
+  btn.setAttribute('aria-expanded', String(!collapsed));
+  btn.setAttribute('aria-label', label);
+  btn.textContent = collapsed ? '▸' : '▾';
+  btn.addEventListener('click', onToggle);
   return btn;
 }

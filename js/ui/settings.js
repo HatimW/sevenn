@@ -1,6 +1,20 @@
 import { getSettings, saveSettings, listBlocks, upsertBlock, deleteBlock, deleteLecture, updateLecture, exportJSON, importJSON, exportAnkiCSV } from '../storage/storage.js';
 import { confirmModal } from './components/confirm.js';
 
+const collapsedLectureBlocks = new Set();
+
+function isLectureListCollapsed(blockId) {
+  return collapsedLectureBlocks.has(blockId);
+}
+
+function toggleLectureListCollapse(blockId) {
+  if (collapsedLectureBlocks.has(blockId)) {
+    collapsedLectureBlocks.delete(blockId);
+  } else {
+    collapsedLectureBlocks.add(blockId);
+  }
+}
+
 export async function renderSettings(root) {
   root.innerHTML = '';
 
@@ -41,6 +55,8 @@ export async function renderSettings(root) {
   blocks.forEach((b,i) => {
     const wrap = document.createElement('div');
     wrap.className = 'block';
+    const lectures = (b.lectures || []).slice().sort((a,b)=> b.week - a.week || b.id - a.id);
+    const lecturesCollapsed = isLectureListCollapsed(b.blockId);
     const title = document.createElement('h3');
     title.textContent = `${b.blockId} – ${b.title}`;
     wrap.appendChild(title);
@@ -48,6 +64,18 @@ export async function renderSettings(root) {
     const wkInfo = document.createElement('div');
     wkInfo.textContent = `Weeks: ${b.weeks}`;
     wrap.appendChild(wkInfo);
+
+    if (lectures.length || lecturesCollapsed) {
+      const toggleLecturesBtn = document.createElement('button');
+      toggleLecturesBtn.type = 'button';
+      toggleLecturesBtn.className = 'btn secondary settings-lecture-toggle';
+      toggleLecturesBtn.textContent = lecturesCollapsed ? 'Show lectures' : 'Hide lectures';
+      toggleLecturesBtn.addEventListener('click', async () => {
+        toggleLectureListCollapse(b.blockId);
+        await renderSettings(root);
+      });
+      wrap.appendChild(toggleLecturesBtn);
+    }
 
     const controls = document.createElement('div');
     controls.className = 'row';
@@ -124,8 +152,12 @@ export async function renderSettings(root) {
       editForm.style.display = editForm.style.display === 'none' ? 'flex' : 'none';
     });
 
+    const lectureSection = document.createElement('div');
+    lectureSection.className = 'settings-lecture-section';
+    lectureSection.hidden = lecturesCollapsed;
+
     const lecList = document.createElement('ul');
-    (b.lectures || []).slice().sort((a,b)=> b.week - a.week || b.id - a.id).forEach(l => {
+    lectures.forEach(l => {
       const li = document.createElement('li');
       li.className = 'row';
       const span = document.createElement('span');
@@ -178,7 +210,7 @@ export async function renderSettings(root) {
       li.append(editLec, delLec);
       lecList.appendChild(li);
     });
-    wrap.appendChild(lecList);
+    lectureSection.appendChild(lecList);
 
     const lecForm = document.createElement('form');
     lecForm.className = 'row';
@@ -207,7 +239,9 @@ export async function renderSettings(root) {
       await upsertBlock(updated);
       await renderSettings(root);
     });
-    wrap.appendChild(lecForm);
+    lectureSection.appendChild(lecForm);
+
+    wrap.appendChild(lectureSection);
 
     list.appendChild(wrap);
   });
