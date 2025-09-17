@@ -154,6 +154,7 @@ function createToolbarButton(label, title, onClick){
   btn.className = 'rich-editor-btn';
   btn.textContent = label;
   btn.title = title;
+  btn.setAttribute('aria-label', title);
   btn.addEventListener('mousedown', e => e.preventDefault());
   btn.addEventListener('click', onClick);
   return btn;
@@ -185,24 +186,49 @@ export function createRichTextEditor({ value = '' } = {}){
     editable.dispatchEvent(new Event('input'));
   }
 
-  const controls = [
+  function hasActiveSelection(){
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return false;
+    const anchor = selection.anchorNode;
+    const focus = selection.focusNode;
+    if (!anchor || !focus) return false;
+    return editable.contains(anchor) && editable.contains(focus);
+  }
+
+  function createGroup(){
+    const group = document.createElement('div');
+    group.className = 'rich-editor-group';
+    toolbar.appendChild(group);
+    return group;
+  }
+
+  const inlineGroup = createGroup();
+  [
     createToolbarButton('B', 'Bold', () => exec('bold')),
     createToolbarButton('I', 'Italic', () => exec('italic')),
     createToolbarButton('U', 'Underline', () => exec('underline')),
     createToolbarButton('S', 'Strikethrough', () => exec('strikeThrough'))
-  ];
-  controls.forEach(btn => toolbar.appendChild(btn));
+  ].forEach(btn => inlineGroup.appendChild(btn));
 
   const colorWrap = document.createElement('label');
   colorWrap.className = 'rich-editor-color';
   colorWrap.title = 'Text color';
   const colorInput = document.createElement('input');
   colorInput.type = 'color';
+  colorInput.value = '#ffffff';
+  colorInput.dataset.lastColor = '#ffffff';
   colorInput.addEventListener('input', () => {
+    if (!hasActiveSelection()) {
+      const previous = colorInput.dataset.lastColor || '#ffffff';
+      colorInput.value = previous;
+      return;
+    }
     exec('foreColor', colorInput.value);
+    colorInput.dataset.lastColor = colorInput.value;
   });
   colorWrap.appendChild(colorInput);
-  toolbar.appendChild(colorWrap);
+  const colorGroup = createGroup();
+  colorGroup.appendChild(colorWrap);
 
   const highlightWrap = document.createElement('label');
   highlightWrap.className = 'rich-editor-color';
@@ -210,11 +236,68 @@ export function createRichTextEditor({ value = '' } = {}){
   const highlightInput = document.createElement('input');
   highlightInput.type = 'color';
   highlightInput.value = '#ffff00';
+  highlightInput.dataset.lastColor = '#ffff00';
   highlightInput.addEventListener('input', () => {
+    if (!hasActiveSelection()) {
+      highlightInput.value = highlightInput.dataset.lastColor || '#ffff00';
+      return;
+    }
     exec('hiliteColor', highlightInput.value);
+    highlightInput.dataset.lastColor = highlightInput.value;
   });
   highlightWrap.appendChild(highlightInput);
-  toolbar.appendChild(highlightWrap);
+  colorGroup.appendChild(highlightWrap);
+
+  const listGroup = createGroup();
+  const listSelect = document.createElement('select');
+  listSelect.className = 'rich-editor-select';
+  [
+    ['', 'Lists'],
+    ['unordered', 'Bulleted'],
+    ['ordered', 'Numbered'],
+    ['lower-alpha', 'Lettered'],
+    ['lower-roman', 'Roman numerals']
+  ].forEach(([value, label]) => {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    listSelect.appendChild(opt);
+  });
+  if (listSelect.firstElementChild) {
+    listSelect.firstElementChild.disabled = true;
+    listSelect.firstElementChild.hidden = true;
+  }
+  listSelect.value = '';
+
+  function applyOrderedStyle(style){
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return;
+    let node = selection.getRangeAt(0).startContainer;
+    if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+    while (node && node !== editable) {
+      if (node.nodeType === Node.ELEMENT_NODE && node.tagName?.toLowerCase() === 'ol') {
+        if (style) node.style.listStyleType = style;
+        else node.style.removeProperty('list-style-type');
+        break;
+      }
+      node = node.parentNode;
+    }
+  }
+
+  listSelect.addEventListener('change', () => {
+    const value = listSelect.value;
+    if (!value) return;
+    focusEditor();
+    if (value === 'unordered') {
+      exec('insertUnorderedList');
+    } else {
+      exec('insertOrderedList');
+      applyOrderedStyle(value === 'ordered' ? '' : value);
+    }
+    editable.dispatchEvent(new Event('input'));
+    listSelect.value = '';
+  });
+  listGroup.appendChild(listSelect);
 
   const sizeSelect = document.createElement('select');
   sizeSelect.className = 'rich-editor-size';
@@ -260,12 +343,9 @@ export function createRichTextEditor({ value = '' } = {}){
     editable.dispatchEvent(new Event('input'));
     sizeSelect.value = '';
   });
-  toolbar.appendChild(sizeSelect);
+  listGroup.appendChild(sizeSelect);
 
-  const bulletBtn = createToolbarButton('•', 'Bulleted list', () => exec('insertUnorderedList'));
-  toolbar.appendChild(bulletBtn);
-  const numberedBtn = createToolbarButton('1.', 'Numbered list', () => exec('insertOrderedList'));
-  toolbar.appendChild(numberedBtn);
+  const mediaGroup = createGroup();
 
   const linkBtn = createToolbarButton('🔗', 'Insert link', () => {
     focusEditor();
@@ -273,7 +353,7 @@ export function createRichTextEditor({ value = '' } = {}){
     if (!url) return;
     exec('createLink', url);
   });
-  toolbar.appendChild(linkBtn);
+  mediaGroup.appendChild(linkBtn);
 
   const imageBtn = createToolbarButton('🖼', 'Insert image', () => {
     focusEditor();
@@ -281,7 +361,7 @@ export function createRichTextEditor({ value = '' } = {}){
     if (!url) return;
     exec('insertImage', url);
   });
-  toolbar.appendChild(imageBtn);
+  mediaGroup.appendChild(imageBtn);
 
   const mediaBtn = createToolbarButton('🎬', 'Insert media', () => {
     focusEditor();
@@ -301,10 +381,20 @@ export function createRichTextEditor({ value = '' } = {}){
     document.execCommand('insertHTML', false, html);
     editable.dispatchEvent(new Event('input'));
   });
-  toolbar.appendChild(mediaBtn);
+  mediaGroup.appendChild(mediaBtn);
 
   const clearBtn = createToolbarButton('⌫', 'Clear formatting', () => exec('removeFormat'));
-  toolbar.appendChild(clearBtn);
+  const utilityGroup = createGroup();
+  utilityGroup.appendChild(clearBtn);
+
+  const clearHighlightBtn = createToolbarButton('⨯', 'Remove highlight', () => {
+    focusEditor();
+    document.execCommand('hiliteColor', false, 'transparent');
+    highlightInput.value = '#ffff00';
+    highlightInput.dataset.lastColor = '#ffff00';
+    editable.dispatchEvent(new Event('input'));
+  });
+  utilityGroup.appendChild(clearHighlightBtn);
 
   editable.addEventListener('keydown', (e) => {
     if (e.key === 'Tab') {

@@ -1,6 +1,5 @@
 import { listBlocks, upsertItem, deleteItem } from '../../storage/storage.js';
 import { state, setEntryLayout } from '../../state.js';
-import { chipList } from './chips.js';
 import { openEditor } from './editor.js';
 import { confirmModal } from './confirm.js';
 import { openLinker } from './linker.js';
@@ -35,6 +34,29 @@ const fieldDefs = {
     ['mnemonic','Mnemonic','🧠']
   ]
 };
+
+function escapeHtml(str = '') {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function ensureExtras(item) {
+  if (Array.isArray(item.extras) && item.extras.length) {
+    return item.extras;
+  }
+  if (item.facts && item.facts.length) {
+    return [{
+      id: 'legacy-facts',
+      title: 'Highlights',
+      body: `<ul>${item.facts.map(f => `<li>${escapeHtml(f)}</li>`).join('')}</ul>`
+    }];
+  }
+  return [];
+}
 
 const expanded = new Set();
 const collapsedBlocks = new Set();
@@ -175,16 +197,27 @@ export function createItemCard(item, onChange){
       sec.appendChild(txt);
       body.appendChild(sec);
     });
+    const extras = ensureExtras(item);
+    extras.forEach(extra => {
+      if (!extra || !extra.body) return;
+      const sec = document.createElement('div');
+      sec.className = 'section section--extra';
+      const tl = document.createElement('div');
+      tl.className = 'section-title';
+      tl.textContent = extra.title || 'Additional Section';
+      sec.appendChild(tl);
+      const txt = document.createElement('div');
+      txt.className = 'section-content';
+      renderRichText(txt, extra.body);
+      sec.appendChild(txt);
+      body.appendChild(sec);
+    });
+
     if (item.links && item.links.length) {
       const lc = document.createElement('span');
       lc.className = 'chip link-chip';
       lc.textContent = `🪢 ${item.links.length}`;
       body.appendChild(lc);
-    }
-    if (item.facts && item.facts.length) {
-      const facts = chipList(item.facts);
-      facts.classList.add('facts');
-      body.appendChild(facts);
     }
   }
 

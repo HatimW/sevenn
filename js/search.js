@@ -20,7 +20,16 @@ export function buildTokens(item) {
   const fields = [];
   if (item.name) fields.push(item.name);
   if (item.concept) fields.push(item.concept);
-  fields.push(...(item.facts || []), ...(item.tags || []));
+  fields.push(...(item.tags || []));
+  if (Array.isArray(item.extras)) {
+    item.extras.forEach(extra => {
+      if (!extra) return;
+      if (extra.title) fields.push(extra.title);
+      if (extra.body) fields.push(stripHtml(extra.body));
+    });
+  } else if (item.facts && item.facts.length) {
+    fields.push(...item.facts);
+  }
   if (item.lectures) fields.push(...item.lectures.map(l => l.name));
   contentFields.forEach(field => {
     if (typeof item[field] === 'string' && item[field]) {
