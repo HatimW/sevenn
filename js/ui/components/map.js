@@ -1353,12 +1353,7 @@ function adjustScale() {
   });
 
   svg.querySelectorAll('.map-edge').forEach(line => {
-    const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
-    line.setAttribute('stroke-width', baseWidth * lineScale);
-    if (line._overlay) {
-      const overlayBase = Number(line._overlay.dataset.baseWidth) || baseWidth * 0.85;
-      line._overlay.setAttribute('stroke-width', overlayBase * lineScale);
-    }
+    updateLineStrokeWidth(line);
     syncLineDecoration(line);
   });
 }
@@ -1420,12 +1415,15 @@ function applyLineStyle(line, info = {}) {
   line.dataset.label = label;
 
   line.style.stroke = color;
+  line.style.color = color;
   line.style.filter = '';
   line.removeAttribute('marker-start');
   line.removeAttribute('marker-end');
   line.removeAttribute('marker-mid');
   line.removeAttribute('stroke-dasharray');
   line.classList.remove('edge-glow');
+
+  updateLineStrokeWidth(line);
 
   if (style === 'dashed') {
     const base = getLineThicknessValue(thickness);
@@ -1453,12 +1451,13 @@ function applyLineStyle(line, info = {}) {
     line.classList.add('edge-glow');
   }
 
-  let title = line.querySelector('title');
-  if (!title) {
-    title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    line.appendChild(title);
+  const title = line.querySelector('title');
+  if (title) title.remove();
+  if (label) {
+    line.setAttribute('aria-label', label);
+  } else {
+    line.removeAttribute('aria-label');
   }
-  title.textContent = label;
 
   if (mapState.hoveredEdge === line) {
     if (label) {
@@ -1473,6 +1472,23 @@ function applyLineStyle(line, info = {}) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+function updateLineStrokeWidth(line) {
+  if (!line) return;
+  const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
+  const { lineScale = 1 } = getCurrentScales();
+  const strokeWidth = baseWidth * lineScale;
+  if (Number.isFinite(strokeWidth)) {
+    line.setAttribute('stroke-width', strokeWidth);
+  }
+  if (line._overlay) {
+    const overlayBase = Number(line._overlay.dataset.baseWidth) || baseWidth * 0.85;
+    const overlayWidth = overlayBase * lineScale;
+    if (Number.isFinite(overlayWidth)) {
+      line._overlay.setAttribute('stroke-width', overlayWidth);
+    }
+  }
 }
 
 function syncLineDecoration(line) {
@@ -1534,16 +1550,16 @@ function updateBlockedOverlay(line, overlay) {
   const norm1 = Math.hypot(diag1x, diag1y) || 1;
   const norm2 = Math.hypot(diag2x, diag2y) || 1;
   const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
-  const armLength = baseWidth * 3.2;
+  const armLength = Math.max(28, baseWidth * 4.2);
   const d = `M${midX - (diag1x / norm1) * armLength} ${midY - (diag1y / norm1) * armLength}`
     + ` L${midX + (diag1x / norm1) * armLength} ${midY + (diag1y / norm1) * armLength}`
     + ` M${midX - (diag2x / norm2) * armLength} ${midY - (diag2y / norm2) * armLength}`
     + ` L${midX + (diag2x / norm2) * armLength} ${midY + (diag2y / norm2) * armLength}`;
   overlay.setAttribute('d', d);
-  const overlayBase = baseWidth * 0.85;
+  const overlayBase = baseWidth * 1.6;
   overlay.dataset.baseWidth = String(overlayBase);
   const scales = getCurrentScales();
-  overlay.setAttribute('stroke', line.dataset.color || DEFAULT_LINK_COLOR);
+  overlay.setAttribute('stroke', '#dc2626');
   overlay.setAttribute('stroke-width', overlayBase * (scales.lineScale || 1));
 }
 
