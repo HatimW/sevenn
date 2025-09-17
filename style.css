@@ -1132,48 +1132,14 @@ body.map-toolbox-dragging {
   gap: var(--pad);
 }
 
-.exam-card-session-note {
-  margin-top: var(--pad-sm);
-  background: var(--muted);
-  border-radius: var(--radius);
-  padding: var(--pad-sm) var(--pad);
-  color: var(--gray);
-  font-size: 0.9rem;
-}
-
 .exam-attempts {
   display: flex;
   flex-direction: column;
   gap: var(--pad-sm);
-  padding: var(--pad);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--muted);
 }
 
-.exam-attempts summary {
+.exam-attempts h3 {
   margin: 0;
-  list-style: none;
-  cursor: pointer;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: var(--pad-sm);
-}
-
-.exam-attempts summary::-webkit-details-marker {
-  display: none;
-}
-
-.exam-attempts summary::after {
-  content: '▸';
-  margin-left: auto;
-  transition: transform 0.2s ease;
-  color: var(--gray);
-}
-
-.exam-attempts[open] summary::after {
-  transform: rotate(90deg);
 }
 
 .exam-attempt-empty {
@@ -1185,7 +1151,6 @@ body.map-toolbox-dragging {
   display: flex;
   flex-direction: column;
   gap: var(--pad-sm);
-  margin-top: var(--pad-sm);
 }
 
 .exam-attempt-row {
@@ -1277,13 +1242,6 @@ body.map-toolbox-dragging {
   flex-wrap: wrap;
   gap: var(--pad);
   align-items: center;
-}
-
-.exam-top-left {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--pad);
 }
 
 .exam-progress {
@@ -1407,28 +1365,6 @@ body.map-toolbox-dragging {
 
 .exam-warning {
   color: #fbbf24;
-}
-
-.exam-timer {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-variant-numeric: tabular-nums;
-}
-
-.exam-timer-label {
-  color: var(--gray);
-  font-weight: 500;
-}
-
-.exam-timer-count {
-  font-weight: 600;
-  font-size: 1.1rem;
-}
-
-.exam-timer-inline {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
 }
 
 .exam-verdict {
