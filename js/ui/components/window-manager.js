@@ -3,6 +3,8 @@ let zIndexCounter = 2000;
 let dock;
 let dockList;
 let dockHandle;
+const MIN_WIDTH = 360;
+const MIN_HEIGHT = 280;
 
 function ensureDock(){
   if (dock) return;
@@ -60,11 +62,51 @@ function setupDragging(win, header){
   }
 }
 
+function setupResizing(win) {
+  const handle = document.createElement('div');
+  handle.className = 'floating-resizer';
+  let active = null;
+
+  handle.addEventListener('mousedown', (event) => {
+    if (event.button !== 0) return;
+    const rect = win.getBoundingClientRect();
+    active = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startWidth: rect.width,
+      startHeight: rect.height
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    event.preventDefault();
+    event.stopPropagation();
+  });
+
+  function onMove(event) {
+    if (!active) return;
+    const deltaX = event.clientX - active.startX;
+    const deltaY = event.clientY - active.startY;
+    const width = Math.max(MIN_WIDTH, active.startWidth + deltaX);
+    const height = Math.max(MIN_HEIGHT, active.startHeight + deltaY);
+    win.style.width = `${width}px`;
+    win.style.height = `${height}px`;
+  }
+
+  function onUp(){
+    active = null;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
+
+  win.appendChild(handle);
+}
+
 export function createFloatingWindow({ title, width = 520, onClose } = {}){
   ensureDock();
   const win = document.createElement('div');
   win.className = 'floating-window';
   win.style.width = typeof width === 'number' ? `${width}px` : width;
+  win.style.height = '';
   win.style.left = `${120 + windows.size * 32}px`;
   win.style.top = `${100 + windows.size * 24}px`;
   bringToFront(win);
@@ -153,6 +195,7 @@ export function createFloatingWindow({ title, width = 520, onClose } = {}){
   win.addEventListener('mousedown', () => bringToFront(win));
 
   setupDragging(win, header);
+  setupResizing(win);
 
   document.body.appendChild(win);
   windows.add(win);

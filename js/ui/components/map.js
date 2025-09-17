@@ -1,4 +1,4 @@
-import { listItemsByKind, getItem, upsertItem } from '../../storage/storage.js';
+import { listItemsByKind, getItem, upsertItem, listBlocks } from '../../storage/storage.js';
 import { showPopup } from './popup.js';
 
 const TOOL = {
@@ -78,6 +78,30 @@ const LINE_THICKNESS_OPTIONS = [
   { value: 'bold', label: 'Bold' }
 ];
 
+const UNASSIGNED = 'unassigned';
+const LECTURE_SEP = '__';
+
+function lectureValue(blockId, lecture) {
+  const blockKey = blockId || UNASSIGNED;
+  if (!lecture) return `${blockKey}${LECTURE_SEP}general`;
+  const idPart = lecture.id != null ? `id:${lecture.id}` : `name:${encodeURIComponent(lecture.name || '')}`;
+  return `${blockKey}${LECTURE_SEP}${idPart}`;
+}
+
+function parseLectureValue(value) {
+  const [blockKey = UNASSIGNED, rest = 'general'] = value.split(LECTURE_SEP);
+  if (rest === 'general') {
+    return { blockId: blockKey, general: true };
+  }
+  if (rest.startsWith('id:')) {
+    return { blockId: blockKey, id: Number(rest.slice(3)), name: null, general: false };
+  }
+  if (rest.startsWith('name:')) {
+    return { blockId: blockKey, id: null, name: decodeURIComponent(rest.slice(5)), general: false };
+  }
+  return { blockId: blockKey, id: rest, name: null, general: false };
+}
+
 const mapState = {
   tool: TOOL.NAVIGATE,
   selectionIds: [],
@@ -118,7 +142,10 @@ const mapState = {
   edgeTooltip: null,
   hoveredEdge: null,
   hoveredEdgePointer: { x: 0, y: 0 },
-  currentScales: { nodeScale: 1, labelScale: 1, lineScale: 1 }
+  currentScales: { nodeScale: 1, labelScale: 1, lineScale: 1 },
+  filters: { block: 'all', week: 'all', lecture: 'all', includeLinked: true },
+  searchTerm: '',
+  focusTargetId: null
 };
 
 function setAreaInteracting(active) {
@@ -151,17 +178,410 @@ export async function renderMap(root) {
 
   ensureListeners();
 
+  const blocks = await listBlocks();
+  const blockMeta = new Map(blocks.map(b => [b.blockId, b]));
+  const blockOrder = new Map(blocks.map((b, idx) => [b.blockId, idx]));
+
   const items = [
     ...(await listItemsByKind('disease')),
     ...(await listItemsByKind('drug')),
     ...(await listItemsByKind('concept'))
   ];
 
-  const hiddenNodes = items.filter(it => it.mapHidden);
-  const visibleItems = items.filter(it => !it.mapHidden);
-
   const itemMap = Object.fromEntries(items.map(it => [it.id, it]));
   mapState.itemMap = itemMap;
+
+  const filters = mapState.filters || { block: 'all', week: 'all', lecture: 'all', includeLinked: true };
+  mapState.filters = filters;
+
+  const derivedBlocks = new Set();
+  const weeksByBlock = new Map();
+  const lectureMapByBlock = new Map();
+  const generalPresence = new Map();
+
+  const ensureWeekSet = (blockId) => {
+    const key = blockId || UNASSIGNED;
+    if (!weeksByBlock.has(key)) weeksByBlock.set(key, new Set());
+    return weeksByBlock.get(key);
+  };
+
+  const ensureLectureMap = (blockId) => {
+    const key = blockId || UNASSIGNED;
+    if (!lectureMapByBlock.has(key)) lectureMapByBlock.set(key, new Map());
+    return lectureMapByBlock.get(key);
+  };
+
+  const markGeneral = (blockId) => {
+    const key = blockId || UNASSIGNED;
+    generalPresence.set(key, true);
+  };
+
+  blocks.forEach(block => {
+    derivedBlocks.add(block.blockId);
+    const weeks = ensureWeekSet(block.blockId);
+    const totalWeeks = Number(block.weeks);
+    if (Number.isFinite(totalWeeks)) {
+      for (let i = 1; i <= totalWeeks; i += 1) {
+        weeks.add(String(i));
+      }
+    }
+    const lectureMap = ensureLectureMap(block.blockId);
+    (block.lectures || []).forEach(lec => {
+      const value = lectureValue(block.blockId, lec);
+      if (!lectureMap.has(value)) {
+        lectureMap.set(value, { data: lec, label: lec.name || `Lecture ${lec.id}` });
+      }
+    });
+  });
+
+  items.forEach(item => {
+    const lectureList = item.lectures || [];
+    const blockList = item.blocks || [];
+    const lectureBlocks = new Set();
+    lectureList.forEach(lec => {
+      const blockKey = lec.blockId || UNASSIGNED;
+      lectureBlocks.add(blockKey);
+      derivedBlocks.add(blockKey);
+      ensureWeekSet(blockKey).add(Number.isFinite(lec.week) ? String(lec.week) : UNASSIGNED);
+      const lectureMap = ensureLectureMap(blockKey);
+      const value = lectureValue(blockKey, lec);
+      if (!lectureMap.has(value)) {
+        lectureMap.set(value, { data: lec, label: lec.name || (lec.id != null ? `Lecture ${lec.id}` : 'Lecture') });
+      }
+    });
+
+    if (blockList.length) {
+      blockList.forEach(id => {
+        const blockKey = id || UNASSIGNED;
+        derivedBlocks.add(blockKey);
+        if (!lectureBlocks.has(blockKey)) {
+          markGeneral(blockKey);
+        }
+        const weeks = ensureWeekSet(blockKey);
+        if (item.weeks && item.weeks.length) {
+          item.weeks.forEach(w => weeks.add(Number.isFinite(w) ? String(w) : UNASSIGNED));
+        } else {
+          weeks.add(UNASSIGNED);
+        }
+      });
+    }
+
+    if (!lectureList.length && !blockList.length) {
+      derivedBlocks.add(UNASSIGNED);
+      markGeneral(UNASSIGNED);
+      ensureWeekSet(UNASSIGNED).add(UNASSIGNED);
+    }
+
+    lectureBlocks.forEach(blockKey => {
+      const weeks = ensureWeekSet(blockKey);
+      if (item.weeks && item.weeks.length) {
+        item.weeks.forEach(w => weeks.add(Number.isFinite(w) ? String(w) : UNASSIGNED));
+      }
+    });
+  });
+
+  const blockOptions = [{ value: 'all', label: 'All blocks' }];
+  const knownBlocks = Array.from(new Set([...blocks.map(b => b.blockId), ...derivedBlocks])).filter(id => id && id !== UNASSIGNED);
+  knownBlocks.sort((a, b) => {
+    const ao = blockOrder.has(a) ? blockOrder.get(a) : Infinity;
+    const bo = blockOrder.has(b) ? blockOrder.get(b) : Infinity;
+    if (ao === bo) return String(a).localeCompare(String(b));
+    return ao - bo;
+  });
+  if (derivedBlocks.has(UNASSIGNED) || items.some(it => !(it.blocks && it.blocks.length) && !(it.lectures && it.lectures.length))) {
+    blockOptions.push({ value: UNASSIGNED, label: 'Unassigned' });
+  }
+  knownBlocks.forEach(id => {
+    const meta = blockMeta.get(id);
+    blockOptions.push({ value: id, label: meta ? `${id} — ${meta.title}` : id });
+  });
+
+  if (!blockOptions.some(opt => opt.value === filters.block)) {
+    filters.block = 'all';
+  }
+
+  const controls = document.createElement('div');
+  controls.className = 'map-controls';
+  root.appendChild(controls);
+
+  const searchForm = document.createElement('form');
+  searchForm.className = 'map-search';
+  const searchInput = document.createElement('input');
+  searchInput.type = 'search';
+  searchInput.placeholder = 'Search concept…';
+  searchInput.value = mapState.searchTerm || '';
+  const datalist = document.createElement('datalist');
+  datalist.id = 'map-search-options';
+  items
+    .filter(it => !it.mapHidden)
+    .sort((a, b) => (a.name || a.concept || '').localeCompare(b.name || b.concept || ''))
+    .forEach(it => {
+      const opt = document.createElement('option');
+      opt.value = it.name || it.concept || '';
+      datalist.appendChild(opt);
+    });
+  searchInput.setAttribute('list', datalist.id);
+  const searchButton = document.createElement('button');
+  searchButton.type = 'submit';
+  searchButton.textContent = 'Go';
+  searchForm.append(searchInput, searchButton);
+  controls.appendChild(searchForm);
+  controls.appendChild(datalist);
+
+  function executeSearch(term) {
+    const query = term.trim();
+    if (!query) return;
+    const lower = query.toLowerCase();
+    const target = items.find(it => (it.name || it.concept || '').toLowerCase() === lower)
+      || items.find(it => (it.name || it.concept || '').toLowerCase().includes(lower));
+    if (target) {
+      mapState.searchTerm = query;
+      mapState.focusTargetId = target.id;
+      mapState.selectionIds = [target.id];
+      renderMap(mapState.root);
+    }
+  }
+
+  searchForm.addEventListener('submit', event => {
+    event.preventDefault();
+    executeSearch(searchInput.value);
+  });
+
+  const filtersRow = document.createElement('div');
+  filtersRow.className = 'map-filter-row';
+  controls.appendChild(filtersRow);
+
+  const blockSelect = document.createElement('select');
+  blockSelect.className = 'map-filter';
+  blockOptions.forEach(opt => {
+    const option = document.createElement('option');
+    option.value = opt.value;
+    option.textContent = opt.label;
+    blockSelect.appendChild(option);
+  });
+  blockSelect.value = filters.block;
+  blockSelect.addEventListener('change', () => {
+    filters.block = blockSelect.value;
+    filters.week = 'all';
+    filters.lecture = 'all';
+    renderMap(mapState.root);
+  });
+  filtersRow.appendChild(blockSelect);
+
+  const weekSelect = document.createElement('select');
+  weekSelect.className = 'map-filter';
+  filtersRow.appendChild(weekSelect);
+
+  const lectureSelect = document.createElement('select');
+  lectureSelect.className = 'map-filter';
+  filtersRow.appendChild(lectureSelect);
+
+  const includeWrap = document.createElement('label');
+  includeWrap.className = 'map-filter-toggle';
+  const includeCheckbox = document.createElement('input');
+  includeCheckbox.type = 'checkbox';
+  includeCheckbox.checked = Boolean(filters.includeLinked);
+  includeCheckbox.addEventListener('change', () => {
+    filters.includeLinked = includeCheckbox.checked;
+    renderMap(mapState.root);
+  });
+  includeWrap.append(includeCheckbox, document.createTextNode(' Include linked nodes'));
+  filtersRow.appendChild(includeWrap);
+
+  const resetBtn = document.createElement('button');
+  resetBtn.type = 'button';
+  resetBtn.className = 'map-filter-reset';
+  resetBtn.textContent = 'Reset filters';
+  resetBtn.addEventListener('click', () => {
+    mapState.filters = { block: 'all', week: 'all', lecture: 'all', includeLinked: true };
+    mapState.focusTargetId = null;
+    mapState.searchTerm = '';
+    renderMap(mapState.root);
+  });
+  filtersRow.appendChild(resetBtn);
+
+  function populateWeekOptions() {
+    weekSelect.innerHTML = '';
+    const blockVal = filters.block;
+    if (blockVal === 'all') {
+      weekSelect.disabled = true;
+      const option = document.createElement('option');
+      option.value = 'all';
+      option.textContent = 'All weeks';
+      weekSelect.appendChild(option);
+      weekSelect.value = 'all';
+      filters.week = 'all';
+      return;
+    }
+    weekSelect.disabled = false;
+    const optionAll = document.createElement('option');
+    optionAll.value = 'all';
+    optionAll.textContent = 'All weeks';
+    weekSelect.appendChild(optionAll);
+    const weekSet = weeksByBlock.get(blockVal) || new Set();
+    const numericWeeks = Array.from(weekSet).filter(v => v !== UNASSIGNED).map(Number).filter(n => Number.isFinite(n)).sort((a, b) => a - b);
+    numericWeeks.forEach(week => {
+      const opt = document.createElement('option');
+      opt.value = String(week);
+      opt.textContent = `Week ${week}`;
+      weekSelect.appendChild(opt);
+    });
+    if (weekSet.has(UNASSIGNED)) {
+      const opt = document.createElement('option');
+      opt.value = UNASSIGNED;
+      opt.textContent = 'Unassigned';
+      weekSelect.appendChild(opt);
+    }
+    if (![...weekSelect.options].some(o => o.value === filters.week)) {
+      filters.week = 'all';
+    }
+    weekSelect.value = filters.week;
+  }
+
+  function populateLectureOptions() {
+    lectureSelect.innerHTML = '';
+    const blockVal = filters.block;
+    if (blockVal === 'all') {
+      lectureSelect.disabled = true;
+      const option = document.createElement('option');
+      option.value = 'all';
+      option.textContent = 'All lectures';
+      lectureSelect.appendChild(option);
+      lectureSelect.value = 'all';
+      filters.lecture = 'all';
+      return;
+    }
+    lectureSelect.disabled = false;
+    const optionAll = document.createElement('option');
+    optionAll.value = 'all';
+    optionAll.textContent = 'All lectures';
+    lectureSelect.appendChild(optionAll);
+    const map = lectureMapByBlock.get(blockVal) || new Map();
+    let entries = Array.from(map.entries());
+    if (filters.week !== 'all' && filters.week !== UNASSIGNED) {
+      entries = entries.filter(([, info]) => Number(info.data?.week) === Number(filters.week));
+    }
+    entries.sort((a, b) => a[1].label.localeCompare(b[1].label));
+    entries.forEach(([value, info]) => {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = info.label;
+      lectureSelect.appendChild(opt);
+    });
+    if (generalPresence.get(blockVal)) {
+      const opt = document.createElement('option');
+      opt.value = lectureValue(blockVal, null);
+      opt.textContent = 'General items';
+      lectureSelect.appendChild(opt);
+    }
+    if (![...lectureSelect.options].some(o => o.value === filters.lecture)) {
+      filters.lecture = 'all';
+    }
+    lectureSelect.value = filters.lecture;
+  }
+
+  populateWeekOptions();
+  populateLectureOptions();
+
+  weekSelect.addEventListener('change', () => {
+    filters.week = weekSelect.value;
+    filters.lecture = 'all';
+    renderMap(mapState.root);
+  });
+
+  lectureSelect.addEventListener('change', () => {
+    filters.lecture = lectureSelect.value;
+    renderMap(mapState.root);
+  });
+
+  const hiddenNodes = items.filter(it => it.mapHidden);
+
+  const gatherItemBlocks = (item) => {
+    const set = new Set();
+    (item.lectures || []).forEach(lec => set.add(lec.blockId || UNASSIGNED));
+    (item.blocks || []).forEach(id => set.add(id || UNASSIGNED));
+    if (!set.size) set.add(UNASSIGNED);
+    return set;
+  };
+
+  const gatherItemWeeks = (item, blockId) => {
+    const key = blockId || UNASSIGNED;
+    const set = new Set();
+    (item.lectures || []).forEach(lec => {
+      const blockKey = lec.blockId || UNASSIGNED;
+      if (blockKey === key) {
+        set.add(Number.isFinite(lec.week) ? String(lec.week) : UNASSIGNED);
+      }
+    });
+    if ((item.blocks || []).some(id => (id || UNASSIGNED) === key)) {
+      if (item.weeks && item.weeks.length) {
+        item.weeks.forEach(w => set.add(Number.isFinite(w) ? String(w) : UNASSIGNED));
+      } else {
+        set.add(UNASSIGNED);
+      }
+    }
+    if (key === UNASSIGNED && !(item.blocks && item.blocks.length) && !(item.lectures && item.lectures.length)) {
+      set.add(UNASSIGNED);
+    }
+    return set;
+  };
+
+  const gatherItemLectures = (item, blockId) => {
+    const key = blockId || UNASSIGNED;
+    return (item.lectures || []).filter(lec => (lec.blockId || UNASSIGNED) === key);
+  };
+
+  const matchesBlockFilter = (item) => {
+    if (filters.block === 'all') return true;
+    const blocksForItem = gatherItemBlocks(item);
+    return blocksForItem.has(filters.block === UNASSIGNED ? UNASSIGNED : filters.block);
+  };
+
+  const matchesWeekFilter = (item) => {
+    if (filters.block === 'all' || filters.week === 'all') return true;
+    const weeks = gatherItemWeeks(item, filters.block);
+    return weeks.has(filters.week);
+  };
+
+  const matchesLectureFilter = (item) => {
+    if (filters.block === 'all' || filters.lecture === 'all') return true;
+    const info = parseLectureValue(filters.lecture);
+    const lectures = gatherItemLectures(item, info.blockId);
+    if (info.general) {
+      if (info.blockId === UNASSIGNED) {
+        return lectures.length === 0 && gatherItemBlocks(item).has(UNASSIGNED);
+      }
+      if (lectures.length) return false;
+      return gatherItemBlocks(item).has(info.blockId) && matchesWeekFilter(item);
+    }
+    return lectures.some(lec => {
+      if (info.id != null && lec.id != null) {
+        return Number(lec.id) === Number(info.id);
+      }
+      if (info.name) {
+        return (lec.name || '').toLowerCase() === info.name.toLowerCase();
+      }
+      return false;
+    });
+  };
+
+  const baseItems = items.filter(item => !item.mapHidden && matchesBlockFilter(item) && matchesWeekFilter(item) && matchesLectureFilter(item));
+  const visibleSet = new Set(baseItems.map(it => it.id));
+  if (filters.includeLinked) {
+    baseItems.forEach(it => {
+      (it.links || []).forEach(link => {
+        const target = itemMap[link.id];
+        if (target && !target.mapHidden) {
+          visibleSet.add(target.id);
+        }
+      });
+    });
+  }
+  if (mapState.focusTargetId) {
+    visibleSet.add(mapState.focusTargetId);
+  }
+
+  const visibleItems = items.filter(it => !it.mapHidden && visibleSet.has(it.id));
 
   const base = 1000;
   const size = Math.max(base, visibleItems.length * 150);
@@ -415,6 +835,18 @@ export async function renderMap(root) {
 
   updateSelectionHighlight();
   updatePendingHighlight();
+
+  if (mapState.focusTargetId) {
+    const pos = positions[mapState.focusTargetId];
+    if (pos) {
+      const size = Math.max(mapState.minView || 120, Math.min(mapState.defaultViewSize || viewBox.w, viewBox.w * 0.6));
+      viewBox.x = Math.max(0, pos.x - size / 2);
+      viewBox.y = Math.max(0, pos.y - size / 2);
+      viewBox.w = size;
+      viewBox.h = size;
+    }
+    mapState.focusTargetId = null;
+  }
 
   updateViewBox();
   refreshCursor();
