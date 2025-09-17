@@ -2,8 +2,6 @@ import { openDB } from './idb.js';
 import { buildTokens } from '../search.js';
 
 function prom(req){
-  if (!req) return Promise.resolve(undefined);
-  if (typeof req.then === 'function') return req;
   return new Promise((resolve,reject)=>{
     req.onsuccess = ()=> resolve(req.result);
     req.onerror = ()=> reject(req.error);
