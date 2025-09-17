@@ -719,11 +719,39 @@ input[type="checkbox"]:checked::after {
   stroke-linecap: round;
 
 }
+.map-edge.edge-glow {
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.65));
+}
+
+.map-edge-decoration {
+  pointer-events: none;
+  stroke: var(--panel);
+  vector-effect: non-scaling-stroke;
+}
+
 .map-label {
   fill: var(--text);
-  font-size: 13px;
+  font-size: 16px;
+  font-weight: 600;
   text-anchor: middle;
   pointer-events: none;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.45);
+}
+
+.map-edge-tooltip {
+  position: absolute;
+  background: rgba(15, 23, 42, 0.92);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  font-size: 13px;
+  pointer-events: none;
+  white-space: normal;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.45);
+  transform: translate3d(0, 0, 0);
+  max-width: 320px;
+  line-height: 1.4;
 }
 
 .line-menu {

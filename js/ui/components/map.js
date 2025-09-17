@@ -50,6 +50,33 @@ const CURSOR_STYLE = {
 };
 
 const DEFAULT_LINK_COLOR = '#888888';
+const DEFAULT_LINE_STYLE = 'solid';
+const DEFAULT_LINE_THICKNESS = 'regular';
+
+const LINE_STYLE_OPTIONS = [
+  { value: 'solid', label: 'Solid' },
+  { value: 'dashed', label: 'Dashed' },
+  { value: 'dotted', label: 'Dotted' },
+  { value: 'arrow-end', label: 'Arrow →' },
+  { value: 'arrow-start', label: 'Arrow ←' },
+  { value: 'arrow-both', label: 'Double arrow ↔' },
+  { value: 'glow', label: 'Glow highlight' },
+  { value: 'blocked', label: 'Blocked ✕' }
+];
+
+const LINE_STYLE_VALUE_SET = new Set(LINE_STYLE_OPTIONS.map(option => option.value));
+
+const LINE_THICKNESS_VALUES = {
+  thin: 2,
+  regular: 4,
+  bold: 7
+};
+
+const LINE_THICKNESS_OPTIONS = [
+  { value: 'thin', label: 'Thin' },
+  { value: 'regular', label: 'Regular' },
+  { value: 'bold', label: 'Bold' }
+];
 
 const mapState = {
   tool: TOOL.NAVIGATE,
@@ -72,6 +99,7 @@ const mapState = {
   itemMap: {},
   elements: new Map(),
   root: null,
+  container: null,
   updateViewBox: () => {},
   selectionBox: null,
   sizeLimit: 2000,
@@ -86,7 +114,11 @@ const mapState = {
   baseCursor: 'grab',
   cursorOverride: null,
   defaultViewSize: null,
-  justCompletedSelection: false
+  justCompletedSelection: false,
+  edgeTooltip: null,
+  hoveredEdge: null,
+  hoveredEdgePointer: { x: 0, y: 0 },
+  currentScales: { nodeScale: 1, labelScale: 1, lineScale: 1 }
 };
 
 function setAreaInteracting(active) {
@@ -112,6 +144,8 @@ export async function renderMap(root) {
   mapState.toolboxEl = null;
   mapState.toolboxContainer = null;
   mapState.cursorOverride = null;
+  mapState.hoveredEdge = null;
+  mapState.hoveredEdgePointer = { x: 0, y: 0 };
   stopAutoPan();
   setAreaInteracting(false);
 
@@ -138,6 +172,7 @@ export async function renderMap(root) {
   const container = document.createElement('div');
   container.className = 'map-container';
   root.appendChild(container);
+  mapState.container = container;
 
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.classList.add('map-svg');
@@ -180,24 +215,17 @@ export async function renderMap(root) {
 
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-  const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-  marker.setAttribute('id', 'arrow');
-  marker.setAttribute('viewBox', '0 0 10 10');
-  marker.setAttribute('refX', '10');
-  marker.setAttribute('refY', '5');
-  marker.setAttribute('markerWidth', '6');
-  marker.setAttribute('markerHeight', '6');
-  marker.setAttribute('orient', 'auto');
-  const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  arrowPath.setAttribute('d', 'M0,0 L10,5 L0,10 Z');
-  arrowPath.setAttribute('fill', 'inherit');
-  marker.appendChild(arrowPath);
-  defs.appendChild(marker);
+  buildLineMarkers(defs);
   svg.appendChild(defs);
   svg.appendChild(g);
   mapState.g = g;
 
   container.appendChild(svg);
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'map-edge-tooltip hidden';
+  container.appendChild(tooltip);
+  mapState.edgeTooltip = tooltip;
 
   const selectionBox = document.createElement('div');
   selectionBox.className = 'map-selection hidden';
@@ -259,16 +287,21 @@ export async function renderMap(root) {
       applyLineStyle(path, l);
       path.dataset.a = it.id;
       path.dataset.b = l.id;
+      path.dataset.label = l.name || '';
       path.addEventListener('click', e => {
         e.stopPropagation();
         handleEdgeClick(path, it.id, l.id, e);
       });
-      path.addEventListener('mouseenter', () => {
+      path.addEventListener('mouseenter', evt => {
         if (mapState.tool === TOOL.HIDE) {
           applyCursorOverride('hide');
         } else if (mapState.tool === TOOL.BREAK) {
           applyCursorOverride('break');
         }
+        showEdgeTooltip(path, evt);
+      });
+      path.addEventListener('mousemove', evt => {
+        moveEdgeTooltip(path, evt);
       });
       path.addEventListener('mouseleave', () => {
         if (mapState.tool === TOOL.HIDE) {
@@ -277,6 +310,7 @@ export async function renderMap(root) {
         if (mapState.tool === TOOL.BREAK) {
           clearCursorOverride('break');
         }
+        hideEdgeTooltip(path);
       });
       g.appendChild(path);
     });
@@ -368,8 +402,9 @@ export async function renderMap(root) {
 
     const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     text.setAttribute('x', pos.x);
-    text.setAttribute('y', pos.y - (baseR + 8));
+    text.setAttribute('y', pos.y - (baseR + 12));
     text.setAttribute('class', 'map-label');
+    text.setAttribute('font-size', '16');
     text.dataset.id = it.id;
     text.textContent = it.name || it.concept || '?';
     text.addEventListener('mousedown', handleNodePointerDown);
@@ -398,6 +433,46 @@ function ensureListeners() {
     window.addEventListener('resize', ensureToolboxWithinBounds);
     window._mapToolboxResizeAttached = true;
   }
+}
+
+function buildLineMarkers(defs) {
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const configs = [
+    {
+      id: 'arrow-end',
+      viewBox: '0 0 12 12',
+      refX: 12,
+      refY: 6,
+      markerWidth: 8,
+      markerHeight: 8,
+      path: 'M0,0 L12,6 L0,12 Z'
+    },
+    {
+      id: 'arrow-start',
+      viewBox: '0 0 12 12',
+      refX: 0,
+      refY: 6,
+      markerWidth: 8,
+      markerHeight: 8,
+      path: 'M12,0 L0,6 L12,12 Z'
+    }
+  ];
+  configs.forEach(cfg => {
+    const marker = document.createElementNS(svgNS, 'marker');
+    marker.setAttribute('id', cfg.id);
+    marker.setAttribute('viewBox', cfg.viewBox);
+    marker.setAttribute('refX', String(cfg.refX));
+    marker.setAttribute('refY', String(cfg.refY));
+    marker.setAttribute('markerWidth', String(cfg.markerWidth));
+    marker.setAttribute('markerHeight', String(cfg.markerHeight));
+    marker.setAttribute('orient', 'auto');
+    marker.setAttribute('markerUnits', 'strokeWidth');
+    const path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('d', cfg.path);
+    path.setAttribute('fill', 'currentColor');
+    marker.appendChild(path);
+    defs.appendChild(marker);
+  });
 }
 
 function attachSvgEvents(svg) {
@@ -468,19 +543,13 @@ function handleMouseMove(e) {
   }
 
   if (mapState.nodeDrag) {
-    const { circle, label } = mapState.elements.get(mapState.nodeDrag.id) || {};
-    if (!circle) return;
+    const entry = mapState.elements.get(mapState.nodeDrag.id);
+    if (!entry || !entry.circle) return;
     const { x, y } = clientToMap(e.clientX, e.clientY);
     const nx = x - mapState.nodeDrag.offset.x;
     const ny = y - mapState.nodeDrag.offset.y;
     mapState.positions[mapState.nodeDrag.id] = { x: nx, y: ny };
-    circle.setAttribute('cx', nx);
-    circle.setAttribute('cy', ny);
-    if (label) {
-      label.setAttribute('x', nx);
-      const baseR = Number(circle.dataset.radius) || 20;
-      label.setAttribute('y', ny - (baseR + 8));
-    }
+    updateNodeGeometry(mapState.nodeDrag.id, entry);
     updateEdgesFor(mapState.nodeDrag.id);
     mapState.nodeWasDragged = true;
     return;
@@ -496,14 +565,7 @@ function handleMouseMove(e) {
       const nx = pos.x + dx;
       const ny = pos.y + dy;
       mapState.positions[id] = { x: nx, y: ny };
-      const entry = mapState.elements.get(id);
-      if (entry) {
-        entry.circle.setAttribute('cx', nx);
-        entry.circle.setAttribute('cy', ny);
-        entry.label.setAttribute('x', nx);
-        const baseR = Number(entry.circle.dataset.radius) || 20;
-        entry.label.setAttribute('y', ny - (baseR + 8));
-      }
+      updateNodeGeometry(id);
       updateEdgesFor(id);
     });
     mapState.nodeWasDragged = true;
@@ -708,6 +770,40 @@ function computeSelectionFromRect() {
   return mapState.selectionIds.slice();
 }
 
+function getCurrentScales() {
+  return mapState.currentScales || { nodeScale: 1, labelScale: 1, lineScale: 1 };
+}
+
+function getLineThicknessValue(key) {
+  return LINE_THICKNESS_VALUES[key] || LINE_THICKNESS_VALUES[DEFAULT_LINE_THICKNESS];
+}
+
+function normalizeLineStyle(style) {
+  if (!style) return DEFAULT_LINE_STYLE;
+  if (style === 'arrow') return 'arrow-end';
+  return LINE_STYLE_VALUE_SET.has(style) ? style : DEFAULT_LINE_STYLE;
+}
+
+function updateNodeGeometry(id, entry = mapState.elements.get(id)) {
+  if (!entry) return;
+  const { circle, label } = entry;
+  const pos = mapState.positions[id];
+  if (!circle || !pos) return;
+  const baseR = Number(circle.dataset.radius) || 20;
+  const scales = getCurrentScales();
+  const nodeScale = scales.nodeScale || 1;
+  const labelScale = scales.labelScale || 1;
+  circle.setAttribute('cx', pos.x);
+  circle.setAttribute('cy', pos.y);
+  circle.setAttribute('r', baseR * nodeScale);
+  if (label) {
+    label.setAttribute('x', pos.x);
+    const offset = (baseR + 12) * nodeScale;
+    label.setAttribute('y', pos.y - offset);
+    label.setAttribute('font-size', 16 * labelScale);
+  }
+}
+
 function updateSelectionHighlight() {
   const ids = mapState.previewSelection || mapState.selectionIds;
   const set = new Set(ids);
@@ -738,6 +834,7 @@ function updateEdgesFor(id) {
   if (!mapState.g) return;
   mapState.g.querySelectorAll(`path[data-a='${id}'], path[data-b='${id}']`).forEach(edge => {
     edge.setAttribute('d', calcPath(edge.dataset.a, edge.dataset.b));
+    syncLineDecoration(edge);
   });
 }
 
@@ -1154,13 +1251,20 @@ async function handleAddLinkClick(nodeId) {
     return;
   }
   const label = prompt('Optional label for this link:', '') || '';
-  await createLink(from.id, to.id, { name: label, color: DEFAULT_LINK_COLOR, style: 'solid', hidden: false });
+  await createLink(from.id, to.id, {
+    name: label,
+    color: DEFAULT_LINK_COLOR,
+    style: DEFAULT_LINE_STYLE,
+    thickness: DEFAULT_LINE_THICKNESS,
+    hidden: false
+  });
   mapState.pendingLink = null;
   updatePendingHighlight();
   await renderMap(mapState.root);
 }
 
 function handleEdgeClick(path, aId, bId, evt) {
+  hideEdgeTooltip(path);
   if (mapState.tool === TOOL.NAVIGATE) {
     openLineMenu(evt, path, aId, bId);
   } else if (mapState.tool === TOOL.BREAK) {
@@ -1174,6 +1278,60 @@ function handleEdgeClick(path, aId, bId, evt) {
   }
 }
 
+function showEdgeTooltip(line, evt) {
+  const tooltip = mapState.edgeTooltip;
+  const container = mapState.container;
+  if (!tooltip || !container) return;
+  const text = line?.dataset?.label || '';
+  if (!text) {
+    hideEdgeTooltip(line);
+    return;
+  }
+  tooltip.textContent = text;
+  tooltip.classList.remove('hidden');
+  mapState.hoveredEdge = line;
+  if (evt && Number.isFinite(evt.clientX) && Number.isFinite(evt.clientY)) {
+    mapState.hoveredEdgePointer = { x: evt.clientX, y: evt.clientY };
+  }
+  positionEdgeTooltip(evt);
+}
+
+function moveEdgeTooltip(line, evt) {
+  if (mapState.hoveredEdge !== line) return;
+  if (!mapState.edgeTooltip || mapState.edgeTooltip.classList.contains('hidden')) return;
+  if (evt && Number.isFinite(evt.clientX) && Number.isFinite(evt.clientY)) {
+    mapState.hoveredEdgePointer = { x: evt.clientX, y: evt.clientY };
+  }
+  positionEdgeTooltip(evt);
+}
+
+function hideEdgeTooltip(line) {
+  if (line && mapState.hoveredEdge && mapState.hoveredEdge !== line) return;
+  const tooltip = mapState.edgeTooltip;
+  if (!tooltip) return;
+  tooltip.classList.add('hidden');
+  tooltip.textContent = '';
+  mapState.hoveredEdge = null;
+}
+
+function positionEdgeTooltip(evt) {
+  const tooltip = mapState.edgeTooltip;
+  const container = mapState.container;
+  if (!tooltip || !container) return;
+  const rect = container.getBoundingClientRect();
+  const pointer = evt && Number.isFinite(evt.clientX) && Number.isFinite(evt.clientY)
+    ? { x: evt.clientX, y: evt.clientY }
+    : mapState.hoveredEdgePointer;
+  const rawX = pointer.x - rect.left + 14;
+  const rawY = pointer.y - rect.top + 14;
+  const maxX = rect.width - tooltip.offsetWidth - 12;
+  const maxY = rect.height - tooltip.offsetHeight - 12;
+  const clampedX = clamp(rawX, 12, Math.max(12, maxX));
+  const clampedY = clamp(rawY, 12, Math.max(12, maxY));
+  tooltip.style.left = `${clampedX}px`;
+  tooltip.style.top = `${clampedY}px`;
+}
+
 function adjustScale() {
   const svg = mapState.svg;
   if (!svg) return;
@@ -1184,23 +1342,24 @@ function adjustScale() {
   const defaultSize = Number.isFinite(mapState.defaultViewSize) ? mapState.defaultViewSize : w;
   const zoomInRatio = defaultSize / w;
   const zoomOutRatio = w / defaultSize;
-  const nodeScale = clamp(Math.pow(zoomInRatio, 0.4), 0.7, 2.1);
-  const labelScale = clamp(Math.pow(zoomOutRatio, 0.45), 1, 2.3);
-  const lineScale = clamp(Math.pow(zoomInRatio, 0.25), 0.7, 2);
+  const nodeScale = clamp(Math.pow(zoomInRatio, 0.5), 0.65, 2.6);
+  const labelScale = clamp(Math.pow(zoomOutRatio, 0.4), 1.2, 3.2);
+  const lineScale = clamp(Math.pow(zoomInRatio, 0.33), 0.7, 2.4);
 
-  mapState.elements.forEach(({ circle, label }) => {
-    const baseR = Number(circle.dataset.radius) || 20;
-    const scaledRadius = baseR * nodeScale;
-    circle.setAttribute('r', scaledRadius);
-    const pos = mapState.positions[circle.dataset.id];
-    if (pos && label) {
-      label.setAttribute('font-size', 13 * labelScale);
-      const offset = (baseR + 8) * nodeScale + (labelScale - 1) * 4;
-      label.setAttribute('y', pos.y - offset);
-    }
+  mapState.currentScales = { nodeScale, labelScale, lineScale };
+
+  mapState.elements.forEach((entry, id) => {
+    updateNodeGeometry(id, entry);
   });
+
   svg.querySelectorAll('.map-edge').forEach(line => {
-    line.setAttribute('stroke-width', 4 * lineScale);
+    const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
+    line.setAttribute('stroke-width', baseWidth * lineScale);
+    if (line._overlay) {
+      const overlayBase = Number(line._overlay.dataset.baseWidth) || baseWidth * 0.85;
+      line._overlay.setAttribute('stroke-width', overlayBase * lineScale);
+    }
+    syncLineDecoration(line);
   });
 }
 
@@ -1243,23 +1402,149 @@ function calcPath(aId, bId) {
   return `M${x1} ${y1} Q${cx} ${cy} ${x2} ${y2}`;
 }
 
-function applyLineStyle(line, info) {
-  const color = info.color || 'var(--gray)';
+function applyLineStyle(line, info = {}) {
+  const previousColor = line.dataset.color;
+  const previousStyle = line.dataset.style;
+  const previousThickness = line.dataset.thickness;
+  const previousLabel = line.dataset.label;
+
+  const color = info.color ?? previousColor ?? DEFAULT_LINK_COLOR;
+  const style = normalizeLineStyle(info.style ?? previousStyle);
+  const thickness = info.thickness ?? previousThickness ?? DEFAULT_LINE_THICKNESS;
+  const label = info.name ?? previousLabel ?? '';
+
+  line.dataset.color = color;
+  line.dataset.style = style;
+  line.dataset.thickness = thickness;
+  line.dataset.baseWidth = String(getLineThicknessValue(thickness));
+  line.dataset.label = label;
+
   line.style.stroke = color;
-  if (info.style === 'dashed') line.setAttribute('stroke-dasharray', '4,4');
-  else line.removeAttribute('stroke-dasharray');
-  if (info.style === 'arrow') line.setAttribute('marker-end', 'url(#arrow)');
-  else line.removeAttribute('marker-end');
+  line.style.filter = '';
+  line.removeAttribute('marker-start');
+  line.removeAttribute('marker-end');
+  line.removeAttribute('marker-mid');
+  line.removeAttribute('stroke-dasharray');
+  line.classList.remove('edge-glow');
+
+  if (style === 'dashed') {
+    const base = getLineThicknessValue(thickness);
+    line.setAttribute('stroke-dasharray', `${base * 3},${base * 2}`);
+    line.setAttribute('stroke-linecap', 'round');
+  } else if (style === 'dotted') {
+    const base = Math.max(1, getLineThicknessValue(thickness) * 0.9);
+    line.setAttribute('stroke-dasharray', `${base},${base * 2.1}`);
+    line.setAttribute('stroke-linecap', 'round');
+  } else {
+    line.removeAttribute('stroke-dasharray');
+    line.setAttribute('stroke-linecap', 'round');
+  }
+
+  if (style === 'arrow-end') {
+    line.setAttribute('marker-end', 'url(#arrow-end)');
+  } else if (style === 'arrow-start') {
+    line.setAttribute('marker-start', 'url(#arrow-start)');
+  } else if (style === 'arrow-both') {
+    line.setAttribute('marker-start', 'url(#arrow-start)');
+    line.setAttribute('marker-end', 'url(#arrow-end)');
+  }
+
+  if (style === 'glow') {
+    line.classList.add('edge-glow');
+  }
+
   let title = line.querySelector('title');
   if (!title) {
     title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
     line.appendChild(title);
   }
-  title.textContent = info.name || '';
+  title.textContent = label;
+
+  if (mapState.hoveredEdge === line) {
+    if (label) {
+      showEdgeTooltip(line, { clientX: mapState.hoveredEdgePointer.x, clientY: mapState.hoveredEdgePointer.y });
+    } else {
+      hideEdgeTooltip(line);
+    }
+  }
+
+  syncLineDecoration(line);
 }
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+function syncLineDecoration(line) {
+  const style = normalizeLineStyle(line?.dataset?.style);
+  if (style === 'blocked') {
+    const overlay = ensureLineOverlay(line);
+    if (overlay) updateBlockedOverlay(line, overlay);
+  } else {
+    removeLineOverlay(line);
+  }
+}
+
+function ensureLineOverlay(line) {
+  if (!line || !line.parentNode) return null;
+  let overlay = line._overlay;
+  if (overlay && overlay.parentNode !== line.parentNode) {
+    overlay.remove();
+    overlay = null;
+  }
+  if (!overlay) {
+    overlay = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    overlay.classList.add('map-edge-decoration');
+    overlay.setAttribute('fill', 'none');
+    overlay.setAttribute('pointer-events', 'none');
+    overlay.setAttribute('stroke-linecap', 'round');
+    overlay.setAttribute('stroke-linejoin', 'round');
+    line.parentNode.insertBefore(overlay, line.nextSibling);
+    line._overlay = overlay;
+  }
+  return overlay;
+}
+
+function removeLineOverlay(line) {
+  if (line && line._overlay) {
+    line._overlay.remove();
+    line._overlay = null;
+  }
+}
+
+function updateBlockedOverlay(line, overlay) {
+  if (!line || !overlay) return;
+  const a = mapState.positions[line.dataset.a];
+  const b = mapState.positions[line.dataset.b];
+  if (!a || !b) return;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (!len) return;
+  const midX = (a.x + b.x) / 2;
+  const midY = (a.y + b.y) / 2;
+  const tx = dx / len;
+  const ty = dy / len;
+  const nx = -ty;
+  const ny = tx;
+  const diag1x = tx + nx;
+  const diag1y = ty + ny;
+  const diag2x = tx - nx;
+  const diag2y = ty - ny;
+  const norm1 = Math.hypot(diag1x, diag1y) || 1;
+  const norm2 = Math.hypot(diag2x, diag2y) || 1;
+  const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
+  const armLength = baseWidth * 3.2;
+  const d = `M${midX - (diag1x / norm1) * armLength} ${midY - (diag1y / norm1) * armLength}`
+    + ` L${midX + (diag1x / norm1) * armLength} ${midY + (diag1y / norm1) * armLength}`
+    + ` M${midX - (diag2x / norm2) * armLength} ${midY - (diag2y / norm2) * armLength}`
+    + ` L${midX + (diag2x / norm2) * armLength} ${midY + (diag2y / norm2) * armLength}`;
+  overlay.setAttribute('d', d);
+  const overlayBase = baseWidth * 0.85;
+  overlay.dataset.baseWidth = String(overlayBase);
+  const scales = getCurrentScales();
+  overlay.setAttribute('stroke', line.dataset.color || DEFAULT_LINK_COLOR);
+  overlay.setAttribute('stroke-width', overlayBase * (scales.lineScale || 1));
 }
 
 async function setNodeHidden(id, hidden) {
@@ -1273,7 +1558,15 @@ async function createLink(aId, bId, info) {
   const a = await getItem(aId);
   const b = await getItem(bId);
   if (!a || !b) return;
-  const linkInfo = { id: bId, style: 'solid', color: DEFAULT_LINK_COLOR, name: '', hidden: false, ...info };
+  const linkInfo = {
+    id: bId,
+    style: DEFAULT_LINE_STYLE,
+    thickness: DEFAULT_LINE_THICKNESS,
+    color: DEFAULT_LINK_COLOR,
+    name: '',
+    hidden: false,
+    ...info
+  };
   const reverseInfo = { ...linkInfo, id: aId };
   a.links = a.links || [];
   b.links = b.links || [];
@@ -1320,15 +1613,28 @@ async function openLineMenu(evt, line, aId, bId) {
   const typeLabel = document.createElement('label');
   typeLabel.textContent = 'Style';
   const typeSel = document.createElement('select');
-  ['solid', 'dashed', 'arrow'].forEach(t => {
+  LINE_STYLE_OPTIONS.forEach(option => {
     const opt = document.createElement('option');
-    opt.value = t;
-    opt.textContent = t;
+    opt.value = option.value;
+    opt.textContent = option.label;
     typeSel.appendChild(opt);
   });
-  typeSel.value = link.style || 'solid';
+  typeSel.value = normalizeLineStyle(link.style || DEFAULT_LINE_STYLE);
   typeLabel.appendChild(typeSel);
   menu.appendChild(typeLabel);
+
+  const thickLabel = document.createElement('label');
+  thickLabel.textContent = 'Thickness';
+  const thickSel = document.createElement('select');
+  LINE_THICKNESS_OPTIONS.forEach(option => {
+    const opt = document.createElement('option');
+    opt.value = option.value;
+    opt.textContent = option.label;
+    thickSel.appendChild(opt);
+  });
+  thickSel.value = link.thickness || DEFAULT_LINE_THICKNESS;
+  thickLabel.appendChild(thickSel);
+  menu.appendChild(thickLabel);
 
   const nameLabel = document.createElement('label');
   nameLabel.textContent = 'Label';
@@ -1342,7 +1648,12 @@ async function openLineMenu(evt, line, aId, bId) {
   btn.className = 'btn';
   btn.textContent = 'Save';
   btn.addEventListener('click', async () => {
-    const patch = { color: colorInput.value, style: typeSel.value, name: nameInput.value };
+    const patch = {
+      color: colorInput.value,
+      style: typeSel.value,
+      thickness: thickSel.value,
+      name: nameInput.value
+    };
     await updateLink(aId, bId, patch);
     applyLineStyle(line, patch);
     document.body.removeChild(menu);
