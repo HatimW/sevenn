@@ -21,7 +21,8 @@ var Sevenn = (() => {
     flashSession: null,
     examSession: null,
     examAttemptExpanded: {},
-    map: { panzoom: false }
+    map: { panzoom: false },
+    blockMode: { section: "", assignments: {}, reveal: {}, order: {} }
   };
   function setTab(t) {
     state.tab = t;
@@ -52,6 +53,12 @@ var Sevenn = (() => {
   }
   function setExamAttemptExpanded(examId, expanded2) {
     state.examAttemptExpanded[examId] = expanded2;
+  }
+  function setBlockMode(patch) {
+    Object.assign(state.blockMode, patch);
+  }
+  function resetBlockMode() {
+    state.blockMode = { section: "", assignments: {}, reveal: {}, order: {} };
   }
 
   // js/storage/idb.js
@@ -1902,144 +1909,451 @@ var Sevenn = (() => {
 
   // js/ui/components/builder.js
   async function renderBuilder(root) {
+    const blocks = await loadBlocks();
     root.innerHTML = "";
     const wrap = document.createElement("div");
     wrap.className = "builder";
     root.appendChild(wrap);
+    drawBuilder(wrap, blocks);
+  }
+  async function loadBlocks() {
     const blocks = await listBlocks();
     blocks.push({ blockId: "__unlabeled", title: "Unlabeled", weeks: 0, lectures: [] });
-    blocks.forEach((b) => {
-      const blockDiv = document.createElement("div");
-      blockDiv.className = "builder-section";
-      const blkLabel = document.createElement("label");
-      blkLabel.className = "row";
-      const blkCb = document.createElement("input");
-      blkCb.type = "checkbox";
-      blkCb.checked = state.builder.blocks.includes(b.blockId);
-      blkLabel.appendChild(blkCb);
-      blkLabel.appendChild(document.createTextNode(b.title || b.blockId));
-      blockDiv.appendChild(blkLabel);
-      const weekWrap = document.createElement("div");
-      weekWrap.className = "builder-sub";
-      weekWrap.style.display = blkCb.checked ? "block" : "none";
-      blockDiv.appendChild(weekWrap);
-      blkCb.addEventListener("change", () => {
-        const set = new Set(state.builder.blocks);
-        if (blkCb.checked) set.add(b.blockId);
-        else set.delete(b.blockId);
-        setBuilder({ blocks: Array.from(set) });
-        weekWrap.style.display = blkCb.checked ? "block" : "none";
-      });
-      const weeks = Array.from({ length: b.weeks || 8 }, (_, i) => i + 1);
-      weeks.forEach((w) => {
-        const wkLabel = document.createElement("label");
-        wkLabel.className = "row";
-        const wkCb = document.createElement("input");
-        wkCb.type = "checkbox";
-        const wkKey = `${b.blockId}|${w}`;
-        wkCb.checked = state.builder.weeks.includes(wkKey);
-        wkLabel.appendChild(wkCb);
-        wkLabel.appendChild(document.createTextNode(`Week ${w}`));
-        weekWrap.appendChild(wkLabel);
-        const lecWrap = document.createElement("div");
-        lecWrap.className = "builder-sub";
-        lecWrap.style.display = wkCb.checked ? "block" : "none";
-        wkLabel.appendChild(lecWrap);
-        wkCb.addEventListener("change", () => {
-          const set = new Set(state.builder.weeks);
-          if (wkCb.checked) set.add(wkKey);
-          else set.delete(wkKey);
-          setBuilder({ weeks: Array.from(set) });
-          lecWrap.style.display = wkCb.checked ? "block" : "none";
-        });
-        (b.lectures || []).filter((l) => l.week === w).forEach((l) => {
-          const key = `${b.blockId}|${l.id}`;
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.className = "chip" + (state.builder.lectures.includes(key) ? " active" : "");
-          btn.textContent = l.name;
-          btn.addEventListener("click", () => {
-            const set = new Set(state.builder.lectures);
-            if (set.has(key)) set.delete(key);
-            else set.add(key);
-            setBuilder({ lectures: Array.from(set) });
-            btn.classList.toggle("active");
-          });
-          lecWrap.appendChild(btn);
-        });
-      });
-      wrap.appendChild(blockDiv);
+    return blocks;
+  }
+  function drawBuilder(container, blocks) {
+    container.innerHTML = "";
+    const rerender = () => drawBuilder(container, blocks);
+    const layout = document.createElement("div");
+    layout.className = "builder-layout";
+    container.appendChild(layout);
+    const blockColumn = document.createElement("div");
+    blockColumn.className = "builder-blocks";
+    layout.appendChild(blockColumn);
+    blocks.forEach((block) => {
+      blockColumn.appendChild(renderBlockPanel(block, rerender));
     });
-    const typeSection = document.createElement("div");
-    typeSection.className = "builder-section";
-    const typeTitle = document.createElement("div");
-    typeTitle.textContent = "Types:";
-    typeSection.appendChild(typeTitle);
+    const controls = renderControls(rerender);
+    layout.appendChild(controls);
+  }
+  function renderBlockPanel(block, rerender) {
+    const blockId = block.blockId;
+    const lectures = Array.isArray(block.lectures) ? [...block.lectures] : [];
+    lectures.sort((a, b) => {
+      const weekDiff = (a.week ?? 0) - (b.week ?? 0);
+      if (weekDiff !== 0) return weekDiff;
+      return (a.name || "").localeCompare(b.name || "");
+    });
+    const weeks = groupByWeek(lectures);
+    const hasSelections = hasBlockSelection(blockId);
+    const card = document.createElement("div");
+    card.className = "card builder-block-card";
+    if (hasSelections) card.classList.add("active");
+    const header = document.createElement("div");
+    header.className = "builder-block-header";
+    const title = document.createElement("h3");
+    title.textContent = block.title || blockId;
+    header.appendChild(title);
+    const meta = document.createElement("span");
+    meta.className = "builder-block-meta";
+    const weekCount = weeks.length;
+    const lectureCount = lectures.length;
+    const metaParts = [];
+    if (weekCount) metaParts.push(`${weekCount} week${weekCount === 1 ? "" : "s"}`);
+    if (lectureCount) metaParts.push(`${lectureCount} lecture${lectureCount === 1 ? "" : "s"}`);
+    meta.textContent = metaParts.join(" \u2022 ") || "No lectures linked yet";
+    header.appendChild(meta);
+    const actions = document.createElement("div");
+    actions.className = "builder-block-actions";
+    const blockSelected = state.builder.blocks.includes(blockId);
+    const toggleBlockBtn = createPill(blockSelected, blockSelected ? "Block added" : "Add block", () => {
+      toggleBlock(block);
+      rerender();
+    });
+    actions.appendChild(toggleBlockBtn);
+    if (lectures.length) {
+      const allBtn = createAction("Select all lectures", () => {
+        selectEntireBlock(block);
+        rerender();
+      });
+      actions.appendChild(allBtn);
+    }
+    if (hasSelections) {
+      const clearBtn = createAction("Clear block", () => {
+        clearBlock(blockId);
+        rerender();
+      });
+      actions.appendChild(clearBtn);
+    }
+    header.appendChild(actions);
+    card.appendChild(header);
+    if (blockId === "__unlabeled") {
+      const note = document.createElement("div");
+      note.className = "builder-unlabeled-note";
+      note.textContent = "Include to study cards without block or lecture tags.";
+      card.appendChild(note);
+      return card;
+    }
+    const weekList = document.createElement("div");
+    weekList.className = "builder-week-list";
+    if (!weeks.length) {
+      const empty = document.createElement("div");
+      empty.className = "builder-empty";
+      empty.textContent = "No lectures added yet.";
+      weekList.appendChild(empty);
+    } else {
+      weeks.forEach(({ week, items }) => {
+        weekList.appendChild(renderWeek(block, week, items, rerender));
+      });
+    }
+    card.appendChild(weekList);
+    return card;
+  }
+  function renderWeek(block, week, lectures, rerender) {
+    const blockId = block.blockId;
+    const weekKey = weekKeyFor(blockId, week);
+    const selected = state.builder.weeks.includes(weekKey);
+    const row = document.createElement("div");
+    row.className = "builder-week-card";
+    const header = document.createElement("div");
+    header.className = "builder-week-header";
+    const label = createPill(selected, formatWeekLabel(week), () => {
+      toggleWeek(block, week);
+      rerender();
+    }, "week");
+    header.appendChild(label);
+    const meta = document.createElement("span");
+    meta.className = "builder-week-meta";
+    meta.textContent = `${lectures.length} lecture${lectures.length === 1 ? "" : "s"}`;
+    header.appendChild(meta);
+    const actions = document.createElement("div");
+    actions.className = "builder-week-actions";
+    const allBtn = createAction("Select all", () => {
+      selectWeek(block, week);
+      rerender();
+    });
+    actions.appendChild(allBtn);
+    header.appendChild(actions);
+    row.appendChild(header);
+    const lectureList = document.createElement("div");
+    lectureList.className = "builder-lecture-list";
+    lectures.forEach((lecture) => {
+      lectureList.appendChild(renderLecture(block, lecture, rerender));
+    });
+    row.appendChild(lectureList);
+    return row;
+  }
+  function renderLecture(block, lecture, rerender) {
+    const blockId = block.blockId;
+    const lectureKey = lectureKeyFor(blockId, lecture.id);
+    const active = state.builder.lectures.includes(lectureKey);
+    const pill = createPill(active, lecture.name || `Lecture ${lecture.id}`, () => {
+      toggleLecture(block, lecture);
+      rerender();
+    }, "lecture");
+    return pill;
+  }
+  function renderControls(rerender) {
+    const aside = document.createElement("aside");
+    aside.className = "builder-controls";
+    aside.appendChild(renderFilterCard(rerender));
+    aside.appendChild(renderSummaryCard(rerender));
+    return aside;
+  }
+  function renderFilterCard(rerender) {
+    const card = document.createElement("div");
+    card.className = "card builder-filter-card";
+    const title = document.createElement("h3");
+    title.textContent = "Filters";
+    card.appendChild(title);
+    const typeLabel = document.createElement("div");
+    typeLabel.className = "builder-section-title";
+    typeLabel.textContent = "Card types";
+    card.appendChild(typeLabel);
+    const pillRow = document.createElement("div");
+    pillRow.className = "builder-pill-row";
     const typeMap = { disease: "Disease", drug: "Drug", concept: "Concept" };
-    Object.entries(typeMap).forEach(([val, labelText]) => {
-      const label = document.createElement("label");
-      label.className = "row";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = state.builder.types.includes(val);
-      cb.addEventListener("change", () => {
-        const set = new Set(state.builder.types);
-        if (cb.checked) set.add(val);
-        else set.delete(val);
-        setBuilder({ types: Array.from(set) });
-      });
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(labelText));
-      typeSection.appendChild(label);
+    Object.entries(typeMap).forEach(([value, label]) => {
+      const active = state.builder.types.includes(value);
+      const pill = createPill(active, label, () => {
+        toggleType(value);
+        rerender();
+      }, "small");
+      pillRow.appendChild(pill);
     });
-    wrap.appendChild(typeSection);
-    const favSection = document.createElement("label");
-    favSection.className = "row";
-    const favCb = document.createElement("input");
-    favCb.type = "checkbox";
-    favCb.checked = state.builder.onlyFav;
-    favCb.addEventListener("change", () => setBuilder({ onlyFav: favCb.checked }));
-    favSection.appendChild(favCb);
-    favSection.appendChild(document.createTextNode("Only favorites"));
-    wrap.appendChild(favSection);
-    const buildBtn = document.createElement("button");
-    buildBtn.className = "btn btn-primary";
-    buildBtn.textContent = "Build Set";
+    card.appendChild(pillRow);
+    const favToggle = createPill(state.builder.onlyFav, "Only favorites", () => {
+      setBuilder({ onlyFav: !state.builder.onlyFav });
+      rerender();
+    }, "small outline");
+    card.appendChild(favToggle);
+    return card;
+  }
+  function renderSummaryCard(rerender) {
+    const card = document.createElement("div");
+    card.className = "card builder-summary-card";
+    const title = document.createElement("h3");
+    title.textContent = "Study set";
+    card.appendChild(title);
+    const selectionMeta = document.createElement("div");
+    selectionMeta.className = "builder-selection-meta";
+    selectionMeta.innerHTML = `
+    <span>Blocks: ${state.builder.blocks.length}</span>
+    <span>Weeks: ${state.builder.weeks.length}</span>
+    <span>Lectures: ${state.builder.lectures.length}</span>
+  `;
+    card.appendChild(selectionMeta);
     const count = document.createElement("div");
     count.className = "builder-count";
     count.textContent = `Set size: ${state.cohort.length}`;
+    card.appendChild(count);
+    const actions = document.createElement("div");
+    actions.className = "builder-summary-actions";
+    const buildBtn = document.createElement("button");
+    buildBtn.type = "button";
+    buildBtn.className = "btn";
+    buildBtn.textContent = "Build set";
     buildBtn.addEventListener("click", async () => {
-      let items = [];
-      for (const kind of state.builder.types) {
-        items = items.concat(await listItemsByKind(kind));
-      }
-      items = items.filter((it) => {
-        if (state.builder.onlyFav && !it.favorite) return false;
-        if (state.builder.blocks.length) {
-          const wantUnlabeled = state.builder.blocks.includes("__unlabeled");
-          const hasMatch = it.blocks?.some((b) => state.builder.blocks.includes(b));
-          if (!hasMatch) {
-            if (!(wantUnlabeled && (!it.blocks || !it.blocks.length))) return false;
-          }
-        }
-        if (state.builder.weeks.length) {
-          const ok = state.builder.weeks.some((pair) => {
-            const [b, w] = pair.split("|");
-            return it.blocks?.includes(b) && it.weeks?.includes(Number(w));
-          });
-          if (!ok) return false;
-        }
-        if (state.builder.lectures.length) {
-          const ok = it.lectures?.some((l) => state.builder.lectures.includes(`${l.blockId}|${l.id}`));
-          if (!ok) return false;
-        }
-        return true;
-      });
-      setCohort(items);
-      count.textContent = `Set size: ${items.length}`;
+      await buildSet(buildBtn, count, rerender);
     });
-    wrap.appendChild(buildBtn);
-    wrap.appendChild(count);
+    actions.appendChild(buildBtn);
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "btn secondary";
+    clearBtn.textContent = "Clear selection";
+    clearBtn.disabled = !hasAnySelection();
+    clearBtn.addEventListener("click", () => {
+      setBuilder({ blocks: [], weeks: [], lectures: [] });
+      rerender();
+    });
+    actions.appendChild(clearBtn);
+    card.appendChild(actions);
+    return card;
+  }
+  async function buildSet(button, countEl, rerender) {
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = "Building\u2026";
+    try {
+      const items = await gatherItems();
+      setCohort(items);
+      resetBlockMode();
+      countEl.textContent = `Set size: ${items.length}`;
+    } finally {
+      button.disabled = false;
+      button.textContent = original;
+    }
+    rerender();
+  }
+  async function gatherItems() {
+    let items = [];
+    for (const kind of state.builder.types) {
+      const byKind = await listItemsByKind(kind);
+      items = items.concat(byKind);
+    }
+    return items.filter((item) => {
+      if (state.builder.onlyFav && !item.favorite) return false;
+      if (state.builder.blocks.length) {
+        const wantUnlabeled = state.builder.blocks.includes("__unlabeled");
+        const hasBlockMatch = item.blocks?.some((b) => state.builder.blocks.includes(b));
+        if (!hasBlockMatch) {
+          const isUnlabeled = !item.blocks || !item.blocks.length;
+          if (!(wantUnlabeled && isUnlabeled)) return false;
+        }
+      }
+      if (state.builder.weeks.length) {
+        const ok = state.builder.weeks.some((pair) => {
+          const [blockId, weekStr] = pair.split("|");
+          const weekNum = Number(weekStr);
+          return item.blocks?.includes(blockId) && item.weeks?.includes(weekNum);
+        });
+        if (!ok) return false;
+      }
+      if (state.builder.lectures.length) {
+        const ok = item.lectures?.some((lecture) => {
+          const key = lectureKeyFor(lecture.blockId, lecture.id);
+          return state.builder.lectures.includes(key);
+        });
+        if (!ok) return false;
+      }
+      return true;
+    });
+  }
+  function toggleBlock(block) {
+    const blockId = block.blockId;
+    const set = new Set(state.builder.blocks);
+    const isActive = set.has(blockId);
+    if (isActive) {
+      set.delete(blockId);
+      const weeks = state.builder.weeks.filter((key) => !key.startsWith(`${blockId}|`));
+      const lectures = state.builder.lectures.filter((key) => !key.startsWith(`${blockId}|`));
+      setBuilder({ blocks: Array.from(set), weeks, lectures });
+    } else {
+      set.add(blockId);
+      setBuilder({ blocks: Array.from(set) });
+    }
+  }
+  function selectEntireBlock(block) {
+    const blockId = block.blockId;
+    const blockSet = new Set(state.builder.blocks);
+    const weekSet = new Set(state.builder.weeks);
+    const lectureSet = new Set(state.builder.lectures);
+    blockSet.add(blockId);
+    (block.lectures || []).forEach((lecture) => {
+      if (lecture.week != null) weekSet.add(weekKeyFor(blockId, lecture.week));
+      lectureSet.add(lectureKeyFor(blockId, lecture.id));
+    });
+    setBuilder({
+      blocks: Array.from(blockSet),
+      weeks: Array.from(weekSet),
+      lectures: Array.from(lectureSet)
+    });
+  }
+  function clearBlock(blockId) {
+    const blocks = state.builder.blocks.filter((id) => id !== blockId);
+    const weeks = state.builder.weeks.filter((key) => !key.startsWith(`${blockId}|`));
+    const lectures = state.builder.lectures.filter((key) => !key.startsWith(`${blockId}|`));
+    setBuilder({ blocks, weeks, lectures });
+  }
+  function toggleWeek(block, week) {
+    const weekKey = weekKeyFor(block.blockId, week);
+    const weekSet = new Set(state.builder.weeks);
+    const lectureSet = new Set(state.builder.lectures);
+    const blockSet = new Set(state.builder.blocks);
+    if (weekSet.has(weekKey)) {
+      weekSet.delete(weekKey);
+      (block.lectures || []).forEach((lecture) => {
+        if (lecture.week === week) {
+          lectureSet.delete(lectureKeyFor(block.blockId, lecture.id));
+        }
+      });
+    } else {
+      weekSet.add(weekKey);
+      blockSet.add(block.blockId);
+    }
+    setBuilder({
+      weeks: Array.from(weekSet),
+      lectures: Array.from(lectureSet),
+      blocks: Array.from(blockSet)
+    });
+  }
+  function selectWeek(block, week) {
+    const weekKey = weekKeyFor(block.blockId, week);
+    const weekSet = new Set(state.builder.weeks);
+    const lectureSet = new Set(state.builder.lectures);
+    const blockSet = new Set(state.builder.blocks);
+    weekSet.add(weekKey);
+    blockSet.add(block.blockId);
+    (block.lectures || []).forEach((lecture) => {
+      if (lecture.week === week) {
+        lectureSet.add(lectureKeyFor(block.blockId, lecture.id));
+      }
+    });
+    setBuilder({
+      weeks: Array.from(weekSet),
+      lectures: Array.from(lectureSet),
+      blocks: Array.from(blockSet)
+    });
+  }
+  function toggleLecture(block, lecture) {
+    const key = lectureKeyFor(block.blockId, lecture.id);
+    const lectureSet = new Set(state.builder.lectures);
+    const blockSet = new Set(state.builder.blocks);
+    const weekSet = new Set(state.builder.weeks);
+    if (lectureSet.has(key)) {
+      lectureSet.delete(key);
+    } else {
+      lectureSet.add(key);
+      blockSet.add(block.blockId);
+      if (lecture.week != null) weekSet.add(weekKeyFor(block.blockId, lecture.week));
+    }
+    setBuilder({
+      lectures: Array.from(lectureSet),
+      blocks: Array.from(blockSet),
+      weeks: Array.from(weekSet)
+    });
+  }
+  function toggleType(type) {
+    const types = new Set(state.builder.types);
+    if (types.has(type)) types.delete(type);
+    else types.add(type);
+    setBuilder({ types: Array.from(types) });
+  }
+  function hasBlockSelection(blockId) {
+    return state.builder.blocks.includes(blockId) || state.builder.weeks.some((key) => key.startsWith(`${blockId}|`)) || state.builder.lectures.some((key) => key.startsWith(`${blockId}|`));
+  }
+  function hasAnySelection() {
+    return state.builder.blocks.length || state.builder.weeks.length || state.builder.lectures.length;
+  }
+  function groupByWeek(lectures) {
+    const map = /* @__PURE__ */ new Map();
+    lectures.forEach((lecture) => {
+      const week = lecture.week != null ? lecture.week : -1;
+      if (!map.has(week)) map.set(week, []);
+      map.get(week).push(lecture);
+    });
+    return Array.from(map.entries()).sort((a, b) => a[0] - b[0]).map(([week, items]) => ({ week, items }));
+  }
+  function weekKeyFor(blockId, week) {
+    return `${blockId}|${week}`;
+  }
+  function lectureKeyFor(blockId, lectureId) {
+    return `${blockId}|${lectureId}`;
+  }
+  function formatWeekLabel(week) {
+    if (week == null || week < 0) return "No week";
+    return `Week ${week}`;
+  }
+  function createPill(active, label, onClick, variant = "") {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "builder-pill";
+    if (variant) {
+      const variants = Array.isArray(variant) ? variant : variant.split(" ");
+      variants.filter(Boolean).forEach((name) => btn.classList.add(`builder-pill-${name}`));
+    }
+    if (active) btn.classList.add("active");
+    btn.textContent = label;
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+  function createAction(label, onClick) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "builder-action";
+    btn.textContent = label;
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+
+  // js/ui/components/sections.js
+  var SECTION_DEFS = {
+    disease: [
+      { key: "etiology", label: "Etiology" },
+      { key: "pathophys", label: "Pathophys" },
+      { key: "clinical", label: "Clinical Presentation" },
+      { key: "diagnosis", label: "Diagnosis" },
+      { key: "treatment", label: "Treatment" },
+      { key: "complications", label: "Complications" },
+      { key: "mnemonic", label: "Mnemonic" }
+    ],
+    drug: [
+      { key: "moa", label: "Mechanism" },
+      { key: "uses", label: "Uses" },
+      { key: "sideEffects", label: "Side Effects" },
+      { key: "contraindications", label: "Contraindications" },
+      { key: "mnemonic", label: "Mnemonic" }
+    ],
+    concept: [
+      { key: "definition", label: "Definition" },
+      { key: "mechanism", label: "Mechanism" },
+      { key: "clinicalRelevance", label: "Clinical Relevance" },
+      { key: "example", label: "Example" },
+      { key: "mnemonic", label: "Mnemonic" }
+    ]
+  };
+  function sectionDefsForKind(kind) {
+    return SECTION_DEFS[kind] || [];
   }
 
   // js/ui/components/flashcards.js
@@ -2127,32 +2441,7 @@ var Sevenn = (() => {
     });
   }
   function sectionsFor(item) {
-    const map = {
-      disease: [
-        ["Etiology", "etiology"],
-        ["Pathophys", "pathophys"],
-        ["Clinical Presentation", "clinical"],
-        ["Diagnosis", "diagnosis"],
-        ["Treatment", "treatment"],
-        ["Complications", "complications"],
-        ["Mnemonic", "mnemonic"]
-      ],
-      drug: [
-        ["Mechanism", "moa"],
-        ["Uses", "uses"],
-        ["Side Effects", "sideEffects"],
-        ["Contraindications", "contraindications"],
-        ["Mnemonic", "mnemonic"]
-      ],
-      concept: [
-        ["Definition", "definition"],
-        ["Mechanism", "mechanism"],
-        ["Clinical Relevance", "clinicalRelevance"],
-        ["Example", "example"],
-        ["Mnemonic", "mnemonic"]
-      ]
-    };
-    return map[item.kind] || [];
+    return sectionDefsForKind(item.kind).map((def) => [def.label, def.key]);
   }
 
   // js/ui/components/review.js
@@ -2334,6 +2623,375 @@ var Sevenn = (() => {
     return map[item.kind] || [];
   }
 
+  // js/ui/components/block-mode.js
+  function renderBlockMode(root) {
+    const shell = document.createElement("section");
+    shell.className = "block-mode-shell";
+    root.appendChild(shell);
+    drawBlockMode(shell);
+  }
+  function drawBlockMode(shell) {
+    shell.innerHTML = "";
+    const redraw = () => drawBlockMode(shell);
+    const items = state.cohort || [];
+    if (!items.length) {
+      shell.appendChild(messageCard("Build a study set to unlock Blocks mode. Use the filters above to assemble a cohort."));
+      return;
+    }
+    const sections = collectSections(items);
+    if (!sections.length) {
+      shell.appendChild(messageCard("The selected cards do not have structured sections yet. Add cards with rich content to practice in Blocks mode."));
+      return;
+    }
+    let activeKey = state.blockMode.section;
+    if (!activeKey || !sections.some((sec) => sec.key === activeKey)) {
+      activeKey = sections[0].key;
+      if (activeKey !== state.blockMode.section) {
+        setBlockMode({ section: activeKey });
+      }
+    }
+    const sectionData = sections.find((sec) => sec.key === activeKey) || sections[0];
+    const entryMap = /* @__PURE__ */ new Map();
+    sectionData.items.forEach((info) => {
+      entryMap.set(entryIdFor(info.itemId, sectionData.key), info);
+    });
+    const validAssignments = sanitizeAssignments(sectionData.key, entryMap);
+    const assignedSet = new Set(Object.values(validAssignments));
+    const reveal = !!(state.blockMode.reveal && state.blockMode.reveal[sectionData.key]);
+    const bankEntries = Array.from(entryMap.entries()).filter(([id]) => !assignedSet.has(id)).map(([entryId, info]) => ({ entryId, value: info.value, itemId: info.itemId }));
+    const orderedBank = orderEntries(sectionData.key, bankEntries);
+    const results = sectionData.items.map((info) => {
+      const entryId = entryIdFor(info.itemId, sectionData.key);
+      const assignedId = validAssignments[info.itemId];
+      const assignedInfo = assignedId ? entryMap.get(assignedId) : null;
+      const assignedValue = assignedInfo ? assignedInfo.value : "";
+      const correct = assignedValue && normalized(assignedValue) === normalized(info.value);
+      return { ...info, entryId, assignedId, assignedValue, correct };
+    });
+    const filledCount = results.filter((r) => r.assignedValue).length;
+    const correctCount = results.filter((r) => r.correct).length;
+    shell.appendChild(renderHeader({
+      sections,
+      activeKey: sectionData.key,
+      filledCount,
+      correctCount,
+      total: results.length,
+      bankRemaining: orderedBank.length,
+      reveal,
+      onSectionChange: (key) => {
+        const nextReveal = { ...state.blockMode.reveal || {} };
+        delete nextReveal[key];
+        setBlockMode({ section: key, reveal: nextReveal });
+        redraw();
+      },
+      onCheck: () => {
+        const nextReveal = { ...state.blockMode.reveal || {} };
+        nextReveal[sectionData.key] = true;
+        setBlockMode({ reveal: nextReveal });
+        redraw();
+      },
+      onReset: () => {
+        const assignments = { ...state.blockMode.assignments || {} };
+        assignments[sectionData.key] = {};
+        const revealMap = { ...state.blockMode.reveal || {} };
+        delete revealMap[sectionData.key];
+        setBlockMode({ assignments, reveal: revealMap });
+        redraw();
+      }
+    }));
+    const board = document.createElement("div");
+    board.className = "block-mode-board";
+    results.forEach((result) => {
+      board.appendChild(renderBlockCard({
+        sectionLabel: sectionData.label,
+        reveal,
+        result,
+        onRemove: () => {
+          const assignments = { ...state.blockMode.assignments || {} };
+          const nextSectionAssignments = { ...assignments[sectionData.key] || {} };
+          delete nextSectionAssignments[result.itemId];
+          assignments[sectionData.key] = nextSectionAssignments;
+          const revealMap = { ...state.blockMode.reveal || {} };
+          delete revealMap[sectionData.key];
+          setBlockMode({ assignments, reveal: revealMap });
+          redraw();
+        },
+        onDrop: (entryId) => {
+          const info = entryMap.get(entryId);
+          if (!info) return;
+          const assignments = { ...state.blockMode.assignments || {} };
+          const nextSectionAssignments = { ...assignments[sectionData.key] || {} };
+          for (const [itemId, assigned] of Object.entries(nextSectionAssignments)) {
+            if (assigned === entryId) delete nextSectionAssignments[itemId];
+          }
+          nextSectionAssignments[result.itemId] = entryId;
+          assignments[sectionData.key] = nextSectionAssignments;
+          const revealMap = { ...state.blockMode.reveal || {} };
+          delete revealMap[sectionData.key];
+          setBlockMode({ assignments, reveal: revealMap });
+          redraw();
+        }
+      }));
+    });
+    shell.appendChild(board);
+    shell.appendChild(renderBank({
+      label: sectionData.label,
+      entries: orderedBank
+    }));
+  }
+  function renderHeader({ sections, activeKey, filledCount, correctCount, total, bankRemaining, reveal, onSectionChange, onCheck, onReset }) {
+    const card = document.createElement("div");
+    card.className = "card block-mode-header";
+    const titleRow = document.createElement("div");
+    titleRow.className = "block-mode-header-row";
+    const title = document.createElement("h2");
+    title.textContent = "Blocks Mode";
+    titleRow.appendChild(title);
+    const selectWrap = document.createElement("label");
+    selectWrap.className = "block-mode-select";
+    const selectLabel = document.createElement("span");
+    selectLabel.textContent = "Section";
+    selectWrap.appendChild(selectLabel);
+    const select = document.createElement("select");
+    sections.forEach((sec) => {
+      const opt = document.createElement("option");
+      opt.value = sec.key;
+      opt.textContent = sec.label;
+      if (sec.key === activeKey) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.addEventListener("change", () => onSectionChange(select.value));
+    selectWrap.appendChild(select);
+    titleRow.appendChild(selectWrap);
+    card.appendChild(titleRow);
+    const meta = document.createElement("div");
+    meta.className = "block-mode-meta-row";
+    const placed = document.createElement("span");
+    placed.textContent = `Placed: ${filledCount}/${total}`;
+    meta.appendChild(placed);
+    if (reveal) {
+      const score = document.createElement("span");
+      score.textContent = `Correct: ${correctCount}/${total}`;
+      meta.appendChild(score);
+    }
+    const bankInfo = document.createElement("span");
+    bankInfo.textContent = `In bank: ${bankRemaining}`;
+    meta.appendChild(bankInfo);
+    card.appendChild(meta);
+    const actions = document.createElement("div");
+    actions.className = "block-mode-actions";
+    const checkBtn = document.createElement("button");
+    checkBtn.type = "button";
+    checkBtn.className = "btn";
+    checkBtn.textContent = "Check answers";
+    checkBtn.disabled = !filledCount;
+    checkBtn.addEventListener("click", onCheck);
+    actions.appendChild(checkBtn);
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.className = "btn secondary";
+    resetBtn.textContent = "Reset section";
+    resetBtn.disabled = !filledCount;
+    resetBtn.addEventListener("click", onReset);
+    actions.appendChild(resetBtn);
+    card.appendChild(actions);
+    return card;
+  }
+  function renderBlockCard({ sectionLabel, reveal, result, onRemove, onDrop }) {
+    const card = document.createElement("div");
+    card.className = "card block-mode-card";
+    const title = document.createElement("div");
+    title.className = "block-mode-card-title";
+    title.textContent = itemTitle(result.item);
+    card.appendChild(title);
+    const subtitle = document.createElement("div");
+    subtitle.className = "block-mode-card-subtitle";
+    subtitle.textContent = formatItemContext(result.item);
+    if (subtitle.textContent) card.appendChild(subtitle);
+    const slot = document.createElement("div");
+    slot.className = "block-mode-slot";
+    slot.dataset.itemId = result.itemId;
+    slot.dataset.section = sectionLabel;
+    slot.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      slot.classList.add("drag-over");
+    });
+    slot.addEventListener("dragenter", (event) => {
+      event.preventDefault();
+      slot.classList.add("drag-over");
+    });
+    slot.addEventListener("dragleave", () => {
+      slot.classList.remove("drag-over");
+    });
+    slot.addEventListener("drop", (event) => {
+      event.preventDefault();
+      slot.classList.remove("drag-over");
+      const entryId = event.dataTransfer.getData("text/plain");
+      if (entryId) onDrop(entryId);
+    });
+    if (result.assignedValue) {
+      slot.classList.add("filled");
+      const chip = document.createElement("div");
+      chip.className = "block-chip assigned";
+      const text = document.createElement("div");
+      text.className = "block-chip-text";
+      text.textContent = result.assignedValue;
+      chip.appendChild(text);
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "chip-remove";
+      removeBtn.textContent = "\xD7";
+      removeBtn.addEventListener("click", onRemove);
+      chip.appendChild(removeBtn);
+      slot.appendChild(chip);
+    } else {
+      const placeholder = document.createElement("div");
+      placeholder.className = "block-slot-placeholder";
+      placeholder.textContent = `Drop ${sectionLabel.toLowerCase()} here`;
+      slot.appendChild(placeholder);
+    }
+    card.appendChild(slot);
+    if (reveal) {
+      slot.classList.add(result.correct ? "correct" : result.assignedValue ? "incorrect" : "missing");
+      if (!result.correct) {
+        const answer = document.createElement("div");
+        answer.className = "block-mode-answer";
+        const label = document.createElement("span");
+        label.textContent = "Answer";
+        const body = document.createElement("div");
+        body.textContent = result.value;
+        answer.appendChild(label);
+        answer.appendChild(body);
+        card.appendChild(answer);
+      }
+    }
+    return card;
+  }
+  function renderBank({ label, entries, onPick }) {
+    const card = document.createElement("div");
+    card.className = "card block-mode-bank";
+    const title = document.createElement("div");
+    title.className = "block-mode-bank-title";
+    title.textContent = `${label} bank`;
+    card.appendChild(title);
+    const list = document.createElement("div");
+    list.className = "block-mode-bank-items";
+    if (!entries.length) {
+      const empty = document.createElement("div");
+      empty.className = "block-mode-bank-empty";
+      empty.textContent = "All matches placed!";
+      list.appendChild(empty);
+    } else {
+      entries.forEach((entry) => {
+        const chip = document.createElement("div");
+        chip.className = "block-chip";
+        chip.textContent = entry.value;
+        chip.draggable = true;
+        chip.addEventListener("dragstart", (event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", entry.entryId);
+          chip.classList.add("dragging");
+        });
+        chip.addEventListener("dragend", () => chip.classList.remove("dragging"));
+        if (onPick) {
+          chip.addEventListener("click", () => onPick(entry.entryId));
+        }
+        list.appendChild(chip);
+      });
+    }
+    card.appendChild(list);
+    return card;
+  }
+  function collectSections(items) {
+    const map = /* @__PURE__ */ new Map();
+    items.forEach((item, index) => {
+      const itemId = resolveItemId(item, index);
+      sectionDefsForKind(item.kind).forEach((def) => {
+        const value = sectionValue(item[def.key]);
+        if (!value) return;
+        let section = map.get(def.key);
+        if (!section) {
+          section = { key: def.key, label: def.label, items: [] };
+          map.set(def.key, section);
+        }
+        section.items.push({ item, itemId, value });
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }
+  function sanitizeAssignments(sectionKey, entryMap) {
+    const current = state.blockMode.assignments && state.blockMode.assignments[sectionKey] || {};
+    let changed = false;
+    const valid = {};
+    for (const [itemId, entryId] of Object.entries(current)) {
+      if (entryMap.has(entryId)) {
+        valid[itemId] = entryId;
+      } else {
+        changed = true;
+      }
+    }
+    if (changed) {
+      const assignments = { ...state.blockMode.assignments || {} };
+      assignments[sectionKey] = valid;
+      setBlockMode({ assignments });
+    }
+    return valid;
+  }
+  function orderEntries(sectionKey, entries) {
+    const ids = entries.map((entry) => entry.entryId);
+    const existing = state.blockMode.order && state.blockMode.order[sectionKey] || [];
+    const filtered = existing.filter((id) => ids.includes(id));
+    const missing = ids.filter((id) => !filtered.includes(id));
+    const next = filtered.concat(missing);
+    if (!arraysEqual(existing, next)) {
+      const order = { ...state.blockMode.order || {} };
+      order[sectionKey] = next;
+      setBlockMode({ order });
+    }
+    const byId = new Map(entries.map((entry) => [entry.entryId, entry]));
+    return next.map((id) => byId.get(id)).filter(Boolean);
+  }
+  function entryIdFor(itemId, sectionKey) {
+    return `${itemId}::${sectionKey}`;
+  }
+  function sectionValue(raw) {
+    if (raw == null) return "";
+    const text = typeof raw === "string" ? raw : String(raw);
+    return text.trim();
+  }
+  function normalized(text) {
+    return sectionValue(text).replace(/\s+/g, " ").toLowerCase();
+  }
+  function resolveItemId(item, index) {
+    return item.id || item.uid || item.slug || item.key || `${item.kind || "item"}-${index}`;
+  }
+  function itemTitle(item) {
+    return item.name || item.concept || item.title || "Card";
+  }
+  function formatItemContext(item) {
+    const parts = [];
+    if (item.kind) parts.push(capitalize(item.kind));
+    if (Array.isArray(item.lectures) && item.lectures.length) {
+      const lectureNames = item.lectures.map((l) => l.name).filter(Boolean);
+      if (lectureNames.length) parts.push(lectureNames.join(", "));
+    }
+    return parts.join(" \u2022 ");
+  }
+  function capitalize(text) {
+    if (!text) return "";
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+  function arraysEqual(a, b) {
+    if (a.length !== b.length) return false;
+    return a.every((val, idx) => val === b[idx]);
+  }
+  function messageCard(text) {
+    const card = document.createElement("div");
+    card.className = "card block-mode-empty";
+    card.textContent = text;
+    return card;
+  }
+
   // js/ui/components/exams.js
   var DEFAULT_SECONDS = 60;
   var timerHandles = /* @__PURE__ */ new WeakMap();
@@ -2444,8 +3102,8 @@ var Sevenn = (() => {
   }
   function slugify(text) {
     const lowered = (text || "").toLowerCase();
-    const normalized = lowered.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-    return normalized || "exam";
+    const normalized2 = lowered.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    return normalized2 || "exam";
   }
   function triggerExamDownload(exam) {
     try {
@@ -4970,12 +5628,7 @@ var Sevenn = (() => {
       updateNodeGeometry(id, entry);
     });
     svg.querySelectorAll(".map-edge").forEach((line) => {
-      const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
-      line.setAttribute("stroke-width", baseWidth * lineScale);
-      if (line._overlay) {
-        const overlayBase = Number(line._overlay.dataset.baseWidth) || baseWidth * 0.85;
-        line._overlay.setAttribute("stroke-width", overlayBase * lineScale);
-      }
+      updateLineStrokeWidth(line);
       syncLineDecoration(line);
     });
   }
@@ -5031,12 +5684,14 @@ var Sevenn = (() => {
     line.dataset.baseWidth = String(getLineThicknessValue(thickness));
     line.dataset.label = label;
     line.style.stroke = color;
+    line.style.color = color;
     line.style.filter = "";
     line.removeAttribute("marker-start");
     line.removeAttribute("marker-end");
     line.removeAttribute("marker-mid");
     line.removeAttribute("stroke-dasharray");
     line.classList.remove("edge-glow");
+    updateLineStrokeWidth(line);
     if (style === "dashed") {
       const base = getLineThicknessValue(thickness);
       line.setAttribute("stroke-dasharray", `${base * 3},${base * 2}`);
@@ -5060,12 +5715,13 @@ var Sevenn = (() => {
     if (style === "glow") {
       line.classList.add("edge-glow");
     }
-    let title = line.querySelector("title");
-    if (!title) {
-      title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-      line.appendChild(title);
+    const title = line.querySelector("title");
+    if (title) title.remove();
+    if (label) {
+      line.setAttribute("aria-label", label);
+    } else {
+      line.removeAttribute("aria-label");
     }
-    title.textContent = label;
     if (mapState.hoveredEdge === line) {
       if (label) {
         showEdgeTooltip(line, { clientX: mapState.hoveredEdgePointer.x, clientY: mapState.hoveredEdgePointer.y });
@@ -5077,6 +5733,22 @@ var Sevenn = (() => {
   }
   function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
+  }
+  function updateLineStrokeWidth(line) {
+    if (!line) return;
+    const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
+    const { lineScale = 1 } = getCurrentScales();
+    const strokeWidth = baseWidth * lineScale;
+    if (Number.isFinite(strokeWidth)) {
+      line.setAttribute("stroke-width", strokeWidth);
+    }
+    if (line._overlay) {
+      const overlayBase = Number(line._overlay.dataset.baseWidth) || baseWidth * 0.85;
+      const overlayWidth = overlayBase * lineScale;
+      if (Number.isFinite(overlayWidth)) {
+        line._overlay.setAttribute("stroke-width", overlayWidth);
+      }
+    }
   }
   function syncLineDecoration(line) {
     const style = normalizeLineStyle(line?.dataset?.style);
@@ -5134,13 +5806,13 @@ var Sevenn = (() => {
     const norm1 = Math.hypot(diag1x, diag1y) || 1;
     const norm2 = Math.hypot(diag2x, diag2y) || 1;
     const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
-    const armLength = baseWidth * 3.2;
+    const armLength = Math.max(28, baseWidth * 4.2);
     const d = `M${midX - diag1x / norm1 * armLength} ${midY - diag1y / norm1 * armLength} L${midX + diag1x / norm1 * armLength} ${midY + diag1y / norm1 * armLength} M${midX - diag2x / norm2 * armLength} ${midY - diag2y / norm2 * armLength} L${midX + diag2x / norm2 * armLength} ${midY + diag2y / norm2 * armLength}`;
     overlay.setAttribute("d", d);
-    const overlayBase = baseWidth * 0.85;
+    const overlayBase = baseWidth * 1.6;
     overlay.dataset.baseWidth = String(overlayBase);
     const scales = getCurrentScales();
-    overlay.setAttribute("stroke", line.dataset.color || DEFAULT_LINK_COLOR);
+    overlay.setAttribute("stroke", "#dc2626");
     overlay.setAttribute("stroke-width", overlayBase * (scales.lineScale || 1));
   }
   async function setNodeHidden(id, hidden) {
@@ -5336,7 +6008,7 @@ var Sevenn = (() => {
         main.appendChild(wrap);
         const subnav = document.createElement("div");
         subnav.className = "tabs row subtabs";
-        ["Flashcards", "Review", "Quiz"].forEach((st) => {
+        ["Flashcards", "Review", "Quiz", "Blocks"].forEach((st) => {
           const sb = document.createElement("button");
           sb.className = "tab" + (state.subtab.Study === st ? " active" : "");
           sb.textContent = st;
@@ -5359,7 +6031,7 @@ var Sevenn = (() => {
             main.appendChild(startBtn);
           } else if (state.subtab.Study === "Review") {
             renderReview(main, render);
-          } else {
+          } else if (state.subtab.Study === "Quiz") {
             const startBtn = document.createElement("button");
             startBtn.className = "btn";
             startBtn.textContent = "Start Quiz";
@@ -5368,6 +6040,8 @@ var Sevenn = (() => {
               render();
             });
             main.appendChild(startBtn);
+          } else if (state.subtab.Study === "Blocks") {
+            renderBlockMode(main);
           }
         }
       }
