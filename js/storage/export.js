@@ -10,29 +10,32 @@ function prom(req){
 
 export async function exportJSON(){
   const db = await openDB();
-  const tx = db.transaction(['items','blocks','exams','settings']);
+  const tx = db.transaction(['items','blocks','exams','settings','exam_sessions']);
   const items = await prom(tx.objectStore('items').getAll());
   const blocks = await prom(tx.objectStore('blocks').getAll());
   const exams = await prom(tx.objectStore('exams').getAll());
+  const examSessions = await prom(tx.objectStore('exam_sessions').getAll());
   const settingsArr = await prom(tx.objectStore('settings').getAll());
   const settings = settingsArr.find(s => s.id === 'app') || { id:'app', dailyCount:20, theme:'dark' };
-  return { items, blocks, exams, settings };
+  return { items, blocks, exams, examSessions, settings };
 }
 
 export async function importJSON(dbDump){
   try {
     const db = await openDB();
-    const tx = db.transaction(['items','blocks','exams','settings'],'readwrite');
+    const tx = db.transaction(['items','blocks','exams','settings','exam_sessions'],'readwrite');
     const items = tx.objectStore('items');
     const blocks = tx.objectStore('blocks');
     const exams = tx.objectStore('exams');
     const settings = tx.objectStore('settings');
+    const examSessions = tx.objectStore('exam_sessions');
 
     await Promise.all([
       prom(items.clear()),
       prom(blocks.clear()),
       prom(exams.clear()),
-      prom(settings.clear())
+      prom(settings.clear()),
+      prom(examSessions.clear())
     ]);
 
     if (dbDump.settings) await prom(settings.put({ ...dbDump.settings, id:'app' }));
@@ -50,6 +53,11 @@ export async function importJSON(dbDump){
     if (Array.isArray(dbDump.exams)) {
       for (const ex of dbDump.exams) {
         await prom(exams.put(ex));
+      }
+    }
+    if (Array.isArray(dbDump.examSessions)) {
+      for (const sess of dbDump.examSessions) {
+        await prom(examSessions.put(sess));
       }
     }
 

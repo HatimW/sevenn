@@ -281,6 +281,47 @@ export async function upsertExam(exam) {
 export async function deleteExam(id) {
   const e = await store('exams', 'readwrite');
   await prom(e.delete(id));
+  await deleteExamSessionsForExam(id);
+}
+
+export async function listExamSessions() {
+  const s = await store('exam_sessions');
+  try {
+    return await prom(s.getAll());
+  } catch (err) {
+    console.warn('listExamSessions failed', err);
+    return [];
+  }
+}
+
+export async function upsertExamSession(session) {
+  const s = await store('exam_sessions', 'readwrite');
+  const existing = session.id ? await prom(s.get(session.id)) : null;
+  const now = Date.now();
+  const next = {
+    ...session,
+    id: session.id,
+    createdAt: existing?.createdAt || session.createdAt || now,
+    updatedAt: now
+  };
+  await prom(s.put(next));
+}
+
+export async function deleteExamSession(id) {
+  if (!id) return;
+  const s = await store('exam_sessions', 'readwrite');
+  await prom(s.delete(id));
+}
+
+export async function deleteExamSessionsForExam(examId) {
+  if (!examId) return;
+  const s = await store('exam_sessions', 'readwrite');
+  const idx = s.index('by_examId');
+  const req = idx.getAllKeys(examId);
+  const keys = await prom(req);
+  for (const key of keys) {
+    await prom(s.delete(key));
+  }
 }
 
 // export/import helpers
