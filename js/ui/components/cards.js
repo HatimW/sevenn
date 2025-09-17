@@ -7,6 +7,7 @@ import { createItemCard } from './cardlist.js';
  * @param {Function} onChange
  */
 export function renderCards(container, items, onChange){
+  container.innerHTML = '';
   const decks = new Map();
   items.forEach(it => {
     if (it.lectures && it.lectures.length){

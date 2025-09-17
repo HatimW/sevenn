@@ -1,4 +1,5 @@
 import { listBlocks, upsertItem, deleteItem } from '../../storage/storage.js';
+import { state, setEntryLayout } from '../../state.js';
 import { chipList } from './chips.js';
 import { openEditor } from './editor.js';
 import { confirmModal } from './confirm.js';
@@ -204,6 +205,7 @@ export function createItemCard(item, onChange){
 }
 
 export async function renderCardList(container, items, kind, onChange){
+  container.innerHTML = '';
   const blocks = await listBlocks();
   const blockTitle = id => blocks.find(b => b.blockId === id)?.title || id;
   const orderMap = new Map(blocks.map((b,i)=>[b.blockId,i]));
@@ -245,6 +247,102 @@ export async function renderCardList(container, items, kind, onChange){
     const bo = orderMap.has(b) ? orderMap.get(b) : Infinity;
     return ao - bo;
   });
+  const layoutState = state.entryLayout;
+
+  const toolbar = document.createElement('div');
+  toolbar.className = 'entry-layout-toolbar';
+
+  const viewToggle = document.createElement('div');
+  viewToggle.className = 'layout-toggle';
+
+  const listBtn = document.createElement('button');
+  listBtn.type = 'button';
+  listBtn.className = 'layout-btn' + (layoutState.mode === 'list' ? ' active' : '');
+  listBtn.textContent = 'List';
+  listBtn.addEventListener('click', () => {
+    if (layoutState.mode === 'list') return;
+    setEntryLayout({ mode: 'list' });
+    updateToolbar();
+    applyLayout();
+  });
+
+  const gridBtn = document.createElement('button');
+  gridBtn.type = 'button';
+  gridBtn.className = 'layout-btn' + (layoutState.mode === 'grid' ? ' active' : '');
+  gridBtn.textContent = 'Grid';
+  gridBtn.addEventListener('click', () => {
+    if (layoutState.mode === 'grid') return;
+    setEntryLayout({ mode: 'grid' });
+    updateToolbar();
+    applyLayout();
+  });
+
+  viewToggle.appendChild(listBtn);
+  viewToggle.appendChild(gridBtn);
+  toolbar.appendChild(viewToggle);
+
+  const columnWrap = document.createElement('label');
+  columnWrap.className = 'layout-control';
+  columnWrap.textContent = 'Columns';
+  const columnInput = document.createElement('input');
+  columnInput.type = 'range';
+  columnInput.min = '1';
+  columnInput.max = '6';
+  columnInput.step = '1';
+  columnInput.value = String(layoutState.columns);
+  const columnValue = document.createElement('span');
+  columnValue.className = 'layout-value';
+  columnValue.textContent = String(layoutState.columns);
+  columnInput.addEventListener('input', () => {
+    setEntryLayout({ columns: Number(columnInput.value) });
+    columnValue.textContent = String(state.entryLayout.columns);
+    applyLayout();
+  });
+  columnWrap.appendChild(columnInput);
+  columnWrap.appendChild(columnValue);
+  toolbar.appendChild(columnWrap);
+
+  const scaleWrap = document.createElement('label');
+  scaleWrap.className = 'layout-control';
+  scaleWrap.textContent = 'Scale';
+  const scaleInput = document.createElement('input');
+  scaleInput.type = 'range';
+  scaleInput.min = '0.6';
+  scaleInput.max = '1.4';
+  scaleInput.step = '0.05';
+  scaleInput.value = String(layoutState.scale);
+  const scaleValue = document.createElement('span');
+  scaleValue.className = 'layout-value';
+  scaleValue.textContent = `${layoutState.scale.toFixed(2)}x`;
+  scaleInput.addEventListener('input', () => {
+    setEntryLayout({ scale: Number(scaleInput.value) });
+    scaleValue.textContent = `${state.entryLayout.scale.toFixed(2)}x`;
+    applyLayout();
+  });
+  scaleWrap.appendChild(scaleInput);
+  scaleWrap.appendChild(scaleValue);
+  toolbar.appendChild(scaleWrap);
+
+  container.appendChild(toolbar);
+
+  function updateToolbar(){
+    const mode = state.entryLayout.mode;
+    listBtn.classList.toggle('active', mode === 'list');
+    gridBtn.classList.toggle('active', mode === 'grid');
+    columnWrap.style.display = mode === 'grid' ? '' : 'none';
+  }
+
+  function applyLayout(){
+    const lists = container.querySelectorAll('.card-list');
+    lists.forEach(list => {
+      list.classList.toggle('grid-layout', state.entryLayout.mode === 'grid');
+      list.style.setProperty('--entry-scale', state.entryLayout.scale);
+      list.style.setProperty('--entry-columns', state.entryLayout.columns);
+    });
+  }
+
+  updateToolbar();
+
   sortedBlocks.forEach(b => {
     const blockSec = document.createElement('section');
     blockSec.className = 'block-section';
@@ -295,6 +393,9 @@ export async function renderCardList(container, items, kind, onChange){
       weekSec.appendChild(weekHeader);
       const list = document.createElement('div');
       list.className = 'card-list';
+      list.style.setProperty('--entry-scale', state.entryLayout.scale);
+      list.style.setProperty('--entry-columns', state.entryLayout.columns);
+      list.classList.toggle('grid-layout', state.entryLayout.mode === 'grid');
       const rows = wkMap.get(w);
       function renderChunk(start=0){
         const slice = rows.slice(start,start+200);
@@ -307,4 +408,6 @@ export async function renderCardList(container, items, kind, onChange){
     });
     container.appendChild(blockSec);
   });
+
+  applyLayout();
 }

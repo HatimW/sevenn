@@ -14,6 +14,7 @@
     },
     query: "",
     filters: { types: ["disease", "drug", "concept"], block: "", week: "", onlyFav: false, sort: "updated" },
+    entryLayout: { mode: "list", columns: 3, scale: 1 },
     builder: {
       blocks: [],
       weeks: [],
@@ -69,6 +70,25 @@
   }
   function resetBlockMode() {
     state.blockMode = { section: "", assignments: {}, reveal: {}, order: {} };
+  }
+  function setEntryLayout(patch) {
+    if (!patch) return;
+    const layout = state.entryLayout;
+    if (Object.prototype.hasOwnProperty.call(patch, "columns")) {
+      const cols = Number(patch.columns);
+      if (!Number.isNaN(cols)) {
+        layout.columns = Math.max(1, Math.min(6, Math.round(cols)));
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "scale")) {
+      const scl = Number(patch.scale);
+      if (!Number.isNaN(scl)) {
+        layout.scale = Math.max(0.6, Math.min(1.4, scl));
+      }
+    }
+    if (patch.mode === "list" || patch.mode === "grid") {
+      layout.mode = patch.mode;
+    }
   }
 
   // js/storage/idb.js
@@ -1164,10 +1184,180 @@
     root.appendChild(dataCard);
   }
 
+  // js/ui/components/chips.js
+  function chipList(values = []) {
+    const box = document.createElement("div");
+    box.className = "chips";
+    values.forEach((v) => {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = v;
+      box.appendChild(chip);
+    });
+    return box;
+  }
+
   // js/utils.js
   function uid() {
     const g = globalThis;
     return g.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+  }
+
+  // js/ui/components/window-manager.js
+  var windows = /* @__PURE__ */ new Set();
+  var zIndexCounter = 2e3;
+  var dock;
+  var dockList;
+  var dockHandle;
+  function ensureDock() {
+    if (dock) return;
+    dock = document.createElement("div");
+    dock.className = "window-dock";
+    dockHandle = document.createElement("button");
+    dockHandle.type = "button";
+    dockHandle.className = "window-dock-handle";
+    dockHandle.textContent = "\u{1F5C2}";
+    dockHandle.addEventListener("click", () => {
+      dock.classList.toggle("open");
+    });
+    dock.appendChild(dockHandle);
+    dockList = document.createElement("div");
+    dockList.className = "window-dock-list";
+    dock.appendChild(dockList);
+    document.body.appendChild(dock);
+  }
+  function bringToFront(win) {
+    if (!win) return;
+    zIndexCounter += 1;
+    win.style.zIndex = zIndexCounter;
+  }
+  function setupDragging(win, header) {
+    let active = null;
+    header.addEventListener("mousedown", (e) => {
+      if (e.target.closest("button")) return;
+      active = {
+        offsetX: e.clientX - win.offsetLeft,
+        offsetY: e.clientY - win.offsetTop
+      };
+      bringToFront(win);
+      document.addEventListener("mousemove", handleMove);
+      document.addEventListener("mouseup", stopDrag);
+      e.preventDefault();
+    });
+    function handleMove(e) {
+      if (!active) return;
+      const left = e.clientX - active.offsetX;
+      const top = e.clientY - active.offsetY;
+      win.style.left = `${left}px`;
+      win.style.top = `${top}px`;
+    }
+    function stopDrag() {
+      active = null;
+      document.removeEventListener("mousemove", handleMove);
+      document.removeEventListener("mouseup", stopDrag);
+    }
+  }
+  function createFloatingWindow({ title, width = 520, onClose } = {}) {
+    ensureDock();
+    const win = document.createElement("div");
+    win.className = "floating-window";
+    win.style.width = typeof width === "number" ? `${width}px` : width;
+    win.style.left = `${120 + windows.size * 32}px`;
+    win.style.top = `${100 + windows.size * 24}px`;
+    bringToFront(win);
+    const header = document.createElement("div");
+    header.className = "floating-header";
+    const titleEl = document.createElement("div");
+    titleEl.className = "floating-title";
+    titleEl.textContent = title || "Window";
+    header.appendChild(titleEl);
+    const actions = document.createElement("div");
+    actions.className = "floating-actions";
+    const minimizeBtn = document.createElement("button");
+    minimizeBtn.type = "button";
+    minimizeBtn.className = "floating-action";
+    minimizeBtn.title = "Minimize";
+    minimizeBtn.textContent = "\u2014";
+    actions.appendChild(minimizeBtn);
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "floating-action";
+    closeBtn.title = "Close";
+    closeBtn.textContent = "\xD7";
+    actions.appendChild(closeBtn);
+    header.appendChild(actions);
+    win.appendChild(header);
+    const body = document.createElement("div");
+    body.className = "floating-body";
+    win.appendChild(body);
+    let minimized = false;
+    let dockButton = null;
+    function handleMinimize() {
+      if (minimized) {
+        restore();
+        return;
+      }
+      minimized = true;
+      win.classList.add("minimized");
+      win.style.display = "none";
+      dock.classList.add("open");
+      dockButton = document.createElement("button");
+      dockButton.type = "button";
+      dockButton.className = "dock-entry";
+      dockButton.textContent = titleEl.textContent;
+      dockButton.addEventListener("click", () => restore());
+      dockList.appendChild(dockButton);
+    }
+    function destroyDockButton() {
+      if (dockButton && dockButton.parentElement) {
+        dockButton.parentElement.removeChild(dockButton);
+      }
+      dockButton = null;
+      if (!dockList.childElementCount) {
+        dock.classList.remove("open");
+      }
+    }
+    function restore() {
+      if (!minimized) return;
+      minimized = false;
+      win.classList.remove("minimized");
+      win.style.display = "";
+      bringToFront(win);
+      destroyDockButton();
+    }
+    minimizeBtn.addEventListener("click", handleMinimize);
+    function close(reason) {
+      destroyDockButton();
+      windows.delete(win);
+      if (win.parentElement) win.parentElement.removeChild(win);
+      if (typeof onClose === "function") onClose(reason);
+    }
+    closeBtn.addEventListener("click", () => close("close"));
+    win.addEventListener("mousedown", () => bringToFront(win));
+    setupDragging(win, header);
+    document.body.appendChild(win);
+    windows.add(win);
+    return {
+      element: win,
+      body,
+      setContent(node) {
+        body.innerHTML = "";
+        if (node) body.appendChild(node);
+      },
+      close,
+      minimize: handleMinimize,
+      restore,
+      setTitle(text) {
+        titleEl.textContent = text;
+        if (dockButton) dockButton.textContent = text;
+      },
+      isMinimized() {
+        return minimized;
+      },
+      focus() {
+        bringToFront(win);
+      }
+    };
   }
 
   // js/ui/components/editor.js
@@ -1202,16 +1392,17 @@
       ["facts", "Facts (comma separated)"]
     ]
   };
+  var titleMap = { disease: "Disease", drug: "Drug", concept: "Concept" };
   async function openEditor(kind, onSave, existing = null) {
-    const overlay = document.createElement("div");
-    overlay.className = "modal";
+    const win = createFloatingWindow({
+      title: `${existing ? "Edit" : "Add"} ${titleMap[kind] || kind}`,
+      width: 600
+    });
     const form = document.createElement("form");
-    form.className = "card modal-form";
-    const title = document.createElement("h2");
-    title.textContent = (existing ? "Edit " : "Add ") + kind;
-    form.appendChild(title);
+    form.className = "editor-form";
     const nameLabel = document.createElement("label");
     nameLabel.textContent = kind === "concept" ? "Concept" : "Name";
+    nameLabel.className = "editor-field";
     const nameInput = document.createElement("input");
     nameInput.className = "input";
     nameInput.value = existing ? existing.name || existing.concept || "" : "";
@@ -1220,6 +1411,7 @@
     const fieldInputs = {};
     fieldMap[kind].forEach(([field, label]) => {
       const lbl = document.createElement("label");
+      lbl.className = "editor-field";
       lbl.textContent = label;
       let inp;
       if (field === "facts") {
@@ -1236,6 +1428,7 @@
       fieldInputs[field] = inp;
     });
     const colorLabel = document.createElement("label");
+    colorLabel.className = "editor-field";
     colorLabel.textContent = "Color";
     const colorInput = document.createElement("input");
     colorInput.type = "color";
@@ -1254,12 +1447,14 @@
       lectSet.add(`${l.blockId}|${l.id}`);
     });
     const blockWrap = document.createElement("div");
-    blockWrap.className = "tag-wrap";
+    blockWrap.className = "tag-wrap editor-tags";
     const blockTitle = document.createElement("div");
+    blockTitle.className = "editor-tags-title";
     blockTitle.textContent = "Tags";
     blockWrap.appendChild(blockTitle);
     blocks.forEach((b) => {
       const blockDiv = document.createElement("div");
+      blockDiv.className = "editor-tag-block";
       const blkLabel = document.createElement("label");
       blkLabel.className = "row";
       const blkCb = document.createElement("input");
@@ -1314,26 +1509,20 @@
       blockWrap.appendChild(blockDiv);
     });
     form.appendChild(blockWrap);
-    const saveBtn = document.createElement("button");
-    saveBtn.type = "submit";
-    saveBtn.className = "btn";
-    saveBtn.textContent = "Save";
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.className = "btn";
-    cancel.textContent = "Cancel";
-    cancel.addEventListener("click", () => document.body.removeChild(overlay));
-    const actions = document.createElement("div");
-    actions.className = "modal-actions";
-    actions.appendChild(cancel);
-    actions.appendChild(saveBtn);
-    form.appendChild(actions);
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
+    const actionBar = document.createElement("div");
+    actionBar.className = "editor-actions";
+    const status = document.createElement("span");
+    status.className = "editor-status";
+    async function persist(closeAfter) {
       const titleKey = kind === "concept" ? "concept" : "name";
+      const trimmed = nameInput.value.trim();
+      if (!trimmed) {
+        status.textContent = "Name is required.";
+        return;
+      }
+      status.textContent = "Saving\u2026";
       const item = existing || { id: uid(), kind };
-      item[titleKey] = nameInput.value.trim();
-      if (!item[titleKey]) return;
+      item[titleKey] = trimmed;
       fieldMap[kind].forEach(([field]) => {
         const v = fieldInputs[field].value.trim();
         if (field === "facts") {
@@ -1350,34 +1539,58 @@
         const [blockId, lecIdStr] = key.split("|");
         const lecId = Number(lecIdStr);
         const blk = blockMap.get(blockId);
-        const l = blk?.lectures.find((l2) => l2.id === lecId);
+        const l = blk?.lectures.find((le) => le.id === lecId);
         if (l) lectures.push({ blockId, id: l.id, name: l.name, week: l.week });
       }
       item.lectures = lectures;
       item.color = colorInput.value;
       await upsertItem(item);
-      document.body.removeChild(overlay);
-      onSave && onSave();
+      existing = item;
+      updateTitle();
+      status.textContent = closeAfter ? "" : "Saved";
+      if (onSave) onSave();
+      if (closeAfter) {
+        win.close("saved");
+      }
+    }
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "btn";
+    saveBtn.textContent = "Save";
+    saveBtn.addEventListener("click", () => persist(false));
+    const saveCloseBtn = document.createElement("button");
+    saveCloseBtn.type = "button";
+    saveCloseBtn.className = "btn";
+    saveCloseBtn.textContent = "Save & Close";
+    saveCloseBtn.addEventListener("click", () => persist(true));
+    const discardBtn = document.createElement("button");
+    discardBtn.type = "button";
+    discardBtn.className = "btn secondary";
+    discardBtn.textContent = "Close without Saving";
+    discardBtn.addEventListener("click", () => win.close("discard"));
+    actionBar.appendChild(saveBtn);
+    actionBar.appendChild(saveCloseBtn);
+    actionBar.appendChild(discardBtn);
+    actionBar.appendChild(status);
+    form.appendChild(actionBar);
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      persist(false);
     });
-    overlay.appendChild(form);
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) document.body.removeChild(overlay);
-    });
-    document.body.appendChild(overlay);
+    win.setContent(form);
+    const updateTitle = () => {
+      const base = `${existing ? "Edit" : "Add"} ${titleMap[kind] || kind}`;
+      const name = nameInput.value.trim();
+      if (name) {
+        win.setTitle(`${base}: ${name}`);
+      } else {
+        win.setTitle(base);
+      }
+    };
+    nameInput.addEventListener("input", updateTitle);
+    updateTitle();
+    win.focus();
     nameInput.focus();
-  }
-
-  // js/ui/components/chips.js
-  function chipList(values = []) {
-    const box = document.createElement("div");
-    box.className = "chips";
-    values.forEach((v) => {
-      const chip = document.createElement("span");
-      chip.className = "chip";
-      chip.textContent = v;
-      box.appendChild(chip);
-    });
-    return box;
   }
 
   // js/ui/components/linker.js
@@ -1678,6 +1891,7 @@
     return card;
   }
   async function renderCardList(container, items, kind, onChange) {
+    container.innerHTML = "";
     const blocks = await listBlocks();
     const blockTitle = (id) => blocks.find((b) => b.blockId === id)?.title || id;
     const orderMap = new Map(blocks.map((b, i) => [b.blockId, i]));
@@ -1719,6 +1933,90 @@
       const bo = orderMap.has(b) ? orderMap.get(b) : Infinity;
       return ao - bo;
     });
+    const layoutState = state.entryLayout;
+    const toolbar = document.createElement("div");
+    toolbar.className = "entry-layout-toolbar";
+    const viewToggle = document.createElement("div");
+    viewToggle.className = "layout-toggle";
+    const listBtn = document.createElement("button");
+    listBtn.type = "button";
+    listBtn.className = "layout-btn" + (layoutState.mode === "list" ? " active" : "");
+    listBtn.textContent = "List";
+    listBtn.addEventListener("click", () => {
+      if (layoutState.mode === "list") return;
+      setEntryLayout({ mode: "list" });
+      updateToolbar();
+      applyLayout();
+    });
+    const gridBtn = document.createElement("button");
+    gridBtn.type = "button";
+    gridBtn.className = "layout-btn" + (layoutState.mode === "grid" ? " active" : "");
+    gridBtn.textContent = "Grid";
+    gridBtn.addEventListener("click", () => {
+      if (layoutState.mode === "grid") return;
+      setEntryLayout({ mode: "grid" });
+      updateToolbar();
+      applyLayout();
+    });
+    viewToggle.appendChild(listBtn);
+    viewToggle.appendChild(gridBtn);
+    toolbar.appendChild(viewToggle);
+    const columnWrap = document.createElement("label");
+    columnWrap.className = "layout-control";
+    columnWrap.textContent = "Columns";
+    const columnInput = document.createElement("input");
+    columnInput.type = "range";
+    columnInput.min = "1";
+    columnInput.max = "6";
+    columnInput.step = "1";
+    columnInput.value = String(layoutState.columns);
+    const columnValue = document.createElement("span");
+    columnValue.className = "layout-value";
+    columnValue.textContent = String(layoutState.columns);
+    columnInput.addEventListener("input", () => {
+      setEntryLayout({ columns: Number(columnInput.value) });
+      columnValue.textContent = String(state.entryLayout.columns);
+      applyLayout();
+    });
+    columnWrap.appendChild(columnInput);
+    columnWrap.appendChild(columnValue);
+    toolbar.appendChild(columnWrap);
+    const scaleWrap = document.createElement("label");
+    scaleWrap.className = "layout-control";
+    scaleWrap.textContent = "Scale";
+    const scaleInput = document.createElement("input");
+    scaleInput.type = "range";
+    scaleInput.min = "0.6";
+    scaleInput.max = "1.4";
+    scaleInput.step = "0.05";
+    scaleInput.value = String(layoutState.scale);
+    const scaleValue = document.createElement("span");
+    scaleValue.className = "layout-value";
+    scaleValue.textContent = `${layoutState.scale.toFixed(2)}x`;
+    scaleInput.addEventListener("input", () => {
+      setEntryLayout({ scale: Number(scaleInput.value) });
+      scaleValue.textContent = `${state.entryLayout.scale.toFixed(2)}x`;
+      applyLayout();
+    });
+    scaleWrap.appendChild(scaleInput);
+    scaleWrap.appendChild(scaleValue);
+    toolbar.appendChild(scaleWrap);
+    container.appendChild(toolbar);
+    function updateToolbar() {
+      const mode = state.entryLayout.mode;
+      listBtn.classList.toggle("active", mode === "list");
+      gridBtn.classList.toggle("active", mode === "grid");
+      columnWrap.style.display = mode === "grid" ? "" : "none";
+    }
+    function applyLayout() {
+      const lists = container.querySelectorAll(".card-list");
+      lists.forEach((list) => {
+        list.classList.toggle("grid-layout", state.entryLayout.mode === "grid");
+        list.style.setProperty("--entry-scale", state.entryLayout.scale);
+        list.style.setProperty("--entry-columns", state.entryLayout.columns);
+      });
+    }
+    updateToolbar();
     sortedBlocks.forEach((b) => {
       const blockSec = document.createElement("section");
       blockSec.className = "block-section";
@@ -1771,6 +2069,9 @@
         weekSec.appendChild(weekHeader);
         const list = document.createElement("div");
         list.className = "card-list";
+        list.style.setProperty("--entry-scale", state.entryLayout.scale);
+        list.style.setProperty("--entry-columns", state.entryLayout.columns);
+        list.classList.toggle("grid-layout", state.entryLayout.mode === "grid");
         const rows = wkMap.get(w);
         function renderChunk(start = 0) {
           const slice = rows.slice(start, start + 200);
@@ -1785,10 +2086,12 @@
       });
       container.appendChild(blockSec);
     });
+    applyLayout();
   }
 
   // js/ui/components/cards.js
   function renderCards(container, items, onChange) {
+    container.innerHTML = "";
     const decks = /* @__PURE__ */ new Map();
     items.forEach((it) => {
       if (it.lectures && it.lectures.length) {
@@ -6040,6 +6343,40 @@
     await upsertItem(b);
   }
 
+  // js/ui/components/entry-controls.js
+  var defaultOptions = [
+    { value: "disease", label: "Disease" },
+    { value: "drug", label: "Drug" },
+    { value: "concept", label: "Concept" }
+  ];
+  function createEntryAddControl(onAdded, initialKind = "disease") {
+    const wrapper = document.createElement("div");
+    wrapper.className = "entry-add-control";
+    const select = document.createElement("select");
+    select.className = "input entry-add-select";
+    defaultOptions.forEach((opt) => {
+      const option = document.createElement("option");
+      option.value = opt.value;
+      option.textContent = opt.label;
+      select.appendChild(option);
+    });
+    if (initialKind) {
+      select.value = initialKind;
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn";
+    button.textContent = "Add";
+    button.addEventListener("click", () => {
+      const kind = select.value;
+      if (!kind) return;
+      openEditor(kind, onAdded);
+    });
+    wrapper.appendChild(select);
+    wrapper.appendChild(button);
+    return wrapper;
+  }
+
   // js/main.js
   var tabs = ["Diseases", "Drugs", "Concepts", "Cards", "Study", "Exams", "Map", "Settings"];
   async function render() {
@@ -6084,27 +6421,34 @@
     } else if (["Diseases", "Drugs", "Concepts"].includes(state.tab)) {
       const kindMap = { Diseases: "disease", Drugs: "drug", Concepts: "concept" };
       const kind = kindMap[state.tab];
-      const addBtn = document.createElement("button");
-      addBtn.className = "btn";
-      addBtn.textContent = "Add " + kind;
-      addBtn.addEventListener("click", () => openEditor(kind, render));
-      main.appendChild(addBtn);
+      main.appendChild(createEntryAddControl(render, kind));
+      const listHost = document.createElement("div");
+      listHost.className = "tab-content";
+      main.appendChild(listHost);
       const filter = { ...state.filters, types: [kind], query: state.query };
       const items = await findItemsByFilter(filter);
-      await renderCardList(main, items, kind, render);
+      await renderCardList(listHost, items, kind, render);
     } else if (state.tab === "Cards") {
+      main.appendChild(createEntryAddControl(render, "disease"));
+      const content = document.createElement("div");
+      content.className = "tab-content";
+      main.appendChild(content);
       const filter = { ...state.filters, query: state.query };
       const items = await findItemsByFilter(filter);
-      renderCards(main, items, render);
+      renderCards(content, items, render);
     } else if (state.tab === "Study") {
+      main.appendChild(createEntryAddControl(render, "disease"));
+      const content = document.createElement("div");
+      content.className = "tab-content";
+      main.appendChild(content);
       if (state.flashSession) {
-        renderFlashcards(main, render);
+        renderFlashcards(content, render);
       } else if (state.quizSession) {
-        renderQuiz(main, render);
+        renderQuiz(content, render);
       } else {
         const wrap = document.createElement("div");
         await renderBuilder(wrap);
-        main.appendChild(wrap);
+        content.appendChild(wrap);
         const subnav = document.createElement("div");
         subnav.className = "tabs row subtabs";
         ["Flashcards", "Review", "Quiz", "Blocks"].forEach((st) => {
@@ -6117,7 +6461,7 @@
           });
           subnav.appendChild(sb);
         });
-        main.appendChild(subnav);
+        content.appendChild(subnav);
         if (state.cohort.length) {
           if (state.subtab.Study === "Flashcards") {
             const startBtn = document.createElement("button");
@@ -6127,9 +6471,9 @@
               setFlashSession({ idx: 0, pool: state.cohort });
               render();
             });
-            main.appendChild(startBtn);
+            content.appendChild(startBtn);
           } else if (state.subtab.Study === "Review") {
-            renderReview(main, render);
+            renderReview(content, render);
           } else if (state.subtab.Study === "Quiz") {
             const startBtn = document.createElement("button");
             startBtn.className = "btn";
@@ -6138,20 +6482,28 @@
               setQuizSession({ idx: 0, score: 0, pool: state.cohort });
               render();
             });
-            main.appendChild(startBtn);
+            content.appendChild(startBtn);
           } else if (state.subtab.Study === "Blocks") {
-            renderBlockMode(main);
+            renderBlockMode(content);
           }
         }
       }
     } else if (state.tab === "Exams") {
+      main.appendChild(createEntryAddControl(render, "disease"));
+      const content = document.createElement("div");
+      content.className = "tab-content";
+      main.appendChild(content);
       if (state.examSession) {
-        renderExamRunner(main, render);
+        renderExamRunner(content, render);
       } else {
-        await renderExams(main, render);
+        await renderExams(content, render);
       }
     } else if (state.tab === "Map") {
-      await renderMap(main);
+      main.appendChild(createEntryAddControl(render, "disease"));
+      const mapHost = document.createElement("div");
+      mapHost.className = "tab-content map-host";
+      main.appendChild(mapHost);
+      await renderMap(mapHost);
     } else {
       main.textContent = `Currently viewing: ${state.tab}`;
     }
