@@ -45,10 +45,12 @@ function renderBlockPanel(block, rerender) {
   });
   const weeks = groupByWeek(lectures);
   const hasSelections = hasBlockSelection(blockId);
+  const blockCollapsed = isBlockCollapsed(blockId);
 
   const card = document.createElement('div');
   card.className = 'card builder-block-card';
   if (hasSelections) card.classList.add('active');
+  if (blockCollapsed) card.classList.add('is-collapsed');
 
   const header = document.createElement('div');
   header.className = 'builder-block-header';
@@ -76,6 +78,12 @@ function renderBlockPanel(block, rerender) {
   actions.appendChild(toggleBlockBtn);
 
   if (lectures.length) {
+    const toggleCollapseBtn = createAction(blockCollapsed ? 'Show weeks' : 'Hide weeks', () => {
+      toggleBlockCollapsed(blockId);
+      rerender();
+    });
+    actions.appendChild(toggleCollapseBtn);
+
     const allBtn = createAction('Select all lectures', () => {
       selectEntireBlock(block);
       rerender();
@@ -104,6 +112,7 @@ function renderBlockPanel(block, rerender) {
 
   const weekList = document.createElement('div');
   weekList.className = 'builder-week-list';
+  weekList.hidden = blockCollapsed;
   if (!weeks.length) {
     const empty = document.createElement('div');
     empty.className = 'builder-empty';
@@ -122,8 +131,10 @@ function renderWeek(block, week, lectures, rerender) {
   const blockId = block.blockId;
   const weekKey = weekKeyFor(blockId, week);
   const selected = state.builder.weeks.includes(weekKey);
+  const weekCollapsed = isWeekCollapsed(blockId, week);
   const row = document.createElement('div');
   row.className = 'builder-week-card';
+  if (weekCollapsed) row.classList.add('is-collapsed');
 
   const header = document.createElement('div');
   header.className = 'builder-week-header';
@@ -141,6 +152,11 @@ function renderWeek(block, week, lectures, rerender) {
 
   const actions = document.createElement('div');
   actions.className = 'builder-week-actions';
+  const toggleBtn = createAction(weekCollapsed ? 'Show lectures' : 'Hide lectures', () => {
+    toggleWeekCollapsed(blockId, week);
+    rerender();
+  });
+  actions.appendChild(toggleBtn);
   const allBtn = createAction('Select all', () => {
     selectWeek(block, week);
     rerender();
@@ -152,6 +168,7 @@ function renderWeek(block, week, lectures, rerender) {
 
   const lectureList = document.createElement('div');
   lectureList.className = 'builder-lecture-list';
+  lectureList.hidden = weekCollapsed;
   lectures.forEach(lecture => {
     lectureList.appendChild(renderLecture(block, lecture, rerender));
   });
@@ -419,6 +436,35 @@ function toggleType(type) {
   const types = new Set(state.builder.types);
   if (types.has(type)) types.delete(type); else types.add(type);
   setBuilder({ types: Array.from(types) });
+}
+
+function isBlockCollapsed(blockId) {
+  return (state.builder.collapsedBlocks || []).includes(blockId);
+}
+
+function toggleBlockCollapsed(blockId) {
+  const collapsed = new Set(state.builder.collapsedBlocks || []);
+  if (collapsed.has(blockId)) {
+    collapsed.delete(blockId);
+  } else {
+    collapsed.add(blockId);
+  }
+  setBuilder({ collapsedBlocks: Array.from(collapsed) });
+}
+
+function isWeekCollapsed(blockId, week) {
+  return (state.builder.collapsedWeeks || []).includes(weekKeyFor(blockId, week));
+}
+
+function toggleWeekCollapsed(blockId, week) {
+  const key = weekKeyFor(blockId, week);
+  const collapsed = new Set(state.builder.collapsedWeeks || []);
+  if (collapsed.has(key)) {
+    collapsed.delete(key);
+  } else {
+    collapsed.add(key);
+  }
+  setBuilder({ collapsedWeeks: Array.from(collapsed) });
 }
 
 function hasBlockSelection(blockId) {
