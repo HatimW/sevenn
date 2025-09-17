@@ -10,10 +10,9 @@ function isLectureListCollapsed(blockId) {
 function toggleLectureListCollapse(blockId) {
   if (collapsedLectureBlocks.has(blockId)) {
     collapsedLectureBlocks.delete(blockId);
-    return false;
+  } else {
+    collapsedLectureBlocks.add(blockId);
   }
-  collapsedLectureBlocks.add(blockId);
-  return true;
 }
 
 export async function renderSettings(root) {
@@ -66,18 +65,14 @@ export async function renderSettings(root) {
     wkInfo.textContent = `Weeks: ${b.weeks}`;
     wrap.appendChild(wkInfo);
 
-    let lectureSection;
     if (lectures.length || lecturesCollapsed) {
       const toggleLecturesBtn = document.createElement('button');
       toggleLecturesBtn.type = 'button';
       toggleLecturesBtn.className = 'btn secondary settings-lecture-toggle';
       toggleLecturesBtn.textContent = lecturesCollapsed ? 'Show lectures' : 'Hide lectures';
-      toggleLecturesBtn.addEventListener('click', () => {
-        const collapsed = toggleLectureListCollapse(b.blockId);
-        toggleLecturesBtn.textContent = collapsed ? 'Show lectures' : 'Hide lectures';
-        if (lectureSection) {
-          lectureSection.hidden = collapsed;
-        }
+      toggleLecturesBtn.addEventListener('click', async () => {
+        toggleLectureListCollapse(b.blockId);
+        await renderSettings(root);
       });
       wrap.appendChild(toggleLecturesBtn);
     }
@@ -157,7 +152,7 @@ export async function renderSettings(root) {
       editForm.style.display = editForm.style.display === 'none' ? 'flex' : 'none';
     });
 
-    lectureSection = document.createElement('div');
+    const lectureSection = document.createElement('div');
     lectureSection.className = 'settings-lecture-section';
     lectureSection.hidden = lecturesCollapsed;
 

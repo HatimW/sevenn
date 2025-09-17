@@ -34,14 +34,7 @@ async function render() {
     const kindClass = { Diseases:'disease', Drugs:'drug', Concepts:'concept' }[t];
     btn.className = 'tab' + (state.tab === t ? ' active' : '');
     if (kindClass) btn.classList.add(kindClass);
-    if (t === 'Settings') {
-      btn.innerHTML = '⚙️';
-      btn.classList.add('tab-icon');
-      btn.setAttribute('aria-label', 'Settings');
-      btn.title = 'Settings';
-    } else {
-      btn.textContent = t;
-    }
+    btn.textContent = t;
     btn.addEventListener('click', () => {
       setTab(t);
       render();
@@ -55,27 +48,8 @@ async function render() {
   search.type = 'search';
   search.placeholder = 'Search';
   search.value = state.query;
-  search.addEventListener('input', e => {
-    setQuery(e.target.value);
-    render();
-  });
-  search.addEventListener('keydown', e => {
-    if (e.key === 'Enter') {
-      setQuery(search.value.trim());
-      render();
-    }
-  });
+  search.addEventListener('input', e => { setQuery(e.target.value); render(); });
   header.appendChild(search);
-
-  const searchBtn = document.createElement('button');
-  searchBtn.type = 'button';
-  searchBtn.className = 'search-btn';
-  searchBtn.textContent = 'Search';
-  searchBtn.addEventListener('click', () => {
-    setQuery(search.value.trim());
-    render();
-  });
-  header.appendChild(searchBtn);
   root.appendChild(header);
 
   const main = document.createElement('main');
