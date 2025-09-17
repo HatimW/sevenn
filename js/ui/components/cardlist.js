@@ -170,8 +170,8 @@ export function createItemCard(item, onChange){
       sec.appendChild(tl);
       const txt = document.createElement('div');
       txt.className = 'section-content';
-      txt.textContent = item[f];
-      txt.style.whiteSpace = 'pre-wrap';
+      txt.innerHTML = item[f];
+      txt.style.whiteSpace = 'normal';
       sec.appendChild(txt);
       body.appendChild(sec);
     });

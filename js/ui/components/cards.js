@@ -1,4 +1,8 @@
+import { listBlocks } from '../../storage/storage.js';
 import { createItemCard } from './cardlist.js';
+
+const collapsedCardBlocks = new Set();
+const collapsedCardWeeks = new Set();
 
 /**
  * Render lecture-based decks combining all item types.
@@ -6,87 +10,148 @@ import { createItemCard } from './cardlist.js';
  * @param {import('../../types.js').Item[]} items
  * @param {Function} onChange
  */
-export function renderCards(container, items, onChange){
+export async function renderCards(container, items, onChange){
   container.innerHTML = '';
-  const decks = new Map();
-  items.forEach(it => {
-    if (it.lectures && it.lectures.length){
-      it.lectures.forEach(l => {
-        const key = l.name || `Lecture ${l.id}`;
-        if (!decks.has(key)) decks.set(key, []);
-        decks.get(key).push(it);
+  const blocks = await listBlocks();
+  const blockOrder = new Map(blocks.map((b,i)=>[b.blockId,i]));
+  const blockMeta = new Map(blocks.map(b => [b.blockId, b]));
+  const groupMap = new Map();
+
+  function ensureBlock(blockId){
+    if (!groupMap.has(blockId)) groupMap.set(blockId, new Map());
+    return groupMap.get(blockId);
+  }
+
+  function ensureWeek(blockId, week){
+    const block = ensureBlock(blockId);
+    if (!block.has(week)) block.set(week, new Map());
+    return block.get(week);
+  }
+
+  function addToDeck(blockId, weekValue, lectureKey, label, card){
+    const week = ensureWeek(blockId, weekValue);
+    if (!week.has(lectureKey)) {
+      week.set(lectureKey, { label, cards: [] });
+    }
+    week.get(lectureKey).cards.push(card);
+  }
+
+  items.forEach(item => {
+    if (item.lectures && item.lectures.length){
+      item.lectures.forEach(lec => {
+        const blockId = lec.blockId || '_';
+        const week = Number.isFinite(lec.week) ? lec.week : '_';
+        const title = lec.name || `Lecture ${lec.id || ''}`;
+        const deckKey = `${lec.blockId || '_'}|${week}|${lec.id || title}`;
+        addToDeck(blockId, week, deckKey, title, item);
       });
     } else {
-      if (!decks.has('Unassigned')) decks.set('Unassigned', []);
-      decks.get('Unassigned').push(it);
+      const blockId = (item.blocks && item.blocks[0]) || '_';
+      const week = (item.weeks && item.weeks[0]) || '_';
+      const deckKey = 'general';
+      addToDeck(blockId, week, deckKey, 'General', item);
     }
   });
 
-  const list = document.createElement('div');
-  list.className = 'deck-list';
-  container.appendChild(list);
+  const layout = document.createElement('div');
+  layout.className = 'cards-layout';
+  container.appendChild(layout);
 
   const viewer = document.createElement('div');
   viewer.className = 'deck-viewer hidden';
   container.appendChild(viewer);
 
-  decks.forEach((cards, lecture) => {
-    const deck = document.createElement('div');
-    deck.className = 'deck';
-    const title = document.createElement('div');
-    title.className = 'deck-title';
-    title.textContent = lecture;
-    const meta = document.createElement('div');
-    meta.className = 'deck-meta';
-    const blocks = Array.from(new Set(cards.flatMap(c => c.blocks || []))).join(', ');
-    const weeks = Array.from(new Set(cards.flatMap(c => c.weeks || []))).join(', ');
-    meta.textContent = `${blocks}${blocks && weeks ? ' • ' : ''}${weeks ? 'Week ' + weeks : ''}`;
-    deck.appendChild(title);
-    deck.appendChild(meta);
-    deck.addEventListener('click', () => { stopPreview(deck); openDeck(lecture, cards); });
-    let hoverTimer;
-    deck.addEventListener('mouseenter', () => {
-      hoverTimer = setTimeout(() => startPreview(deck, cards), 3000);
-    });
-    deck.addEventListener('mouseleave', () => {
-      clearTimeout(hoverTimer);
-      stopPreview(deck);
-    });
-    list.appendChild(deck);
+  const decksById = new Map();
+
+  const sortedBlocks = Array.from(groupMap.keys()).sort((a,b)=>{
+    const ao = blockOrder.has(a) ? blockOrder.get(a) : Infinity;
+    const bo = blockOrder.has(b) ? blockOrder.get(b) : Infinity;
+    if (ao === bo) return String(a).localeCompare(String(b));
+    return ao - bo;
   });
 
-  function startPreview(deckEl, cards){
-    if (deckEl._preview) return;
-    deckEl.classList.add('pop');
-    const fan = document.createElement('div');
-    fan.className = 'deck-fan';
-    deckEl.appendChild(fan);
-    const show = cards.slice(0,5);
-    const spread = 20;
-    const offset = (show.length - 1) * spread / 2;
-    show.forEach((c,i) => {
-      const mini = document.createElement('div');
-      mini.className = 'fan-card';
-      mini.textContent = c.name || c.concept || '';
-      fan.appendChild(mini);
-      const angle = -offset + i * spread;
-      mini.style.transform = `rotate(${angle}deg) translateY(-80px)`;
-      setTimeout(() => { mini.style.opacity = 1; }, i * 100);
-    });
-    deckEl._preview = { fan };
-  }
-
-  function stopPreview(deckEl){
-    const prev = deckEl._preview;
-    if (prev){
-      prev.fan.remove();
-      deckEl.classList.remove('pop');
-      deckEl._preview = null;
+  sortedBlocks.forEach(blockId => {
+    const blockSection = document.createElement('section');
+    blockSection.className = 'card-block';
+    const blockHeader = document.createElement('button');
+    blockHeader.type = 'button';
+    blockHeader.className = 'card-block-header';
+    const meta = blockMeta.get(blockId);
+    const label = blockId === '_' ? 'Unassigned Block' : `${blockId} • ${meta?.title || ''}`.trim();
+    const collapsed = collapsedCardBlocks.has(blockId);
+    blockHeader.textContent = `${collapsed ? '▸' : '▾'} ${label}`;
+    if (meta?.color) {
+      blockHeader.style.background = `linear-gradient(90deg, ${meta.color} 0%, rgba(15,23,42,0.9) 100%)`;
     }
-  }
+    blockHeader.addEventListener('click', () => {
+      if (collapsedCardBlocks.has(blockId)) collapsedCardBlocks.delete(blockId); else collapsedCardBlocks.add(blockId);
+      renderCards(container, items, onChange);
+    });
+    blockSection.appendChild(blockHeader);
 
-  function openDeck(title, cards){
-    list.classList.add('hidden');
+    const weeksWrap = document.createElement('div');
+    weeksWrap.className = 'card-weeks';
+    weeksWrap.hidden = collapsed;
+    blockSection.appendChild(weeksWrap);
+
+    const weekMap = groupMap.get(blockId);
+    const weekKeys = Array.from(weekMap.keys()).sort((a,b)=>{
+      if (a === '_' && b !== '_') return 1;
+      if (b === '_' && a !== '_') return -1;
+      return Number(a) - Number(b);
+    });
+
+    weekKeys.forEach(weekKey => {
+      const weekSection = document.createElement('div');
+      weekSection.className = 'card-week';
+      const weekHeader = document.createElement('button');
+      weekHeader.type = 'button';
+      weekHeader.className = 'card-week-header';
+      const key = `${blockId}__${weekKey}`;
+      const weekCollapsed = collapsedCardWeeks.has(key);
+      const weekLabel = weekKey === '_' ? 'Unassigned Week' : `Week ${weekKey}`;
+      weekHeader.textContent = `${weekCollapsed ? '▸' : '▾'} ${weekLabel}`;
+      weekHeader.addEventListener('click', () => {
+        if (collapsedCardWeeks.has(key)) collapsedCardWeeks.delete(key); else collapsedCardWeeks.add(key);
+        renderCards(container, items, onChange);
+      });
+      weekSection.appendChild(weekHeader);
+
+      const deckWrap = document.createElement('div');
+      deckWrap.className = 'deck-list';
+      deckWrap.hidden = weekCollapsed;
+      weekSection.appendChild(deckWrap);
+
+      const lectures = Array.from(weekMap.get(weekKey).entries()).sort((a,b)=>{
+        return a[1].label.localeCompare(b[1].label);
+      });
+
+      lectures.forEach(([deckId, info]) => {
+        const deck = document.createElement('button');
+        deck.type = 'button';
+        deck.className = 'deck';
+        deck.innerHTML = `
+          <span class="deck-title">${info.label}</span>
+          <span class="deck-meta">${info.cards.length} card${info.cards.length === 1 ? '' : 's'}</span>
+        `;
+        deck.addEventListener('click', () => openDeck(`${blockId}|${weekKey}|${deckId}`, info.label, info.cards));
+        deckWrap.appendChild(deck);
+        decksById.set(`${blockId}|${weekKey}|${deckId}`, { title: info.label, cards: info.cards });
+      });
+
+      weeksWrap.appendChild(weekSection);
+    });
+
+    layout.appendChild(blockSection);
+  });
+
+  function openDeck(id, title, cards){
+    const stored = decksById.get(id);
+    if (stored) {
+      title = stored.title;
+      cards = stored.cards;
+    }
+    layout.classList.add('hidden');
     viewer.classList.remove('hidden');
     viewer.innerHTML = '';
 
@@ -165,7 +230,7 @@ export function renderCards(container, items, onChange){
       document.removeEventListener('keydown', keyHandler);
       viewer.classList.add('hidden');
       viewer.innerHTML = '';
-      list.classList.remove('hidden');
+      layout.classList.remove('hidden');
     });
 
     function keyHandler(e){
@@ -175,6 +240,7 @@ export function renderCards(container, items, onChange){
     }
     document.addEventListener('keydown', keyHandler);
 
+    layout.classList.add('hidden');
     renderCard();
   }
 }
