@@ -11,7 +11,17 @@ export const state = {
   },
   query: "",
   filters: { types:["disease","drug","concept"], block:"", week:"", onlyFav:false, sort:"updated" },
-  builder: { blocks:[], weeks:[], lectures:[], types:["disease","drug","concept"], tags:[], onlyFav:false, manualPicks:[] },
+  builder: {
+    blocks:[],
+    weeks:[],
+    lectures:[],
+    types:["disease","drug","concept"],
+    tags:[],
+    onlyFav:false,
+    manualPicks:[],
+    collapsedBlocks:[],
+    collapsedWeeks:[]
+  },
   cohort: [],
   review: { count:20, format:"flashcards" },
   quizSession: null,

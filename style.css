@@ -377,6 +377,10 @@ input[type="checkbox"]:checked::after {
   margin-left: auto;
 }
 
+.builder-block-card.is-collapsed .builder-week-list {
+  display: none;
+}
+
 .builder-unlabeled-note {
   color: var(--gray);
   font-size: 0.95rem;
@@ -397,6 +401,10 @@ input[type="checkbox"]:checked::after {
   gap: var(--pad-sm);
 }
 
+.builder-week-card.is-collapsed .builder-lecture-list {
+  display: none;
+}
+
 .builder-week-header {
   display: flex;
   flex-wrap: wrap;
@@ -410,6 +418,9 @@ input[type="checkbox"]:checked::after {
 }
 
 .builder-week-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--pad-sm);
   margin-left: auto;
 }
 
