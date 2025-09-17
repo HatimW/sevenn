@@ -4,10 +4,6 @@ import { exportJSON, importJSON, exportAnkiCSV } from './export.js';
 let dbPromise;
 
 function prom(req) {
-  if (!req) return Promise.resolve(undefined);
-  if (typeof req.then === 'function') {
-    return req;
-  }
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
