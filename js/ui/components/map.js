@@ -85,7 +85,8 @@ const mapState = {
   toolboxContainer: null,
   baseCursor: 'grab',
   cursorOverride: null,
-  defaultViewSize: null
+  defaultViewSize: null,
+  justCompletedSelection: false
 };
 
 function setAreaInteracting(active) {
@@ -106,6 +107,7 @@ export async function renderMap(root) {
   mapState.selectionRect = null;
   mapState.previewSelection = null;
   mapState.nodeWasDragged = false;
+  mapState.justCompletedSelection = false;
   stopToolboxDrag();
   mapState.toolboxEl = null;
   mapState.toolboxContainer = null;
@@ -311,6 +313,7 @@ export async function renderMap(root) {
           offset: { x: x - current.x, y: y - current.y }
         };
         mapState.nodeWasDragged = false;
+        setAreaInteracting(true);
       } else {
         mapState.areaDrag = {
           ids: [...mapState.selectionIds],
@@ -401,9 +404,12 @@ function attachSvgEvents(svg) {
   svg.addEventListener('mousedown', e => {
     if (e.button !== 0) return;
     if (e.target !== svg) return;
+    mapState.justCompletedSelection = false;
     if (mapState.tool !== TOOL.AREA) {
+      e.preventDefault();
       mapState.draggingView = true;
       mapState.lastPointer = { x: e.clientX, y: e.clientY };
+      setAreaInteracting(true);
       refreshCursor({ keepOverride: false });
     } else if (mapState.tool === TOOL.AREA) {
       e.preventDefault();
@@ -414,6 +420,21 @@ function attachSvgEvents(svg) {
       mapState.selectionBox.classList.remove('hidden');
       setAreaInteracting(true);
     }
+  });
+
+  svg.addEventListener('click', e => {
+    if (mapState.tool !== TOOL.AREA) return;
+    if (e.target !== svg) return;
+    if (mapState.justCompletedSelection) {
+      mapState.justCompletedSelection = false;
+      return;
+    }
+    if (mapState.selectionIds.length || mapState.previewSelection) {
+      mapState.selectionIds = [];
+      mapState.previewSelection = null;
+      updateSelectionHighlight();
+    }
+    setAreaInteracting(false);
   });
 
   svg.addEventListener('wheel', e => {
@@ -527,6 +548,7 @@ async function handleMouseUp(e) {
       await persistNodePosition(id);
     }
     mapState.nodeWasDragged = false;
+    setAreaInteracting(false);
   }
 
   if (mapState.areaDrag) {
@@ -545,6 +567,7 @@ async function handleMouseUp(e) {
   if (mapState.draggingView) {
     mapState.draggingView = false;
     cursorNeedsRefresh = true;
+    setAreaInteracting(false);
   }
 
   if (mapState.selectionRect) {
@@ -556,6 +579,7 @@ async function handleMouseUp(e) {
     updateSelectionHighlight();
     stopAutoPan();
     setAreaInteracting(false);
+    mapState.justCompletedSelection = true;
   }
 
   if (cursorNeedsRefresh) {
@@ -1160,9 +1184,9 @@ function adjustScale() {
   const defaultSize = Number.isFinite(mapState.defaultViewSize) ? mapState.defaultViewSize : w;
   const zoomInRatio = defaultSize / w;
   const zoomOutRatio = w / defaultSize;
-  const nodeScale = clamp(Math.pow(zoomInRatio, 0.3), 0.5, 1.6);
-  const labelScale = clamp(Math.pow(zoomOutRatio, 0.3), 1, 1.7);
-  const lineScale = clamp(Math.pow(zoomInRatio, 0.2), 0.6, 1.8);
+  const nodeScale = clamp(Math.pow(zoomInRatio, 0.4), 0.7, 2.1);
+  const labelScale = clamp(Math.pow(zoomOutRatio, 0.45), 1, 2.3);
+  const lineScale = clamp(Math.pow(zoomInRatio, 0.25), 0.7, 2);
 
   mapState.elements.forEach(({ circle, label }) => {
     const baseR = Number(circle.dataset.radius) || 20;
@@ -1170,8 +1194,9 @@ function adjustScale() {
     circle.setAttribute('r', scaledRadius);
     const pos = mapState.positions[circle.dataset.id];
     if (pos && label) {
-      label.setAttribute('font-size', 12 * labelScale);
-      label.setAttribute('y', pos.y - (baseR + 8) * nodeScale);
+      label.setAttribute('font-size', 13 * labelScale);
+      const offset = (baseR + 8) * nodeScale + (labelScale - 1) * 4;
+      label.setAttribute('y', pos.y - offset);
     }
   });
   svg.querySelectorAll('.map-edge').forEach(line => {
