@@ -1,4 +1,4 @@
-var Sevenn = (() => {
+(() => {
   // js/state.js
   var state = {
     tab: "Diseases",
@@ -14,7 +14,17 @@ var Sevenn = (() => {
     },
     query: "",
     filters: { types: ["disease", "drug", "concept"], block: "", week: "", onlyFav: false, sort: "updated" },
-    builder: { blocks: [], weeks: [], lectures: [], types: ["disease", "drug", "concept"], tags: [], onlyFav: false, manualPicks: [] },
+    builder: {
+      blocks: [],
+      weeks: [],
+      lectures: [],
+      types: ["disease", "drug", "concept"],
+      tags: [],
+      onlyFav: false,
+      manualPicks: [],
+      collapsedBlocks: [],
+      collapsedWeeks: []
+    },
     cohort: [],
     review: { count: 20, format: "flashcards" },
     quizSession: null,
@@ -839,6 +849,17 @@ var Sevenn = (() => {
   }
 
   // js/ui/settings.js
+  var collapsedLectureBlocks = /* @__PURE__ */ new Set();
+  function isLectureListCollapsed(blockId) {
+    return collapsedLectureBlocks.has(blockId);
+  }
+  function toggleLectureListCollapse(blockId) {
+    if (collapsedLectureBlocks.has(blockId)) {
+      collapsedLectureBlocks.delete(blockId);
+    } else {
+      collapsedLectureBlocks.add(blockId);
+    }
+  }
   async function renderSettings(root) {
     root.innerHTML = "";
     const settings = await getSettings();
@@ -872,12 +893,25 @@ var Sevenn = (() => {
     blocks.forEach((b, i) => {
       const wrap = document.createElement("div");
       wrap.className = "block";
+      const lectures = (b.lectures || []).slice().sort((a, b2) => b2.week - a.week || b2.id - a.id);
+      const lecturesCollapsed = isLectureListCollapsed(b.blockId);
       const title = document.createElement("h3");
       title.textContent = `${b.blockId} \u2013 ${b.title}`;
       wrap.appendChild(title);
       const wkInfo = document.createElement("div");
       wkInfo.textContent = `Weeks: ${b.weeks}`;
       wrap.appendChild(wkInfo);
+      if (lectures.length || lecturesCollapsed) {
+        const toggleLecturesBtn = document.createElement("button");
+        toggleLecturesBtn.type = "button";
+        toggleLecturesBtn.className = "btn secondary settings-lecture-toggle";
+        toggleLecturesBtn.textContent = lecturesCollapsed ? "Show lectures" : "Hide lectures";
+        toggleLecturesBtn.addEventListener("click", async () => {
+          toggleLectureListCollapse(b.blockId);
+          await renderSettings(root);
+        });
+        wrap.appendChild(toggleLecturesBtn);
+      }
       const controls = document.createElement("div");
       controls.className = "row";
       const upBtn = document.createElement("button");
@@ -952,8 +986,11 @@ var Sevenn = (() => {
       edit.addEventListener("click", () => {
         editForm.style.display = editForm.style.display === "none" ? "flex" : "none";
       });
+      const lectureSection = document.createElement("div");
+      lectureSection.className = "settings-lecture-section";
+      lectureSection.hidden = lecturesCollapsed;
       const lecList = document.createElement("ul");
-      (b.lectures || []).slice().sort((a, b2) => b2.week - a.week || b2.id - a.id).forEach((l) => {
+      lectures.forEach((l) => {
         const li = document.createElement("li");
         li.className = "row";
         const span = document.createElement("span");
@@ -1002,7 +1039,7 @@ var Sevenn = (() => {
         li.append(editLec, delLec);
         lecList.appendChild(li);
       });
-      wrap.appendChild(lecList);
+      lectureSection.appendChild(lecList);
       const lecForm = document.createElement("form");
       lecForm.className = "row";
       const idInput = document.createElement("input");
@@ -1030,7 +1067,8 @@ var Sevenn = (() => {
         await upsertBlock(updated);
         await renderSettings(root);
       });
-      wrap.appendChild(lecForm);
+      lectureSection.appendChild(lecForm);
+      wrap.appendChild(lectureSection);
       list.appendChild(wrap);
     });
     const form = document.createElement("form");
@@ -1946,11 +1984,23 @@ var Sevenn = (() => {
     });
     const weeks = groupByWeek(lectures);
     const hasSelections = hasBlockSelection(blockId);
+    const blockCollapsed = isBlockCollapsed(blockId);
     const card = document.createElement("div");
     card.className = "card builder-block-card";
     if (hasSelections) card.classList.add("active");
+    if (blockCollapsed) card.classList.add("is-collapsed");
     const header = document.createElement("div");
     header.className = "builder-block-header";
+    const blockCollapseBtn = createCollapseToggle({
+      collapsed: blockCollapsed,
+      label: blockCollapsed ? "Show weeks" : "Hide weeks",
+      onToggle: () => {
+        toggleBlockCollapsed(blockId);
+        rerender();
+      },
+      variant: "block"
+    });
+    header.appendChild(blockCollapseBtn);
     const title = document.createElement("h3");
     title.textContent = block.title || blockId;
     header.appendChild(title);
@@ -1996,6 +2046,7 @@ var Sevenn = (() => {
     }
     const weekList = document.createElement("div");
     weekList.className = "builder-week-list";
+    weekList.hidden = blockCollapsed;
     if (!weeks.length) {
       const empty = document.createElement("div");
       empty.className = "builder-empty";
@@ -2013,10 +2064,21 @@ var Sevenn = (() => {
     const blockId = block.blockId;
     const weekKey = weekKeyFor(blockId, week);
     const selected = state.builder.weeks.includes(weekKey);
+    const weekCollapsed = isWeekCollapsed(blockId, week);
     const row = document.createElement("div");
     row.className = "builder-week-card";
+    if (weekCollapsed) row.classList.add("is-collapsed");
     const header = document.createElement("div");
     header.className = "builder-week-header";
+    const weekCollapseBtn = createCollapseToggle({
+      collapsed: weekCollapsed,
+      label: weekCollapsed ? "Show lectures" : "Hide lectures",
+      onToggle: () => {
+        toggleWeekCollapsed(blockId, week);
+        rerender();
+      }
+    });
+    header.appendChild(weekCollapseBtn);
     const label = createPill(selected, formatWeekLabel(week), () => {
       toggleWeek(block, week);
       rerender();
@@ -2037,6 +2099,7 @@ var Sevenn = (() => {
     row.appendChild(header);
     const lectureList = document.createElement("div");
     lectureList.className = "builder-lecture-list";
+    lectureList.hidden = weekCollapsed;
     lectures.forEach((lecture) => {
       lectureList.appendChild(renderLecture(block, lecture, rerender));
     });
@@ -2279,6 +2342,31 @@ var Sevenn = (() => {
     else types.add(type);
     setBuilder({ types: Array.from(types) });
   }
+  function isBlockCollapsed(blockId) {
+    return (state.builder.collapsedBlocks || []).includes(blockId);
+  }
+  function toggleBlockCollapsed(blockId) {
+    const collapsed = new Set(state.builder.collapsedBlocks || []);
+    if (collapsed.has(blockId)) {
+      collapsed.delete(blockId);
+    } else {
+      collapsed.add(blockId);
+    }
+    setBuilder({ collapsedBlocks: Array.from(collapsed) });
+  }
+  function isWeekCollapsed(blockId, week) {
+    return (state.builder.collapsedWeeks || []).includes(weekKeyFor(blockId, week));
+  }
+  function toggleWeekCollapsed(blockId, week) {
+    const key = weekKeyFor(blockId, week);
+    const collapsed = new Set(state.builder.collapsedWeeks || []);
+    if (collapsed.has(key)) {
+      collapsed.delete(key);
+    } else {
+      collapsed.add(key);
+    }
+    setBuilder({ collapsedWeeks: Array.from(collapsed) });
+  }
   function hasBlockSelection(blockId) {
     return state.builder.blocks.includes(blockId) || state.builder.weeks.some((key) => key.startsWith(`${blockId}|`)) || state.builder.lectures.some((key) => key.startsWith(`${blockId}|`));
   }
@@ -2323,6 +2411,17 @@ var Sevenn = (() => {
     btn.className = "builder-action";
     btn.textContent = label;
     btn.addEventListener("click", onClick);
+    return btn;
+  }
+  function createCollapseToggle({ collapsed, label, onToggle, variant = "week" }) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "builder-collapse-toggle";
+    if (variant === "block") btn.classList.add("builder-collapse-toggle-block");
+    btn.setAttribute("aria-expanded", String(!collapsed));
+    btn.setAttribute("aria-label", label);
+    btn.textContent = collapsed ? "\u25B8" : "\u25BE";
+    btn.addEventListener("click", onToggle);
     return btn;
   }
 
