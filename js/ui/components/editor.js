@@ -1,5 +1,6 @@
 import { uid } from '../../utils.js';
 import { upsertItem, listBlocks } from '../../storage/storage.js';
+import { createFloatingWindow } from './window-manager.js';
 
 const fieldMap = {
   disease: [
@@ -33,19 +34,20 @@ const fieldMap = {
   ]
 };
 
+const titleMap = { disease: 'Disease', drug: 'Drug', concept: 'Concept' };
+
 export async function openEditor(kind, onSave, existing = null) {
-  const overlay = document.createElement('div');
-  overlay.className = 'modal';
+  const win = createFloatingWindow({
+    title: `${existing ? 'Edit' : 'Add'} ${titleMap[kind] || kind}`,
+    width: 600
+  });
 
   const form = document.createElement('form');
-  form.className = 'card modal-form';
-
-  const title = document.createElement('h2');
-  title.textContent = (existing ? 'Edit ' : 'Add ') + kind;
-  form.appendChild(title);
+  form.className = 'editor-form';
 
   const nameLabel = document.createElement('label');
   nameLabel.textContent = kind === 'concept' ? 'Concept' : 'Name';
+  nameLabel.className = 'editor-field';
   const nameInput = document.createElement('input');
   nameInput.className = 'input';
   nameInput.value = existing ? (existing.name || existing.concept || '') : '';
@@ -55,6 +57,7 @@ export async function openEditor(kind, onSave, existing = null) {
   const fieldInputs = {};
   fieldMap[kind].forEach(([field, label]) => {
     const lbl = document.createElement('label');
+    lbl.className = 'editor-field';
     lbl.textContent = label;
     let inp;
     if (field === 'facts') {
@@ -72,6 +75,7 @@ export async function openEditor(kind, onSave, existing = null) {
   });
 
   const colorLabel = document.createElement('label');
+  colorLabel.className = 'editor-field';
   colorLabel.textContent = 'Color';
   const colorInput = document.createElement('input');
   colorInput.type = 'color';
@@ -80,7 +84,6 @@ export async function openEditor(kind, onSave, existing = null) {
   colorLabel.appendChild(colorInput);
   form.appendChild(colorLabel);
 
-  // tagging: blocks -> weeks -> lectures (multi-select)
   const blocks = await listBlocks();
   const blockMap = new Map(blocks.map(b => [b.blockId, b]));
   const blockSet = new Set(existing?.blocks || []);
@@ -93,13 +96,15 @@ export async function openEditor(kind, onSave, existing = null) {
   });
 
   const blockWrap = document.createElement('div');
-  blockWrap.className = 'tag-wrap';
+  blockWrap.className = 'tag-wrap editor-tags';
   const blockTitle = document.createElement('div');
+  blockTitle.className = 'editor-tags-title';
   blockTitle.textContent = 'Tags';
   blockWrap.appendChild(blockTitle);
 
   blocks.forEach(b => {
     const blockDiv = document.createElement('div');
+    blockDiv.className = 'editor-tag-block';
     const blkLabel = document.createElement('label');
     blkLabel.className = 'row';
     const blkCb = document.createElement('input');
@@ -160,29 +165,22 @@ export async function openEditor(kind, onSave, existing = null) {
 
   form.appendChild(blockWrap);
 
-  const saveBtn = document.createElement('button');
-  saveBtn.type = 'submit';
-  saveBtn.className = 'btn';
-  saveBtn.textContent = 'Save';
+  const actionBar = document.createElement('div');
+  actionBar.className = 'editor-actions';
 
-  const cancel = document.createElement('button');
-  cancel.type = 'button';
-  cancel.className = 'btn';
-  cancel.textContent = 'Cancel';
-  cancel.addEventListener('click', () => document.body.removeChild(overlay));
+  const status = document.createElement('span');
+  status.className = 'editor-status';
 
-  const actions = document.createElement('div');
-  actions.className = 'modal-actions';
-  actions.appendChild(cancel);
-  actions.appendChild(saveBtn);
-  form.appendChild(actions);
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
+  async function persist(closeAfter){
     const titleKey = kind === 'concept' ? 'concept' : 'name';
+    const trimmed = nameInput.value.trim();
+    if (!trimmed) {
+      status.textContent = 'Name is required.';
+      return;
+    }
+    status.textContent = 'Saving…';
     const item = existing || { id: uid(), kind };
-    item[titleKey] = nameInput.value.trim();
-    if (!item[titleKey]) return;
+    item[titleKey] = trimmed;
     fieldMap[kind].forEach(([field]) => {
       const v = fieldInputs[field].value.trim();
       if (field === 'facts') {
@@ -199,20 +197,64 @@ export async function openEditor(kind, onSave, existing = null) {
       const [blockId, lecIdStr] = key.split('|');
       const lecId = Number(lecIdStr);
       const blk = blockMap.get(blockId);
-      const l = blk?.lectures.find(l => l.id === lecId);
+      const l = blk?.lectures.find(le => le.id === lecId);
       if (l) lectures.push({ blockId, id: l.id, name: l.name, week: l.week });
     }
     item.lectures = lectures;
     item.color = colorInput.value;
     await upsertItem(item);
-    document.body.removeChild(overlay);
-    onSave && onSave();
+    existing = item;
+    updateTitle();
+    status.textContent = closeAfter ? '' : 'Saved';
+    if (onSave) onSave();
+    if (closeAfter) {
+      win.close('saved');
+    }
+  }
+
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'btn';
+  saveBtn.textContent = 'Save';
+  saveBtn.addEventListener('click', () => persist(false));
+
+  const saveCloseBtn = document.createElement('button');
+  saveCloseBtn.type = 'button';
+  saveCloseBtn.className = 'btn';
+  saveCloseBtn.textContent = 'Save & Close';
+  saveCloseBtn.addEventListener('click', () => persist(true));
+
+  const discardBtn = document.createElement('button');
+  discardBtn.type = 'button';
+  discardBtn.className = 'btn secondary';
+  discardBtn.textContent = 'Close without Saving';
+  discardBtn.addEventListener('click', () => win.close('discard'));
+
+  actionBar.appendChild(saveBtn);
+  actionBar.appendChild(saveCloseBtn);
+  actionBar.appendChild(discardBtn);
+  actionBar.appendChild(status);
+  form.appendChild(actionBar);
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    persist(false);
   });
 
-  overlay.appendChild(form);
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) document.body.removeChild(overlay);
-  });
-  document.body.appendChild(overlay);
+  win.setContent(form);
+
+  const updateTitle = () => {
+    const base = `${existing ? 'Edit' : 'Add'} ${titleMap[kind] || kind}`;
+    const name = nameInput.value.trim();
+    if (name) {
+      win.setTitle(`${base}: ${name}`);
+    } else {
+      win.setTitle(base);
+    }
+  };
+  nameInput.addEventListener('input', updateTitle);
+  updateTitle();
+
+  win.focus();
   nameInput.focus();
 }

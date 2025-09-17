@@ -11,6 +11,7 @@ export const state = {
   },
   query: "",
   filters: { types:["disease","drug","concept"], block:"", week:"", onlyFav:false, sort:"updated" },
+  entryLayout: { mode: 'list', columns: 3, scale: 1 },
   builder: {
     blocks:[],
     weeks:[],
@@ -48,3 +49,22 @@ export function setExamAttemptExpanded(examId, expanded){
 }
 export function setBlockMode(patch){ Object.assign(state.blockMode, patch); }
 export function resetBlockMode(){ state.blockMode = { section:"", assignments:{}, reveal:{}, order:{} }; }
+export function setEntryLayout(patch){
+  if (!patch) return;
+  const layout = state.entryLayout;
+  if (Object.prototype.hasOwnProperty.call(patch, 'columns')) {
+    const cols = Number(patch.columns);
+    if (!Number.isNaN(cols)) {
+      layout.columns = Math.max(1, Math.min(6, Math.round(cols)));
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'scale')) {
+    const scl = Number(patch.scale);
+    if (!Number.isNaN(scl)) {
+      layout.scale = Math.max(0.6, Math.min(1.4, scl));
+    }
+  }
+  if (patch.mode === 'list' || patch.mode === 'grid') {
+    layout.mode = patch.mode;
+  }
+}

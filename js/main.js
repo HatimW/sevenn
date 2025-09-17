@@ -1,7 +1,6 @@
 import { state, setTab, setSubtab, setFlashSession, setQuizSession, setQuery } from './state.js';
 import { initDB, findItemsByFilter } from './storage/storage.js';
 import { renderSettings } from './ui/settings.js';
-import { openEditor } from './ui/components/editor.js';
 import { renderCardList } from './ui/components/cardlist.js';
 import { renderCards } from './ui/components/cards.js';
 import { renderBuilder } from './ui/components/builder.js';
@@ -11,6 +10,7 @@ import { renderQuiz } from './ui/components/quiz.js';
 import { renderBlockMode } from './ui/components/block-mode.js';
 import { renderExams, renderExamRunner } from './ui/components/exams.js';
 import { renderMap } from './ui/components/map.js';
+import { createEntryAddControl } from './ui/components/entry-controls.js';
 
 const tabs = ["Diseases","Drugs","Concepts","Cards","Study","Exams","Map","Settings"];
 
@@ -60,28 +60,36 @@ async function render() {
   } else if (['Diseases','Drugs','Concepts'].includes(state.tab)) {
     const kindMap = { Diseases:'disease', Drugs:'drug', Concepts:'concept' };
     const kind = kindMap[state.tab];
-    const addBtn = document.createElement('button');
-    addBtn.className = 'btn';
-    addBtn.textContent = 'Add ' + kind;
-    addBtn.addEventListener('click', () => openEditor(kind, render));
-    main.appendChild(addBtn);
+    main.appendChild(createEntryAddControl(render, kind));
+
+    const listHost = document.createElement('div');
+    listHost.className = 'tab-content';
+    main.appendChild(listHost);
 
     const filter = { ...state.filters, types:[kind], query: state.query };
     const items = await findItemsByFilter(filter);
-    await renderCardList(main, items, kind, render);
+    await renderCardList(listHost, items, kind, render);
   } else if (state.tab === 'Cards') {
+    main.appendChild(createEntryAddControl(render, 'disease'));
+    const content = document.createElement('div');
+    content.className = 'tab-content';
+    main.appendChild(content);
     const filter = { ...state.filters, query: state.query };
     const items = await findItemsByFilter(filter);
-    renderCards(main, items, render);
+    renderCards(content, items, render);
   } else if (state.tab === 'Study') {
+    main.appendChild(createEntryAddControl(render, 'disease'));
+    const content = document.createElement('div');
+    content.className = 'tab-content';
+    main.appendChild(content);
     if (state.flashSession) {
-      renderFlashcards(main, render);
+      renderFlashcards(content, render);
     } else if (state.quizSession) {
-      renderQuiz(main, render);
+      renderQuiz(content, render);
     } else {
       const wrap = document.createElement('div');
       await renderBuilder(wrap);
-      main.appendChild(wrap);
+      content.appendChild(wrap);
 
       const subnav = document.createElement('div');
       subnav.className = 'tabs row subtabs';
@@ -95,7 +103,7 @@ async function render() {
         });
         subnav.appendChild(sb);
       });
-      main.appendChild(subnav);
+      content.appendChild(subnav);
 
       if (state.cohort.length) {
         if (state.subtab.Study === 'Flashcards') {
@@ -106,9 +114,9 @@ async function render() {
             setFlashSession({ idx: 0, pool: state.cohort });
             render();
           });
-          main.appendChild(startBtn);
+          content.appendChild(startBtn);
         } else if (state.subtab.Study === 'Review') {
-          renderReview(main, render);
+          renderReview(content, render);
         } else if (state.subtab.Study === 'Quiz') {
           const startBtn = document.createElement('button');
           startBtn.className = 'btn';
@@ -117,20 +125,28 @@ async function render() {
             setQuizSession({ idx:0, score:0, pool: state.cohort });
             render();
           });
-          main.appendChild(startBtn);
+          content.appendChild(startBtn);
         } else if (state.subtab.Study === 'Blocks') {
-          renderBlockMode(main);
+          renderBlockMode(content);
         }
       }
     }
   } else if (state.tab === 'Exams') {
+    main.appendChild(createEntryAddControl(render, 'disease'));
+    const content = document.createElement('div');
+    content.className = 'tab-content';
+    main.appendChild(content);
     if (state.examSession) {
-      renderExamRunner(main, render);
+      renderExamRunner(content, render);
     } else {
-      await renderExams(main, render);
+      await renderExams(content, render);
     }
   } else if (state.tab === 'Map') {
-    await renderMap(main);
+    main.appendChild(createEntryAddControl(render, 'disease'));
+    const mapHost = document.createElement('div');
+    mapHost.className = 'tab-content map-host';
+    main.appendChild(mapHost);
+    await renderMap(mapHost);
   } else {
     main.textContent = `Currently viewing: ${state.tab}`;
   }
