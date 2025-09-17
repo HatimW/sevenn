@@ -1,4 +1,4 @@
-(() => {
+var Sevenn = (() => {
   // js/state.js
   var state = {
     tab: "Diseases",
@@ -438,7 +438,16 @@
     const fields = [];
     if (item.name) fields.push(item.name);
     if (item.concept) fields.push(item.concept);
-    fields.push(...item.facts || [], ...item.tags || []);
+    fields.push(...item.tags || []);
+    if (Array.isArray(item.extras)) {
+      item.extras.forEach((extra) => {
+        if (!extra) return;
+        if (extra.title) fields.push(extra.title);
+        if (extra.body) fields.push(stripHtml(extra.body));
+      });
+    } else if (item.facts && item.facts.length) {
+      fields.push(...item.facts);
+    }
     if (item.lectures) fields.push(...item.lectures.map((l) => l.name));
     contentFields.forEach((field) => {
       if (typeof item[field] === "string" && item[field]) {
@@ -564,12 +573,36 @@
   }
 
   // js/validators.js
+  var randomId = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+  function escapeHtml(str = "") {
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function legacyFactsToHtml(facts = []) {
+    return facts.map((f) => `<p>${escapeHtml(f)}</p>`).join("");
+  }
   function cleanItem(item) {
+    const extras = Array.isArray(item.extras) ? item.extras : [];
+    const normalizedExtras = extras.map((ex) => {
+      if (!ex || typeof ex !== "object") return null;
+      const id = typeof ex.id === "string" && ex.id ? ex.id : randomId();
+      const title = typeof ex.title === "string" ? ex.title : "";
+      const body = typeof ex.body === "string" ? ex.body : "";
+      if (!title.trim() && !body.trim()) return null;
+      return { id, title: title.trim(), body };
+    }).filter(Boolean);
+    if (!normalizedExtras.length && Array.isArray(item.facts) && item.facts.length) {
+      normalizedExtras.push({
+        id: randomId(),
+        title: "Highlights",
+        body: legacyFactsToHtml(item.facts)
+      });
+    }
     return {
       ...item,
       favorite: !!item.favorite,
       color: item.color || null,
-      facts: item.facts || [],
+      extras: normalizedExtras,
+      facts: normalizedExtras.length ? [] : Array.isArray(item.facts) ? item.facts : [],
       tags: item.tags || [],
       links: item.links || [],
       blocks: item.blocks || [],
@@ -1212,19 +1245,6 @@
     root.appendChild(dataCard);
   }
 
-  // js/ui/components/chips.js
-  function chipList(values = []) {
-    const box = document.createElement("div");
-    box.className = "chips";
-    values.forEach((v) => {
-      const chip = document.createElement("span");
-      chip.className = "chip";
-      chip.textContent = v;
-      box.appendChild(chip);
-    });
-    return box;
-  }
-
   // js/utils.js
   function uid() {
     const g = globalThis;
@@ -1447,7 +1467,7 @@
     "text-decoration-style",
     "text-align"
   ]);
-  function escapeHtml(str = "") {
+  function escapeHtml2(str = "") {
     return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
   function isSafeUrl(value = "", { allowData = false, requireHttps = false } = {}) {
@@ -1536,7 +1556,7 @@
     if (!value) return "";
     const looksHtml = /<([a-z][^>]*>)/i.test(value);
     if (looksHtml) return sanitizeHtml(value);
-    return sanitizeHtml(escapeHtml(value).replace(/\n/g, "<br>"));
+    return sanitizeHtml(escapeHtml2(value).replace(/\n/g, "<br>"));
   }
   function isEmptyHtml(html = "") {
     if (!html) return true;
@@ -1552,6 +1572,7 @@
     btn.className = "rich-editor-btn";
     btn.textContent = label;
     btn.title = title;
+    btn.setAttribute("aria-label", title);
     btn.addEventListener("mousedown", (e) => e.preventDefault());
     btn.addEventListener("click", onClick);
     return btn;
@@ -1577,34 +1598,111 @@
       document.execCommand(command, false, arg);
       editable.dispatchEvent(new Event("input"));
     }
-    const controls = [
+    function hasActiveSelection() {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return false;
+      const anchor = selection.anchorNode;
+      const focus = selection.focusNode;
+      if (!anchor || !focus) return false;
+      return editable.contains(anchor) && editable.contains(focus);
+    }
+    function createGroup() {
+      const group = document.createElement("div");
+      group.className = "rich-editor-group";
+      toolbar.appendChild(group);
+      return group;
+    }
+    const inlineGroup = createGroup();
+    [
       createToolbarButton("B", "Bold", () => exec("bold")),
       createToolbarButton("I", "Italic", () => exec("italic")),
       createToolbarButton("U", "Underline", () => exec("underline")),
       createToolbarButton("S", "Strikethrough", () => exec("strikeThrough"))
-    ];
-    controls.forEach((btn) => toolbar.appendChild(btn));
+    ].forEach((btn) => inlineGroup.appendChild(btn));
     const colorWrap = document.createElement("label");
     colorWrap.className = "rich-editor-color";
     colorWrap.title = "Text color";
     const colorInput = document.createElement("input");
     colorInput.type = "color";
+    colorInput.value = "#ffffff";
+    colorInput.dataset.lastColor = "#ffffff";
     colorInput.addEventListener("input", () => {
+      if (!hasActiveSelection()) {
+        const previous = colorInput.dataset.lastColor || "#ffffff";
+        colorInput.value = previous;
+        return;
+      }
       exec("foreColor", colorInput.value);
+      colorInput.dataset.lastColor = colorInput.value;
     });
     colorWrap.appendChild(colorInput);
-    toolbar.appendChild(colorWrap);
+    const colorGroup = createGroup();
+    colorGroup.appendChild(colorWrap);
     const highlightWrap = document.createElement("label");
     highlightWrap.className = "rich-editor-color";
     highlightWrap.title = "Highlight color";
     const highlightInput = document.createElement("input");
     highlightInput.type = "color";
     highlightInput.value = "#ffff00";
+    highlightInput.dataset.lastColor = "#ffff00";
     highlightInput.addEventListener("input", () => {
+      if (!hasActiveSelection()) {
+        highlightInput.value = highlightInput.dataset.lastColor || "#ffff00";
+        return;
+      }
       exec("hiliteColor", highlightInput.value);
+      highlightInput.dataset.lastColor = highlightInput.value;
     });
     highlightWrap.appendChild(highlightInput);
-    toolbar.appendChild(highlightWrap);
+    colorGroup.appendChild(highlightWrap);
+    const listGroup = createGroup();
+    const listSelect = document.createElement("select");
+    listSelect.className = "rich-editor-select";
+    [
+      ["", "Lists"],
+      ["unordered", "Bulleted"],
+      ["ordered", "Numbered"],
+      ["lower-alpha", "Lettered"],
+      ["lower-roman", "Roman numerals"]
+    ].forEach(([value2, label]) => {
+      const opt = document.createElement("option");
+      opt.value = value2;
+      opt.textContent = label;
+      listSelect.appendChild(opt);
+    });
+    if (listSelect.firstElementChild) {
+      listSelect.firstElementChild.disabled = true;
+      listSelect.firstElementChild.hidden = true;
+    }
+    listSelect.value = "";
+    function applyOrderedStyle(style) {
+      const selection = window.getSelection();
+      if (!selection?.rangeCount) return;
+      let node = selection.getRangeAt(0).startContainer;
+      if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+      while (node && node !== editable) {
+        if (node.nodeType === Node.ELEMENT_NODE && node.tagName?.toLowerCase() === "ol") {
+          if (style) node.style.listStyleType = style;
+          else node.style.removeProperty("list-style-type");
+          break;
+        }
+        node = node.parentNode;
+      }
+    }
+    listSelect.addEventListener("change", () => {
+      const value2 = listSelect.value;
+      if (!value2) return;
+      focusEditor();
+      if (value2 === "unordered") {
+        exec("insertUnorderedList");
+      } else {
+        exec("insertOrderedList");
+        applyOrderedStyle(value2 === "ordered" ? "" : value2);
+      }
+      editable.dispatchEvent(new Event("input"));
+      listSelect.value = "";
+    });
+    listGroup.appendChild(listSelect);
     const sizeSelect = document.createElement("select");
     sizeSelect.className = "rich-editor-size";
     const sizes = [
@@ -1649,32 +1747,29 @@
       editable.dispatchEvent(new Event("input"));
       sizeSelect.value = "";
     });
-    toolbar.appendChild(sizeSelect);
-    const bulletBtn = createToolbarButton("\u2022", "Bulleted list", () => exec("insertUnorderedList"));
-    toolbar.appendChild(bulletBtn);
-    const numberedBtn = createToolbarButton("1.", "Numbered list", () => exec("insertOrderedList"));
-    toolbar.appendChild(numberedBtn);
+    listGroup.appendChild(sizeSelect);
+    const mediaGroup = createGroup();
     const linkBtn = createToolbarButton("\u{1F517}", "Insert link", () => {
       focusEditor();
       const url = prompt("Enter URL");
       if (!url) return;
       exec("createLink", url);
     });
-    toolbar.appendChild(linkBtn);
+    mediaGroup.appendChild(linkBtn);
     const imageBtn = createToolbarButton("\u{1F5BC}", "Insert image", () => {
       focusEditor();
       const url = prompt("Enter image URL");
       if (!url) return;
       exec("insertImage", url);
     });
-    toolbar.appendChild(imageBtn);
+    mediaGroup.appendChild(imageBtn);
     const mediaBtn = createToolbarButton("\u{1F3AC}", "Insert media", () => {
       focusEditor();
       const url = prompt("Enter media URL");
       if (!url) return;
       const typePrompt = prompt("Media type (video/audio/embed)", "video");
       const kind = (typePrompt || "video").toLowerCase();
-      const safeUrl = escapeHtml(url);
+      const safeUrl = escapeHtml2(url);
       let html = "";
       if (kind.startsWith("a")) {
         html = `<audio controls src="${safeUrl}"></audio>`;
@@ -1686,9 +1781,18 @@
       document.execCommand("insertHTML", false, html);
       editable.dispatchEvent(new Event("input"));
     });
-    toolbar.appendChild(mediaBtn);
+    mediaGroup.appendChild(mediaBtn);
     const clearBtn = createToolbarButton("\u232B", "Clear formatting", () => exec("removeFormat"));
-    toolbar.appendChild(clearBtn);
+    const utilityGroup = createGroup();
+    utilityGroup.appendChild(clearBtn);
+    const clearHighlightBtn = createToolbarButton("\u2A2F", "Remove highlight", () => {
+      focusEditor();
+      document.execCommand("hiliteColor", false, "transparent");
+      highlightInput.value = "#ffff00";
+      highlightInput.dataset.lastColor = "#ffff00";
+      editable.dispatchEvent(new Event("input"));
+    });
+    utilityGroup.appendChild(clearHighlightBtn);
     editable.addEventListener("keydown", (e) => {
       if (e.key === "Tab") {
         e.preventDefault();
@@ -1730,8 +1834,7 @@
       ["diagnosis", "Diagnosis"],
       ["treatment", "Treatment"],
       ["complications", "Complications"],
-      ["mnemonic", "Mnemonic"],
-      ["facts", "Facts (comma separated)"]
+      ["mnemonic", "Mnemonic"]
     ],
     drug: [
       ["class", "Class"],
@@ -1740,8 +1843,7 @@
       ["uses", "Uses"],
       ["sideEffects", "Side Effects"],
       ["contraindications", "Contraindications"],
-      ["mnemonic", "Mnemonic"],
-      ["facts", "Facts (comma separated)"]
+      ["mnemonic", "Mnemonic"]
     ],
     concept: [
       ["type", "Type"],
@@ -1749,11 +1851,13 @@
       ["mechanism", "Mechanism"],
       ["clinicalRelevance", "Clinical Relevance"],
       ["example", "Example"],
-      ["mnemonic", "Mnemonic"],
-      ["facts", "Facts (comma separated)"]
+      ["mnemonic", "Mnemonic"]
     ]
   };
   var titleMap = { disease: "Disease", drug: "Drug", concept: "Concept" };
+  function escapeHtml3(str = "") {
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
   async function openEditor(kind, onSave, existing = null) {
     const win = createFloatingWindow({
       title: `${existing ? "Edit" : "Add"} ${titleMap[kind] || kind}`,
@@ -1774,22 +1878,71 @@
       const lbl = document.createElement("label");
       lbl.className = "editor-field";
       lbl.textContent = label;
-      let inp;
-      if (field === "facts") {
-        inp = document.createElement("input");
-        inp.className = "input";
-        inp.value = existing ? (existing.facts || []).join(", ") : "";
-        fieldInputs[field] = {
-          getValue: () => inp.value.trim()
-        };
-      } else {
-        const editor = createRichTextEditor({ value: existing ? existing[field] || "" : "" });
-        inp = editor.element;
-        fieldInputs[field] = editor;
-      }
+      const editor = createRichTextEditor({ value: existing ? existing[field] || "" : "" });
+      const inp = editor.element;
+      fieldInputs[field] = editor;
       lbl.appendChild(inp);
       form.appendChild(lbl);
     });
+    const extrasWrap = document.createElement("section");
+    extrasWrap.className = "editor-extras";
+    const extrasHeader = document.createElement("div");
+    extrasHeader.className = "editor-extras-header";
+    const extrasTitle = document.createElement("h3");
+    extrasTitle.textContent = "Custom Sections";
+    extrasHeader.appendChild(extrasTitle);
+    const addExtraBtn = document.createElement("button");
+    addExtraBtn.type = "button";
+    addExtraBtn.className = "btn subtle";
+    addExtraBtn.textContent = "Add Section";
+    extrasHeader.appendChild(addExtraBtn);
+    extrasWrap.appendChild(extrasHeader);
+    const extrasList = document.createElement("div");
+    extrasList.className = "editor-extras-list";
+    extrasWrap.appendChild(extrasList);
+    form.appendChild(extrasWrap);
+    const extraControls = /* @__PURE__ */ new Map();
+    function addExtra(extra = {}) {
+      const id = extra.id || uid();
+      const row = document.createElement("div");
+      row.className = "editor-extra";
+      row.dataset.id = id;
+      const titleRow = document.createElement("div");
+      titleRow.className = "editor-extra-title-row";
+      const titleInput = document.createElement("input");
+      titleInput.className = "input editor-extra-title";
+      titleInput.placeholder = "Section title";
+      titleInput.value = extra.title || "";
+      titleRow.appendChild(titleInput);
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "icon-btn ghost";
+      removeBtn.title = "Remove section";
+      removeBtn.textContent = "\u2715";
+      removeBtn.addEventListener("click", () => {
+        extraControls.delete(id);
+        row.remove();
+      });
+      titleRow.appendChild(removeBtn);
+      row.appendChild(titleRow);
+      const editor = createRichTextEditor({ value: extra.body || "" });
+      row.appendChild(editor.element);
+      extrasList.appendChild(row);
+      extraControls.set(id, { id, titleInput, editor });
+    }
+    addExtraBtn.addEventListener("click", () => addExtra());
+    const legacyExtras = (() => {
+      if (existing?.extras && existing.extras.length) return existing.extras;
+      if (existing?.facts && existing.facts.length) {
+        return [{
+          id: uid(),
+          title: "Highlights",
+          body: existing.facts.map((f) => `<p>${escapeHtml3(f)}</p>`).join("")
+        }];
+      }
+      return [];
+    })();
+    legacyExtras.forEach((extra) => addExtra(extra));
     const colorLabel = document.createElement("label");
     colorLabel.className = "editor-field";
     colorLabel.textContent = "Color";
@@ -1813,7 +1966,7 @@
     blockWrap.className = "tag-wrap editor-tags";
     const blockTitle = document.createElement("div");
     blockTitle.className = "editor-tags-title";
-    blockTitle.textContent = "Tags";
+    blockTitle.textContent = "Curriculum tags";
     blockWrap.appendChild(blockTitle);
     blocks.forEach((b) => {
       const blockDiv = document.createElement("div");
@@ -1889,12 +2042,14 @@
       fieldMap[kind].forEach(([field]) => {
         const control = fieldInputs[field];
         const v = control?.getValue ? control.getValue() : "";
-        if (field === "facts") {
-          item.facts = v ? v.split(",").map((s) => s.trim()).filter(Boolean) : [];
-        } else {
-          item[field] = v;
-        }
+        item[field] = v;
       });
+      item.extras = Array.from(extraControls.values()).map(({ id, titleInput, editor }) => ({
+        id,
+        title: titleInput.value.trim(),
+        body: editor.getValue()
+      })).filter((ex) => ex.title || ex.body);
+      item.facts = [];
       item.blocks = Array.from(blockSet);
       const weekNums = new Set(Array.from(weekSet).map((k) => Number(k.split("|")[1])));
       item.weeks = Array.from(weekNums);
@@ -2091,6 +2246,22 @@
       ["mnemonic", "Mnemonic", "\u{1F9E0}"]
     ]
   };
+  function escapeHtml4(str = "") {
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function ensureExtras(item) {
+    if (Array.isArray(item.extras) && item.extras.length) {
+      return item.extras;
+    }
+    if (item.facts && item.facts.length) {
+      return [{
+        id: "legacy-facts",
+        title: "Highlights",
+        body: `<ul>${item.facts.map((f) => `<li>${escapeHtml4(f)}</li>`).join("")}</ul>`
+      }];
+    }
+    return [];
+  }
   var expanded = /* @__PURE__ */ new Set();
   var collapsedBlocks = /* @__PURE__ */ new Set();
   var collapsedWeeks = /* @__PURE__ */ new Set();
@@ -2227,16 +2398,26 @@
         sec.appendChild(txt);
         body.appendChild(sec);
       });
+      const extras = ensureExtras(item);
+      extras.forEach((extra) => {
+        if (!extra || !extra.body) return;
+        const sec = document.createElement("div");
+        sec.className = "section section--extra";
+        const tl = document.createElement("div");
+        tl.className = "section-title";
+        tl.textContent = extra.title || "Additional Section";
+        sec.appendChild(tl);
+        const txt = document.createElement("div");
+        txt.className = "section-content";
+        renderRichText(txt, extra.body);
+        sec.appendChild(txt);
+        body.appendChild(sec);
+      });
       if (item.links && item.links.length) {
         const lc = document.createElement("span");
         lc.className = "chip link-chip";
         lc.textContent = `\u{1FAA2} ${item.links.length}`;
         body.appendChild(lc);
-      }
-      if (item.facts && item.facts.length) {
-        const facts = chipList(item.facts);
-        facts.classList.add("facts");
-        body.appendChild(facts);
       }
     }
     renderBody();
@@ -5151,6 +5332,20 @@
       ["mnemonic", "Mnemonic"]
     ]
   };
+  function escapeHtml5(str = "") {
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function collectExtras(item) {
+    if (Array.isArray(item.extras) && item.extras.length) return item.extras;
+    if (item.facts && item.facts.length) {
+      return [{
+        id: "legacy-facts",
+        title: "Highlights",
+        body: `<ul>${item.facts.map((f) => `<li>${escapeHtml5(f)}</li>`).join("")}</ul>`
+      }];
+    }
+    return [];
+  }
   function showPopup(item) {
     const modal = document.createElement("div");
     modal.className = "modal";
@@ -5166,7 +5361,7 @@
       const val = item[field];
       if (!val) return;
       const sec = document.createElement("div");
-      sec.className = "section";
+      sec.className = "section section--extra";
       const tl = document.createElement("div");
       tl.className = "section-title";
       tl.textContent = label;
@@ -5176,12 +5371,20 @@
       sec.appendChild(txt);
       card.appendChild(sec);
     });
-    if (item.facts && item.facts.length) {
-      const facts = document.createElement("div");
-      facts.className = "facts";
-      facts.textContent = item.facts.join(", ");
-      card.appendChild(facts);
-    }
+    const extras = collectExtras(item);
+    extras.forEach((extra) => {
+      if (!extra || !extra.body) return;
+      const sec = document.createElement("div");
+      sec.className = "section";
+      const tl = document.createElement("div");
+      tl.className = "section-title";
+      tl.textContent = extra.title || "Additional Section";
+      sec.appendChild(tl);
+      const txt = document.createElement("div");
+      renderRichText(txt, extra.body);
+      sec.appendChild(txt);
+      card.appendChild(sec);
+    });
     const close = document.createElement("button");
     close.className = "btn";
     close.textContent = "Close";

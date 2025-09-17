@@ -1,6 +1,5 @@
 import { listBlocks } from '../../storage/storage.js';
 import { createTitleCell } from './titlecell.js';
-import { chipList } from './chips.js';
 import { renderRichText } from './rich-text.js';
 
 const columnMap = {
@@ -12,7 +11,7 @@ const columnMap = {
     ['treatment', 'Treatment'],
     ['complications', 'Complications'],
     ['mnemonic', 'Mnemonic'],
-    ['facts', 'Facts']
+    ['extras', 'Custom Sections']
   ],
   drug: [
     ['class', 'Class'],
@@ -22,7 +21,7 @@ const columnMap = {
     ['sideEffects', 'Side Effects'],
     ['contraindications', 'Contraindications'],
     ['mnemonic', 'Mnemonic'],
-    ['facts', 'Facts']
+    ['extras', 'Custom Sections']
   ],
   concept: [
     ['type', 'Type'],
@@ -31,9 +30,30 @@ const columnMap = {
     ['clinicalRelevance', 'Clinical Relevance'],
     ['example', 'Example'],
     ['mnemonic', 'Mnemonic'],
-    ['facts', 'Facts']
+    ['extras', 'Custom Sections']
   ]
 };
+
+function escapeHtml(str = '') {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function collectExtras(item) {
+  if (Array.isArray(item.extras) && item.extras.length) return item.extras;
+  if (item.facts && item.facts.length) {
+    return [{
+      id: 'legacy-facts',
+      title: 'Highlights',
+      body: `<ul>${item.facts.map(f => `<li>${escapeHtml(f)}</li>`).join('')}</ul>`
+    }];
+  }
+  return [];
+}
 
 export async function renderTable(container, items, kind, onChange) {
   const blocks = await listBlocks();
@@ -112,8 +132,22 @@ export async function renderTable(container, items, kind, onChange) {
           tr.appendChild(td);
           columnMap[kind].forEach(([field]) => {
             const td2 = document.createElement('td');
-            if (field === 'facts') {
-              td2.appendChild(chipList(it.facts || []));
+            if (field === 'extras') {
+              const extras = collectExtras(it);
+              if (extras.length) {
+                extras.forEach(extra => {
+                  const wrap = document.createElement('div');
+                  wrap.className = 'table-extra';
+                  const heading = document.createElement('div');
+                  heading.className = 'table-extra-title';
+                  heading.textContent = extra.title || 'Additional Section';
+                  wrap.appendChild(heading);
+                  const content = document.createElement('div');
+                  renderRichText(content, extra.body || '');
+                  wrap.appendChild(content);
+                  td2.appendChild(wrap);
+                });
+              }
             } else {
               renderRichText(td2, it[field] || '');
             }

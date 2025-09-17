@@ -29,6 +29,27 @@ const fieldDefs = {
   ]
 };
 
+function escapeHtml(str = '') {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function collectExtras(item) {
+  if (Array.isArray(item.extras) && item.extras.length) return item.extras;
+  if (item.facts && item.facts.length) {
+    return [{
+      id: 'legacy-facts',
+      title: 'Highlights',
+      body: `<ul>${item.facts.map(f => `<li>${escapeHtml(f)}</li>`).join('')}</ul>`
+    }];
+  }
+  return [];
+}
+
 export function showPopup(item){
   const modal = document.createElement('div');
   modal.className = 'modal';
@@ -57,12 +78,20 @@ export function showPopup(item){
     card.appendChild(sec);
   });
 
-  if (item.facts && item.facts.length){
-    const facts = document.createElement('div');
-    facts.className = 'facts';
-    facts.textContent = item.facts.join(', ');
-    card.appendChild(facts);
-  }
+  const extras = collectExtras(item);
+  extras.forEach(extra => {
+    if (!extra || !extra.body) return;
+    const sec = document.createElement('div');
+    sec.className = 'section section--extra';
+    const tl = document.createElement('div');
+    tl.className = 'section-title';
+    tl.textContent = extra.title || 'Additional Section';
+    sec.appendChild(tl);
+    const txt = document.createElement('div');
+    renderRichText(txt, extra.body);
+    sec.appendChild(txt);
+    card.appendChild(sec);
+  });
 
   const close = document.createElement('button');
   close.className = 'btn';

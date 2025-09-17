@@ -11,8 +11,7 @@ const fieldMap = {
     ['diagnosis', 'Diagnosis'],
     ['treatment', 'Treatment'],
     ['complications', 'Complications'],
-    ['mnemonic', 'Mnemonic'],
-    ['facts', 'Facts (comma separated)']
+    ['mnemonic', 'Mnemonic']
   ],
   drug: [
     ['class', 'Class'],
@@ -21,8 +20,7 @@ const fieldMap = {
     ['uses', 'Uses'],
     ['sideEffects', 'Side Effects'],
     ['contraindications', 'Contraindications'],
-    ['mnemonic', 'Mnemonic'],
-    ['facts', 'Facts (comma separated)']
+    ['mnemonic', 'Mnemonic']
   ],
   concept: [
     ['type', 'Type'],
@@ -30,12 +28,20 @@ const fieldMap = {
     ['mechanism', 'Mechanism'],
     ['clinicalRelevance', 'Clinical Relevance'],
     ['example', 'Example'],
-    ['mnemonic', 'Mnemonic'],
-    ['facts', 'Facts (comma separated)']
+    ['mnemonic', 'Mnemonic']
   ]
 };
 
 const titleMap = { disease: 'Disease', drug: 'Drug', concept: 'Concept' };
+
+function escapeHtml(str = '') {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 export async function openEditor(kind, onSave, existing = null) {
   const win = createFloatingWindow({
@@ -60,22 +66,80 @@ export async function openEditor(kind, onSave, existing = null) {
     const lbl = document.createElement('label');
     lbl.className = 'editor-field';
     lbl.textContent = label;
-    let inp;
-    if (field === 'facts') {
-      inp = document.createElement('input');
-      inp.className = 'input';
-      inp.value = existing ? (existing.facts || []).join(', ') : '';
-      fieldInputs[field] = {
-        getValue: () => inp.value.trim()
-      };
-    } else {
-      const editor = createRichTextEditor({ value: existing ? existing[field] || '' : '' });
-      inp = editor.element;
-      fieldInputs[field] = editor;
-    }
+    const editor = createRichTextEditor({ value: existing ? existing[field] || '' : '' });
+    const inp = editor.element;
+    fieldInputs[field] = editor;
     lbl.appendChild(inp);
     form.appendChild(lbl);
   });
+
+  const extrasWrap = document.createElement('section');
+  extrasWrap.className = 'editor-extras';
+  const extrasHeader = document.createElement('div');
+  extrasHeader.className = 'editor-extras-header';
+  const extrasTitle = document.createElement('h3');
+  extrasTitle.textContent = 'Custom Sections';
+  extrasHeader.appendChild(extrasTitle);
+  const addExtraBtn = document.createElement('button');
+  addExtraBtn.type = 'button';
+  addExtraBtn.className = 'btn subtle';
+  addExtraBtn.textContent = 'Add Section';
+  extrasHeader.appendChild(addExtraBtn);
+  extrasWrap.appendChild(extrasHeader);
+
+  const extrasList = document.createElement('div');
+  extrasList.className = 'editor-extras-list';
+  extrasWrap.appendChild(extrasList);
+  form.appendChild(extrasWrap);
+
+  const extraControls = new Map();
+
+  function addExtra(extra = {}) {
+    const id = extra.id || uid();
+    const row = document.createElement('div');
+    row.className = 'editor-extra';
+    row.dataset.id = id;
+
+    const titleRow = document.createElement('div');
+    titleRow.className = 'editor-extra-title-row';
+    const titleInput = document.createElement('input');
+    titleInput.className = 'input editor-extra-title';
+    titleInput.placeholder = 'Section title';
+    titleInput.value = extra.title || '';
+    titleRow.appendChild(titleInput);
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'icon-btn ghost';
+    removeBtn.title = 'Remove section';
+    removeBtn.textContent = '✕';
+    removeBtn.addEventListener('click', () => {
+      extraControls.delete(id);
+      row.remove();
+    });
+    titleRow.appendChild(removeBtn);
+    row.appendChild(titleRow);
+
+    const editor = createRichTextEditor({ value: extra.body || '' });
+    row.appendChild(editor.element);
+    extrasList.appendChild(row);
+    extraControls.set(id, { id, titleInput, editor });
+  }
+
+  addExtraBtn.addEventListener('click', () => addExtra());
+
+  const legacyExtras = (() => {
+    if (existing?.extras && existing.extras.length) return existing.extras;
+    if (existing?.facts && existing.facts.length) {
+      return [{
+        id: uid(),
+        title: 'Highlights',
+        body: existing.facts.map(f => `<p>${escapeHtml(f)}</p>`).join('')
+      }];
+    }
+    return [];
+  })();
+
+  legacyExtras.forEach(extra => addExtra(extra));
 
   const colorLabel = document.createElement('label');
   colorLabel.className = 'editor-field';
@@ -102,7 +166,7 @@ export async function openEditor(kind, onSave, existing = null) {
   blockWrap.className = 'tag-wrap editor-tags';
   const blockTitle = document.createElement('div');
   blockTitle.className = 'editor-tags-title';
-  blockTitle.textContent = 'Tags';
+  blockTitle.textContent = 'Curriculum tags';
   blockWrap.appendChild(blockTitle);
 
   blocks.forEach(b => {
@@ -187,12 +251,14 @@ export async function openEditor(kind, onSave, existing = null) {
     fieldMap[kind].forEach(([field]) => {
       const control = fieldInputs[field];
       const v = control?.getValue ? control.getValue() : '';
-      if (field === 'facts') {
-        item.facts = v ? v.split(',').map(s => s.trim()).filter(Boolean) : [];
-      } else {
-        item[field] = v;
-      }
+      item[field] = v;
     });
+    item.extras = Array.from(extraControls.values()).map(({ id, titleInput, editor }) => ({
+      id,
+      title: titleInput.value.trim(),
+      body: editor.getValue()
+    })).filter(ex => ex.title || ex.body);
+    item.facts = [];
     item.blocks = Array.from(blockSet);
     const weekNums = new Set(Array.from(weekSet).map(k => Number(k.split('|')[1])));
     item.weeks = Array.from(weekNums);

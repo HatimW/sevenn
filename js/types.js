@@ -12,7 +12,8 @@
  * @property {Kind} kind
  * @property {boolean} favorite
  * @property {string|null} color         // pastel override or null
- * @property {string[]} facts            // chips
+ * @property {{ id:string, title:string, body:string }[]} extras
+ * @property {string[]} facts            // legacy chips
  * @property {string[]} tags             // chips
  * @property {{id:string, type:LinkType}[]} links
  * @property {string[]} blocks           // ["F1","MSK"]
