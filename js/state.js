@@ -17,6 +17,7 @@ export const state = {
   quizSession: null,
   flashSession: null,
   examSession: null,
+  examAttemptExpanded: {},
   map: { panzoom:false }
 };
 
@@ -31,3 +32,6 @@ export function setFlashSession(sess){ state.flashSession = sess; }
 export function setQuizSession(sess){ state.quizSession = sess; }
 export function setReviewConfig(patch){ Object.assign(state.review, patch); }
 export function setExamSession(sess){ state.examSession = sess; }
+export function setExamAttemptExpanded(examId, expanded){
+  state.examAttemptExpanded[examId] = expanded;
+}
