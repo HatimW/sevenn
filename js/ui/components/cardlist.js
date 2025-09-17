@@ -4,6 +4,7 @@ import { chipList } from './chips.js';
 import { openEditor } from './editor.js';
 import { confirmModal } from './confirm.js';
 import { openLinker } from './linker.js';
+import { renderRichText } from './rich-text.js';
 
 const kindColors = { disease: 'var(--pink)', drug: 'var(--blue)', concept: 'var(--green)' };
 const fieldDefs = {
@@ -170,8 +171,7 @@ export function createItemCard(item, onChange){
       sec.appendChild(tl);
       const txt = document.createElement('div');
       txt.className = 'section-content';
-      txt.textContent = item[f];
-      txt.style.whiteSpace = 'pre-wrap';
+      renderRichText(txt, item[f]);
       sec.appendChild(txt);
       body.appendChild(sec);
     });

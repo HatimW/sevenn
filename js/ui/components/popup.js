@@ -1,3 +1,5 @@
+import { renderRichText } from './rich-text.js';
+
 const fieldDefs = {
   disease: [
     ['etiology','Etiology'],
@@ -50,8 +52,7 @@ export function showPopup(item){
     tl.textContent = label;
     sec.appendChild(tl);
     const txt = document.createElement('div');
-    txt.textContent = val;
-    txt.style.whiteSpace = 'pre-wrap';
+    renderRichText(txt, val);
     sec.appendChild(txt);
     card.appendChild(sec);
   });

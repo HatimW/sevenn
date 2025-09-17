@@ -1,4 +1,5 @@
 import { state, setQuizSession } from '../../state.js';
+import { renderRichText } from './rich-text.js';
 
 function titleOf(item){
   return item.name || item.concept || '';
@@ -39,7 +40,7 @@ export function renderQuiz(root, redraw){
     head.className = 'section-title';
     head.textContent = label;
     const body = document.createElement('div');
-    body.textContent = item[field];
+    renderRichText(body, item[field]);
     sec.appendChild(head);
     sec.appendChild(body);
     info.appendChild(sec);

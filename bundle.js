@@ -408,6 +408,29 @@
   }
 
   // js/search.js
+  var contentFields = [
+    "etiology",
+    "pathophys",
+    "clinical",
+    "diagnosis",
+    "treatment",
+    "complications",
+    "mnemonic",
+    "class",
+    "source",
+    "moa",
+    "uses",
+    "sideEffects",
+    "contraindications",
+    "type",
+    "definition",
+    "mechanism",
+    "clinicalRelevance",
+    "example"
+  ];
+  function stripHtml(value = "") {
+    return value.replace(/<br\s*\/?>(\s*)/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&[#a-z0-9]+;/gi, " ");
+  }
   function tokenize(str) {
     return str.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
   }
@@ -417,6 +440,11 @@
     if (item.concept) fields.push(item.concept);
     fields.push(...item.facts || [], ...item.tags || []);
     if (item.lectures) fields.push(...item.lectures.map((l) => l.name));
+    contentFields.forEach((field) => {
+      if (typeof item[field] === "string" && item[field]) {
+        fields.push(stripHtml(item[field]));
+      }
+    });
     return Array.from(new Set(tokenize(fields.join(" ")))).slice(0, 200).join(" ");
   }
 
@@ -1360,6 +1388,339 @@
     };
   }
 
+  // js/ui/components/rich-text.js
+  var allowedTags = /* @__PURE__ */ new Set([
+    "a",
+    "b",
+    "strong",
+    "i",
+    "em",
+    "u",
+    "s",
+    "strike",
+    "del",
+    "mark",
+    "span",
+    "font",
+    "p",
+    "div",
+    "br",
+    "ul",
+    "ol",
+    "li",
+    "img",
+    "sub",
+    "sup",
+    "blockquote",
+    "code",
+    "pre",
+    "hr",
+    "video",
+    "audio",
+    "source",
+    "iframe"
+  ]);
+  var allowedAttributes = {
+    "a": ["href", "title", "target", "rel"],
+    "img": ["src", "alt", "title", "width", "height"],
+    "span": ["style"],
+    "div": ["style"],
+    "p": ["style"],
+    "font": ["style", "color", "face", "size"],
+    "blockquote": ["style"],
+    "code": ["style"],
+    "pre": ["style"],
+    "video": ["src", "controls", "width", "height", "poster", "preload", "loop", "muted", "playsinline"],
+    "audio": ["src", "controls", "preload", "loop", "muted"],
+    "source": ["src", "type"],
+    "iframe": ["src", "title", "width", "height", "allow", "allowfullscreen", "frameborder"]
+  };
+  var allowedStyles = /* @__PURE__ */ new Set([
+    "color",
+    "background-color",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "text-decoration-line",
+    "text-decoration",
+    "text-decoration-color",
+    "text-decoration-style",
+    "text-align"
+  ]);
+  function escapeHtml(str = "") {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function isSafeUrl(value = "", { allowData = false, requireHttps = false } = {}) {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    if (/^javascript:/i.test(trimmed)) return false;
+    if (!allowData && /^data:/i.test(trimmed)) return false;
+    if (/^blob:/i.test(trimmed)) return true;
+    if (requireHttps) {
+      if (trimmed.startsWith("//")) return true;
+      if (trimmed.startsWith("/") || trimmed.startsWith("./") || trimmed.startsWith("../")) return true;
+      if (/^https:/i.test(trimmed)) return true;
+      return false;
+    }
+    return true;
+  }
+  function cleanStyles(node) {
+    const style = node.getAttribute("style");
+    if (!style) return;
+    const cleaned = style.split(";").map((part) => part.trim()).filter(Boolean).map((part) => {
+      const [rawProp, ...valueParts] = part.split(":");
+      if (!rawProp || !valueParts.length) return null;
+      const prop = rawProp.trim().toLowerCase();
+      if (!allowedStyles.has(prop)) return null;
+      return `${prop}: ${valueParts.join(":").trim()}`;
+    }).filter(Boolean).join("; ");
+    if (cleaned) node.setAttribute("style", cleaned);
+    else node.removeAttribute("style");
+  }
+  function sanitizeNode(node) {
+    if (node.nodeType === Node.TEXT_NODE) return;
+    if (node.nodeType === Node.COMMENT_NODE) {
+      node.remove();
+      return;
+    }
+    const tag = node.tagName?.toLowerCase();
+    if (!tag) return;
+    if (!allowedTags.has(tag)) {
+      if (node.childNodes.length) {
+        const parent = node.parentNode;
+        while (node.firstChild) parent.insertBefore(node.firstChild, node);
+        node.remove();
+      } else {
+        node.remove();
+      }
+      return;
+    }
+    const attrs = Array.from(node.attributes || []);
+    const allowList = allowedAttributes[tag] || [];
+    attrs.forEach((attr) => {
+      const name = attr.name.toLowerCase();
+      if (name === "style") {
+        cleanStyles(node);
+        return;
+      }
+      if (!allowList.includes(name)) {
+        node.removeAttribute(attr.name);
+        return;
+      }
+      if (tag === "a" && name === "href") {
+        const value = attr.value.trim();
+        if (!value || value.startsWith("javascript:")) {
+          node.removeAttribute(attr.name);
+        } else {
+          node.setAttribute("target", "_blank");
+          node.setAttribute("rel", "noopener noreferrer");
+        }
+      }
+      if (name === "src" && ["img", "video", "audio", "source", "iframe"].includes(tag)) {
+        const allowData = tag === "img";
+        const requireHttps = tag === "iframe";
+        if (!isSafeUrl(attr.value || "", { allowData, requireHttps })) {
+          node.removeAttribute(attr.name);
+        }
+      }
+    });
+    Array.from(node.childNodes).forEach(sanitizeNode);
+  }
+  function sanitizeHtml(html = "") {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    Array.from(template.content.childNodes).forEach(sanitizeNode);
+    return template.innerHTML;
+  }
+  function normalizeInput(value = "") {
+    if (!value) return "";
+    const looksHtml = /<([a-z][^>]*>)/i.test(value);
+    if (looksHtml) return sanitizeHtml(value);
+    return sanitizeHtml(escapeHtml(value).replace(/\n/g, "<br>"));
+  }
+  function isEmptyHtml(html = "") {
+    if (!html) return true;
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const hasMedia = template.content.querySelector("img,video,audio,iframe");
+    const text = template.content.textContent?.replace(/\u00a0/g, " ").trim();
+    return !hasMedia && !text;
+  }
+  function createToolbarButton(label, title, onClick) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "rich-editor-btn";
+    btn.textContent = label;
+    btn.title = title;
+    btn.addEventListener("mousedown", (e) => e.preventDefault());
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+  function createRichTextEditor({ value = "" } = {}) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "rich-editor";
+    const toolbar = document.createElement("div");
+    toolbar.className = "rich-editor-toolbar";
+    wrapper.appendChild(toolbar);
+    const editable = document.createElement("div");
+    editable.className = "rich-editor-area input";
+    editable.contentEditable = "true";
+    editable.spellcheck = true;
+    editable.innerHTML = normalizeInput(value);
+    wrapper.appendChild(editable);
+    function focusEditor() {
+      editable.focus({ preventScroll: false });
+    }
+    function exec(command, arg = null) {
+      focusEditor();
+      document.execCommand("styleWithCSS", false, true);
+      document.execCommand(command, false, arg);
+      editable.dispatchEvent(new Event("input"));
+    }
+    const controls = [
+      createToolbarButton("B", "Bold", () => exec("bold")),
+      createToolbarButton("I", "Italic", () => exec("italic")),
+      createToolbarButton("U", "Underline", () => exec("underline")),
+      createToolbarButton("S", "Strikethrough", () => exec("strikeThrough"))
+    ];
+    controls.forEach((btn) => toolbar.appendChild(btn));
+    const colorWrap = document.createElement("label");
+    colorWrap.className = "rich-editor-color";
+    colorWrap.title = "Text color";
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.addEventListener("input", () => {
+      exec("foreColor", colorInput.value);
+    });
+    colorWrap.appendChild(colorInput);
+    toolbar.appendChild(colorWrap);
+    const highlightWrap = document.createElement("label");
+    highlightWrap.className = "rich-editor-color";
+    highlightWrap.title = "Highlight color";
+    const highlightInput = document.createElement("input");
+    highlightInput.type = "color";
+    highlightInput.value = "#ffff00";
+    highlightInput.addEventListener("input", () => {
+      exec("hiliteColor", highlightInput.value);
+    });
+    highlightWrap.appendChild(highlightInput);
+    toolbar.appendChild(highlightWrap);
+    const sizeSelect = document.createElement("select");
+    sizeSelect.className = "rich-editor-size";
+    const sizes = [
+      ["Default", ""],
+      ["Small", "0.85rem"],
+      ["Normal", "1rem"],
+      ["Large", "1.25rem"],
+      ["Huge", "1.5rem"]
+    ];
+    sizes.forEach(([label, value2]) => {
+      const opt = document.createElement("option");
+      opt.value = value2;
+      opt.textContent = label;
+      sizeSelect.appendChild(opt);
+    });
+    sizeSelect.addEventListener("change", () => {
+      focusEditor();
+      document.execCommand("styleWithCSS", false, true);
+      document.execCommand("fontSize", false, 4);
+      const selection = window.getSelection();
+      if (selection?.rangeCount) {
+        const walker = document.createTreeWalker(editable, NodeFilter.SHOW_ELEMENT, {
+          acceptNode: (node) => node.tagName?.toLowerCase() === "font" ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+        });
+        const toAdjust = [];
+        while (walker.nextNode()) {
+          toAdjust.push(walker.currentNode);
+        }
+        toAdjust.forEach((node) => {
+          if (sizeSelect.value) {
+            const span = document.createElement("span");
+            span.style.fontSize = sizeSelect.value;
+            while (node.firstChild) span.appendChild(node.firstChild);
+            node.parentNode.replaceChild(span, node);
+          } else {
+            const parent = node.parentNode;
+            while (node.firstChild) parent.insertBefore(node.firstChild, node);
+            parent.removeChild(node);
+          }
+        });
+      }
+      editable.dispatchEvent(new Event("input"));
+      sizeSelect.value = "";
+    });
+    toolbar.appendChild(sizeSelect);
+    const bulletBtn = createToolbarButton("\u2022", "Bulleted list", () => exec("insertUnorderedList"));
+    toolbar.appendChild(bulletBtn);
+    const numberedBtn = createToolbarButton("1.", "Numbered list", () => exec("insertOrderedList"));
+    toolbar.appendChild(numberedBtn);
+    const linkBtn = createToolbarButton("\u{1F517}", "Insert link", () => {
+      focusEditor();
+      const url = prompt("Enter URL");
+      if (!url) return;
+      exec("createLink", url);
+    });
+    toolbar.appendChild(linkBtn);
+    const imageBtn = createToolbarButton("\u{1F5BC}", "Insert image", () => {
+      focusEditor();
+      const url = prompt("Enter image URL");
+      if (!url) return;
+      exec("insertImage", url);
+    });
+    toolbar.appendChild(imageBtn);
+    const mediaBtn = createToolbarButton("\u{1F3AC}", "Insert media", () => {
+      focusEditor();
+      const url = prompt("Enter media URL");
+      if (!url) return;
+      const typePrompt = prompt("Media type (video/audio/embed)", "video");
+      const kind = (typePrompt || "video").toLowerCase();
+      const safeUrl = escapeHtml(url);
+      let html = "";
+      if (kind.startsWith("a")) {
+        html = `<audio controls src="${safeUrl}"></audio>`;
+      } else if (kind.startsWith("e") || kind.startsWith("i")) {
+        html = `<iframe src="${safeUrl}" title="Embedded media" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+      } else {
+        html = `<video controls src="${safeUrl}"></video>`;
+      }
+      document.execCommand("insertHTML", false, html);
+      editable.dispatchEvent(new Event("input"));
+    });
+    toolbar.appendChild(mediaBtn);
+    const clearBtn = createToolbarButton("\u232B", "Clear formatting", () => exec("removeFormat"));
+    toolbar.appendChild(clearBtn);
+    editable.addEventListener("keydown", (e) => {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        if (e.shiftKey) exec("outdent");
+        else exec("indent");
+      }
+    });
+    return {
+      element: wrapper,
+      getValue() {
+        const sanitized = sanitizeHtml(editable.innerHTML);
+        return isEmptyHtml(sanitized) ? "" : sanitized;
+      },
+      setValue(val) {
+        editable.innerHTML = normalizeInput(val);
+      },
+      focus() {
+        focusEditor();
+      }
+    };
+  }
+  function renderRichText(target, value) {
+    const normalized2 = normalizeInput(value);
+    if (!normalized2) {
+      target.textContent = "";
+      target.classList.remove("rich-content");
+      return;
+    }
+    target.classList.add("rich-content");
+    target.innerHTML = normalized2;
+  }
+
   // js/ui/components/editor.js
   var fieldMap = {
     disease: [
@@ -1418,14 +1779,16 @@
         inp = document.createElement("input");
         inp.className = "input";
         inp.value = existing ? (existing.facts || []).join(", ") : "";
+        fieldInputs[field] = {
+          getValue: () => inp.value.trim()
+        };
       } else {
-        inp = document.createElement("textarea");
-        inp.className = "input";
-        inp.value = existing ? existing[field] || "" : "";
+        const editor = createRichTextEditor({ value: existing ? existing[field] || "" : "" });
+        inp = editor.element;
+        fieldInputs[field] = editor;
       }
       lbl.appendChild(inp);
       form.appendChild(lbl);
-      fieldInputs[field] = inp;
     });
     const colorLabel = document.createElement("label");
     colorLabel.className = "editor-field";
@@ -1524,7 +1887,8 @@
       const item = existing || { id: uid(), kind };
       item[titleKey] = trimmed;
       fieldMap[kind].forEach(([field]) => {
-        const v = fieldInputs[field].value.trim();
+        const control = fieldInputs[field];
+        const v = control?.getValue ? control.getValue() : "";
         if (field === "facts") {
           item.facts = v ? v.split(",").map((s) => s.trim()).filter(Boolean) : [];
         } else {
@@ -1859,8 +2223,7 @@
         sec.appendChild(tl);
         const txt = document.createElement("div");
         txt.className = "section-content";
-        txt.textContent = item[f];
-        txt.style.whiteSpace = "pre-wrap";
+        renderRichText(txt, item[f]);
         sec.appendChild(txt);
         body.appendChild(sec);
       });
@@ -2789,7 +3152,7 @@
       head.textContent = label;
       const body = document.createElement("div");
       body.className = "flash-body";
-      body.textContent = item[field] || "";
+      renderRichText(body, item[field] || "");
       sec.appendChild(head);
       sec.appendChild(body);
       sec.addEventListener("click", () => {
@@ -2956,7 +3319,7 @@
       head.className = "section-title";
       head.textContent = label;
       const body = document.createElement("div");
-      body.textContent = item[field];
+      renderRichText(body, item[field]);
       sec.appendChild(head);
       sec.appendChild(body);
       info.appendChild(sec);
@@ -3359,7 +3722,10 @@
   function sectionValue(raw) {
     if (raw == null) return "";
     const text = typeof raw === "string" ? raw : String(raw);
-    return text.trim();
+    const sanitized = sanitizeHtml(text);
+    const template = document.createElement("template");
+    template.innerHTML = sanitized;
+    return template.content.textContent?.trim() || "";
   }
   function normalized(text) {
     return sectionValue(text).replace(/\s+/g, " ").toLowerCase();
@@ -4806,8 +5172,7 @@
       tl.textContent = label;
       sec.appendChild(tl);
       const txt = document.createElement("div");
-      txt.textContent = val;
-      txt.style.whiteSpace = "pre-wrap";
+      renderRichText(txt, val);
       sec.appendChild(txt);
       card.appendChild(sec);
     });
@@ -6352,28 +6717,51 @@
   function createEntryAddControl(onAdded, initialKind = "disease") {
     const wrapper = document.createElement("div");
     wrapper.className = "entry-add-control";
-    const select = document.createElement("select");
-    select.className = "input entry-add-select";
-    defaultOptions.forEach((opt) => {
-      const option = document.createElement("option");
-      option.value = opt.value;
-      option.textContent = opt.label;
-      select.appendChild(option);
-    });
-    if (initialKind) {
-      select.value = initialKind;
-    }
     const button = document.createElement("button");
     button.type = "button";
     button.className = "btn";
     button.textContent = "Add";
-    button.addEventListener("click", () => {
-      const kind = select.value;
-      if (!kind) return;
-      openEditor(kind, onAdded);
+    const menu = document.createElement("div");
+    menu.className = "entry-add-menu hidden";
+    const options = [...defaultOptions];
+    if (initialKind) {
+      const idx = options.findIndex((opt) => opt.value === initialKind);
+      if (idx > 0) {
+        const [preferred] = options.splice(idx, 1);
+        options.unshift(preferred);
+      }
+    }
+    options.forEach((opt) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "entry-add-menu-item";
+      item.textContent = opt.label;
+      item.addEventListener("click", () => {
+        closeMenu();
+        openEditor(opt.value, onAdded);
+      });
+      menu.appendChild(item);
     });
-    wrapper.appendChild(select);
+    function closeMenu() {
+      menu.classList.add("hidden");
+      document.removeEventListener("mousedown", handleOutside);
+    }
+    function handleOutside(e) {
+      if (!wrapper.contains(e.target)) {
+        closeMenu();
+      }
+    }
+    button.addEventListener("click", () => {
+      const willOpen = menu.classList.contains("hidden");
+      if (willOpen) {
+        menu.classList.remove("hidden");
+        document.addEventListener("mousedown", handleOutside);
+      } else {
+        closeMenu();
+      }
+    });
     wrapper.appendChild(button);
+    wrapper.appendChild(menu);
     return wrapper;
   }
 
