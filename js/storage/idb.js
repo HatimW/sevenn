@@ -1,5 +1,5 @@
 const DB_NAME = 'sevenn-db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export function openDB() {
   return new Promise((resolve, reject) => {
@@ -40,6 +40,11 @@ export function openDB() {
 
       if (!db.objectStoreNames.contains('settings')) {
         db.createObjectStore('settings', { keyPath: 'id' });
+      }
+
+      if (!db.objectStoreNames.contains('exam_sessions')) {
+        const sessions = db.createObjectStore('exam_sessions', { keyPath: 'examId' });
+        sessions.createIndex('by_updatedAt', 'updatedAt');
       }
     };
     req.onsuccess = () => {

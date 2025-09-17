@@ -283,5 +283,26 @@ export async function deleteExam(id) {
   await prom(e.delete(id));
 }
 
+export async function listExamSessions() {
+  const s = await store('exam_sessions');
+  return await prom(s.getAll());
+}
+
+export async function loadExamSession(examId) {
+  const s = await store('exam_sessions');
+  return await prom(s.get(examId));
+}
+
+export async function saveExamSessionProgress(progress) {
+  const s = await store('exam_sessions', 'readwrite');
+  const now = Date.now();
+  await prom(s.put({ ...progress, updatedAt: now }));
+}
+
+export async function deleteExamSessionProgress(examId) {
+  const s = await store('exam_sessions', 'readwrite');
+  await prom(s.delete(examId));
+}
+
 // export/import helpers
 export { exportJSON, importJSON, exportAnkiCSV };

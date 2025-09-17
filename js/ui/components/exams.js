@@ -1,13 +1,150 @@
-import { listExams, upsertExam, deleteExam } from '../../storage/storage.js';
-import { state, setExamSession } from '../../state.js';
+import { listExams, upsertExam, deleteExam, listExamSessions, loadExamSession, saveExamSessionProgress, deleteExamSessionProgress } from '../../storage/storage.js';
+import { state, setExamSession, setExamAttemptExpanded } from '../../state.js';
 import { uid } from '../../utils.js';
 import { confirmModal } from './confirm.js';
 
 const DEFAULT_SECONDS = 60;
 
+const timerHandles = new WeakMap();
+let keyHandler = null;
+let keyHandlerSession = null;
+let lastExamStatusMessage = '';
+
 function clone(value) {
   return value ? JSON.parse(JSON.stringify(value)) : value;
 }
+
+function totalExamTimeMs(exam) {
+  const seconds = typeof exam.secondsPerQuestion === 'number' ? exam.secondsPerQuestion : DEFAULT_SECONDS;
+  return seconds * (exam.questions?.length || 0) * 1000;
+}
+
+function stopTimer(sess) {
+  const handle = timerHandles.get(sess);
+  if (handle) {
+    clearInterval(handle);
+    timerHandles.delete(sess);
+  }
+  if (sess?.startedAt) {
+    const now = Date.now();
+    const delta = Math.max(0, now - sess.startedAt);
+    sess.elapsedMs = (sess.elapsedMs || 0) + delta;
+    if (sess.exam?.timerMode === 'timed' && typeof sess.remainingMs === 'number') {
+      sess.remainingMs = Math.max(0, sess.remainingMs - delta);
+    }
+    sess.startedAt = null;
+  }
+}
+
+function ensureTimer(sess, render) {
+  if (!sess || sess.mode !== 'taking' || sess.exam.timerMode !== 'timed') return;
+  if (timerHandles.has(sess)) return;
+  if (typeof sess.remainingMs !== 'number') {
+    sess.remainingMs = totalExamTimeMs(sess.exam);
+  }
+  if (typeof sess.elapsedMs !== 'number') sess.elapsedMs = 0;
+  sess.startedAt = Date.now();
+  const handle = setInterval(() => {
+    const now = Date.now();
+    const last = sess.startedAt || now;
+    const delta = Math.max(0, now - last);
+    sess.startedAt = now;
+    sess.elapsedMs = (sess.elapsedMs || 0) + delta;
+    sess.remainingMs = Math.max(0, (sess.remainingMs ?? 0) - delta);
+    if (sess.remainingMs <= 0) {
+      stopTimer(sess);
+      finalizeExam(sess, render, { autoSubmit: true });
+    } else {
+      render();
+    }
+  }, 1000);
+  timerHandles.set(sess, handle);
+}
+
+function teardownKeyboardNavigation() {
+  if (keyHandler) {
+    window.removeEventListener('keydown', keyHandler);
+    keyHandler = null;
+    keyHandlerSession = null;
+  }
+}
+
+function setupKeyboardNavigation(sess, render) {
+  if (!sess || sess.mode === 'summary') {
+    teardownKeyboardNavigation();
+    return;
+  }
+  if (keyHandler && keyHandlerSession === sess) return;
+  teardownKeyboardNavigation();
+  keyHandlerSession = sess;
+  keyHandler = event => {
+    if (event.defaultPrevented) return;
+    const target = event.target;
+    if (target instanceof HTMLElement) {
+      const tag = target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return;
+    }
+    if (event.key === 'ArrowRight') {
+      if (sess.idx < sess.exam.questions.length - 1) {
+        event.preventDefault();
+        sess.idx += 1;
+        render();
+      }
+    } else if (event.key === 'ArrowLeft') {
+      if (sess.idx > 0) {
+        event.preventDefault();
+        sess.idx -= 1;
+        render();
+      }
+    }
+  };
+  window.addEventListener('keydown', keyHandler);
+}
+
+function formatCountdown(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return [hours, minutes, seconds].map(val => String(val).padStart(2, '0')).join(':');
+  }
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function currentElapsedMs(sess) {
+  const base = sess?.elapsedMs || 0;
+  if (sess?.startedAt) {
+    return base + Math.max(0, Date.now() - sess.startedAt);
+  }
+  return base;
+}
+
+function slugify(text) {
+  const lowered = (text || '').toLowerCase();
+  const normalized = lowered.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return normalized || 'exam';
+}
+
+function triggerExamDownload(exam) {
+  try {
+    const data = JSON.stringify(exam, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${slugify(exam.examTitle || 'exam')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    return true;
+  } catch (err) {
+    console.warn('Failed to export exam', err);
+    return false;
+  }
+}
+
 
 function ensureExamShape(exam) {
   const next = clone(exam) || {};
@@ -89,13 +226,40 @@ function createBlankQuestion() {
 }
 
 function createTakingSession(exam) {
+  const snapshot = clone(exam);
+  const totalMs = snapshot.timerMode === 'timed' ? totalExamTimeMs(snapshot) : null;
   return {
     mode: 'taking',
-    exam: clone(exam),
+    exam: snapshot,
     idx: 0,
     answers: {},
     flagged: {},
-    startedAt: Date.now()
+    checked: {},
+    startedAt: Date.now(),
+    elapsedMs: 0,
+    remainingMs: totalMs
+  };
+}
+
+function hydrateSavedSession(saved, fallbackExam) {
+  const baseExam = saved?.exam ? ensureExamShape(saved.exam).exam : fallbackExam;
+  const exam = clone(baseExam);
+  const questionCount = exam.questions.length;
+  const idx = Math.min(Math.max(Number(saved?.idx) || 0, 0), Math.max(0, questionCount - 1));
+  const remaining = typeof saved?.remainingMs === 'number'
+    ? Math.max(0, saved.remainingMs)
+    : (exam.timerMode === 'timed' ? totalExamTimeMs(exam) : null);
+  const elapsed = Math.max(0, Number(saved?.elapsedMs) || 0);
+  return {
+    mode: 'taking',
+    exam,
+    idx,
+    answers: saved?.answers ? { ...saved.answers } : {},
+    flagged: saved?.flagged ? { ...saved.flagged } : {},
+    checked: saved?.checked ? { ...saved.checked } : {},
+    startedAt: Date.now(),
+    elapsedMs: elapsed,
+    remainingMs: remaining
   };
 }
 
@@ -158,6 +322,13 @@ export async function renderExams(root, render) {
   root.appendChild(controls);
   root.appendChild(fileInput);
 
+  if (lastExamStatusMessage) {
+    status.textContent = lastExamStatusMessage;
+    lastExamStatusMessage = '';
+  } else {
+    status.textContent = '';
+  }
+
   const stored = await listExams();
   const exams = [];
   for (const raw of stored) {
@@ -166,6 +337,19 @@ export async function renderExams(root, render) {
     if (changed) await upsertExam(exam);
   }
   exams.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+  const savedSessions = await listExamSessions();
+  const sessionMap = new Map();
+  for (const sess of savedSessions) {
+    if (sess?.examId) sessionMap.set(sess.examId, sess);
+  }
+
+  // Clean up orphaned sessions for removed exams
+  for (const sess of savedSessions) {
+    if (!exams.find(ex => ex.id === sess.examId)) {
+      await deleteExamSessionProgress(sess.examId);
+    }
+  }
 
   if (!exams.length) {
     const empty = document.createElement('div');
@@ -178,12 +362,12 @@ export async function renderExams(root, render) {
   const grid = document.createElement('div');
   grid.className = 'exam-grid';
   exams.forEach(exam => {
-    grid.appendChild(buildExamCard(exam, render));
+    grid.appendChild(buildExamCard(exam, render, sessionMap.get(exam.id), status));
   });
   root.appendChild(grid);
 }
 
-function buildExamCard(exam, render) {
+function buildExamCard(exam, render, savedSession, statusEl) {
   const card = document.createElement('article');
   card.className = 'card exam-card';
 
@@ -222,14 +406,46 @@ function buildExamCard(exam, render) {
   }
   card.appendChild(stats);
 
+  if (savedSession) {
+    const banner = document.createElement('div');
+    banner.className = 'exam-saved-banner';
+    const updated = savedSession.updatedAt ? new Date(savedSession.updatedAt).toLocaleString() : null;
+    banner.textContent = updated ? `Saved attempt • ${updated}` : 'Saved attempt available';
+    card.appendChild(banner);
+  }
+
   const actions = document.createElement('div');
   actions.className = 'exam-card-actions';
 
+  if (savedSession) {
+    const resumeBtn = document.createElement('button');
+    resumeBtn.className = 'btn';
+    resumeBtn.textContent = 'Resume Attempt';
+    resumeBtn.disabled = exam.questions.length === 0;
+    resumeBtn.addEventListener('click', async () => {
+      const latest = await loadExamSession(exam.id);
+      if (!latest) {
+        if (statusEl) statusEl.textContent = 'Saved attempt could not be found.';
+        render();
+        return;
+      }
+      const session = hydrateSavedSession(latest, exam);
+      setExamSession(session);
+      render();
+    });
+    actions.appendChild(resumeBtn);
+  }
+
   const startBtn = document.createElement('button');
-  startBtn.className = 'btn';
-  startBtn.textContent = 'Start Exam';
+  startBtn.className = savedSession ? 'btn secondary' : 'btn';
+  startBtn.textContent = savedSession ? 'Start Fresh' : 'Start Exam';
   startBtn.disabled = exam.questions.length === 0;
-  startBtn.addEventListener('click', () => {
+  startBtn.addEventListener('click', async () => {
+    if (savedSession) {
+      const confirm = await confirmModal('Start a new attempt and discard saved progress?');
+      if (!confirm) return;
+      await deleteExamSessionProgress(exam.id);
+    }
     setExamSession(createTakingSession(exam));
     render();
   });
@@ -252,12 +468,26 @@ function buildExamCard(exam, render) {
   editBtn.addEventListener('click', () => openExamEditor(exam, render));
   actions.appendChild(editBtn);
 
+  const exportBtn = document.createElement('button');
+  exportBtn.className = 'btn secondary';
+  exportBtn.textContent = 'Export';
+  exportBtn.addEventListener('click', () => {
+    const ok = triggerExamDownload(exam);
+    if (!ok && statusEl) {
+      statusEl.textContent = 'Unable to export exam.';
+    } else if (ok && statusEl) {
+      statusEl.textContent = 'Exam exported.';
+    }
+  });
+  actions.appendChild(exportBtn);
+
   const delBtn = document.createElement('button');
   delBtn.className = 'btn danger';
   delBtn.textContent = 'Delete';
   delBtn.addEventListener('click', async () => {
     const ok = await confirmModal(`Delete "${exam.examTitle}"? This will remove all attempts.`);
     if (!ok) return;
+    await deleteExamSessionProgress(exam.id).catch(() => {});
     await deleteExam(exam.id);
     render();
   });
@@ -267,9 +497,28 @@ function buildExamCard(exam, render) {
 
   const attemptsWrap = document.createElement('div');
   attemptsWrap.className = 'exam-attempts';
+  const attemptsHeader = document.createElement('div');
+  attemptsHeader.className = 'exam-attempts-header';
   const attemptsTitle = document.createElement('h3');
   attemptsTitle.textContent = 'Attempts';
-  attemptsWrap.appendChild(attemptsTitle);
+  attemptsHeader.appendChild(attemptsTitle);
+
+  const expandedState = state.examAttemptExpanded[exam.id];
+  const isExpanded = expandedState != null ? expandedState : true;
+  if (exam.results.length) {
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'exam-attempt-toggle';
+    toggle.textContent = isExpanded ? 'Hide Attempts' : 'Show Attempts';
+    toggle.addEventListener('click', () => {
+      setExamAttemptExpanded(exam.id, !isExpanded);
+      render();
+    });
+    attemptsHeader.appendChild(toggle);
+  }
+
+  attemptsWrap.appendChild(attemptsHeader);
+  attemptsWrap.classList.toggle('collapsed', !isExpanded && exam.results.length > 0);
 
   if (!exam.results.length) {
     const none = document.createElement('p');
@@ -446,14 +695,29 @@ function renderPalette(sidebar, sess, render) {
 
 export function renderExamRunner(root, render) {
   const sess = state.examSession;
-  if (!sess) return;
+  if (!sess) {
+    teardownKeyboardNavigation();
+    return;
+  }
   root.innerHTML = '';
   root.className = 'exam-session';
 
   if (sess.mode === 'summary') {
+    teardownKeyboardNavigation();
     renderSummary(root, render, sess);
     return;
   }
+
+  setupKeyboardNavigation(sess, render);
+
+  if (!sess.answers) sess.answers = {};
+  if (!sess.flagged) sess.flagged = {};
+  if (!sess.checked) sess.checked = {};
+  if (typeof sess.elapsedMs !== 'number') sess.elapsedMs = 0;
+  if (sess.exam.timerMode === 'timed' && typeof sess.remainingMs !== 'number') {
+    sess.remainingMs = totalExamTimeMs(sess.exam);
+  }
+  if (!sess.startedAt) sess.startedAt = Date.now();
 
   const questionCount = sess.exam.questions.length;
   if (!questionCount) {
@@ -463,10 +727,14 @@ export function renderExamRunner(root, render) {
     const back = document.createElement('button');
     back.className = 'btn';
     back.textContent = 'Back to Exams';
-    back.addEventListener('click', () => { setExamSession(null); render(); });
+    back.addEventListener('click', () => { teardownKeyboardNavigation(); setExamSession(null); render(); });
     empty.appendChild(back);
     root.appendChild(empty);
     return;
+  }
+
+  if (sess.mode === 'taking' && sess.exam.timerMode === 'timed') {
+    ensureTimer(sess, render);
   }
 
   if (sess.idx < 0) sess.idx = 0;
@@ -487,6 +755,8 @@ export function renderExamRunner(root, render) {
   const question = sess.exam.questions[sess.idx];
   const answers = sess.mode === 'review' ? sess.result.answers || {} : sess.answers || {};
   const selected = answers[sess.idx];
+  const isInstantCheck = sess.mode === 'taking' && sess.exam.timerMode !== 'timed' && Boolean(sess.checked?.[sess.idx]);
+  const showReview = sess.mode === 'review' || isInstantCheck;
 
   const top = document.createElement('div');
   top.className = 'exam-topbar';
@@ -513,6 +783,14 @@ export function renderExamRunner(root, render) {
     flagBtn.disabled = true;
   }
   top.appendChild(flagBtn);
+
+  if (sess.mode === 'taking' && sess.exam.timerMode === 'timed') {
+    const timerEl = document.createElement('div');
+    timerEl.className = 'exam-timer';
+    const remainingMs = typeof sess.remainingMs === 'number' ? sess.remainingMs : totalExamTimeMs(sess.exam);
+    timerEl.textContent = formatCountdown(remainingMs);
+    top.appendChild(timerEl);
+  }
   main.appendChild(top);
 
   const stem = document.createElement('div');
@@ -554,8 +832,16 @@ export function renderExamRunner(root, render) {
       if (selected === opt.id) choice.classList.add('selected');
       choice.addEventListener('click', () => {
         sess.answers[sess.idx] = opt.id;
+        if (sess.exam.timerMode !== 'timed' && sess.checked) {
+          delete sess.checked[sess.idx];
+        }
         render();
       });
+      if (isInstantCheck) {
+        const cls = answerClass(question, selected, opt.id);
+        if (cls) choice.classList.add(cls);
+        if (selected === opt.id) choice.classList.add('chosen');
+      }
     } else {
       const cls = answerClass(question, selected, opt.id);
       if (cls) choice.classList.add(cls);
@@ -566,7 +852,7 @@ export function renderExamRunner(root, render) {
 
   main.appendChild(optionsWrap);
 
-  if (sess.mode === 'review') {
+  if (showReview) {
     const verdict = document.createElement('div');
     verdict.className = 'exam-verdict';
     let verdictText = 'Not answered';
@@ -581,7 +867,7 @@ export function renderExamRunner(root, render) {
       }
     }
     verdict.classList.add(verdictClass);
-    verdict.textContent = verdictText;
+    verdict.textContent = sess.mode === 'review' ? verdictText : `Checked: ${verdictText}`;
     main.appendChild(verdict);
 
     const answerSummary = document.createElement('div');
@@ -623,6 +909,31 @@ export function renderExamRunner(root, render) {
   nav.appendChild(prev);
 
   if (sess.mode === 'taking') {
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn secondary';
+    saveBtn.textContent = 'Save & Exit';
+    saveBtn.addEventListener('click', async () => {
+      await saveProgressAndExit(sess, render);
+    });
+    nav.appendChild(saveBtn);
+
+    if (sess.exam.timerMode !== 'timed') {
+      const checkBtn = document.createElement('button');
+      checkBtn.className = 'btn secondary';
+      checkBtn.textContent = isInstantCheck ? 'Hide Check' : 'Check Answer';
+      checkBtn.disabled = question.options.length === 0;
+      checkBtn.addEventListener('click', () => {
+        if (!sess.checked) sess.checked = {};
+        if (isInstantCheck) {
+          delete sess.checked[sess.idx];
+        } else {
+          sess.checked[sess.idx] = true;
+        }
+        render();
+      });
+      nav.appendChild(checkBtn);
+    }
+
     const nextBtn = document.createElement('button');
     nextBtn.className = 'btn secondary';
     nextBtn.textContent = 'Next Question';
@@ -665,7 +976,7 @@ export function renderExamRunner(root, render) {
       });
     } else {
       exit.textContent = 'Back to Exams';
-      exit.addEventListener('click', () => { setExamSession(null); render(); });
+      exit.addEventListener('click', () => { teardownKeyboardNavigation(); setExamSession(null); render(); });
     }
     nav.appendChild(exit);
   }
@@ -685,21 +996,55 @@ function renderSidebarMeta(sidebar, sess) {
     duration.innerHTML = `<strong>Duration:</strong> ${formatDuration(sess.result.durationMs)}`;
     info.appendChild(duration);
   } else if (sess.mode === 'taking') {
-    const timerMode = document.createElement('div');
     if (sess.exam.timerMode === 'timed') {
-      timerMode.innerHTML = `<strong>Timer:</strong> Timed (${sess.exam.secondsPerQuestion}s/question)`;
+      const remaining = typeof sess.remainingMs === 'number' ? sess.remainingMs : totalExamTimeMs(sess.exam);
+      const timer = document.createElement('div');
+      timer.innerHTML = `<strong>Time Remaining:</strong> ${formatCountdown(remaining)}`;
+      info.appendChild(timer);
+
+      const pace = document.createElement('div');
+      pace.innerHTML = `<strong>Pace:</strong> ${sess.exam.secondsPerQuestion}s/question`;
+      info.appendChild(pace);
     } else {
+      const timerMode = document.createElement('div');
       timerMode.innerHTML = '<strong>Timer:</strong> Untimed';
+      info.appendChild(timerMode);
+
+      const elapsed = document.createElement('div');
+      elapsed.innerHTML = `<strong>Elapsed:</strong> ${formatDuration(currentElapsedMs(sess))}`;
+      info.appendChild(elapsed);
     }
-    info.appendChild(timerMode);
   }
 
   sidebar.appendChild(info);
 }
 
-async function finalizeExam(sess, render) {
+async function saveProgressAndExit(sess, render) {
+  stopTimer(sess);
+  const payload = {
+    examId: sess.exam.id,
+    exam: clone(sess.exam),
+    idx: sess.idx,
+    answers: { ...(sess.answers || {}) },
+    flagged: { ...(sess.flagged || {}) },
+    checked: { ...(sess.checked || {}) },
+    remainingMs: typeof sess.remainingMs === 'number' ? Math.max(0, sess.remainingMs) : null,
+    elapsedMs: sess.elapsedMs || 0,
+    mode: 'taking'
+  };
+  await saveExamSessionProgress(payload);
+  lastExamStatusMessage = 'Attempt saved. You can resume later.';
+  teardownKeyboardNavigation();
+  setExamSession(null);
+  render();
+}
+
+async function finalizeExam(sess, render, options = {}) {
+  const isAuto = Boolean(options.autoSubmit);
+  stopTimer(sess);
+
   const unanswered = sess.exam.questions.filter((_, idx) => sess.answers[idx] == null);
-  if (unanswered.length) {
+  if (!isAuto && unanswered.length) {
     const confirm = await confirmModal(`You have ${unanswered.length} unanswered question${unanswered.length === 1 ? '' : 's'}. Submit anyway?`);
     if (!confirm) return;
   }
@@ -727,7 +1072,7 @@ async function finalizeExam(sess, render) {
     total: sess.exam.questions.length,
     answers,
     flagged,
-    durationMs: sess.startedAt ? Date.now() - sess.startedAt : 0,
+    durationMs: sess.elapsedMs || 0,
     answered: answeredCount
   };
 
@@ -735,7 +1080,13 @@ async function finalizeExam(sess, render) {
   updatedExam.results = [...(updatedExam.results || []), result];
   updatedExam.updatedAt = Date.now();
   await upsertExam(updatedExam);
+  await deleteExamSessionProgress(updatedExam.id).catch(() => {});
 
+  if (isAuto) {
+    lastExamStatusMessage = 'Time expired. Attempt submitted automatically.';
+  }
+
+  teardownKeyboardNavigation();
   setExamSession({ mode: 'summary', exam: updatedExam, latestResult: result });
   render();
 }

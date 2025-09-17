@@ -1104,6 +1104,15 @@ body.map-toolbox-dragging {
   gap: var(--pad);
 }
 
+.exam-saved-banner {
+  background: rgba(166, 217, 255, 0.15);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--pad-sm) var(--pad);
+  color: var(--blue);
+  font-size: 0.9rem;
+}
+
 .exam-stat {
   background: var(--muted);
   border-radius: var(--radius);
@@ -1140,6 +1149,32 @@ body.map-toolbox-dragging {
 
 .exam-attempts h3 {
   margin: 0;
+}
+
+.exam-attempts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pad);
+}
+
+.exam-attempts.collapsed .exam-attempt-list {
+  display: none;
+}
+
+.exam-attempt-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--gray);
+  font-size: 0.85rem;
+  padding: 4px 10px;
+}
+
+.exam-attempt-toggle:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: var(--blue);
+  color: var(--blue);
 }
 
 .exam-attempt-empty {
@@ -1246,6 +1281,14 @@ body.map-toolbox-dragging {
 
 .exam-progress {
   font-weight: 600;
+}
+
+.exam-timer {
+  margin-left: auto;
+  font-weight: 600;
+  background: var(--muted);
+  border-radius: var(--radius);
+  padding: 6px 12px;
 }
 
 .flag-btn {
