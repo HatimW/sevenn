@@ -2,6 +2,7 @@ import { uid, setToggleState } from '../../utils.js';
 import { upsertItem, listBlocks } from '../../storage/storage.js';
 import { createFloatingWindow } from './window-manager.js';
 import { createRichTextEditor } from './rich-text.js';
+import { confirmModal } from './confirm.js';
 
 const fieldMap = {
   disease: [
@@ -44,9 +45,23 @@ function escapeHtml(str = '') {
 }
 
 export async function openEditor(kind, onSave, existing = null) {
+  let isDirty = false;
+  let status;
+
   const win = createFloatingWindow({
     title: `${existing ? 'Edit' : 'Add'} ${titleMap[kind] || kind}`,
-    width: 600
+    width: 660,
+    onBeforeClose: async (reason) => {
+      if (reason === 'saved') return true;
+      if (!isDirty) return true;
+      if (reason !== 'close') return true;
+      const shouldSave = await confirmModal('Save changes before closing?');
+      if (shouldSave) {
+        await persist(true);
+        return false;
+      }
+      return true;
+    }
   });
 
   const form = document.createElement('form');
@@ -61,12 +76,22 @@ export async function openEditor(kind, onSave, existing = null) {
   nameLabel.appendChild(nameInput);
   form.appendChild(nameLabel);
 
+  const markDirty = () => {
+    isDirty = true;
+    if (status) status.textContent = '';
+  };
+
+  nameInput.addEventListener('input', markDirty);
+
   const fieldInputs = {};
   fieldMap[kind].forEach(([field, label]) => {
     const lbl = document.createElement('label');
     lbl.className = 'editor-field';
     lbl.textContent = label;
-    const editor = createRichTextEditor({ value: existing ? existing[field] || '' : '' });
+    const editor = createRichTextEditor({
+      value: existing ? existing[field] || '' : '',
+      onChange: markDirty
+    });
     const inp = editor.element;
     fieldInputs[field] = editor;
     lbl.appendChild(inp);
@@ -94,8 +119,9 @@ export async function openEditor(kind, onSave, existing = null) {
 
   const extraControls = new Map();
 
-  function addExtra(extra = {}) {
-    const id = extra.id || uid();
+  function addExtra(extra = null) {
+    const data = extra || {};
+    const id = data.id || uid();
     const row = document.createElement('div');
     row.className = 'editor-extra';
     row.dataset.id = id;
@@ -105,7 +131,7 @@ export async function openEditor(kind, onSave, existing = null) {
     const titleInput = document.createElement('input');
     titleInput.className = 'input editor-extra-title';
     titleInput.placeholder = 'Section title';
-    titleInput.value = extra.title || '';
+    titleInput.value = data.title || '';
     titleRow.appendChild(titleInput);
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
@@ -115,14 +141,19 @@ export async function openEditor(kind, onSave, existing = null) {
     removeBtn.addEventListener('click', () => {
       extraControls.delete(id);
       row.remove();
+      markDirty();
     });
     titleRow.appendChild(removeBtn);
     row.appendChild(titleRow);
 
-    const editor = createRichTextEditor({ value: extra.body || '' });
+    const editor = createRichTextEditor({ value: data.body || '', onChange: markDirty });
     row.appendChild(editor.element);
     extrasList.appendChild(row);
     extraControls.set(id, { id, titleInput, editor });
+
+    titleInput.addEventListener('input', markDirty);
+    row.addEventListener('input', markDirty);
+    if (!extra) markDirty();
   }
 
   addExtraBtn.addEventListener('click', () => addExtra());
@@ -150,6 +181,7 @@ export async function openEditor(kind, onSave, existing = null) {
   colorInput.value = existing?.color || '#ffffff';
   colorLabel.appendChild(colorInput);
   form.appendChild(colorLabel);
+  colorInput.addEventListener('input', markDirty);
 
   const blocks = await listBlocks();
   const blockMap = new Map(blocks.map(b => [b.blockId, b]));
@@ -213,6 +245,7 @@ export async function openEditor(kind, onSave, existing = null) {
         } else {
           blockSet.add(b.blockId);
         }
+        markDirty();
         renderBlockChips();
         renderBlockPanels();
       });
@@ -296,6 +329,7 @@ export async function openEditor(kind, onSave, existing = null) {
               lectureWrap.classList.remove('collapsed');
             }
             setToggleState(weekChip, weekSet.has(weekKey));
+            markDirty();
           });
           section.appendChild(weekChip);
 
@@ -328,6 +362,7 @@ export async function openEditor(kind, onSave, existing = null) {
                     lectureWrap.classList.remove('collapsed');
                   }
                 }
+                markDirty();
               });
               lectureWrap.appendChild(lectureChip);
             });
@@ -351,7 +386,7 @@ export async function openEditor(kind, onSave, existing = null) {
   const actionBar = document.createElement('div');
   actionBar.className = 'editor-actions';
 
-  const status = document.createElement('span');
+  status = document.createElement('span');
   status.className = 'editor-status';
 
   async function persist(closeAfter){
@@ -388,13 +423,21 @@ export async function openEditor(kind, onSave, existing = null) {
     }
     item.lectures = lectures;
     item.color = colorInput.value;
-    await upsertItem(item);
+    try {
+      await upsertItem(item);
+    } catch (err) {
+      console.error(err);
+      status.textContent = 'Failed to save.';
+      throw err;
+    }
     existing = item;
     updateTitle();
-    status.textContent = closeAfter ? '' : 'Saved';
+    isDirty = false;
     if (onSave) onSave();
     if (closeAfter) {
       win.close('saved');
+    } else {
+      status.textContent = 'Saved';
     }
   }
 
@@ -402,29 +445,17 @@ export async function openEditor(kind, onSave, existing = null) {
   saveBtn.type = 'button';
   saveBtn.className = 'btn';
   saveBtn.textContent = 'Save';
-  saveBtn.addEventListener('click', () => persist(false));
-
-  const saveCloseBtn = document.createElement('button');
-  saveCloseBtn.type = 'button';
-  saveCloseBtn.className = 'btn';
-  saveCloseBtn.textContent = 'Save & Close';
-  saveCloseBtn.addEventListener('click', () => persist(true));
-
-  const discardBtn = document.createElement('button');
-  discardBtn.type = 'button';
-  discardBtn.className = 'btn secondary';
-  discardBtn.textContent = 'Close without Saving';
-  discardBtn.addEventListener('click', () => win.close('discard'));
+  saveBtn.addEventListener('click', () => {
+    persist(true).catch(() => {});
+  });
 
   actionBar.appendChild(saveBtn);
-  actionBar.appendChild(saveCloseBtn);
-  actionBar.appendChild(discardBtn);
   actionBar.appendChild(status);
   form.appendChild(actionBar);
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    persist(false);
+    persist(true).catch(() => {});
   });
 
   win.setContent(form);
