@@ -1,5 +1,6 @@
 import { listBlocks, upsertItem, deleteItem } from '../../storage/storage.js';
 import { state, setEntryLayout } from '../../state.js';
+import { setToggleState } from '../../utils.js';
 import { openEditor } from './editor.js';
 import { confirmModal } from './confirm.js';
 import { openLinker } from './linker.js';
@@ -335,7 +336,8 @@ export async function renderCardList(container, items, kind, onChange){
 
   const listBtn = document.createElement('button');
   listBtn.type = 'button';
-  listBtn.className = 'layout-btn' + (layoutState.mode === 'list' ? ' active' : '');
+  listBtn.className = 'layout-btn';
+  setToggleState(listBtn, layoutState.mode === 'list');
   listBtn.textContent = 'List';
   listBtn.addEventListener('click', () => {
     if (layoutState.mode === 'list') return;
@@ -346,7 +348,8 @@ export async function renderCardList(container, items, kind, onChange){
 
   const gridBtn = document.createElement('button');
   gridBtn.type = 'button';
-  gridBtn.className = 'layout-btn' + (layoutState.mode === 'grid' ? ' active' : '');
+  gridBtn.className = 'layout-btn';
+  setToggleState(gridBtn, layoutState.mode === 'grid');
   gridBtn.textContent = 'Grid';
   gridBtn.addEventListener('click', () => {
     if (layoutState.mode === 'grid') return;
@@ -362,6 +365,7 @@ export async function renderCardList(container, items, kind, onChange){
   const controlsToggle = document.createElement('button');
   controlsToggle.type = 'button';
   controlsToggle.className = 'layout-advanced-toggle';
+  setToggleState(controlsToggle, layoutState.controlsVisible);
   controlsToggle.addEventListener('click', () => {
     setEntryLayout({ controlsVisible: !state.entryLayout.controlsVisible });
     updateToolbar();
@@ -421,14 +425,14 @@ export async function renderCardList(container, items, kind, onChange){
 
   function updateToolbar(){
     const { mode, controlsVisible } = state.entryLayout;
-    listBtn.classList.toggle('active', mode === 'list');
-    gridBtn.classList.toggle('active', mode === 'grid');
+    setToggleState(listBtn, mode === 'list');
+    setToggleState(gridBtn, mode === 'grid');
     columnWrap.style.display = mode === 'grid' ? '' : 'none';
     controlsWrap.style.display = controlsVisible ? '' : 'none';
     controlsWrap.setAttribute('aria-hidden', controlsVisible ? 'false' : 'true');
     controlsToggle.textContent = controlsVisible ? 'Hide layout tools' : 'Show layout tools';
     controlsToggle.setAttribute('aria-expanded', controlsVisible ? 'true' : 'false');
-    controlsToggle.classList.toggle('active', controlsVisible);
+    setToggleState(controlsToggle, controlsVisible);
   }
 
   function applyLayout(){

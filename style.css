@@ -101,6 +101,17 @@ button:not(.tab):not(.fab-btn):hover {
   background: rgba(148, 163, 184, 0.22);
 }
 
+[data-toggle="true"] {
+  transition: background 0.25s ease, color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+}
+
+[data-toggle="true"][data-active="true"] {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.42);
+  color: var(--text);
+  box-shadow: 0 10px 22px rgba(2, 6, 23, 0.35);
+}
+
 .header {
   padding: var(--pad) var(--pad-lg);
   background: var(--panel);
@@ -1571,6 +1582,25 @@ input[type="checkbox"]:checked::after {
 .flash-section {
   margin-top: var(--pad);
   cursor: pointer;
+  border-radius: var(--radius);
+  padding: var(--pad-sm);
+  border: 1px solid transparent;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+}
+
+.flash-section:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.75);
+  outline-offset: 3px;
+}
+
+.flash-section[data-active="true"] {
+  background: rgba(148, 163, 184, 0.16);
+  border-color: rgba(148, 163, 184, 0.35);
+  box-shadow: 0 12px 26px rgba(2, 6, 23, 0.28);
+}
+
+.flash-section[data-active="true"] .flash-heading {
+  color: var(--accent);
 }
 
 .flash-heading {
