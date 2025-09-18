@@ -1,5 +1,6 @@
 import { state, setBuilder, setCohort, resetBlockMode } from '../../state.js';
 import { listBlocks, listItemsByKind } from '../../storage/storage.js';
+import { setToggleState } from '../../utils.js';
 
 export async function renderBuilder(root) {
   const blocks = await loadBlocks();
@@ -521,7 +522,7 @@ function createPill(active, label, onClick, variant = '') {
     const variants = Array.isArray(variant) ? variant : variant.split(' ');
     variants.filter(Boolean).forEach(name => btn.classList.add(`builder-pill-${name}`));
   }
-  if (active) btn.classList.add('active');
+  setToggleState(btn, active);
   btn.textContent = label;
   btn.addEventListener('click', onClick);
   return btn;

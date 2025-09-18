@@ -1,6 +1,6 @@
 import { listExams, upsertExam, deleteExam, listExamSessions, loadExamSession, saveExamSessionProgress, deleteExamSessionProgress } from '../../storage/storage.js';
 import { state, setExamSession, setExamAttemptExpanded } from '../../state.js';
-import { uid } from '../../utils.js';
+import { uid, setToggleState } from '../../utils.js';
 import { confirmModal } from './confirm.js';
 
 const DEFAULT_SECONDS = 60;
@@ -679,7 +679,7 @@ function renderPalette(sidebar, sess, render) {
     btn.type = 'button';
     btn.textContent = String(idx + 1);
     btn.className = 'palette-button';
-    if (sess.idx === idx) btn.classList.add('active');
+    setToggleState(btn, sess.idx === idx);
     const answer = answers[idx];
 
     const hasAnswer = question.options.some(opt => opt.id === answer);
@@ -780,7 +780,7 @@ export function renderExamRunner(root, render) {
   const isFlagged = sess.mode === 'review'
     ? (sess.result.flagged || []).includes(sess.idx)
     : Boolean(sess.flagged?.[sess.idx]);
-  flagBtn.classList.toggle('active', isFlagged);
+  setToggleState(flagBtn, isFlagged);
   flagBtn.textContent = isFlagged ? '🚩 Flagged' : 'Flag question';
   if (sess.mode === 'taking') {
     flagBtn.addEventListener('click', () => {
@@ -847,8 +847,7 @@ export function renderExamRunner(root, render) {
     choice.appendChild(label);
     const isSelected = selected === opt.id;
     if (sess.mode === 'taking') {
-      if (isSelected) choice.classList.add('selected');
-      choice.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+      setToggleState(choice, isSelected, 'selected');
       choice.addEventListener('click', () => {
         sess.answers[sess.idx] = opt.id;
         if (sess.exam.timerMode !== 'timed' && sess.checked) {

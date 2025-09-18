@@ -1,4 +1,5 @@
 import { state, setFlashSession } from '../../state.js';
+import { setToggleState } from '../../utils.js';
 import { sectionDefsForKind } from './sections.js';
 import { renderRichText } from './rich-text.js';
 
@@ -34,6 +35,8 @@ export function renderFlashcards(root, redraw) {
   sectionsFor(item).forEach(([label, field]) => {
     const sec = document.createElement('div');
     sec.className = 'flash-section';
+    sec.setAttribute('role', 'button');
+    sec.tabIndex = 0;
     const head = document.createElement('div');
     head.className = 'flash-heading';
     head.textContent = label;
@@ -42,7 +45,18 @@ export function renderFlashcards(root, redraw) {
     renderRichText(body, item[field] || '');
     sec.appendChild(head);
     sec.appendChild(body);
-    sec.addEventListener('click', () => { sec.classList.toggle('revealed'); });
+    setToggleState(sec, false, 'revealed');
+    const toggleReveal = () => {
+      const next = sec.dataset.active !== 'true';
+      setToggleState(sec, next, 'revealed');
+    };
+    sec.addEventListener('click', toggleReveal);
+    sec.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleReveal();
+      }
+    });
     card.appendChild(sec);
   });
 

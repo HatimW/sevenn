@@ -1,4 +1,4 @@
-import { uid } from '../../utils.js';
+import { uid, setToggleState } from '../../utils.js';
 import { upsertItem, listBlocks } from '../../storage/storage.js';
 import { createFloatingWindow } from './window-manager.js';
 import { createRichTextEditor } from './rich-text.js';
@@ -182,7 +182,7 @@ export async function openEditor(kind, onSave, existing = null) {
     chip.type = 'button';
     chip.className = `tag-chip tag-chip-${variant}`;
     chip.textContent = label;
-    if (active) chip.classList.add('active');
+    setToggleState(chip, active);
     return chip;
   }
 
@@ -288,14 +288,14 @@ export async function openEditor(kind, onSave, existing = null) {
                 const key = `${blockId}|${l.id}`;
                 lectSet.delete(key);
                 const chip = lectureWrap.querySelector(`[data-lecture='${key}']`);
-                if (chip) chip.classList.remove('active');
+                if (chip) setToggleState(chip, false);
               });
             } else {
               weekSet.add(weekKey);
               section.classList.add('active');
               lectureWrap.classList.remove('collapsed');
             }
-            weekChip.classList.toggle('active', weekSet.has(weekKey));
+            setToggleState(weekChip, weekSet.has(weekKey));
           });
           section.appendChild(weekChip);
 
@@ -317,14 +317,14 @@ export async function openEditor(kind, onSave, existing = null) {
               lectureChip.addEventListener('click', () => {
                 if (lectSet.has(key)) {
                   lectSet.delete(key);
-                  lectureChip.classList.remove('active');
+                  setToggleState(lectureChip, false);
                 } else {
                   lectSet.add(key);
-                  lectureChip.classList.add('active');
+                  setToggleState(lectureChip, true);
                   if (!weekSet.has(weekKey)) {
                     weekSet.add(weekKey);
                     section.classList.add('active');
-                    weekChip.classList.add('active');
+                    setToggleState(weekChip, true);
                     lectureWrap.classList.remove('collapsed');
                   }
                 }
