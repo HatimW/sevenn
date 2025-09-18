@@ -155,6 +155,9 @@ function createToolbarButton(label, title, onClick){
   btn.textContent = label;
   btn.title = title;
   btn.setAttribute('aria-label', title);
+  btn.dataset.toggle = 'true';
+  btn.dataset.active = 'false';
+  btn.setAttribute('aria-pressed', 'false');
   btn.addEventListener('mousedown', e => e.preventDefault());
   btn.addEventListener('click', onClick);
   return btn;
@@ -224,7 +227,11 @@ export function createRichTextEditor({ value = '', onChange } = {}){
           active = false;
         }
       }
-      btn.classList.toggle('is-active', Boolean(active));
+      const isActive = Boolean(active);
+      btn.classList.toggle('is-active', isActive);
+      btn.dataset.active = isActive ? 'true' : 'false';
+      btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+
     });
   }
 
