@@ -681,7 +681,9 @@ function renderPalette(sidebar, sess, render) {
     btn.className = 'palette-button';
     if (sess.idx === idx) btn.classList.add('active');
     const answer = answers[idx];
+
     const hasAnswer = question.options.some(opt => opt.id === answer);
+
     if (hasAnswer) {
       btn.classList.add('answered');
       if (sess.mode === 'review') {

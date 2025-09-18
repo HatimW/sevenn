@@ -4768,6 +4768,7 @@
       if (sess.idx === idx) btn.classList.add("active");
       const answer = answers[idx];
       const hasAnswer = question.options.some((opt) => opt.id === answer);
+
       if (hasAnswer) {
         btn.classList.add("answered");
         if (sess.mode === "review") {
@@ -4902,6 +4903,7 @@
       if (sess.mode === "taking") choice.type = "button";
       choice.className = "exam-option";
       if (sess.mode === "review") choice.classList.add("review");
+
       const indicator = document.createElement("span");
       indicator.className = "option-indicator";
       choice.appendChild(indicator);
@@ -4909,6 +4911,7 @@
       label.className = "option-text";
       label.textContent = opt.text || "(Empty option)";
       choice.appendChild(label);
+
       const isSelected = selected === opt.id;
       if (sess.mode === "taking") {
         if (isSelected) choice.classList.add("selected");

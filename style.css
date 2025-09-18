@@ -2973,6 +2973,7 @@ body.map-toolbox-dragging {
   border-color: rgba(59, 130, 246, 0.95);
   background: linear-gradient(135deg, #bfdbfe, #60a5fa);
   color: #0f172a;
+
   font-weight: 600;
   box-shadow: 0 8px 18px rgba(37, 99, 235, 0.15), inset 0 0 0 1px rgba(255, 255, 255, 0.8);
 }
@@ -2986,6 +2987,7 @@ body.map-toolbox-dragging {
 .exam-option.selected .option-indicator::after {
   background: rgba(37, 99, 235, 0.92);
   transform: scale(0.9);
+
 }
 
 .exam-option.correct-answer {
@@ -3175,6 +3177,7 @@ body.map-toolbox-dragging {
   background: linear-gradient(135deg, #fef3c7 0%, #fde68a 35%, rgba(187, 247, 208, 0.85) 100%);
   border-color: rgba(251, 191, 36, 0.65);
   color: #78350f;
+
 }
 
 .palette-button.flagged.incorrect {
@@ -3182,6 +3185,7 @@ body.map-toolbox-dragging {
   border-color: rgba(251, 191, 36, 0.65);
   color: #78350f;
 }
+
 
 .palette-button.correct.active,
 .palette-button.incorrect.active,
