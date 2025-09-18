@@ -230,15 +230,19 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
       if (tag === 'i' || tag === 'em') state.italic = true;
       if (tag === 'u') state.underline = true;
       if (tag === 's' || tag === 'strike' || tag === 'del') state.strike = true;
-      if (typeof window !== 'undefined' && el instanceof Element) {
-        const style = window.getComputedStyle(el);
-        if (style) {
+      if (el instanceof Element) {
+        const inlineStyle = el.style;
+        if (inlineStyle) {
           if (!state.bold) {
-            const weight = parseInt(style.fontWeight, 10);
-            if (style.fontWeight === 'bold' || Number.isFinite(weight) && weight >= 600) state.bold = true;
+            const weightRaw = inlineStyle.fontWeight || '';
+            const weightText = typeof weightRaw === 'string' ? weightRaw.toLowerCase() : `${weightRaw}`.toLowerCase();
+            const weightValue = Number.parseInt(weightText, 10);
+            if (weightText === 'bold' || weightText === 'bolder' || Number.isFinite(weightValue) && weightValue >= 600) {
+              state.bold = true;
+            }
           }
-          if (!state.italic && style.fontStyle === 'italic') state.italic = true;
-          const deco = `${style.textDecorationLine || style.textDecoration || ''}`.toLowerCase();
+          if (!state.italic && inlineStyle.fontStyle === 'italic') state.italic = true;
+          const deco = `${inlineStyle.textDecorationLine || inlineStyle.textDecoration || ''}`.toLowerCase();
           if (!state.underline && deco.includes('underline')) state.underline = true;
           if (!state.strike && (deco.includes('line-through') || deco.includes('strikethrough'))) state.strike = true;
         }
