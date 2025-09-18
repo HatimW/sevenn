@@ -1,4 +1,4 @@
-var Sevenn = (() => {
+(() => {
   // js/state.js
   var state = {
     tab: "Diseases",
@@ -4767,7 +4767,8 @@ var Sevenn = (() => {
       btn.className = "palette-button";
       if (sess.idx === idx) btn.classList.add("active");
       const answer = answers[idx];
-      const hasAnswer = answer !== void 0 && answer !== null && answer !== "";
+      const hasAnswer = question.options.some((opt) => opt.id === answer);
+
       if (hasAnswer) {
         btn.classList.add("answered");
         if (sess.mode === "review") {
@@ -4902,7 +4903,15 @@ var Sevenn = (() => {
       if (sess.mode === "taking") choice.type = "button";
       choice.className = "exam-option";
       if (sess.mode === "review") choice.classList.add("review");
-      choice.textContent = opt.text || "(Empty option)";
+
+      const indicator = document.createElement("span");
+      indicator.className = "option-indicator";
+      choice.appendChild(indicator);
+      const label = document.createElement("span");
+      label.className = "option-text";
+      label.textContent = opt.text || "(Empty option)";
+      choice.appendChild(label);
+
       const isSelected = selected === opt.id;
       if (sess.mode === "taking") {
         if (isSelected) choice.classList.add("selected");

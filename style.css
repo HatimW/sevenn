@@ -2925,6 +2925,37 @@ body.map-toolbox-dragging {
   transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
   position: relative;
   box-shadow: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.exam-option .option-indicator {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 2px solid var(--border);
+  background: rgba(15, 23, 42, 0.65);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  position: relative;
+}
+
+.exam-option .option-indicator::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.exam-option .option-text {
+  flex: 1;
+  display: block;
 }
 
 .exam-option:hover {
@@ -2944,8 +2975,19 @@ body.map-toolbox-dragging {
   color: #0f172a;
 
   font-weight: 600;
-
   box-shadow: 0 8px 18px rgba(37, 99, 235, 0.15), inset 0 0 0 1px rgba(255, 255, 255, 0.8);
+}
+
+.exam-option.selected .option-indicator {
+  border-color: rgba(59, 130, 246, 0.95);
+  background: rgba(191, 219, 254, 0.75);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28);
+}
+
+.exam-option.selected .option-indicator::after {
+  background: rgba(37, 99, 235, 0.92);
+  transform: scale(0.9);
+
 }
 
 .exam-option.correct-answer {
@@ -2954,10 +2996,30 @@ body.map-toolbox-dragging {
   color: #064e3b;
 }
 
+.exam-option.correct-answer .option-indicator {
+  border-color: rgba(52, 211, 153, 0.9);
+  background: rgba(187, 247, 208, 0.85);
+}
+
+.exam-option.correct-answer .option-indicator::after {
+  background: rgba(22, 163, 74, 0.9);
+  transform: scale(0.85);
+}
+
 .exam-option.incorrect-answer {
   border-color: rgba(248, 113, 113, 0.9);
   background: linear-gradient(135deg, rgba(254, 205, 211, 0.8), rgba(252, 165, 165, 0.78));
   color: #7f1d1d;
+}
+
+.exam-option.incorrect-answer .option-indicator {
+  border-color: rgba(248, 113, 113, 0.9);
+  background: rgba(254, 205, 211, 0.8);
+}
+
+.exam-option.incorrect-answer .option-indicator::after {
+  background: rgba(220, 38, 38, 0.85);
+  transform: scale(0.85);
 }
 
 .exam-option.selected.correct-answer {
@@ -3115,6 +3177,7 @@ body.map-toolbox-dragging {
   background: linear-gradient(135deg, #fef3c7 0%, #fde68a 35%, rgba(187, 247, 208, 0.85) 100%);
   border-color: rgba(251, 191, 36, 0.65);
   color: #78350f;
+
 }
 
 .palette-button.flagged.incorrect {
