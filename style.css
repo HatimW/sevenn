@@ -411,9 +411,42 @@ button:not(.tab):not(.fab-btn):hover {
   background: linear-gradient(135deg, rgba(165, 180, 252, 0.96), rgba(129, 140, 248, 0.92));
 }
 
+.subtabs {
+  margin-top: var(--pad-sm);
+  column-gap: 8px;
+  row-gap: 8px;
+  flex-wrap: wrap;
+}
+
 .subtabs .tab {
   font-size: 0.9rem;
-  padding: 6px 14px;
+  padding: 6px 16px;
+  border-radius: var(--radius);
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  color: var(--text-muted);
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.subtabs .tab:hover,
+.subtabs .tab:focus-visible {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(56, 189, 248, 0.36);
+  color: var(--text);
+}
+
+.subtabs .tab[data-active="true"] {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.95), rgba(192, 132, 252, 0.9));
+  border-color: transparent;
+  color: #041021;
+  box-shadow: 0 16px 28px rgba(2, 6, 23, 0.38);
+  transform: translateY(-1px);
+}
+
+.subtabs .tab[data-active="true"]:hover,
+.subtabs .tab[data-active="true"]:focus-visible {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.98), rgba(192, 132, 252, 0.96));
+  color: #020a16;
 }
 
 .search-field {
@@ -1018,33 +1051,40 @@ input[type="checkbox"]:checked::after {
 }
 
 .rich-editor-btn {
-  background: transparent;
-  border: none;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.25);
   color: var(--text-muted);
-  padding: 4px 6px;
+  padding: 6px 8px;
   font-size: 0.85rem;
   cursor: pointer;
   border-radius: var(--radius-sm);
-  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  font-weight: 600;
+  font-style: normal;
+  letter-spacing: 0.01em;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
 }
 
 .rich-editor-btn:hover,
 .rich-editor-btn:focus {
-  background: rgba(148, 163, 184, 0.18);
+  background: rgba(56, 189, 248, 0.14);
   color: var(--text);
+  border-color: rgba(56, 189, 248, 0.35);
   outline: none;
 }
 
-.rich-editor-btn.is-active {
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.96), rgba(192, 132, 252, 0.9));
+.rich-editor-btn.is-active,
+.rich-editor-btn[data-active="true"] {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.96), rgba(192, 132, 252, 0.92));
+  border-color: transparent;
   color: #031327;
-  font-weight: 700;
-  box-shadow: 0 18px 32px rgba(2, 6, 23, 0.4);
+  box-shadow: 0 18px 32px rgba(2, 6, 23, 0.42);
   transform: translateY(-1px);
 }
 
 .rich-editor-btn.is-active:hover,
-.rich-editor-btn.is-active:focus {
+.rich-editor-btn.is-active:focus,
+.rich-editor-btn[data-active="true"]:hover,
+.rich-editor-btn[data-active="true"]:focus {
   background: linear-gradient(135deg, rgba(56, 189, 248, 0.98), rgba(192, 132, 252, 0.96));
   color: #020a16;
 }
