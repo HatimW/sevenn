@@ -160,7 +160,23 @@ export function createFloatingWindow({ title, width = 520, onClose, onBeforeClos
 
   closeBtn.addEventListener('click', () => { void close('close'); });
 
-  win.addEventListener('mousedown', () => bringToFront(win));
+  function isInteractiveTarget(target){
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.closest('input, textarea, select, [contenteditable="true"], button, label, .rich-editor-area')) {
+      return true;
+    }
+    return false;
+  }
+
+  win.addEventListener('mousedown', (event) => {
+    if (isInteractiveTarget(event.target)) {
+      requestAnimationFrame(() => bringToFront(win));
+      return;
+    }
+    bringToFront(win);
+  });
+
+  win.addEventListener('focusin', () => bringToFront(win));
 
   setupDragging(win, header);
 
