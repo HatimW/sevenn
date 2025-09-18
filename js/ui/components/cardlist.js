@@ -314,6 +314,22 @@ export async function renderCardList(container, items, kind, onChange){
   viewToggle.appendChild(gridBtn);
   toolbar.appendChild(viewToggle);
 
+  const controlsToggle = document.createElement('button');
+  controlsToggle.type = 'button';
+  controlsToggle.className = 'layout-advanced-toggle';
+  controlsToggle.addEventListener('click', () => {
+    setEntryLayout({ controlsVisible: !state.entryLayout.controlsVisible });
+    updateToolbar();
+  });
+  toolbar.appendChild(controlsToggle);
+
+  const controlsWrap = document.createElement('div');
+  controlsWrap.className = 'layout-controls';
+  const controlsId = `layout-controls-${Math.random().toString(36).slice(2, 8)}`;
+  controlsWrap.id = controlsId;
+  controlsToggle.setAttribute('aria-controls', controlsId);
+  toolbar.appendChild(controlsWrap);
+
   const columnWrap = document.createElement('label');
   columnWrap.className = 'layout-control';
   columnWrap.textContent = 'Columns';
@@ -333,7 +349,7 @@ export async function renderCardList(container, items, kind, onChange){
   });
   columnWrap.appendChild(columnInput);
   columnWrap.appendChild(columnValue);
-  toolbar.appendChild(columnWrap);
+  controlsWrap.appendChild(columnWrap);
 
   const scaleWrap = document.createElement('label');
   scaleWrap.className = 'layout-control';
@@ -354,15 +370,20 @@ export async function renderCardList(container, items, kind, onChange){
   });
   scaleWrap.appendChild(scaleInput);
   scaleWrap.appendChild(scaleValue);
-  toolbar.appendChild(scaleWrap);
+  controlsWrap.appendChild(scaleWrap);
 
   container.appendChild(toolbar);
 
   function updateToolbar(){
-    const mode = state.entryLayout.mode;
+    const { mode, controlsVisible } = state.entryLayout;
     listBtn.classList.toggle('active', mode === 'list');
     gridBtn.classList.toggle('active', mode === 'grid');
     columnWrap.style.display = mode === 'grid' ? '' : 'none';
+    controlsWrap.style.display = controlsVisible ? '' : 'none';
+    controlsWrap.setAttribute('aria-hidden', controlsVisible ? 'false' : 'true');
+    controlsToggle.textContent = controlsVisible ? 'Hide layout tools' : 'Show layout tools';
+    controlsToggle.setAttribute('aria-expanded', controlsVisible ? 'true' : 'false');
+    controlsToggle.classList.toggle('active', controlsVisible);
   }
 
   function applyLayout(){

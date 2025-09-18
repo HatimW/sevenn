@@ -11,7 +11,7 @@ export const state = {
   },
   query: "",
   filters: { types:["disease","drug","concept"], block:"", week:"", onlyFav:false, sort:"updated" },
-  entryLayout: { mode: 'list', columns: 3, scale: 1 },
+  entryLayout: { mode: 'list', columns: 3, scale: 1, controlsVisible: false },
   builder: {
     blocks:[],
     weeks:[],
@@ -66,5 +66,8 @@ export function setEntryLayout(patch){
   }
   if (patch.mode === 'list' || patch.mode === 'grid') {
     layout.mode = patch.mode;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'controlsVisible')) {
+    layout.controlsVisible = Boolean(patch.controlsVisible);
   }
 }
