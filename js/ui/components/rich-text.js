@@ -188,10 +188,47 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
     editable.focus({ preventScroll: false });
   }
 
+  let savedRange = null;
+
+  function rangeWithinEditor(range, { allowCollapsed = true } = {}){
+    if (!range) return false;
+    if (!allowCollapsed && range.collapsed) return false;
+    const { startContainer, endContainer } = range;
+    if (!startContainer || !endContainer) return false;
+    return editable.contains(startContainer) && editable.contains(endContainer);
+  }
+
+  function captureSelectionRange(){
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (!rangeWithinEditor(range)) return;
+    savedRange = range.cloneRange();
+  }
+
+  function getSavedRange({ requireSelection = false } = {}){
+    if (!savedRange) return null;
+    return rangeWithinEditor(savedRange, { allowCollapsed: !requireSelection }) ? savedRange : null;
+  }
+
+  function restoreSavedRange({ requireSelection = false } = {}){
+    const range = getSavedRange({ requireSelection });
+    if (!range) return false;
+    const selection = window.getSelection();
+    if (!selection) return false;
+    selection.removeAllRanges();
+    const clone = range.cloneRange();
+    selection.addRange(clone);
+    savedRange = clone.cloneRange();
+    return true;
+  }
+
   function runCommand(action, { requireSelection = false } = {}){
-    if (requireSelection && !hasActiveSelection()) return false;
+    if (!getSavedRange({ requireSelection })) return false;
     focusEditor();
+    if (!restoreSavedRange({ requireSelection })) return false;
     const result = action();
+    captureSelectionRange();
     editable.dispatchEvent(new Event('input'));
     updateInlineState();
     return result;
@@ -199,8 +236,20 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
 
   function exec(command, arg = null, { requireSelection = false, styleWithCss = true } = {}){
     return runCommand(() => {
-      document.execCommand('styleWithCSS', false, styleWithCss);
-      return document.execCommand(command, false, arg);
+      let previousStyleWithCss = null;
+      try {
+        previousStyleWithCss = document.queryCommandState('styleWithCSS');
+      } catch (err) {
+        previousStyleWithCss = null;
+      }
+      try {
+        document.execCommand('styleWithCSS', false, styleWithCss);
+        return document.execCommand(command, false, arg);
+      } finally {
+        if (previousStyleWithCss !== null) {
+          document.execCommand('styleWithCSS', false, previousStyleWithCss);
+        }
+      }
     }, { requireSelection });
   }
 
@@ -215,7 +264,7 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   }
 
   function hasActiveSelection(){
-    return selectionWithinEditor({ allowCollapsed: false });
+    return Boolean(getSavedRange({ requireSelection: true }));
   }
 
   function collapsedInlineState(){
@@ -319,7 +368,7 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   colorInput.value = '#ffffff';
   colorInput.dataset.lastColor = '#ffffff';
   colorInput.addEventListener('input', () => {
-    if (!hasActiveSelection()) {
+    if (!getSavedRange({ requireSelection: true })) {
       const previous = colorInput.dataset.lastColor || '#ffffff';
       colorInput.value = previous;
       return;
@@ -344,7 +393,7 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   ];
 
   function applyHighlight(color) {
-    if (!hasActiveSelection()) return;
+    if (!getSavedRange({ requireSelection: true })) return;
     exec('hiliteColor', color, { requireSelection: true });
   }
 
@@ -524,6 +573,7 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
       document.removeEventListener('selectionchange', selectionHandler);
       return;
     }
+    captureSelectionRange();
     updateInlineState();
   };
   document.addEventListener('selectionchange', selectionHandler);
