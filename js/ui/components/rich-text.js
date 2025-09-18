@@ -227,9 +227,20 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
     if (!getSavedRange({ requireSelection })) return false;
     focusEditor();
     if (!restoreSavedRange({ requireSelection })) return false;
+
+    let inputFired = false;
+    const handleInput = () => {
+      inputFired = true;
+    };
+    editable.addEventListener('input', handleInput, { once: true });
+
     const result = action();
+
+    editable.removeEventListener('input', handleInput);
     captureSelectionRange();
-    editable.dispatchEvent(new Event('input'));
+    if (!inputFired) {
+      editable.dispatchEvent(new Event('input', { bubbles: true }));
+    }
     updateInlineState();
     return result;
   }
