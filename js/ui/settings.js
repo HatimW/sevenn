@@ -3,96 +3,296 @@ import { confirmModal } from './components/confirm.js';
 
 const collapsedLectureBlocks = new Set();
 
-function sectionKey(blockId) {
-  return blockId || '__unassigned__';
+function isLectureListCollapsed(blockId) {
+  return collapsedLectureBlocks.has(blockId);
 }
 
-function isBlockCollapsed(blockId) {
-  return collapsedLectureBlocks.has(sectionKey(blockId));
-}
-
-function setBlockCollapsed(blockId, collapsed) {
-  const key = sectionKey(blockId);
-  if (collapsed) collapsedLectureBlocks.add(key);
-  else collapsedLectureBlocks.delete(key);
-}
-
-function createPanel(title, description) {
-  const panel = document.createElement('section');
-  panel.className = 'settings-panel';
-
-  const header = document.createElement('div');
-  header.className = 'settings-panel-header';
-  const heading = document.createElement('h3');
-  heading.textContent = title;
-  header.appendChild(heading);
-  if (description) {
-    const subtitle = document.createElement('p');
-    subtitle.className = 'settings-panel-description';
-    subtitle.textContent = description;
-    header.appendChild(subtitle);
+function toggleLectureListCollapse(blockId) {
+  if (collapsedLectureBlocks.has(blockId)) {
+    collapsedLectureBlocks.delete(blockId);
+  } else {
+    collapsedLectureBlocks.add(blockId);
   }
-  panel.appendChild(header);
-
-  const body = document.createElement('div');
-  body.className = 'settings-panel-body';
-  panel.appendChild(body);
-
-  return { panel, body };
 }
 
 export async function renderSettings(root) {
   root.innerHTML = '';
-  root.className = 'settings-root';
 
   const settings = await getSettings();
-  const blocks = await listBlocks();
-  blocks.sort((a, b) => a.order - b.order || a.blockId.localeCompare(b.blockId));
 
-  const page = document.createElement('div');
-  page.className = 'settings-page';
-  root.appendChild(page);
+  const settingsCard = document.createElement('section');
+  settingsCard.className = 'card';
+  const heading = document.createElement('h2');
+  heading.textContent = 'Settings';
+  settingsCard.appendChild(heading);
 
-  const hero = document.createElement('header');
-  hero.className = 'settings-hero';
-  const title = document.createElement('h1');
-  title.textContent = 'Settings';
-  const intro = document.createElement('p');
-  intro.textContent = 'Tune your study experience, manage curriculum structure, and keep your data in sync with the rest of Sevenn.';
-  hero.append(title, intro);
-  page.appendChild(hero);
-
-  const panels = document.createElement('div');
-  panels.className = 'settings-panels';
-  page.appendChild(panels);
-
-  const { panel: goalPanel, body: goalBody } = createPanel('Study goals', 'Set your daily target so the review queue stays manageable.');
-  const goalField = document.createElement('label');
-  goalField.className = 'settings-field';
-  goalField.textContent = 'Daily review target';
-  const goalHint = document.createElement('span');
-  goalHint.className = 'settings-field-hint';
-  goalHint.textContent = 'Number of cards to review each day';
-  goalField.appendChild(goalHint);
-  const goalInput = document.createElement('input');
-  goalInput.type = 'number';
-  goalInput.className = 'input';
-  goalInput.min = '1';
-  goalInput.value = settings.dailyCount;
-  goalInput.addEventListener('change', () => {
-    saveSettings({ dailyCount: Number(goalInput.value) });
+  const dailyLabel = document.createElement('label');
+  dailyLabel.textContent = 'Daily review target:';
+  const dailyInput = document.createElement('input');
+  dailyInput.type = 'number';
+  dailyInput.className = 'input';
+  dailyInput.min = '1';
+  dailyInput.value = settings.dailyCount;
+  dailyInput.addEventListener('change', () => {
+    saveSettings({ dailyCount: Number(dailyInput.value) });
   });
-  goalField.appendChild(goalInput);
-  goalBody.appendChild(goalField);
-  panels.appendChild(goalPanel);
+  dailyLabel.appendChild(dailyInput);
+  settingsCard.appendChild(dailyLabel);
 
-  const { panel: dataPanel, body: dataBody } = createPanel('Data & backups', 'Keep a local copy of your work or bring in data from elsewhere.');
-  const dataActions = document.createElement('div');
-  dataActions.className = 'settings-action-grid';
+  root.appendChild(settingsCard);
+
+  const blocksCard = document.createElement('section');
+  blocksCard.className = 'card';
+  const bHeading = document.createElement('h2');
+  bHeading.textContent = 'Blocks';
+  blocksCard.appendChild(bHeading);
+
+  const list = document.createElement('div');
+  list.className = 'block-list';
+  blocksCard.appendChild(list);
+
+  const blocks = await listBlocks();
+  blocks.forEach((b,i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'block';
+    const lectures = (b.lectures || []).slice().sort((a,b)=> b.week - a.week || b.id - a.id);
+    const lecturesCollapsed = isLectureListCollapsed(b.blockId);
+    const title = document.createElement('h3');
+    title.textContent = `${b.blockId} – ${b.title}`;
+    wrap.appendChild(title);
+
+    const wkInfo = document.createElement('div');
+    wkInfo.textContent = `Weeks: ${b.weeks}`;
+    wrap.appendChild(wkInfo);
+
+    if (lectures.length || lecturesCollapsed) {
+      const toggleLecturesBtn = document.createElement('button');
+      toggleLecturesBtn.type = 'button';
+      toggleLecturesBtn.className = 'btn secondary settings-lecture-toggle';
+      toggleLecturesBtn.textContent = lecturesCollapsed ? 'Show lectures' : 'Hide lectures';
+      toggleLecturesBtn.addEventListener('click', async () => {
+        toggleLectureListCollapse(b.blockId);
+        await renderSettings(root);
+      });
+      wrap.appendChild(toggleLecturesBtn);
+    }
+
+    const controls = document.createElement('div');
+    controls.className = 'row';
+
+    const upBtn = document.createElement('button');
+    upBtn.className = 'btn';
+    upBtn.textContent = '↑';
+    upBtn.disabled = i === 0;
+    upBtn.addEventListener('click', async () => {
+      const other = blocks[i-1];
+      const tmp = b.order; b.order = other.order; other.order = tmp;
+      await upsertBlock(b); await upsertBlock(other);
+      await renderSettings(root);
+    });
+    controls.appendChild(upBtn);
+
+    const downBtn = document.createElement('button');
+    downBtn.className = 'btn';
+    downBtn.textContent = '↓';
+    downBtn.disabled = i === blocks.length - 1;
+    downBtn.addEventListener('click', async () => {
+      const other = blocks[i+1];
+      const tmp = b.order; b.order = other.order; other.order = tmp;
+      await upsertBlock(b); await upsertBlock(other);
+      await renderSettings(root);
+    });
+    controls.appendChild(downBtn);
+
+    const edit = document.createElement('button');
+    edit.className = 'btn';
+    edit.textContent = 'Edit';
+    controls.appendChild(edit);
+
+    const del = document.createElement('button');
+    del.className = 'btn';
+    del.textContent = 'Delete';
+    del.addEventListener('click', async () => {
+      if (await confirmModal('Delete block?')) {
+        await deleteBlock(b.blockId);
+        await renderSettings(root);
+      }
+    });
+    controls.appendChild(del);
+    wrap.appendChild(controls);
+
+    const editForm = document.createElement('form');
+    editForm.className = 'row';
+    editForm.style.display = 'none';
+    const titleInput = document.createElement('input');
+    titleInput.className = 'input';
+    titleInput.value = b.title;
+    const weeksInput = document.createElement('input');
+    weeksInput.className = 'input';
+    weeksInput.type = 'number';
+    weeksInput.value = b.weeks;
+    const colorInput = document.createElement('input');
+    colorInput.className = 'input';
+    colorInput.type = 'color';
+    colorInput.value = b.color || '#ffffff';
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn';
+    saveBtn.type = 'submit';
+    saveBtn.textContent = 'Save';
+    editForm.append(titleInput, weeksInput, colorInput, saveBtn);
+    editForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const updated = { ...b, title: titleInput.value.trim(), weeks: Number(weeksInput.value), color: colorInput.value };
+      await upsertBlock(updated);
+      await renderSettings(root);
+    });
+    wrap.appendChild(editForm);
+
+    edit.addEventListener('click', () => {
+      editForm.style.display = editForm.style.display === 'none' ? 'flex' : 'none';
+    });
+
+    const lectureSection = document.createElement('div');
+    lectureSection.className = 'settings-lecture-section';
+    lectureSection.hidden = lecturesCollapsed;
+
+    const lecList = document.createElement('ul');
+    lectures.forEach(l => {
+      const li = document.createElement('li');
+      li.className = 'row';
+      const span = document.createElement('span');
+      span.textContent = `${l.id}: ${l.name} (W${l.week})`;
+      li.appendChild(span);
+
+      const editLec = document.createElement('button');
+      editLec.className = 'btn';
+      editLec.textContent = 'Edit';
+      const delLec = document.createElement('button');
+      delLec.className = 'btn';
+      delLec.textContent = 'Delete';
+
+      editLec.addEventListener('click', () => {
+        li.innerHTML = '';
+        li.className = 'row';
+        const nameInput = document.createElement('input');
+        nameInput.className = 'input';
+        nameInput.value = l.name;
+        const weekInput = document.createElement('input');
+        weekInput.className = 'input';
+        weekInput.type = 'number';
+        weekInput.value = l.week;
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'btn';
+        saveBtn.textContent = 'Save';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn';
+        cancelBtn.textContent = 'Cancel';
+        li.append(nameInput, weekInput, saveBtn, cancelBtn);
+        saveBtn.addEventListener('click', async () => {
+          const name = nameInput.value.trim();
+          const week = Number(weekInput.value);
+          if (!name || !week || week < 1 || week > b.weeks) return;
+          await updateLecture(b.blockId, { id: l.id, name, week });
+          await renderSettings(root);
+        });
+        cancelBtn.addEventListener('click', async () => {
+          await renderSettings(root);
+        });
+      });
+
+      delLec.addEventListener('click', async () => {
+        if (await confirmModal('Delete lecture?')) {
+          await deleteLecture(b.blockId, l.id);
+          await renderSettings(root);
+        }
+      });
+
+      li.append(editLec, delLec);
+      lecList.appendChild(li);
+    });
+    lectureSection.appendChild(lecList);
+
+    const lecForm = document.createElement('form');
+    lecForm.className = 'row';
+    const idInput = document.createElement('input');
+    idInput.className = 'input';
+    idInput.placeholder = 'id';
+    idInput.type = 'number';
+    const nameInput = document.createElement('input');
+    nameInput.className = 'input';
+    nameInput.placeholder = 'name';
+    const weekInput = document.createElement('input');
+    weekInput.className = 'input';
+    weekInput.placeholder = 'week';
+    weekInput.type = 'number';
+    const addBtn = document.createElement('button');
+    addBtn.className = 'btn';
+    addBtn.type = 'submit';
+    addBtn.textContent = 'Add lecture';
+    lecForm.append(idInput, nameInput, weekInput, addBtn);
+    lecForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const lecture = { id: Number(idInput.value), name: nameInput.value.trim(), week: Number(weekInput.value) };
+      if (!lecture.id || !lecture.name || !lecture.week) return;
+      if (lecture.week < 1 || lecture.week > b.weeks) return;
+      const updated = { ...b, lectures: [...b.lectures, lecture] };
+      await upsertBlock(updated);
+      await renderSettings(root);
+    });
+    lectureSection.appendChild(lecForm);
+
+    wrap.appendChild(lectureSection);
+
+    list.appendChild(wrap);
+  });
+
+  const form = document.createElement('form');
+  form.className = 'row';
+  const id = document.createElement('input');
+  id.className = 'input';
+  id.placeholder = 'ID';
+  const titleInput = document.createElement('input');
+  titleInput.className = 'input';
+  titleInput.placeholder = 'Title';
+  const weeks = document.createElement('input');
+  weeks.className = 'input';
+  weeks.type = 'number';
+  weeks.placeholder = 'Weeks';
+  const color = document.createElement('input');
+  color.className = 'input';
+  color.type = 'color';
+  color.value = '#ffffff';
+  const add = document.createElement('button');
+  add.className = 'btn';
+  add.type = 'submit';
+  add.textContent = 'Add block';
+  form.append(id, titleInput, weeks, color, add);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const def = {
+      blockId: id.value.trim(),
+      title: titleInput.value.trim(),
+      weeks: Number(weeks.value),
+      color: color.value,
+      lectures: [],
+    };
+    if (!def.blockId || !def.title || !def.weeks) return;
+    await upsertBlock(def);
+    await renderSettings(root);
+  });
+  blocksCard.appendChild(form);
+
+  root.appendChild(blocksCard);
+
+  const dataCard = document.createElement('section');
+  dataCard.className = 'card';
+  const dHeading = document.createElement('h2');
+  dHeading.textContent = 'Data';
+  dataCard.appendChild(dHeading);
 
   const exportBtn = document.createElement('button');
   exportBtn.className = 'btn';
-  exportBtn.textContent = 'Export database';
+  exportBtn.textContent = 'Export DB';
   exportBtn.addEventListener('click', async () => {
     const dump = await exportJSON();
     const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
@@ -102,17 +302,14 @@ export async function renderSettings(root) {
     a.click();
     URL.revokeObjectURL(a.href);
   });
-  dataActions.appendChild(exportBtn);
+  dataCard.appendChild(exportBtn);
 
-  const importBtn = document.createElement('button');
-  importBtn.className = 'btn secondary';
-  importBtn.textContent = 'Import database';
   const importInput = document.createElement('input');
   importInput.type = 'file';
   importInput.accept = 'application/json';
-  importInput.hidden = true;
+  importInput.style.display = 'none';
   importInput.addEventListener('change', async () => {
-    const file = importInput.files?.[0];
+    const file = importInput.files[0];
     if (!file) return;
     try {
       const text = await file.text();
@@ -120,15 +317,20 @@ export async function renderSettings(root) {
       const res = await importJSON(json);
       alert(res.message);
       location.reload();
-    } catch (err) {
+    } catch (e) {
       alert('Import failed');
     }
   });
+
+  const importBtn = document.createElement('button');
+  importBtn.className = 'btn';
+  importBtn.textContent = 'Import DB';
   importBtn.addEventListener('click', () => importInput.click());
-  dataActions.appendChild(importBtn);
+  dataCard.appendChild(importBtn);
+  dataCard.appendChild(importInput);
 
   const ankiBtn = document.createElement('button');
-  ankiBtn.className = 'btn secondary';
+  ankiBtn.className = 'btn';
   ankiBtn.textContent = 'Export Anki CSV';
   ankiBtn.addEventListener('click', async () => {
     const dump = await exportJSON();
@@ -139,344 +341,7 @@ export async function renderSettings(root) {
     a.click();
     URL.revokeObjectURL(a.href);
   });
-  dataActions.appendChild(ankiBtn);
+  dataCard.appendChild(ankiBtn);
 
-  dataBody.appendChild(dataActions);
-  dataBody.appendChild(importInput);
-  panels.appendChild(dataPanel);
-
-  const { panel: blockPanel, body: blockBody } = createPanel('Curriculum blocks', 'Organise blocks, weeks, and lectures to match the way you study.');
-  blockPanel.classList.add('settings-panel-wide');
-  page.appendChild(blockPanel);
-
-  const blockList = document.createElement('div');
-  blockList.className = 'settings-block-list';
-  blockBody.appendChild(blockList);
-
-  if (!blocks.length) {
-    const empty = document.createElement('p');
-    empty.className = 'settings-empty';
-    empty.textContent = 'No blocks yet. Use the form below to start building your curriculum structure.';
-    blockList.appendChild(empty);
-  } else {
-    blocks.forEach((block, index) => {
-      blockList.appendChild(createBlockCard(block, index));
-    });
-  }
-
-  const createWrap = document.createElement('div');
-  createWrap.className = 'settings-block-create-wrap';
-  const createTitle = document.createElement('h4');
-  createTitle.textContent = 'Add new block';
-  createWrap.appendChild(createTitle);
-
-  const createForm = document.createElement('form');
-  createForm.className = 'settings-inline-form settings-block-create';
-  const idInput = document.createElement('input');
-  idInput.className = 'input';
-  idInput.placeholder = 'ID';
-  const titleInput = document.createElement('input');
-  titleInput.className = 'input';
-  titleInput.placeholder = 'Title';
-  const weeksInput = document.createElement('input');
-  weeksInput.className = 'input';
-  weeksInput.type = 'number';
-  weeksInput.min = '1';
-  weeksInput.placeholder = 'Weeks';
-  const colorInput = document.createElement('input');
-  colorInput.className = 'input';
-  colorInput.type = 'color';
-  colorInput.value = '#ffffff';
-  const addBtn = document.createElement('button');
-  addBtn.className = 'btn';
-  addBtn.type = 'submit';
-  addBtn.textContent = 'Create block';
-  createForm.append(idInput, titleInput, weeksInput, colorInput, addBtn);
-  createForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const def = {
-      blockId: idInput.value.trim(),
-      title: titleInput.value.trim(),
-      weeks: Number(weeksInput.value),
-      color: colorInput.value,
-      lectures: [],
-    };
-    if (!def.blockId || !def.title || !def.weeks) return;
-    await upsertBlock(def);
-    await renderSettings(root);
-  });
-  createWrap.appendChild(createForm);
-  blockBody.appendChild(createWrap);
-
-  function createBlockCard(block, index) {
-    const card = document.createElement('article');
-    card.className = 'settings-block-card';
-    card.style.setProperty('--block-color', block.color || '#38bdf8');
-    let collapsed = isBlockCollapsed(block.blockId);
-    if (collapsed) card.classList.add('collapsed');
-
-    const header = document.createElement('div');
-    header.className = 'settings-block-header';
-    card.appendChild(header);
-
-    const info = document.createElement('div');
-    info.className = 'settings-block-info';
-    const badge = document.createElement('span');
-    badge.className = 'settings-block-id';
-    badge.textContent = block.blockId;
-    const name = document.createElement('h4');
-    name.className = 'settings-block-title';
-    name.textContent = block.title;
-    const meta = document.createElement('p');
-    meta.className = 'settings-block-meta';
-    const lectures = (block.lectures || []).slice().sort((a, b) => a.week - b.week || a.id - b.id);
-    const metaParts = [];
-    metaParts.push(`${block.weeks} ${block.weeks === 1 ? 'week' : 'weeks'}`);
-    metaParts.push(`${lectures.length} ${lectures.length === 1 ? 'lecture' : 'lectures'}`);
-    meta.textContent = metaParts.join(' • ');
-    info.append(badge, name, meta);
-    header.appendChild(info);
-
-    const actions = document.createElement('div');
-    actions.className = 'settings-block-actions';
-
-    const collapseBtn = document.createElement('button');
-    collapseBtn.className = 'icon-btn ghost settings-collapse-btn';
-    const updateCollapseBtn = () => {
-      collapseBtn.textContent = collapsed ? '▸' : '▾';
-      collapseBtn.title = collapsed ? 'Show lectures' : 'Hide lectures';
-      collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-    };
-    updateCollapseBtn();
-    collapseBtn.addEventListener('click', () => {
-      collapsed = !collapsed;
-      card.classList.toggle('collapsed', collapsed);
-      content.hidden = collapsed;
-      setBlockCollapsed(block.blockId, collapsed);
-      updateCollapseBtn();
-    });
-    actions.appendChild(collapseBtn);
-
-    const upBtn = document.createElement('button');
-    upBtn.className = 'icon-btn ghost';
-    upBtn.textContent = '▲';
-    upBtn.title = 'Move up';
-    upBtn.disabled = index === 0;
-    if (!upBtn.disabled) {
-      upBtn.addEventListener('click', async () => {
-        const other = blocks[index - 1];
-        const tmp = block.order; block.order = other.order; other.order = tmp;
-        await upsertBlock(block); await upsertBlock(other);
-        await renderSettings(root);
-      });
-    }
-    actions.appendChild(upBtn);
-
-    const downBtn = document.createElement('button');
-    downBtn.className = 'icon-btn ghost';
-    downBtn.textContent = '▼';
-    downBtn.title = 'Move down';
-    downBtn.disabled = index === blocks.length - 1;
-    if (!downBtn.disabled) {
-      downBtn.addEventListener('click', async () => {
-        const other = blocks[index + 1];
-        const tmp = block.order; block.order = other.order; other.order = tmp;
-        await upsertBlock(block); await upsertBlock(other);
-        await renderSettings(root);
-      });
-    }
-    actions.appendChild(downBtn);
-
-    const editBtn = document.createElement('button');
-    editBtn.className = 'icon-btn ghost';
-    editBtn.textContent = '✎';
-    editBtn.title = 'Edit block';
-    actions.appendChild(editBtn);
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'icon-btn danger';
-    deleteBtn.textContent = '🗑';
-    deleteBtn.title = 'Delete block';
-    deleteBtn.addEventListener('click', async () => {
-      if (await confirmModal('Delete block?')) {
-        await deleteBlock(block.blockId);
-        await renderSettings(root);
-      }
-    });
-    actions.appendChild(deleteBtn);
-
-    header.appendChild(actions);
-
-    const content = document.createElement('div');
-    content.className = 'settings-block-content';
-    content.hidden = collapsed;
-    card.appendChild(content);
-
-    const editForm = document.createElement('form');
-    editForm.className = 'settings-inline-form settings-block-edit';
-    editForm.hidden = true;
-    const editTitle = document.createElement('input');
-    editTitle.className = 'input';
-    editTitle.value = block.title;
-    const editWeeks = document.createElement('input');
-    editWeeks.className = 'input';
-    editWeeks.type = 'number';
-    editWeeks.min = '1';
-    editWeeks.value = block.weeks;
-    const editColor = document.createElement('input');
-    editColor.className = 'input';
-    editColor.type = 'color';
-    editColor.value = block.color || '#ffffff';
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'btn';
-    saveBtn.type = 'submit';
-    saveBtn.textContent = 'Save changes';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'btn secondary';
-    cancelBtn.type = 'button';
-    cancelBtn.textContent = 'Cancel';
-    editForm.append(editTitle, editWeeks, editColor, saveBtn, cancelBtn);
-    editForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const updated = { ...block, title: editTitle.value.trim(), weeks: Number(editWeeks.value), color: editColor.value };
-      await upsertBlock(updated);
-      await renderSettings(root);
-    });
-    cancelBtn.addEventListener('click', () => {
-      editTitle.value = block.title;
-      editWeeks.value = block.weeks;
-      editColor.value = block.color || '#ffffff';
-      editForm.hidden = true;
-      editBtn.setAttribute('aria-expanded', 'false');
-    });
-    content.appendChild(editForm);
-
-    editBtn.addEventListener('click', () => {
-      const showing = !editForm.hidden;
-      editForm.hidden = showing;
-      editBtn.setAttribute('aria-expanded', showing ? 'false' : 'true');
-    });
-
-    const lectureSection = document.createElement('section');
-    lectureSection.className = 'settings-lecture-section';
-    content.appendChild(lectureSection);
-
-    if (!lectures.length) {
-      const empty = document.createElement('p');
-      empty.className = 'settings-empty';
-      empty.textContent = 'No lectures yet for this block.';
-      lectureSection.appendChild(empty);
-    } else {
-      const lectureList = document.createElement('div');
-      lectureList.className = 'settings-lecture-list';
-      lectureSection.appendChild(lectureList);
-
-      lectures.forEach((lecture) => {
-        const row = document.createElement('div');
-        row.className = 'settings-lecture-row';
-
-        const details = document.createElement('div');
-        details.className = 'settings-lecture-info';
-        const nameEl = document.createElement('div');
-        nameEl.className = 'settings-lecture-name';
-        nameEl.textContent = lecture.name;
-        const metaEl = document.createElement('div');
-        metaEl.className = 'settings-lecture-meta';
-        metaEl.textContent = `Week ${lecture.week} • ID ${lecture.id}`;
-        details.append(nameEl, metaEl);
-        row.appendChild(details);
-
-        const rowActions = document.createElement('div');
-        rowActions.className = 'settings-lecture-actions';
-        const editLectureBtn = document.createElement('button');
-        editLectureBtn.className = 'icon-btn ghost';
-        editLectureBtn.textContent = '✎';
-        editLectureBtn.title = 'Edit lecture';
-        const deleteLectureBtn = document.createElement('button');
-        deleteLectureBtn.className = 'icon-btn danger';
-        deleteLectureBtn.textContent = '🗑';
-        deleteLectureBtn.title = 'Delete lecture';
-        rowActions.append(editLectureBtn, deleteLectureBtn);
-        row.appendChild(rowActions);
-
-        editLectureBtn.addEventListener('click', () => {
-          const form = document.createElement('form');
-          form.className = 'settings-inline-form settings-lecture-edit';
-          const nameInput = document.createElement('input');
-          nameInput.className = 'input';
-          nameInput.value = lecture.name;
-          const weekInput = document.createElement('input');
-          weekInput.className = 'input';
-          weekInput.type = 'number';
-          weekInput.min = '1';
-          weekInput.max = block.weeks;
-          weekInput.value = lecture.week;
-          const saveLectureBtn = document.createElement('button');
-          saveLectureBtn.className = 'btn';
-          saveLectureBtn.type = 'submit';
-          saveLectureBtn.textContent = 'Save';
-          const cancelLectureBtn = document.createElement('button');
-          cancelLectureBtn.className = 'btn secondary';
-          cancelLectureBtn.type = 'button';
-          cancelLectureBtn.textContent = 'Cancel';
-          form.append(nameInput, weekInput, saveLectureBtn, cancelLectureBtn);
-          row.replaceChildren(form);
-          form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const name = nameInput.value.trim();
-            const week = Number(weekInput.value);
-            if (!name || !week || week < 1 || week > block.weeks) return;
-            await updateLecture(block.blockId, { id: lecture.id, name, week });
-            await renderSettings(root);
-          });
-          cancelLectureBtn.addEventListener('click', async () => {
-            await renderSettings(root);
-          });
-        });
-
-        deleteLectureBtn.addEventListener('click', async () => {
-          if (await confirmModal('Delete lecture?')) {
-            await deleteLecture(block.blockId, lecture.id);
-            await renderSettings(root);
-          }
-        });
-
-        lectureList.appendChild(row);
-      });
-    }
-
-    const lectureForm = document.createElement('form');
-    lectureForm.className = 'settings-inline-form settings-lecture-add';
-    const lectureId = document.createElement('input');
-    lectureId.className = 'input';
-    lectureId.placeholder = 'Lecture ID';
-    lectureId.type = 'number';
-    lectureId.min = '1';
-    const lectureName = document.createElement('input');
-    lectureName.className = 'input';
-    lectureName.placeholder = 'Lecture name';
-    const lectureWeek = document.createElement('input');
-    lectureWeek.className = 'input';
-    lectureWeek.placeholder = 'Week';
-    lectureWeek.type = 'number';
-    lectureWeek.min = '1';
-    lectureWeek.max = block.weeks;
-    const lectureAdd = document.createElement('button');
-    lectureAdd.className = 'btn subtle';
-    lectureAdd.type = 'submit';
-    lectureAdd.textContent = 'Add lecture';
-    lectureForm.append(lectureId, lectureName, lectureWeek, lectureAdd);
-    lectureForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-    const lecture = { id: Number(lectureId.value), name: lectureName.value.trim(), week: Number(lectureWeek.value) };
-    if (!lecture.id || !lecture.name || !lecture.week) return;
-    if (lecture.week < 1 || lecture.week > block.weeks) return;
-    const updated = { ...block, lectures: [...(block.lectures || []), lecture] };
-      await upsertBlock(updated);
-      await renderSettings(root);
-    });
-    lectureSection.appendChild(lectureForm);
-
-    return card;
-  }
+  root.appendChild(dataCard);
 }
