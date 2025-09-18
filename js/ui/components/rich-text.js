@@ -202,7 +202,50 @@ export function createRichTextEditor({ value = '' } = {}){
     return group;
   }
 
+  const popovers = [];
+
+  function closePopovers(except = null) {
+    popovers.forEach(({ panel, group }) => {
+      if (panel === except) return;
+      panel.hidden = true;
+      group.classList.remove('open');
+    });
+  }
+
+  const handlePointerDown = (event) => {
+    if (!wrapper.contains(event.target)) closePopovers();
+  };
+  document.addEventListener('pointerdown', handlePointerDown, true);
+
+  const observer = new MutationObserver(() => {
+    if (!document.body.contains(wrapper)) {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  function createPopoverGroup(label, title) {
+    const group = document.createElement('div');
+    group.className = 'rich-editor-group rich-editor-group--popover';
+    const panel = document.createElement('div');
+    panel.className = 'rich-editor-popover';
+    panel.hidden = true;
+    const trigger = createToolbarButton(label, title, () => {
+      const willOpen = panel.hidden;
+      closePopovers(panel);
+      panel.hidden = !willOpen;
+      group.classList.toggle('open', willOpen);
+    });
+    group.appendChild(trigger);
+    group.appendChild(panel);
+    toolbar.appendChild(group);
+    popovers.push({ panel, group });
+    return { group, panel, trigger };
+  }
+
   const inlineGroup = createGroup();
+  inlineGroup.classList.add('rich-editor-group--compact');
   [
     createToolbarButton('B', 'Bold', () => exec('bold')),
     createToolbarButton('I', 'Italic', () => exec('italic')),
@@ -210,11 +253,14 @@ export function createRichTextEditor({ value = '' } = {}){
     createToolbarButton('S', 'Strikethrough', () => exec('strikeThrough'))
   ].forEach(btn => inlineGroup.appendChild(btn));
 
-  const colorWrap = document.createElement('label');
-  colorWrap.className = 'rich-editor-color';
-  colorWrap.title = 'Text color';
+  const colorGroup = createGroup();
+  colorGroup.classList.add('rich-editor-group--compact');
+  const colorBtn = createToolbarButton('A', 'Text color', () => colorInput.click());
+  colorBtn.classList.add('rich-editor-color-btn');
+  colorGroup.appendChild(colorBtn);
   const colorInput = document.createElement('input');
   colorInput.type = 'color';
+  colorInput.className = 'rich-editor-color-input';
   colorInput.value = '#ffffff';
   colorInput.dataset.lastColor = '#ffffff';
   colorInput.addEventListener('input', () => {
@@ -225,17 +271,10 @@ export function createRichTextEditor({ value = '' } = {}){
     }
     exec('foreColor', colorInput.value);
     colorInput.dataset.lastColor = colorInput.value;
+    colorBtn.style.setProperty('--current-color', colorInput.value);
   });
-  colorWrap.appendChild(colorInput);
-  const colorGroup = createGroup();
-  colorGroup.appendChild(colorWrap);
-
-  const highlightGroup = createGroup();
-  highlightGroup.classList.add('rich-editor-highlight-group');
-  const highlightLabel = document.createElement('span');
-  highlightLabel.className = 'rich-editor-label';
-  highlightLabel.textContent = 'Highlight';
-  highlightGroup.appendChild(highlightLabel);
+  colorBtn.style.setProperty('--current-color', colorInput.value);
+  colorGroup.appendChild(colorInput);
 
   const highlightColors = [
     ['#facc15', 'Yellow'],
@@ -254,8 +293,11 @@ export function createRichTextEditor({ value = '' } = {}){
   function applyHighlight(color) {
     if (!hasActiveSelection()) return;
     exec('hiliteColor', color);
+    editable.dispatchEvent(new Event('input'));
   }
 
+  const highlightMenu = createPopoverGroup('🖍', 'Highlight color');
+  highlightMenu.group.classList.add('rich-editor-group--compact');
   highlightColors.forEach(([color, label]) => {
     const swatch = document.createElement('button');
     swatch.type = 'button';
@@ -264,40 +306,21 @@ export function createRichTextEditor({ value = '' } = {}){
     swatch.title = `${label} highlight`;
     swatch.setAttribute('aria-label', `${label} highlight`);
     swatch.addEventListener('mousedown', e => e.preventDefault());
-    swatch.addEventListener('click', () => applyHighlight(color));
-    highlightGroup.appendChild(swatch);
+    swatch.addEventListener('click', () => {
+      applyHighlight(color);
+      closePopovers();
+    });
+    highlightMenu.panel.appendChild(swatch);
   });
-
-  const clearSwatch = document.createElement('button');
-  clearSwatch.type = 'button';
-  clearSwatch.className = 'rich-editor-swatch rich-editor-swatch--clear';
-  clearSwatch.title = 'Remove highlight';
-  clearSwatch.setAttribute('aria-label', 'Remove highlight');
-  clearSwatch.textContent = '✕';
-  clearSwatch.addEventListener('mousedown', e => e.preventDefault());
-  clearSwatch.addEventListener('click', clearHighlight);
-  highlightGroup.appendChild(clearSwatch);
-
-  const listGroup = createGroup();
-  const listSelect = document.createElement('select');
-  listSelect.className = 'rich-editor-select';
-  [
-    ['', 'Lists'],
-    ['unordered', 'Bulleted'],
-    ['ordered', 'Numbered'],
-    ['lower-alpha', 'Lettered'],
-    ['lower-roman', 'Roman numerals']
-  ].forEach(([value, label]) => {
-    const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = label;
-    listSelect.appendChild(opt);
+  const highlightClear = document.createElement('button');
+  highlightClear.type = 'button';
+  highlightClear.className = 'rich-editor-popover-action';
+  highlightClear.textContent = 'Clear highlight';
+  highlightClear.addEventListener('click', () => {
+    clearHighlight();
+    closePopovers();
   });
-  if (listSelect.firstElementChild) {
-    listSelect.firstElementChild.disabled = true;
-    listSelect.firstElementChild.hidden = true;
-  }
-  listSelect.value = '';
+  highlightMenu.panel.appendChild(highlightClear);
 
   function applyOrderedStyle(style){
     const selection = window.getSelection();
@@ -314,37 +337,37 @@ export function createRichTextEditor({ value = '' } = {}){
     }
   }
 
-  listSelect.addEventListener('change', () => {
-    const value = listSelect.value;
-    if (!value) return;
-    focusEditor();
-    if (value === 'unordered') {
-      exec('insertUnorderedList');
-    } else {
-      exec('insertOrderedList');
-      applyOrderedStyle(value === 'ordered' ? '' : value);
-    }
-    editable.dispatchEvent(new Event('input'));
-    listSelect.value = '';
+  const listGroup = createGroup();
+  listGroup.classList.add('rich-editor-group--compact');
+  const bulletBtn = createToolbarButton('•', 'Bulleted list', () => {
+    exec('insertUnorderedList');
   });
-  listGroup.appendChild(listSelect);
+  listGroup.appendChild(bulletBtn);
+  const numberBtn = createToolbarButton('1.', 'Numbered list', () => {
+    exec('insertOrderedList');
+    applyOrderedStyle('');
+  });
+  listGroup.appendChild(numberBtn);
 
-  const sizeSelect = document.createElement('select');
-  sizeSelect.className = 'rich-editor-size';
-  const sizes = [
-    ['Default', ''],
-    ['Small', '0.85rem'],
-    ['Normal', '1rem'],
-    ['Large', '1.25rem'],
-    ['Huge', '1.5rem']
-  ];
-  sizes.forEach(([label, value]) => {
-    const opt = document.createElement('option');
-    opt.value = value;
+  const listMenu = createPopoverGroup('⋯', 'More list styles');
+  listMenu.group.classList.add('rich-editor-group--compact');
+  [
+    ['A.', 'lower-alpha'],
+    ['i.', 'lower-roman']
+  ].forEach(([label, style]) => {
+    const opt = document.createElement('button');
+    opt.type = 'button';
+    opt.className = 'rich-editor-popover-action';
     opt.textContent = label;
-    sizeSelect.appendChild(opt);
+    opt.addEventListener('click', () => {
+      exec('insertOrderedList');
+      applyOrderedStyle(style);
+      closePopovers();
+    });
+    listMenu.panel.appendChild(opt);
   });
-  sizeSelect.addEventListener('change', () => {
+
+  function applyFontSize(size) {
     focusEditor();
     document.execCommand('styleWithCSS', false, true);
     document.execCommand('fontSize', false, 4);
@@ -358,9 +381,9 @@ export function createRichTextEditor({ value = '' } = {}){
         toAdjust.push(walker.currentNode);
       }
       toAdjust.forEach(node => {
-        if (sizeSelect.value) {
+        if (size) {
           const span = document.createElement('span');
-          span.style.fontSize = sizeSelect.value;
+          span.style.fontSize = size;
           while (node.firstChild) span.appendChild(node.firstChild);
           node.parentNode.replaceChild(span, node);
         } else {
@@ -371,11 +394,30 @@ export function createRichTextEditor({ value = '' } = {}){
       });
     }
     editable.dispatchEvent(new Event('input'));
-    sizeSelect.value = '';
+  }
+
+  const sizeMenu = createPopoverGroup('Aa', 'Text size');
+  sizeMenu.group.classList.add('rich-editor-group--compact');
+  [
+    ['Default', ''],
+    ['Small', '0.85rem'],
+    ['Normal', '1rem'],
+    ['Large', '1.25rem'],
+    ['Huge', '1.5rem']
+  ].forEach(([label, value]) => {
+    const opt = document.createElement('button');
+    opt.type = 'button';
+    opt.className = 'rich-editor-popover-action';
+    opt.textContent = label;
+    opt.addEventListener('click', () => {
+      applyFontSize(value);
+      closePopovers();
+    });
+    sizeMenu.panel.appendChild(opt);
   });
-  listGroup.appendChild(sizeSelect);
 
   const mediaGroup = createGroup();
+  mediaGroup.classList.add('rich-editor-group--compact');
 
   const linkBtn = createToolbarButton('🔗', 'Insert link', () => {
     focusEditor();
@@ -413,12 +455,10 @@ export function createRichTextEditor({ value = '' } = {}){
   });
   mediaGroup.appendChild(mediaBtn);
 
-  const clearBtn = createToolbarButton('⌫', 'Clear formatting', () => exec('removeFormat'));
   const utilityGroup = createGroup();
+  utilityGroup.classList.add('rich-editor-group--compact');
+  const clearBtn = createToolbarButton('⌫', 'Clear formatting', () => exec('removeFormat'));
   utilityGroup.appendChild(clearBtn);
-
-  const clearHighlightBtn = createToolbarButton('⨯', 'Remove highlight', clearHighlight);
-  utilityGroup.appendChild(clearHighlightBtn);
 
   editable.addEventListener('keydown', (e) => {
     if (e.key === 'Tab') {
