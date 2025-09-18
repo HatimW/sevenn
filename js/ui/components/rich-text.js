@@ -177,6 +177,8 @@ export function createRichTextEditor({ value = '', onChange } = {}){
   editable.innerHTML = normalizeInput(value);
   wrapper.appendChild(editable);
 
+  const commandButtons = [];
+
   function focusEditor(){
     editable.focus({ preventScroll: false });
   }
@@ -186,6 +188,7 @@ export function createRichTextEditor({ value = '', onChange } = {}){
     focusEditor();
     const result = action();
     editable.dispatchEvent(new Event('input'));
+    updateInlineState();
     return result;
   }
 
@@ -196,13 +199,33 @@ export function createRichTextEditor({ value = '', onChange } = {}){
     }, { requireSelection });
   }
 
-  function hasActiveSelection(){
+  function selectionWithinEditor({ allowCollapsed = true } = {}){
     const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return false;
+    if (!selection || selection.rangeCount === 0) return false;
+    if (!allowCollapsed && selection.isCollapsed) return false;
     const anchor = selection.anchorNode;
     const focus = selection.focusNode;
     if (!anchor || !focus) return false;
     return editable.contains(anchor) && editable.contains(focus);
+  }
+
+  function hasActiveSelection(){
+    return selectionWithinEditor({ allowCollapsed: false });
+  }
+
+  function updateInlineState(){
+    const inEditor = selectionWithinEditor();
+    commandButtons.forEach(({ btn, command }) => {
+      let active = false;
+      if (inEditor) {
+        try {
+          active = document.queryCommandState(command);
+        } catch (err) {
+          active = false;
+        }
+      }
+      btn.classList.toggle('is-active', Boolean(active));
+    });
   }
 
   function createGroup(extraClass){
@@ -212,14 +235,18 @@ export function createRichTextEditor({ value = '', onChange } = {}){
     toolbar.appendChild(group);
     return group;
   }
-
   const inlineGroup = createGroup();
   [
-    createToolbarButton('B', 'Bold', () => exec('bold', null, { requireSelection: true })),
-    createToolbarButton('I', 'Italic', () => exec('italic', null, { requireSelection: true })),
-    createToolbarButton('U', 'Underline', () => exec('underline', null, { requireSelection: true })),
-    createToolbarButton('S', 'Strikethrough', () => exec('strikeThrough', null, { requireSelection: true }))
-  ].forEach(btn => inlineGroup.appendChild(btn));
+    ['B', 'Bold', 'bold'],
+    ['I', 'Italic', 'italic'],
+    ['U', 'Underline', 'underline'],
+    ['S', 'Strikethrough', 'strikeThrough']
+  ].forEach(([label, title, command]) => {
+    const btn = createToolbarButton(label, title, () => exec(command, null, { requireSelection: true }));
+    btn.dataset.command = command;
+    commandButtons.push({ btn, command });
+    inlineGroup.appendChild(btn);
+  });
 
   const colorWrap = document.createElement('label');
   colorWrap.className = 'rich-editor-color';
@@ -418,7 +445,27 @@ export function createRichTextEditor({ value = '', onChange } = {}){
   editable.addEventListener('input', () => {
     if (settingValue) return;
     if (typeof onChange === 'function') onChange();
+    updateInlineState();
   });
+
+  ['keyup','mouseup','focus'].forEach(event => {
+    editable.addEventListener(event, () => updateInlineState());
+  });
+
+  editable.addEventListener('blur', () => {
+    setTimeout(() => updateInlineState(), 0);
+  });
+
+  const selectionHandler = () => {
+    if (!document.body.contains(wrapper)) {
+      document.removeEventListener('selectionchange', selectionHandler);
+      return;
+    }
+    updateInlineState();
+  };
+  document.addEventListener('selectionchange', selectionHandler);
+
+  updateInlineState();
 
   return {
     element: wrapper,
@@ -430,6 +477,7 @@ export function createRichTextEditor({ value = '', onChange } = {}){
       settingValue = true;
       editable.innerHTML = normalizeInput(val);
       settingValue = false;
+      updateInlineState();
     },
     focus(){
       focusEditor();
