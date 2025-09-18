@@ -12,14 +12,10 @@ export function createEntryAddControl(onAdded, initialKind = 'disease') {
 
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'entry-add-fab';
-  button.innerHTML = '<span>＋</span>';
-  button.setAttribute('aria-label', 'Add new entry');
-  button.setAttribute('aria-expanded', 'false');
-
+  button.className = 'btn';
+  button.textContent = 'Add';
   const menu = document.createElement('div');
-  menu.className = 'entry-add-menu';
-  menu.setAttribute('role', 'menu');
+  menu.className = 'entry-add-menu hidden';
 
   const options = [...defaultOptions];
   if (initialKind) {
@@ -35,7 +31,6 @@ export function createEntryAddControl(onAdded, initialKind = 'disease') {
     item.type = 'button';
     item.className = 'entry-add-menu-item';
     item.textContent = opt.label;
-    item.setAttribute('role', 'menuitem');
     item.addEventListener('click', () => {
       closeMenu();
       openEditor(opt.value, onAdded);
@@ -44,8 +39,7 @@ export function createEntryAddControl(onAdded, initialKind = 'disease') {
   });
 
   function closeMenu() {
-    wrapper.classList.remove('open');
-    button.setAttribute('aria-expanded', 'false');
+    menu.classList.add('hidden');
     document.removeEventListener('mousedown', handleOutside);
   }
 
@@ -55,29 +49,17 @@ export function createEntryAddControl(onAdded, initialKind = 'disease') {
     }
   }
 
-  wrapper.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      closeMenu();
-      button.focus();
-    }
-  });
-
   button.addEventListener('click', () => {
-    const willOpen = !wrapper.classList.contains('open');
+    const willOpen = menu.classList.contains('hidden');
     if (willOpen) {
-      wrapper.classList.add('open');
-      button.setAttribute('aria-expanded', 'true');
+      menu.classList.remove('hidden');
       document.addEventListener('mousedown', handleOutside);
-      const firstItem = menu.querySelector('.entry-add-menu-item');
-      if (firstItem) {
-        setTimeout(() => firstItem.focus(), 0);
-      }
     } else {
       closeMenu();
     }
   });
 
-  wrapper.appendChild(menu);
   wrapper.appendChild(button);
+  wrapper.appendChild(menu);
   return wrapper;
 }
