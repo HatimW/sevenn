@@ -16,23 +16,6 @@ const tabs = ["Diseases","Drugs","Concepts","Cards","Study","Exams","Map"];
 
 async function render() {
   const root = document.getElementById('app');
-
-  if (state.tab === 'Map') {
-    root.innerHTML = '';
-    root.classList.add('map-shell');
-    const navTabs = [...tabs.filter(t => t !== 'Map'), 'Settings'];
-    await renderMap(root, {
-      navigate: tab => {
-        setTab(tab);
-        render();
-      },
-      tabs: navTabs
-    });
-    return;
-  }
-
-  root.classList.remove('map-shell');
-
   const activeEl = document.activeElement;
   const shouldRestoreSearch = activeEl && activeEl.dataset && activeEl.dataset.role === 'global-search';
   const selectionStart = shouldRestoreSearch && typeof activeEl.selectionStart === 'number' ? activeEl.selectionStart : null;
