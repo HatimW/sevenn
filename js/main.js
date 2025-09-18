@@ -136,15 +136,16 @@ async function render() {
     main.appendChild(listHost);
 
     const filter = { ...state.filters, types:[kind], query: state.query };
-    const items = await findItemsByFilter(filter);
-    await renderCardList(listHost, items, kind, render);
+    const query = findItemsByFilter(filter);
+    await renderCardList(listHost, query, kind, render);
   } else if (state.tab === 'Cards') {
     main.appendChild(createEntryAddControl(render, 'disease'));
     const content = document.createElement('div');
     content.className = 'tab-content';
     main.appendChild(content);
     const filter = { ...state.filters, query: state.query };
-    const items = await findItemsByFilter(filter);
+    const query = findItemsByFilter(filter);
+    const items = await query.toArray();
     renderCards(content, items, render);
   } else if (state.tab === 'Study') {
     main.appendChild(createEntryAddControl(render, 'disease'));

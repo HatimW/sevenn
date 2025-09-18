@@ -65,6 +65,21 @@ class MemoryIndex {
       return results;
     });
   }
+
+  getAllKeys(value) {
+    return new MemoryRequest(this.store.tx, () => {
+      const results = [];
+      for (const [key, item] of this.store._map()) {
+        const extracted = this.extractor(item);
+        if (this.multiEntry && Array.isArray(extracted)) {
+          if (extracted.includes(value)) results.push(key);
+        } else if (extracted === value) {
+          results.push(key);
+        }
+      }
+      return results;
+    });
+  }
 }
 
 class MemoryStore {
@@ -126,11 +141,23 @@ class MemoryStore {
   }
 
   index(name) {
-    if (this.name === 'items' && name === 'by_kind') {
-      return new MemoryIndex(this, item => item.kind || null);
+    if (this.name === 'items') {
+      switch (name) {
+        case 'by_kind':
+          return new MemoryIndex(this, item => item.kind || null);
+        case 'by_blocks':
+          return new MemoryIndex(this, item => item.blocks || [], true);
+        case 'by_weeks':
+          return new MemoryIndex(this, item => item.weeks || [], true);
+        case 'by_favorite':
+          return new MemoryIndex(this, item => !!item.favorite);
+        default:
+          break;
+      }
     }
     return {
-      getAll: () => new MemoryRequest(this.tx, () => [])
+      getAll: () => new MemoryRequest(this.tx, () => []),
+      getAllKeys: () => new MemoryRequest(this.tx, () => [])
     };
   }
 }

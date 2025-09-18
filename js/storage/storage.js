@@ -3,6 +3,9 @@ import { exportJSON, importJSON, exportAnkiCSV } from './export.js';
 
 let dbPromise;
 
+const DEFAULT_KINDS = ['disease', 'drug', 'concept'];
+const RESULT_BATCH_SIZE = 50;
+
 function prom(req) {
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
@@ -76,6 +79,7 @@ export async function upsertBlock(def) {
       }
       if (changed) {
         it.tokens = buildTokens(it);
+        it.searchMeta = buildSearchMeta(it);
         await prom(i.put(it));
       }
     }
@@ -110,6 +114,7 @@ export async function deleteBlock(blockId) {
       }
       if ((it.blocks?.length || 0) !== beforeBlocks || (it.lectures?.length || 0) !== beforeLects) {
         it.tokens = buildTokens(it);
+        it.searchMeta = buildSearchMeta(it);
         await prom(i.put(it));
       }
     }
@@ -134,6 +139,7 @@ export async function deleteLecture(blockId, lectureId) {
         const validWeeks = new Set((it.lectures || []).map(l => l.week));
         it.weeks = Array.from(validWeeks);
         it.tokens = buildTokens(it);
+        it.searchMeta = buildSearchMeta(it);
         await prom(i.put(it));
       }
     }
@@ -164,12 +170,13 @@ export async function updateLecture(blockId, lecture) {
       const validWeeks = new Set((it.lectures || []).map(l => l.week));
       it.weeks = Array.from(validWeeks);
       it.tokens = buildTokens(it);
+      it.searchMeta = buildSearchMeta(it);
       await prom(i.put(it));
     }
   }
 }
 
-import { buildTokens, tokenize } from '../search.js';
+import { buildTokens, tokenize, buildSearchMeta } from '../search.js';
 import { cleanItem } from '../validators.js';
 
 export async function listItemsByKind(kind) {
@@ -182,46 +189,130 @@ function titleOf(item){
   return item.name || item.concept || '';
 }
 
-export async function findItemsByFilter(filter) {
-  const i = await store('items');
-  let items = await prom(i.getAll());
-
-  if (filter.types && filter.types.length) {
-    items = items.filter(it => filter.types.includes(it.kind));
+function normalizeFilter(filter = {}) {
+  const rawTypes = Array.isArray(filter.types) ? filter.types.filter(t => typeof t === 'string' && t) : [];
+  const types = rawTypes.length ? Array.from(new Set(rawTypes)) : DEFAULT_KINDS;
+  const block = typeof filter.block === 'string' ? filter.block : '';
+  const weekRaw = filter.week;
+  let week = null;
+  if (typeof weekRaw === 'number' && !Number.isNaN(weekRaw)) {
+    week = weekRaw;
+  } else if (typeof weekRaw === 'string' && weekRaw.trim()) {
+    const parsed = Number(weekRaw);
+    if (!Number.isNaN(parsed)) week = parsed;
   }
-  if (filter.block) {
-    if (filter.block === '__unlabeled') {
-      items = items.filter(it => !it.blocks || !it.blocks.length);
-    } else {
-      items = items.filter(it => (it.blocks || []).includes(filter.block));
+  const onlyFav = Boolean(filter.onlyFav);
+  const query = typeof filter.query === 'string' ? filter.query.trim() : '';
+  const tokens = query ? tokenize(query) : [];
+  return {
+    types,
+    block,
+    week,
+    onlyFav,
+    tokens: tokens.length ? tokens : null,
+    sort: filter.sort === 'name' ? 'name' : 'updated'
+  };
+}
+
+async function getKeySet(storeRef, indexName, value) {
+  if (value === null || value === undefined || value === '' || value !== value) return null;
+  if (typeof storeRef.index !== 'function') return null;
+  const idx = storeRef.index(indexName);
+  if (!idx || typeof idx.getAllKeys !== 'function') return null;
+  const keys = await prom(idx.getAllKeys(value));
+  return new Set(keys);
+}
+
+async function keysForKinds(storeRef, kinds) {
+  const idx = typeof storeRef.index === 'function' ? storeRef.index('by_kind') : null;
+  const seen = new Set();
+  const allKeys = [];
+  for (const kind of kinds) {
+    if (!kind) continue;
+    let keys = [];
+    if (idx && typeof idx.getAllKeys === 'function') {
+      keys = await prom(idx.getAllKeys(kind));
+    } else if (idx && typeof idx.getAll === 'function') {
+      const values = await prom(idx.getAll(kind));
+      keys = values.map(v => v?.id).filter(Boolean);
+    }
+    for (const key of keys) {
+      if (!seen.has(key)) {
+        seen.add(key);
+        allKeys.push(key);
+      }
     }
   }
-  if (filter.week) {
-    items = items.filter(it => (it.weeks || []).includes(filter.week));
+  return allKeys;
+}
+
+async function executeItemQuery(filter) {
+  const normalized = normalizeFilter(filter);
+  const itemsStore = await store('items');
+
+  const blockSet = normalized.block && normalized.block !== '__unlabeled'
+    ? await getKeySet(itemsStore, 'by_blocks', normalized.block)
+    : null;
+  const weekSet = normalized.week != null
+    ? await getKeySet(itemsStore, 'by_weeks', normalized.week)
+    : null;
+  const favoriteSet = normalized.onlyFav
+    ? await getKeySet(itemsStore, 'by_favorite', true)
+    : null;
+
+  const baseKeys = await keysForKinds(itemsStore, normalized.types);
+  const filteredKeys = baseKeys.filter(id => {
+    if (!id) return false;
+    if (blockSet && !blockSet.has(id)) return false;
+    if (weekSet && !weekSet.has(id)) return false;
+    if (favoriteSet && !favoriteSet.has(id)) return false;
+    return true;
+  });
+
+  const results = [];
+  for (let i = 0; i < filteredKeys.length; i += RESULT_BATCH_SIZE) {
+    const chunk = filteredKeys.slice(i, i + RESULT_BATCH_SIZE);
+    const fetched = await Promise.all(chunk.map(id => prom(itemsStore.get(id))));
+    for (const item of fetched) {
+      if (!item) continue;
+      if (normalized.block === '__unlabeled' && Array.isArray(item.blocks) && item.blocks.length) continue;
+      if (normalized.tokens) {
+        const tokenField = item.tokens || '';
+        const metaField = item.searchMeta || buildSearchMeta(item);
+        const matches = normalized.tokens.every(tok => tokenField.includes(tok) || metaField.includes(tok));
+        if (!matches) continue;
+      }
+      results.push(item);
+    }
   }
-  if (filter.onlyFav) {
-    items = items.filter(it => it.favorite);
-  }
-  if (filter.query && filter.query.trim()) {
-    const toks = tokenize(filter.query);
-    items = items.filter(it => {
-      const tokens = it.tokens || '';
-      if (toks.every(tok => tokens.includes(tok))) return true;
-      const extra = [
-        titleOf(it),
-        ...(it.tags || []),
-        ...(it.blocks || []),
-        ...(it.lectures || []).map(l => l.name || '')
-      ].join(' ').toLowerCase();
-      return toks.every(tok => extra.includes(tok));
-    });
-  }
-  if (filter.sort === 'name') {
-    items.sort((a,b) => titleOf(a).localeCompare(titleOf(b)));
+
+  if (normalized.sort === 'name') {
+    results.sort((a, b) => titleOf(a).localeCompare(titleOf(b)));
   } else {
-    items.sort((a,b) => b.updatedAt - a.updatedAt);
+    results.sort((a, b) => b.updatedAt - a.updatedAt);
   }
-  return items;
+
+  return results;
+}
+
+export function findItemsByFilter(filter) {
+  let memo;
+  const run = () => {
+    if (!memo) memo = executeItemQuery(filter);
+    return memo;
+  };
+  return {
+    async toArray() {
+      const items = await run();
+      return items.slice();
+    },
+    async *[Symbol.asyncIterator]() {
+      const items = await run();
+      for (let i = 0; i < items.length; i += RESULT_BATCH_SIZE) {
+        yield items.slice(i, i + RESULT_BATCH_SIZE);
+      }
+    }
+  };
 }
 
 export async function getItem(id) {
@@ -239,6 +330,7 @@ export async function upsertItem(item) {
     updatedAt: now,
   });
   next.tokens = buildTokens(next);
+  next.searchMeta = buildSearchMeta(next);
   // enforce link symmetry (basic)
   for (const link of next.links) {
     const other = await prom(i.get(link.id));
@@ -247,6 +339,7 @@ export async function upsertItem(item) {
       if (!other.links.find(l => l.id === next.id)) {
         other.links.push({ id: next.id, type: link.type });
         other.tokens = buildTokens(other);
+        other.searchMeta = buildSearchMeta(other);
         await prom(i.put(other));
       }
     }
@@ -261,6 +354,7 @@ export async function deleteItem(id) {
     if (it.links?.some(l => l.id === id)) {
       it.links = it.links.filter(l => l.id !== id);
       it.tokens = buildTokens(it);
+      it.searchMeta = buildSearchMeta(it);
       await prom(i.put(it));
     }
   }
