@@ -164,7 +164,12 @@ async function render() {
       subnav.className = 'tabs row subtabs';
       ['Flashcards','Review','Quiz','Blocks'].forEach(st => {
         const sb = document.createElement('button');
-        sb.className = 'tab' + (state.subtab.Study === st ? ' active' : '');
+        sb.className = 'tab';
+        const isActive = state.subtab.Study === st;
+        if (isActive) sb.classList.add('active');
+        sb.dataset.toggle = 'true';
+        sb.dataset.active = isActive ? 'true' : 'false';
+        sb.setAttribute('aria-pressed', isActive ? 'true' : 'false');
         sb.textContent = st;
         sb.addEventListener('click', () => {
           setSubtab('Study', st);

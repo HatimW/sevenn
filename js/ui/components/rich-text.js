@@ -216,22 +216,72 @@ export function createRichTextEditor({ value = '', onChange } = {}){
     return selectionWithinEditor({ allowCollapsed: false });
   }
 
+  function collapsedInlineState(){
+    const selection = window.getSelection();
+    if (!selection?.anchorNode) return null;
+    let node = selection.anchorNode;
+    const state = { bold: false, italic: false, underline: false, strike: false };
+
+    const applyFromElement = (el) => {
+      const tag = el.tagName?.toLowerCase();
+      if (tag === 'b' || tag === 'strong') state.bold = true;
+      if (tag === 'i' || tag === 'em') state.italic = true;
+      if (tag === 'u') state.underline = true;
+      if (tag === 's' || tag === 'strike' || tag === 'del') state.strike = true;
+      if (typeof window !== 'undefined' && el instanceof Element) {
+        const style = window.getComputedStyle(el);
+        if (style) {
+          if (!state.bold) {
+            const weight = parseInt(style.fontWeight, 10);
+            if (style.fontWeight === 'bold' || Number.isFinite(weight) && weight >= 600) state.bold = true;
+          }
+          if (!state.italic && style.fontStyle === 'italic') state.italic = true;
+          const deco = `${style.textDecorationLine || style.textDecoration || ''}`.toLowerCase();
+          if (!state.underline && deco.includes('underline')) state.underline = true;
+          if (!state.strike && (deco.includes('line-through') || deco.includes('strikethrough'))) state.strike = true;
+        }
+      }
+    };
+
+    while (node && node !== editable) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        node = node.parentNode;
+        continue;
+      }
+      if (!(node instanceof Element)) {
+        node = node.parentNode;
+        continue;
+      }
+      applyFromElement(node);
+      node = node.parentNode;
+    }
+
+    return state;
+  }
+
   function updateInlineState(){
     const inEditor = selectionWithinEditor();
-    commandButtons.forEach(({ btn, command }) => {
+    const selection = window.getSelection();
+    const collapsed = Boolean(selection?.isCollapsed);
+    const collapsedState = inEditor && collapsed ? collapsedInlineState() : null;
+
+    commandButtons.forEach(({ btn, command, stateKey }) => {
       let active = false;
       if (inEditor) {
-        try {
-          active = document.queryCommandState(command);
-        } catch (err) {
-          active = false;
+        if (collapsed && collapsedState && stateKey) {
+          active = collapsedState[stateKey];
+        } else {
+          try {
+            active = document.queryCommandState(command);
+          } catch (err) {
+            active = false;
+          }
         }
       }
       const isActive = Boolean(active);
       btn.classList.toggle('is-active', isActive);
       btn.dataset.active = isActive ? 'true' : 'false';
       btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-
     });
   }
 
@@ -244,14 +294,14 @@ export function createRichTextEditor({ value = '', onChange } = {}){
   }
   const inlineGroup = createGroup();
   [
-    ['B', 'Bold', 'bold'],
-    ['I', 'Italic', 'italic'],
-    ['U', 'Underline', 'underline'],
-    ['S', 'Strikethrough', 'strikeThrough']
-  ].forEach(([label, title, command]) => {
+    ['B', 'Bold', 'bold', 'bold'],
+    ['I', 'Italic', 'italic', 'italic'],
+    ['U', 'Underline', 'underline', 'underline'],
+    ['S', 'Strikethrough', 'strikeThrough', 'strike']
+  ].forEach(([label, title, command, stateKey]) => {
     const btn = createToolbarButton(label, title, () => exec(command));
     btn.dataset.command = command;
-    commandButtons.push({ btn, command });
+    commandButtons.push({ btn, command, stateKey });
     inlineGroup.appendChild(btn);
   });
 
