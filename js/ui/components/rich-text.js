@@ -216,22 +216,128 @@ export function createRichTextEditor({ value = '', onChange } = {}){
     return selectionWithinEditor({ allowCollapsed: false });
   }
 
+  function getSelectionTargets(){
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return [];
+    const range = selection.getRangeAt(0);
+    const set = new Set();
+
+    const pushNode = (node) => {
+      if (!node) return;
+      let current = node;
+      if (current.nodeType === Node.TEXT_NODE) current = current.parentElement;
+      while (current && current !== editable) {
+        if (current.nodeType === Node.ELEMENT_NODE) {
+          set.add(current);
+          return;
+        }
+        current = current.parentElement;
+      }
+      if (current === editable) set.add(editable);
+    };
+
+    pushNode(range.startContainer);
+    pushNode(range.endContainer);
+
+    if (set.size === 0) {
+      let ancestor = range.commonAncestorContainer;
+      if (ancestor) {
+        if (ancestor.nodeType === Node.TEXT_NODE) ancestor = ancestor.parentElement;
+        if (ancestor && editable.contains(ancestor)) set.add(ancestor);
+      }
+    }
+
+    if (set.size === 0) set.add(editable);
+
+    return Array.from(set);
+  }
+
+  function weightIsBold(value = ''){
+    const trimmed = String(value).trim().toLowerCase();
+    if (!trimmed) return false;
+    if (trimmed === 'bold' || trimmed === 'bolder') return true;
+    const num = parseInt(trimmed, 10);
+    return !Number.isNaN(num) && num >= 600;
+  }
+
+  function textDecorationIncludes(value = '', keyword){
+    if (!value) return false;
+    return value.toLowerCase().split(/[,\s]+/).includes(keyword);
+  }
+
+  function computeStyles(element){
+    const view = element?.ownerDocument?.defaultView;
+    if (!view || typeof view.getComputedStyle !== 'function') return null;
+    try {
+      return view.getComputedStyle(element);
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function elementMatchesCommand(element, command){
+    if (!element) return false;
+    const tag = element.tagName ? element.tagName.toLowerCase() : '';
+    const style = element.style || {};
+    const computed = computeStyles(element);
+
+    if (command === 'bold') {
+      if (tag === 'b' || tag === 'strong') return true;
+      if (weightIsBold(style.fontWeight)) return true;
+      return computed ? weightIsBold(computed.fontWeight) : false;
+    }
+    if (command === 'italic') {
+      if (tag === 'i' || tag === 'em') return true;
+      const inline = (style.fontStyle || '').toLowerCase();
+      if (inline.includes('italic') || inline.includes('oblique')) return true;
+      if (!computed) return false;
+      const fontStyle = (computed.fontStyle || '').toLowerCase();
+      return fontStyle.includes('italic') || fontStyle.includes('oblique');
+    }
+    if (command === 'underline') {
+      if (tag === 'u') return true;
+      const deco = style.textDecorationLine || style.textDecoration || '';
+      if (textDecorationIncludes(deco, 'underline')) return true;
+      if (!computed) return false;
+      const compDeco = computed.textDecorationLine || computed.textDecoration || '';
+      return textDecorationIncludes(compDeco, 'underline');
+    }
+    if (command === 'strikeThrough') {
+      if (tag === 's' || tag === 'strike' || tag === 'del') return true;
+      const deco = style.textDecorationLine || style.textDecoration || '';
+      if (textDecorationIncludes(deco, 'line-through')) return true;
+      if (!computed) return false;
+      const compDeco = computed.textDecorationLine || computed.textDecoration || '';
+      return textDecorationIncludes(compDeco, 'line-through');
+    }
+    return false;
+  }
+
+  function commandIsActive(command){
+    const targets = getSelectionTargets();
+    if (!targets.length) return false;
+    return targets.every(target => elementMatchesCommand(target, command));
+  }
+
   function updateInlineState(){
     const inEditor = selectionWithinEditor();
-    commandButtons.forEach(({ btn, command }) => {
+    commandButtons.forEach(({ btn, command, detect }) => {
       let active = false;
       if (inEditor) {
-        try {
-          active = document.queryCommandState(command);
-        } catch (err) {
-          active = false;
+        if (typeof detect === 'function') {
+          active = detect();
+        } else {
+          try {
+            active = document.queryCommandState(command);
+          } catch (err) {
+            active = false;
+          }
         }
       }
       const isActive = Boolean(active);
       btn.classList.toggle('is-active', isActive);
       btn.dataset.active = isActive ? 'true' : 'false';
       btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-
     });
   }
 
@@ -251,7 +357,7 @@ export function createRichTextEditor({ value = '', onChange } = {}){
   ].forEach(([label, title, command]) => {
     const btn = createToolbarButton(label, title, () => exec(command));
     btn.dataset.command = command;
-    commandButtons.push({ btn, command });
+    commandButtons.push({ btn, command, detect: () => commandIsActive(command) });
     inlineGroup.appendChild(btn);
   });
 
