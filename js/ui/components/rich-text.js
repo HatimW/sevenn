@@ -189,6 +189,7 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   }
 
   let savedRange = null;
+  let suppressSelectionCapture = false;
 
   function rangeWithinEditor(range, { allowCollapsed = true } = {}){
     if (!range) return false;
@@ -199,6 +200,7 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   }
 
   function captureSelectionRange(){
+    if (suppressSelectionCapture) return;
     const selection = window.getSelection();
     if (!selection?.rangeCount) return;
     const range = selection.getRangeAt(0);
@@ -224,9 +226,22 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   }
 
   function runCommand(action, { requireSelection = false } = {}){
-    if (!getSavedRange({ requireSelection })) return false;
-    focusEditor();
-    if (!restoreSavedRange({ requireSelection })) return false;
+    const existing = getSavedRange({ requireSelection });
+    if (!existing) return false;
+
+    const preservedRange = existing.cloneRange();
+    let restored = false;
+
+    suppressSelectionCapture = true;
+    try {
+      focusEditor();
+      savedRange = preservedRange.cloneRange();
+      restored = restoreSavedRange({ requireSelection });
+    } finally {
+      suppressSelectionCapture = false;
+    }
+
+    if (!restored) return false;
 
     let inputFired = false;
     const handleInput = () => {
