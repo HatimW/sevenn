@@ -163,11 +163,9 @@ function createToolbarButton(label, title, onClick){
 export function createRichTextEditor({ value = '' } = {}){
   const wrapper = document.createElement('div');
   wrapper.className = 'rich-editor';
-  wrapper.classList.add('rich-editor--compact');
 
   const toolbar = document.createElement('div');
   toolbar.className = 'rich-editor-toolbar';
-  toolbar.classList.add('rich-editor-toolbar--condensed');
   wrapper.appendChild(toolbar);
 
   const editable = document.createElement('div');
@@ -197,15 +195,14 @@ export function createRichTextEditor({ value = '' } = {}){
     return editable.contains(anchor) && editable.contains(focus);
   }
 
-  function createGroup(...classNames){
+  function createGroup(){
     const group = document.createElement('div');
     group.className = 'rich-editor-group';
-    if (classNames.length) group.classList.add(...classNames);
     toolbar.appendChild(group);
     return group;
   }
 
-  const inlineGroup = createGroup('rich-editor-group--compact');
+  const inlineGroup = createGroup();
   [
     createToolbarButton('B', 'Bold', () => exec('bold')),
     createToolbarButton('I', 'Italic', () => exec('italic')),
@@ -230,11 +227,15 @@ export function createRichTextEditor({ value = '' } = {}){
     colorInput.dataset.lastColor = colorInput.value;
   });
   colorWrap.appendChild(colorInput);
-  const colorGroup = createGroup('rich-editor-group--compact');
+  const colorGroup = createGroup();
   colorGroup.appendChild(colorWrap);
 
-  const highlightGroup = createGroup('rich-editor-group--swatches');
+  const highlightGroup = createGroup();
   highlightGroup.classList.add('rich-editor-highlight-group');
+  const highlightLabel = document.createElement('span');
+  highlightLabel.className = 'rich-editor-label';
+  highlightLabel.textContent = 'Highlight';
+  highlightGroup.appendChild(highlightLabel);
 
   const highlightColors = [
     ['#facc15', 'Yellow'],
@@ -277,7 +278,7 @@ export function createRichTextEditor({ value = '' } = {}){
   clearSwatch.addEventListener('click', clearHighlight);
   highlightGroup.appendChild(clearSwatch);
 
-  const listGroup = createGroup('rich-editor-group--compact');
+  const listGroup = createGroup();
   const listSelect = document.createElement('select');
   listSelect.className = 'rich-editor-select';
   [
@@ -374,7 +375,7 @@ export function createRichTextEditor({ value = '' } = {}){
   });
   listGroup.appendChild(sizeSelect);
 
-  const mediaGroup = createGroup('rich-editor-group--compact');
+  const mediaGroup = createGroup();
 
   const linkBtn = createToolbarButton('🔗', 'Insert link', () => {
     focusEditor();
@@ -413,8 +414,11 @@ export function createRichTextEditor({ value = '' } = {}){
   mediaGroup.appendChild(mediaBtn);
 
   const clearBtn = createToolbarButton('⌫', 'Clear formatting', () => exec('removeFormat'));
-  const utilityGroup = createGroup('rich-editor-group--compact');
+  const utilityGroup = createGroup();
   utilityGroup.appendChild(clearBtn);
+
+  const clearHighlightBtn = createToolbarButton('⨯', 'Remove highlight', clearHighlight);
+  utilityGroup.appendChild(clearHighlightBtn);
 
   editable.addEventListener('keydown', (e) => {
     if (e.key === 'Tab') {
