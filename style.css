@@ -2440,6 +2440,269 @@ input[type="checkbox"]:checked::after {
   gap: 2px;
 }
 
+.map-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: var(--pad);
+  padding-top: 16px;
+  height: 100%;
+}
+
+.map-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.map-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.map-tab-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.map-tab {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  color: var(--text);
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.map-tab:hover {
+  background: rgba(148, 163, 184, 0.28);
+  border-color: rgba(203, 213, 225, 0.4);
+}
+
+.map-tab.active {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.2);
+}
+
+.map-tab-add {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(148, 163, 184, 0.16);
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.map-tab-add:hover {
+  background: rgba(148, 163, 184, 0.26);
+  border-color: rgba(203, 213, 225, 0.42);
+}
+
+.map-search-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.map-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.map-search-input {
+  min-width: 220px;
+}
+
+.map-search-input.not-found {
+  border-color: rgba(248, 113, 113, 0.85);
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.25);
+}
+
+.map-search-btn {
+  padding: 8px 14px;
+}
+
+.map-search-feedback {
+  font-size: 13px;
+  color: var(--text-muted);
+  min-height: 18px;
+}
+
+.map-search-feedback.success {
+  color: var(--accent);
+}
+
+.map-search-feedback.error {
+  color: #f87171;
+}
+
+.map-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: rgba(15, 23, 42, 0.32);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.map-controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.map-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.map-control-name {
+  flex: 1;
+  min-width: 220px;
+  color: var(--text);
+}
+
+.map-name-input {
+  min-width: 220px;
+}
+
+.map-delete-tab {
+  margin-left: auto;
+}
+
+.map-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.map-select {
+  background: rgba(15, 23, 42, 0.45);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  min-width: 160px;
+}
+
+.map-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  outline: none;
+}
+
+.map-reset-filters {
+  align-self: flex-start;
+}
+
+.map-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 16px;
+}
+
+.map-stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.map-palette {
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(15, 23, 42, 0.26);
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+
+.map-palette h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.map-palette-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.map-palette-list,
+.map-palette-active-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.map-palette-item {
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(148, 163, 184, 0.14);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: var(--text);
+}
+
+.map-palette-item:hover {
+  background: rgba(148, 163, 184, 0.24);
+  border-color: rgba(203, 213, 225, 0.4);
+}
+
+.map-palette-active {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.map-palette-active h4 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.map-palette-active-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  color: var(--text);
+}
+
+.map-palette-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 6px 0;
+}
+
 .map-container {
   position: relative;
   width: 100%;
@@ -2531,10 +2794,10 @@ input[type="checkbox"]:checked::after {
 }
 
 .map-tool.active {
-  background: rgba(166, 217, 255, 0.95);
-  color: #041026;
-  border-color: rgba(166, 217, 255, 1);
-  box-shadow: 0 12px 26px rgba(8, 15, 28, 0.4);
+  background: #ffffff;
+  color: #0f172a;
+  border-color: #ffffff;
+  box-shadow: 0 14px 28px rgba(8, 15, 28, 0.32);
 }
 
 .map-tool-badges {

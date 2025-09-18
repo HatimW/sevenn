@@ -50,7 +50,8 @@ function collectExtras(item) {
   return [];
 }
 
-export function showPopup(item){
+export function showPopup(item, options = {}){
+  const { onEdit } = options;
   const modal = document.createElement('div');
   modal.className = 'modal';
   const card = document.createElement('div');
@@ -93,11 +94,29 @@ export function showPopup(item){
     card.appendChild(sec);
   });
 
+  const actions = document.createElement('div');
+  actions.className = 'modal-actions';
+
+  if (typeof onEdit === 'function') {
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'btn secondary';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', () => {
+      modal.remove();
+      onEdit();
+    });
+    actions.appendChild(editBtn);
+  }
+
   const close = document.createElement('button');
+  close.type = 'button';
   close.className = 'btn';
   close.textContent = 'Close';
   close.addEventListener('click', () => modal.remove());
-  card.appendChild(close);
+  actions.appendChild(close);
+
+  card.appendChild(actions);
 
   modal.appendChild(card);
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
