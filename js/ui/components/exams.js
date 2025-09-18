@@ -674,13 +674,20 @@ function renderPalette(sidebar, sess, render) {
     ? (sess.result.flagged || [])
     : Object.entries(sess.flagged || {}).filter(([_, v]) => v).map(([idx]) => Number(idx)));
 
-  sess.exam.questions.forEach((_, idx) => {
+  sess.exam.questions.forEach((question, idx) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = String(idx + 1);
     btn.className = 'palette-button';
     if (sess.idx === idx) btn.classList.add('active');
-    if (answers[idx] != null) btn.classList.add('answered');
+    const answer = answers[idx];
+    const hasAnswer = answer !== undefined && answer !== null && answer !== '';
+    if (hasAnswer) {
+      btn.classList.add('answered');
+      if (sess.mode === 'review') {
+        btn.classList.add(answer === question.answer ? 'correct' : 'incorrect');
+      }
+    }
     if (flaggedSet.has(idx)) btn.classList.add('flagged');
     btn.addEventListener('click', () => {
       sess.idx = idx;
