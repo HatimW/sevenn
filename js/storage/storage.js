@@ -5,6 +5,21 @@ let dbPromise;
 
 const DEFAULT_KINDS = ['disease', 'drug', 'concept'];
 const RESULT_BATCH_SIZE = 50;
+const MAP_CONFIG_KEY = 'map-config';
+
+const DEFAULT_MAP_CONFIG = {
+  activeTabId: 'default',
+  tabs: [
+    {
+      id: 'default',
+      name: 'All concepts',
+      includeLinked: true,
+      manualMode: false,
+      manualIds: [],
+      filter: { blockId: '', week: '', lectureKey: '' }
+    }
+  ]
+};
 
 function prom(req) {
   return new Promise((resolve, reject) => {
@@ -38,6 +53,32 @@ export async function saveSettings(patch) {
   const current = await prom(s.get('app')) || { id: 'app', dailyCount: 20, theme: 'dark' };
   const next = { ...current, ...patch, id: 'app' };
   await prom(s.put(next));
+}
+
+function cloneConfig(config) {
+  return JSON.parse(JSON.stringify(config));
+}
+
+export async function getMapConfig() {
+  try {
+    const s = await store('settings', 'readwrite');
+    const existing = await prom(s.get(MAP_CONFIG_KEY));
+    if (existing && existing.config) {
+      return cloneConfig(existing.config);
+    }
+    const fallback = cloneConfig(DEFAULT_MAP_CONFIG);
+    await prom(s.put({ id: MAP_CONFIG_KEY, config: fallback }));
+    return fallback;
+  } catch (err) {
+    console.warn('getMapConfig failed', err);
+    return cloneConfig(DEFAULT_MAP_CONFIG);
+  }
+}
+
+export async function saveMapConfig(config) {
+  const payload = config ? cloneConfig(config) : cloneConfig(DEFAULT_MAP_CONFIG);
+  const s = await store('settings', 'readwrite');
+  await prom(s.put({ id: MAP_CONFIG_KEY, config: payload }));
 }
 
 export async function listBlocks() {

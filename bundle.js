@@ -658,6 +658,20 @@ var Sevenn = (() => {
   var dbPromise;
   var DEFAULT_KINDS = ["disease", "drug", "concept"];
   var RESULT_BATCH_SIZE = 50;
+  var MAP_CONFIG_KEY = "map-config";
+  var DEFAULT_MAP_CONFIG = {
+    activeTabId: "default",
+    tabs: [
+      {
+        id: "default",
+        name: "All concepts",
+        includeLinked: true,
+        manualMode: false,
+        manualIds: [],
+        filter: { blockId: "", week: "", lectureKey: "" }
+      }
+    ]
+  };
   function prom2(req) {
     return new Promise((resolve, reject) => {
       req.onsuccess = () => resolve(req.result);
@@ -686,6 +700,29 @@ var Sevenn = (() => {
     const current = await prom2(s.get("app")) || { id: "app", dailyCount: 20, theme: "dark" };
     const next = { ...current, ...patch, id: "app" };
     await prom2(s.put(next));
+  }
+  function cloneConfig(config) {
+    return JSON.parse(JSON.stringify(config));
+  }
+  async function getMapConfig() {
+    try {
+      const s = await store("settings", "readwrite");
+      const existing = await prom2(s.get(MAP_CONFIG_KEY));
+      if (existing && existing.config) {
+        return cloneConfig(existing.config);
+      }
+      const fallback = cloneConfig(DEFAULT_MAP_CONFIG);
+      await prom2(s.put({ id: MAP_CONFIG_KEY, config: fallback }));
+      return fallback;
+    } catch (err) {
+      console.warn("getMapConfig failed", err);
+      return cloneConfig(DEFAULT_MAP_CONFIG);
+    }
+  }
+  async function saveMapConfig(config) {
+    const payload = config ? cloneConfig(config) : cloneConfig(DEFAULT_MAP_CONFIG);
+    const s = await store("settings", "readwrite");
+    await prom2(s.put({ id: MAP_CONFIG_KEY, config: payload }));
   }
   async function listBlocks() {
     try {
@@ -5928,7 +5965,8 @@ var Sevenn = (() => {
     }
     return [];
   }
-  function showPopup(item) {
+  function showPopup(item, options = {}) {
+    const { onEdit } = options;
     const modal = document.createElement("div");
     modal.className = "modal";
     const card = document.createElement("div");
@@ -5967,11 +6005,26 @@ var Sevenn = (() => {
       sec.appendChild(txt);
       card.appendChild(sec);
     });
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+    if (typeof onEdit === "function") {
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "btn secondary";
+      editBtn.textContent = "Edit";
+      editBtn.addEventListener("click", () => {
+        modal.remove();
+        onEdit();
+      });
+      actions.appendChild(editBtn);
+    }
     const close = document.createElement("button");
+    close.type = "button";
     close.className = "btn";
     close.textContent = "Close";
     close.addEventListener("click", () => modal.remove());
-    card.appendChild(close);
+    actions.appendChild(close);
+    card.appendChild(actions);
     modal.appendChild(card);
     modal.addEventListener("click", (e) => {
       if (e.target === modal) modal.remove();
@@ -6073,8 +6126,643 @@ var Sevenn = (() => {
     edgeTooltip: null,
     hoveredEdge: null,
     hoveredEdgePointer: { x: 0, y: 0 },
-    currentScales: { nodeScale: 1, labelScale: 1, lineScale: 1 }
+    currentScales: { nodeScale: 1, labelScale: 1, lineScale: 1 },
+    suppressNextClick: false,
+    mapConfig: null,
+    mapConfigLoaded: false,
+    blocks: [],
+    visibleItems: [],
+    searchValue: "",
+    searchFeedback: null,
+    searchInput: null,
+    searchFeedbackEl: null,
+    paletteSearch: ""
   };
+  function normalizeMapTab(tab = {}) {
+    const filter = tab.filter && typeof tab.filter === "object" ? tab.filter : {};
+    const normalized2 = {
+      id: tab.id || uid(),
+      name: tab.name || "Untitled map",
+      includeLinked: tab.includeLinked !== false,
+      manualMode: Boolean(tab.manualMode),
+      manualIds: Array.isArray(tab.manualIds) ? Array.from(new Set(tab.manualIds.filter(Boolean))) : [],
+      filter: {
+        blockId: filter.blockId || "",
+        week: Number.isFinite(filter.week) ? filter.week : typeof filter.week === "string" && filter.week.trim() ? Number(filter.week) : "",
+        lectureKey: filter.lectureKey || ""
+      }
+    };
+    if (!Number.isFinite(normalized2.filter.week)) {
+      normalized2.filter.week = "";
+    }
+    return normalized2;
+  }
+  function normalizeMapConfig(config = null) {
+    const base = config && typeof config === "object" ? { ...config } : {};
+    const tabs2 = Array.isArray(base.tabs) ? base.tabs.map(normalizeMapTab) : [normalizeMapTab({ id: "default", name: "All concepts", includeLinked: true })];
+    const ids = /* @__PURE__ */ new Set();
+    const deduped = [];
+    tabs2.forEach((tab) => {
+      if (ids.has(tab.id)) {
+        const clone3 = { ...tab, id: uid() };
+        ids.add(clone3.id);
+        deduped.push(clone3);
+      } else {
+        ids.add(tab.id);
+        deduped.push(tab);
+      }
+    });
+    const active = deduped.find((tab) => tab.id === base.activeTabId) || deduped[0];
+    return {
+      activeTabId: active.id,
+      tabs: deduped
+    };
+  }
+  async function ensureMapConfig() {
+    if (mapState.mapConfigLoaded && mapState.mapConfig) {
+      return mapState.mapConfig;
+    }
+    const raw = await getMapConfig();
+    const normalized2 = normalizeMapConfig(raw);
+    mapState.mapConfig = normalized2;
+    mapState.mapConfigLoaded = true;
+    if (JSON.stringify(raw) !== JSON.stringify(normalized2)) {
+      await saveMapConfig(normalized2);
+    }
+    return normalized2;
+  }
+  async function persistMapConfig() {
+    if (!mapState.mapConfig) return;
+    const snapshot = JSON.parse(JSON.stringify(mapState.mapConfig));
+    await saveMapConfig(snapshot);
+  }
+  function getActiveTab() {
+    const config = mapState.mapConfig;
+    if (!config) return null;
+    return config.tabs.find((tab) => tab.id === config.activeTabId) || config.tabs[0] || null;
+  }
+  async function setActiveTab(tabId) {
+    const config = mapState.mapConfig;
+    if (!config) return;
+    const tab = config.tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    config.activeTabId = tab.id;
+    mapState.searchValue = "";
+    mapState.searchFeedback = null;
+    mapState.paletteSearch = "";
+    mapState.selectionIds = [];
+    mapState.previewSelection = null;
+    mapState.pendingLink = null;
+    await persistMapConfig();
+    await renderMap(mapState.root);
+  }
+  async function createMapTab() {
+    const config = mapState.mapConfig || normalizeMapConfig(null);
+    const count = config.tabs.length + 1;
+    const tab = normalizeMapTab({
+      id: uid(),
+      name: `Map ${count}`,
+      includeLinked: true,
+      manualMode: false,
+      manualIds: [],
+      filter: { blockId: "", week: "", lectureKey: "" }
+    });
+    config.tabs.push(tab);
+    config.activeTabId = tab.id;
+    mapState.mapConfig = config;
+    mapState.searchValue = "";
+    mapState.searchFeedback = null;
+    await persistMapConfig();
+    await renderMap(mapState.root);
+  }
+  async function deleteActiveTab() {
+    const config = mapState.mapConfig;
+    if (!config) return;
+    if (config.tabs.length <= 1) {
+      alert("At least one map tab is required.");
+      return;
+    }
+    const tab = getActiveTab();
+    if (!tab) return;
+    const confirmed = confirm(`Delete map \u201C${tab.name}\u201D?`);
+    if (!confirmed) return;
+    config.tabs = config.tabs.filter((t) => t.id !== tab.id);
+    config.activeTabId = config.tabs[0]?.id || "";
+    mapState.searchValue = "";
+    mapState.searchFeedback = null;
+    await persistMapConfig();
+    await renderMap(mapState.root);
+  }
+  function updateSearchFeedback(message, type = "") {
+    if (message) {
+      mapState.searchFeedback = { message, type };
+    } else {
+      mapState.searchFeedback = null;
+    }
+    applyStoredSearchFeedback();
+  }
+  function applyStoredSearchFeedback() {
+    const el = mapState.searchFeedbackEl;
+    if (!el) return;
+    const info = mapState.searchFeedback;
+    if (info && info.message) {
+      el.textContent = info.message;
+      el.className = "map-search-feedback" + (info.type ? ` ${info.type}` : "");
+    } else {
+      el.textContent = "";
+      el.className = "map-search-feedback";
+    }
+  }
+  function setSearchInputState({ notFound = false } = {}) {
+    const input = mapState.searchInput;
+    if (!input) return;
+    input.classList.toggle("not-found", Boolean(notFound));
+  }
+  function buildMapHeader(wrapper, activeTab) {
+    const config = mapState.mapConfig || { tabs: [] };
+    const header = document.createElement("div");
+    header.className = "map-header";
+    const tabsWrap = document.createElement("div");
+    tabsWrap.className = "map-tabs";
+    const tabList = document.createElement("div");
+    tabList.className = "map-tab-list";
+    config.tabs.forEach((tab) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "map-tab" + (activeTab && tab.id === activeTab.id ? " active" : "");
+      btn.textContent = tab.name || "Untitled map";
+      btn.addEventListener("click", () => {
+        if (!activeTab || tab.id !== activeTab.id) {
+          setActiveTab(tab.id);
+        }
+      });
+      tabList.appendChild(btn);
+    });
+    tabsWrap.appendChild(tabList);
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "map-tab-add";
+    addBtn.setAttribute("aria-label", "Create new map tab");
+    addBtn.textContent = "+";
+    addBtn.addEventListener("click", () => {
+      createMapTab();
+    });
+    tabsWrap.appendChild(addBtn);
+    header.appendChild(tabsWrap);
+    const searchWrap = document.createElement("div");
+    searchWrap.className = "map-search-container";
+    const form = document.createElement("form");
+    form.className = "map-search";
+    form.addEventListener("submit", (evt) => {
+      evt.preventDefault();
+      handleSearchSubmit(input.value);
+    });
+    const input = document.createElement("input");
+    input.type = "search";
+    input.className = "input map-search-input";
+    input.placeholder = "Search concepts\u2026";
+    input.value = mapState.searchValue || "";
+    input.addEventListener("input", () => {
+      mapState.searchValue = input.value;
+      setSearchInputState({ notFound: false });
+      if (!input.value.trim()) {
+        updateSearchFeedback("", "");
+      }
+    });
+    form.appendChild(input);
+    const submit = document.createElement("button");
+    submit.type = "submit";
+    submit.className = "map-search-btn";
+    submit.textContent = "Go";
+    form.appendChild(submit);
+    searchWrap.appendChild(form);
+    const feedback = document.createElement("div");
+    feedback.className = "map-search-feedback";
+    searchWrap.appendChild(feedback);
+    header.appendChild(searchWrap);
+    wrapper.appendChild(header);
+    mapState.searchInput = input;
+    mapState.searchFeedbackEl = feedback;
+    applyStoredSearchFeedback();
+  }
+  function buildMapControls(wrapper, activeTab) {
+    const controls = document.createElement("div");
+    controls.className = "map-controls";
+    if (!activeTab) {
+      wrapper.appendChild(controls);
+      return;
+    }
+    const titleRow = document.createElement("div");
+    titleRow.className = "map-controls-row";
+    const nameLabel = document.createElement("label");
+    nameLabel.className = "map-control map-control-name";
+    nameLabel.textContent = "Map name";
+    const nameInput = document.createElement("input");
+    nameInput.className = "input map-name-input";
+    nameInput.value = activeTab.name || "";
+    nameInput.addEventListener("change", async () => {
+      const next = nameInput.value.trim() || "Untitled map";
+      if (next === activeTab.name) return;
+      activeTab.name = next;
+      await persistMapConfig();
+      await renderMap(mapState.root);
+    });
+    nameLabel.appendChild(nameInput);
+    titleRow.appendChild(nameLabel);
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "btn danger map-delete-tab";
+    deleteBtn.textContent = "Delete map";
+    if ((mapState.mapConfig?.tabs || []).length <= 1) {
+      deleteBtn.disabled = true;
+    }
+    deleteBtn.addEventListener("click", () => {
+      deleteActiveTab();
+    });
+    titleRow.appendChild(deleteBtn);
+    controls.appendChild(titleRow);
+    const toggleRow = document.createElement("div");
+    toggleRow.className = "map-controls-row";
+    const manualToggle = document.createElement("label");
+    manualToggle.className = "map-toggle";
+    const manualInput = document.createElement("input");
+    manualInput.type = "checkbox";
+    manualInput.checked = Boolean(activeTab.manualMode);
+    manualInput.addEventListener("change", async () => {
+      activeTab.manualMode = manualInput.checked;
+      await persistMapConfig();
+      await renderMap(mapState.root);
+    });
+    const manualSpan = document.createElement("span");
+    manualSpan.textContent = "Manual mode";
+    manualToggle.appendChild(manualInput);
+    manualToggle.appendChild(manualSpan);
+    toggleRow.appendChild(manualToggle);
+    const linkedToggle = document.createElement("label");
+    linkedToggle.className = "map-toggle";
+    const linkedInput = document.createElement("input");
+    linkedInput.type = "checkbox";
+    linkedInput.checked = activeTab.includeLinked !== false;
+    linkedInput.addEventListener("change", async () => {
+      activeTab.includeLinked = linkedInput.checked;
+      await persistMapConfig();
+      await renderMap(mapState.root);
+    });
+    const linkedSpan = document.createElement("span");
+    linkedSpan.textContent = "Include linked concepts";
+    linkedToggle.appendChild(linkedInput);
+    linkedToggle.appendChild(linkedSpan);
+    toggleRow.appendChild(linkedToggle);
+    controls.appendChild(toggleRow);
+    const filterRow = document.createElement("div");
+    filterRow.className = "map-controls-row";
+    const blockWrap = document.createElement("label");
+    blockWrap.className = "map-control";
+    blockWrap.textContent = "Block";
+    const blockSelect = document.createElement("select");
+    blockSelect.className = "map-select";
+    const blocks = mapState.blocks || [];
+    const blockDefault = document.createElement("option");
+    blockDefault.value = "";
+    blockDefault.textContent = "All blocks";
+    blockSelect.appendChild(blockDefault);
+    blocks.forEach((block) => {
+      const opt = document.createElement("option");
+      opt.value = block.blockId;
+      opt.textContent = block.name || block.blockId;
+      blockSelect.appendChild(opt);
+    });
+    blockSelect.value = activeTab.filter.blockId || "";
+    blockSelect.disabled = Boolean(activeTab.manualMode);
+    blockSelect.addEventListener("change", async () => {
+      activeTab.filter.blockId = blockSelect.value;
+      activeTab.filter.week = "";
+      activeTab.filter.lectureKey = "";
+      await persistMapConfig();
+      await renderMap(mapState.root);
+    });
+    blockWrap.appendChild(blockSelect);
+    filterRow.appendChild(blockWrap);
+    const weekWrap = document.createElement("label");
+    weekWrap.className = "map-control";
+    weekWrap.textContent = "Week";
+    const weekSelect = document.createElement("select");
+    weekSelect.className = "map-select";
+    const weekBlock = blocks.find((b) => b.blockId === blockSelect.value);
+    const weekDefault = document.createElement("option");
+    weekDefault.value = "";
+    weekDefault.textContent = blockSelect.value ? "All weeks" : "Select a block";
+    weekSelect.appendChild(weekDefault);
+    if (weekBlock && blockSelect.value) {
+      const weekNumbers = /* @__PURE__ */ new Set();
+      if (Number(weekBlock.weeks)) {
+        for (let i = 1; i <= Number(weekBlock.weeks); i++) {
+          weekNumbers.add(i);
+        }
+      }
+      (weekBlock.lectures || []).forEach((lec) => {
+        if (Number.isFinite(lec?.week)) {
+          weekNumbers.add(lec.week);
+        }
+      });
+      Array.from(weekNumbers).sort((a, b) => a - b).forEach((num) => {
+        const opt = document.createElement("option");
+        opt.value = String(num);
+        opt.textContent = `Week ${num}`;
+        weekSelect.appendChild(opt);
+      });
+    }
+    if (blockSelect.value && activeTab.filter.week) {
+      weekSelect.value = String(activeTab.filter.week);
+    } else {
+      weekSelect.value = "";
+    }
+    weekSelect.disabled = !blockSelect.value || Boolean(activeTab.manualMode);
+    weekSelect.addEventListener("change", async () => {
+      const val = weekSelect.value;
+      activeTab.filter.week = val ? Number(val) : "";
+      activeTab.filter.lectureKey = "";
+      await persistMapConfig();
+      await renderMap(mapState.root);
+    });
+    weekWrap.appendChild(weekSelect);
+    filterRow.appendChild(weekWrap);
+    const lectureWrap = document.createElement("label");
+    lectureWrap.className = "map-control";
+    lectureWrap.textContent = "Lecture";
+    const lectureSelect = document.createElement("select");
+    lectureSelect.className = "map-select";
+    const lectureDefault = document.createElement("option");
+    lectureDefault.value = "";
+    lectureDefault.textContent = blockSelect.value ? "All lectures" : "Select a block";
+    lectureSelect.appendChild(lectureDefault);
+    if (weekBlock && blockSelect.value) {
+      const lectures = Array.isArray(weekBlock.lectures) ? weekBlock.lectures : [];
+      const weekFilter = activeTab.filter.week;
+      lectures.filter((lec) => !weekFilter || lec.week === weekFilter).forEach((lec) => {
+        const opt = document.createElement("option");
+        opt.value = `${weekBlock.blockId}|${lec.id}`;
+        const label = lec.name ? `${lec.name} (Week ${lec.week})` : `Lecture ${lec.id}`;
+        opt.textContent = label;
+        lectureSelect.appendChild(opt);
+      });
+    }
+    lectureSelect.value = activeTab.filter.lectureKey || "";
+    lectureSelect.disabled = !blockSelect.value || Boolean(activeTab.manualMode);
+    lectureSelect.addEventListener("change", async () => {
+      activeTab.filter.lectureKey = lectureSelect.value || "";
+      await persistMapConfig();
+      await renderMap(mapState.root);
+    });
+    lectureWrap.appendChild(lectureSelect);
+    filterRow.appendChild(lectureWrap);
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.className = "btn map-reset-filters";
+    resetBtn.textContent = "Clear filters";
+    resetBtn.disabled = Boolean(activeTab.manualMode);
+    resetBtn.addEventListener("click", async () => {
+      activeTab.filter.blockId = "";
+      activeTab.filter.week = "";
+      activeTab.filter.lectureKey = "";
+      await persistMapConfig();
+      await renderMap(mapState.root);
+    });
+    filterRow.appendChild(resetBtn);
+    controls.appendChild(filterRow);
+    wrapper.appendChild(controls);
+  }
+  function buildMapPalette(items, activeTab) {
+    if (!activeTab || !activeTab.manualMode) {
+      return null;
+    }
+    const palette = document.createElement("div");
+    palette.className = "map-palette";
+    const title = document.createElement("h3");
+    title.textContent = "Concept library";
+    palette.appendChild(title);
+    const description = document.createElement("p");
+    description.className = "map-palette-hint";
+    description.textContent = "Drag terms onto the canvas to add them to this map.";
+    palette.appendChild(description);
+    const searchInput = document.createElement("input");
+    searchInput.type = "search";
+    searchInput.className = "input map-palette-search";
+    searchInput.placeholder = "Filter terms";
+    searchInput.value = mapState.paletteSearch || "";
+    palette.appendChild(searchInput);
+    const list = document.createElement("div");
+    list.className = "map-palette-list";
+    palette.appendChild(list);
+    const manualSet = new Set(Array.isArray(activeTab.manualIds) ? activeTab.manualIds : []);
+    const itemMap = mapState.itemMap || {};
+    function renderList() {
+      list.innerHTML = "";
+      const query = searchInput.value.trim().toLowerCase();
+      const available = items.filter((it) => !manualSet.has(it.id)).filter((it) => !query || titleOf3(it).toLowerCase().includes(query)).sort((a, b) => titleOf3(a).localeCompare(titleOf3(b)));
+      if (!available.length) {
+        const empty = document.createElement("div");
+        empty.className = "map-palette-empty";
+        empty.textContent = query ? "No matching terms." : "All terms have been added.";
+        list.appendChild(empty);
+        return;
+      }
+      available.forEach((it) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "map-palette-item";
+        btn.textContent = titleOf3(it) || it.id;
+        btn.addEventListener("mousedown", (evt) => {
+          const sourceItem = itemMap[it.id] || it;
+          startMenuDrag(sourceItem, evt, { source: "palette" });
+        });
+        list.appendChild(btn);
+      });
+    }
+    searchInput.addEventListener("input", () => {
+      mapState.paletteSearch = searchInput.value;
+      renderList();
+    });
+    renderList();
+    const activeWrap = document.createElement("div");
+    activeWrap.className = "map-palette-active";
+    const activeTitle = document.createElement("h4");
+    activeTitle.textContent = `Active concepts (${manualSet.size})`;
+    activeWrap.appendChild(activeTitle);
+    const activeList = document.createElement("div");
+    activeList.className = "map-palette-active-list";
+    if (!manualSet.size) {
+      const empty = document.createElement("div");
+      empty.className = "map-palette-empty";
+      empty.textContent = "No concepts yet. Drag from the library to begin.";
+      activeList.appendChild(empty);
+    } else {
+      activeTab.manualIds.forEach((id) => {
+        const item = itemMap[id];
+        if (!item) return;
+        const row = document.createElement("div");
+        row.className = "map-palette-active-item";
+        const label = document.createElement("span");
+        label.textContent = titleOf3(item) || id;
+        row.appendChild(label);
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "icon-btn ghost";
+        removeBtn.setAttribute("aria-label", `Remove ${titleOf3(item) || "item"} from this map`);
+        removeBtn.textContent = "\u2715";
+        removeBtn.addEventListener("click", async () => {
+          const tab = getActiveTab();
+          if (!tab) return;
+          tab.manualIds = (tab.manualIds || []).filter((mid) => mid !== id);
+          await persistMapConfig();
+          await renderMap(mapState.root);
+        });
+        row.appendChild(removeBtn);
+        activeList.appendChild(row);
+      });
+    }
+    activeWrap.appendChild(activeList);
+    palette.appendChild(activeWrap);
+    return palette;
+  }
+  function handleSearchSubmit(rawQuery) {
+    const query = (rawQuery || "").trim();
+    if (!query) {
+      mapState.searchValue = "";
+      updateSearchFeedback("", "");
+      setSearchInputState({ notFound: false });
+      return;
+    }
+    mapState.searchValue = rawQuery;
+    const items = mapState.visibleItems || [];
+    const lower = query.toLowerCase();
+    let match = items.find((it) => (titleOf3(it) || "").toLowerCase() === lower);
+    if (!match) {
+      match = items.find((it) => (titleOf3(it) || "").toLowerCase().includes(lower));
+    }
+    if (!match) {
+      updateSearchFeedback("No matching concept on this map.", "error");
+      setSearchInputState({ notFound: true });
+      return;
+    }
+    const success = centerOnNode(match.id);
+    if (success) {
+      updateSearchFeedback(`Centered on ${titleOf3(match)}.`, "success");
+      setSearchInputState({ notFound: false });
+    } else {
+      updateSearchFeedback("Could not focus on that concept.", "error");
+      setSearchInputState({ notFound: true });
+    }
+  }
+  function centerOnNode(id) {
+    if (!mapState.viewBox || !mapState.positions) return false;
+    const pos = mapState.positions[id];
+    if (!pos) return false;
+    const width = mapState.viewBox.w;
+    const height = mapState.viewBox.h;
+    const limit = mapState.sizeLimit || 0;
+    const maxX = Math.max(0, limit - width);
+    const maxY = Math.max(0, limit - height);
+    const nextX = clamp(pos.x - width / 2, 0, maxX);
+    const nextY = clamp(pos.y - height / 2, 0, maxY);
+    if (Number.isFinite(nextX)) mapState.viewBox.x = nextX;
+    if (Number.isFinite(nextY)) mapState.viewBox.y = nextY;
+    if (mapState.updateViewBox) {
+      mapState.updateViewBox();
+    }
+    mapState.selectionIds = [id];
+    updateSelectionHighlight();
+    return true;
+  }
+  function matchesFilter(item, filter = {}) {
+    if (!filter) return true;
+    const blockId = filter.blockId || "";
+    const week = filter.week;
+    const lectureKey = filter.lectureKey || "";
+    if (blockId) {
+      const inBlock = (item.blocks || []).includes(blockId) || (item.lectures || []).some((lec) => lec.blockId === blockId);
+      if (!inBlock) return false;
+    }
+    if (week !== "" && week !== null && week !== void 0) {
+      const weekNum = Number(week);
+      if (Number.isFinite(weekNum)) {
+        if (blockId) {
+          const matchesWeek = (item.lectures || []).some((lec) => lec.blockId === blockId && lec.week === weekNum) || (item.weeks || []).includes(weekNum);
+          if (!matchesWeek) return false;
+        } else if (!(item.weeks || []).includes(weekNum)) {
+          return false;
+        }
+      }
+    }
+    if (lectureKey) {
+      const [blk, lecStr] = lectureKey.split("|");
+      const lecId = Number(lecStr);
+      if (Number.isFinite(lecId)) {
+        const blockMatch = blk || blockId;
+        const hasLecture = (item.lectures || []).some((lec) => {
+          if (!Number.isFinite(lec.id)) return false;
+          if (blockMatch) {
+            return lec.blockId === blockMatch && lec.id === lecId;
+          }
+          return lec.id === lecId;
+        });
+        if (!hasLecture) return false;
+      }
+    }
+    return true;
+  }
+  function applyTabFilters(items, tab) {
+    if (!tab) {
+      return items.filter((it) => !it.mapHidden);
+    }
+    const manualSet = new Set(Array.isArray(tab.manualIds) ? tab.manualIds : []);
+    let base;
+    if (tab.manualMode) {
+      base = items.filter((it) => manualSet.has(it.id));
+    } else {
+      base = items.filter((it) => !it.mapHidden && matchesFilter(it, tab.filter));
+    }
+    const allowed = new Set(base.map((it) => it.id));
+    if (tab.includeLinked !== false) {
+      const queue = [...allowed];
+      while (queue.length) {
+        const id = queue.pop();
+        const item = mapState.itemMap?.[id];
+        if (!item) continue;
+        (item.links || []).forEach((link) => {
+          const other = mapState.itemMap?.[link.id];
+          if (!other) return;
+          if (other.mapHidden && !manualSet.has(other.id)) return;
+          if (!allowed.has(other.id)) {
+            allowed.add(other.id);
+            queue.push(other.id);
+          }
+        });
+      }
+    }
+    return items.filter((it) => {
+      if (!allowed.has(it.id)) return false;
+      if (tab.manualMode) {
+        if (manualSet.has(it.id)) return true;
+        return !it.mapHidden;
+      }
+      return !it.mapHidden || manualSet.has(it.id);
+    });
+  }
+  function openItemPopup(itemId) {
+    const item = mapState.itemMap?.[itemId];
+    if (!item) return;
+    showPopup(item, {
+      onEdit: () => openItemEditor(itemId)
+    });
+  }
+  function openItemEditor(itemId) {
+    const item = mapState.itemMap?.[itemId];
+    if (!item) return;
+    openEditor(item.kind, async () => {
+      await renderMap(mapState.root);
+    }, item);
+  }
   function setAreaInteracting(active) {
     if (!mapState.root) return;
     mapState.root.classList.toggle("map-area-interacting", Boolean(active));
@@ -6093,6 +6781,8 @@ var Sevenn = (() => {
     mapState.previewSelection = null;
     mapState.nodeWasDragged = false;
     mapState.justCompletedSelection = false;
+    mapState.searchInput = null;
+    mapState.searchFeedbackEl = null;
     stopToolboxDrag();
     mapState.toolboxEl = null;
     mapState.toolboxContainer = null;
@@ -6102,23 +6792,42 @@ var Sevenn = (() => {
     stopAutoPan();
     setAreaInteracting(false);
     ensureListeners();
+    await ensureMapConfig();
+    mapState.blocks = await listBlocks();
     const items = [
       ...await listItemsByKind("disease"),
       ...await listItemsByKind("drug"),
       ...await listItemsByKind("concept")
     ];
     const hiddenNodes = items.filter((it) => it.mapHidden);
-    const visibleItems = items.filter((it) => !it.mapHidden);
     const itemMap = Object.fromEntries(items.map((it) => [it.id, it]));
     mapState.itemMap = itemMap;
+    const activeTab = getActiveTab();
+    const visibleItems = applyTabFilters(items, activeTab);
+    mapState.visibleItems = visibleItems;
     const base = 1e3;
     const size = Math.max(base, visibleItems.length * 150);
     const viewport = base;
     mapState.sizeLimit = size * 2;
     mapState.minView = 100;
+    const wrapper = document.createElement("div");
+    wrapper.className = "map-wrapper";
+    root.appendChild(wrapper);
+    buildMapHeader(wrapper, activeTab);
+    buildMapControls(wrapper, activeTab);
+    const content = document.createElement("div");
+    content.className = "map-content";
+    wrapper.appendChild(content);
+    const palette = buildMapPalette(items, activeTab);
+    if (palette) {
+      content.appendChild(palette);
+    }
+    const stage = document.createElement("div");
+    stage.className = "map-stage";
+    content.appendChild(stage);
     const container = document.createElement("div");
     container.className = "map-container";
-    root.appendChild(container);
+    stage.appendChild(container);
     mapState.container = container;
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.classList.add("map-svg");
@@ -6266,6 +6975,7 @@ var Sevenn = (() => {
         if (!isNavigateTool && !isAreaDrag) return;
         e.stopPropagation();
         e.preventDefault();
+        mapState.suppressNextClick = false;
         const { x, y } = clientToMap(e.clientX, e.clientY);
         const current = mapState.positions[it.id] || pos;
         if (isNavigateTool) {
@@ -6293,8 +7003,15 @@ var Sevenn = (() => {
       circle.addEventListener("mousedown", handleNodePointerDown);
       circle.addEventListener("click", async (e) => {
         e.stopPropagation();
+        if (mapState.suppressNextClick) {
+          mapState.suppressNextClick = false;
+          mapState.nodeWasDragged = false;
+          return;
+        }
         if (mapState.tool === TOOL.NAVIGATE) {
-          if (!mapState.nodeWasDragged) showPopup(it);
+          if (!mapState.nodeWasDragged) {
+            openItemPopup(it.id);
+          }
           mapState.nodeWasDragged = false;
         } else if (mapState.tool === TOOL.HIDE) {
           if (confirm(`Remove ${titleOf3(it)} from the map?`)) {
@@ -6329,6 +7046,18 @@ var Sevenn = (() => {
       text.dataset.id = it.id;
       text.textContent = it.name || it.concept || "?";
       text.addEventListener("mousedown", handleNodePointerDown);
+      text.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (mapState.suppressNextClick) {
+          mapState.suppressNextClick = false;
+          mapState.nodeWasDragged = false;
+          return;
+        }
+        if (mapState.tool === TOOL.NAVIGATE && !mapState.nodeWasDragged) {
+          openItemPopup(it.id);
+        }
+        mapState.nodeWasDragged = false;
+      });
       g.appendChild(text);
       mapState.elements.set(it.id, { circle, label: text });
     });
@@ -6509,6 +7238,9 @@ var Sevenn = (() => {
       cursorNeedsRefresh = true;
       if (mapState.nodeWasDragged) {
         await persistNodePosition(id);
+        mapState.suppressNextClick = true;
+      } else {
+        mapState.suppressNextClick = false;
       }
       mapState.nodeWasDragged = false;
       setAreaInteracting(false);
@@ -6520,6 +7252,9 @@ var Sevenn = (() => {
       cursorNeedsRefresh = true;
       if (moved) {
         await Promise.all(ids.map((id) => persistNodePosition(id)));
+        mapState.suppressNextClick = true;
+      } else {
+        mapState.suppressNextClick = false;
       }
       mapState.nodeWasDragged = false;
       stopAutoPan();
@@ -6843,7 +7578,7 @@ var Sevenn = (() => {
           item.textContent = titleOf3(it) || it.id;
           item.addEventListener("mousedown", (e) => {
             if (mapState.tool !== TOOL.HIDE) return;
-            startMenuDrag(it, e);
+            startMenuDrag(it, e, { source: "hidden" });
           });
           list.appendChild(item);
         });
@@ -6891,13 +7626,18 @@ var Sevenn = (() => {
       container.appendChild(toggle);
     }
   }
-  function startMenuDrag(item, event) {
+  function startMenuDrag(item, event, options = {}) {
     event.preventDefault();
     const ghost = document.createElement("div");
     ghost.className = "map-drag-ghost";
     ghost.textContent = titleOf3(item) || item.id;
     document.body.appendChild(ghost);
-    mapState.menuDrag = { id: item.id, ghost };
+    mapState.menuDrag = {
+      id: item.id,
+      ghost,
+      source: options.source || "hidden",
+      tabId: options.tabId || (getActiveTab()?.id || null)
+    };
     updateMenuDragPosition(event.clientX, event.clientY);
   }
   async function finishMenuDrag(clientX, clientY) {
@@ -6912,6 +7652,23 @@ var Sevenn = (() => {
     const { x, y } = clientToMap(clientX, clientY);
     const item = await getItem(drag.id);
     if (!item) return;
+    if (drag.source === "palette") {
+      const tab = getActiveTab();
+      if (!tab || !tab.manualMode) return;
+      if (drag.tabId && tab.id !== drag.tabId) return;
+      if (!Array.isArray(tab.manualIds)) {
+        tab.manualIds = [];
+      }
+      if (!tab.manualIds.includes(item.id)) {
+        tab.manualIds.push(item.id);
+        await persistMapConfig();
+      }
+      item.mapHidden = false;
+      item.mapPos = { x, y };
+      await upsertItem(item);
+      await renderMap(mapState.root);
+      return;
+    }
     item.mapHidden = false;
     item.mapPos = { x, y };
     await upsertItem(item);
