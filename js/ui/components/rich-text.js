@@ -163,7 +163,7 @@ function createToolbarButton(label, title, onClick){
   return btn;
 }
 
-export function createRichTextEditor({ value = '', onChange } = {}){
+export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabelledBy } = {}){
   const wrapper = document.createElement('div');
   wrapper.className = 'rich-editor';
 
@@ -178,6 +178,8 @@ export function createRichTextEditor({ value = '', onChange } = {}){
   editable.contentEditable = 'true';
   editable.spellcheck = true;
   editable.innerHTML = normalizeInput(value);
+  if (ariaLabel) editable.setAttribute('aria-label', ariaLabel);
+  if (ariaLabelledBy) editable.setAttribute('aria-labelledby', ariaLabelledBy);
   wrapper.appendChild(editable);
 
   const commandButtons = [];
