@@ -314,9 +314,6 @@ export async function renderCardList(container, items, kind, onChange){
   viewToggle.appendChild(gridBtn);
   toolbar.appendChild(viewToggle);
 
-  const advancedWrap = document.createElement('div');
-  advancedWrap.className = 'layout-advanced-controls';
-
   const columnWrap = document.createElement('label');
   columnWrap.className = 'layout-control';
   columnWrap.textContent = 'Columns';
@@ -336,7 +333,7 @@ export async function renderCardList(container, items, kind, onChange){
   });
   columnWrap.appendChild(columnInput);
   columnWrap.appendChild(columnValue);
-  advancedWrap.appendChild(columnWrap);
+  toolbar.appendChild(columnWrap);
 
   const scaleWrap = document.createElement('label');
   scaleWrap.className = 'layout-control';
@@ -357,20 +354,7 @@ export async function renderCardList(container, items, kind, onChange){
   });
   scaleWrap.appendChild(scaleInput);
   scaleWrap.appendChild(scaleValue);
-  advancedWrap.appendChild(scaleWrap);
-
-  toolbar.appendChild(advancedWrap);
-
-  const advancedToggle = document.createElement('button');
-  advancedToggle.type = 'button';
-  advancedToggle.className = 'layout-advanced-toggle icon-btn ghost';
-  advancedToggle.title = 'Layout options';
-  advancedToggle.setAttribute('aria-expanded', 'false');
-  advancedToggle.setAttribute('aria-label', 'Toggle layout options');
-  advancedToggle.textContent = '⋯';
-  toolbar.appendChild(advancedToggle);
-
-  let advancedOpen = state.entryLayout.mode === 'grid';
+  toolbar.appendChild(scaleWrap);
 
   container.appendChild(toolbar);
 
@@ -380,21 +364,6 @@ export async function renderCardList(container, items, kind, onChange){
     gridBtn.classList.toggle('active', mode === 'grid');
     columnWrap.style.display = mode === 'grid' ? '' : 'none';
   }
-
-  function updateAdvancedVisibility(){
-    if (advancedOpen) {
-      advancedWrap.removeAttribute('hidden');
-    } else {
-      advancedWrap.setAttribute('hidden', '');
-    }
-    toolbar.classList.toggle('advanced-open', advancedOpen);
-    advancedToggle.setAttribute('aria-expanded', String(advancedOpen));
-  }
-
-  advancedToggle.addEventListener('click', () => {
-    advancedOpen = !advancedOpen;
-    updateAdvancedVisibility();
-  });
 
   function applyLayout(){
     const lists = container.querySelectorAll('.card-list');
@@ -406,7 +375,6 @@ export async function renderCardList(container, items, kind, onChange){
   }
 
   updateToolbar();
-  updateAdvancedVisibility();
 
   sortedBlocks.forEach(b => {
     const blockSec = document.createElement('section');
