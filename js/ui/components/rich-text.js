@@ -230,23 +230,53 @@ export function createRichTextEditor({ value = '' } = {}){
   const colorGroup = createGroup();
   colorGroup.appendChild(colorWrap);
 
-  const highlightWrap = document.createElement('label');
-  highlightWrap.className = 'rich-editor-color';
-  highlightWrap.title = 'Highlight color';
-  const highlightInput = document.createElement('input');
-  highlightInput.type = 'color';
-  highlightInput.value = '#ffff00';
-  highlightInput.dataset.lastColor = '#ffff00';
-  highlightInput.addEventListener('input', () => {
-    if (!hasActiveSelection()) {
-      highlightInput.value = highlightInput.dataset.lastColor || '#ffff00';
-      return;
-    }
-    exec('hiliteColor', highlightInput.value);
-    highlightInput.dataset.lastColor = highlightInput.value;
+  const highlightGroup = createGroup();
+  highlightGroup.classList.add('rich-editor-highlight-group');
+  const highlightLabel = document.createElement('span');
+  highlightLabel.className = 'rich-editor-label';
+  highlightLabel.textContent = 'Highlight';
+  highlightGroup.appendChild(highlightLabel);
+
+  const highlightColors = [
+    ['#facc15', 'Yellow'],
+    ['#f472b6', 'Pink'],
+    ['#f87171', 'Red'],
+    ['#4ade80', 'Green'],
+    ['#38bdf8', 'Blue']
+  ];
+
+  function clearHighlight() {
+    focusEditor();
+    document.execCommand('hiliteColor', false, 'transparent');
+    editable.dispatchEvent(new Event('input'));
+  }
+
+  function applyHighlight(color) {
+    if (!hasActiveSelection()) return;
+    exec('hiliteColor', color);
+  }
+
+  highlightColors.forEach(([color, label]) => {
+    const swatch = document.createElement('button');
+    swatch.type = 'button';
+    swatch.className = 'rich-editor-swatch';
+    swatch.style.setProperty('--swatch-color', color);
+    swatch.title = `${label} highlight`;
+    swatch.setAttribute('aria-label', `${label} highlight`);
+    swatch.addEventListener('mousedown', e => e.preventDefault());
+    swatch.addEventListener('click', () => applyHighlight(color));
+    highlightGroup.appendChild(swatch);
   });
-  highlightWrap.appendChild(highlightInput);
-  colorGroup.appendChild(highlightWrap);
+
+  const clearSwatch = document.createElement('button');
+  clearSwatch.type = 'button';
+  clearSwatch.className = 'rich-editor-swatch rich-editor-swatch--clear';
+  clearSwatch.title = 'Remove highlight';
+  clearSwatch.setAttribute('aria-label', 'Remove highlight');
+  clearSwatch.textContent = '✕';
+  clearSwatch.addEventListener('mousedown', e => e.preventDefault());
+  clearSwatch.addEventListener('click', clearHighlight);
+  highlightGroup.appendChild(clearSwatch);
 
   const listGroup = createGroup();
   const listSelect = document.createElement('select');
@@ -387,13 +417,7 @@ export function createRichTextEditor({ value = '' } = {}){
   const utilityGroup = createGroup();
   utilityGroup.appendChild(clearBtn);
 
-  const clearHighlightBtn = createToolbarButton('⨯', 'Remove highlight', () => {
-    focusEditor();
-    document.execCommand('hiliteColor', false, 'transparent');
-    highlightInput.value = '#ffff00';
-    highlightInput.dataset.lastColor = '#ffff00';
-    editable.dispatchEvent(new Event('input'));
-  });
+  const clearHighlightBtn = createToolbarButton('⨯', 'Remove highlight', clearHighlight);
   utilityGroup.appendChild(clearHighlightBtn);
 
   editable.addEventListener('keydown', (e) => {
