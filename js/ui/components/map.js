@@ -130,9 +130,7 @@ const mapState = {
   searchFeedback: null,
   searchInput: null,
   searchFeedbackEl: null,
-  paletteSearch: '',
-  navigate: null,
-  availableTabs: []
+  paletteSearch: ''
 };
 
 function normalizeMapTab(tab = {}) {
@@ -286,41 +284,10 @@ function setSearchInputState({ notFound = false } = {}) {
   input.classList.toggle('not-found', Boolean(notFound));
 }
 
-function buildMapHeader(activeTab) {
+function buildMapHeader(wrapper, activeTab) {
   const config = mapState.mapConfig || { tabs: [] };
   const header = document.createElement('div');
   header.className = 'map-header';
-
-  const top = document.createElement('div');
-  top.className = 'map-header-top';
-
-  const title = document.createElement('h2');
-  title.className = 'map-header-title';
-  title.textContent = 'Concept maps';
-  top.appendChild(title);
-
-  const actions = document.createElement('div');
-  actions.className = 'map-header-actions';
-
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'map-header-btn map-header-add';
-  addBtn.setAttribute('aria-label', 'Create new map');
-  addBtn.innerHTML = '<span>＋</span>';
-  addBtn.addEventListener('click', () => {
-    createMapTab();
-  });
-  actions.appendChild(addBtn);
-
-  const settingsBtn = document.createElement('button');
-  settingsBtn.type = 'button';
-  settingsBtn.className = 'map-header-btn map-header-settings';
-  settingsBtn.setAttribute('aria-label', 'Toggle map settings');
-  settingsBtn.innerHTML = '<span>⚙️</span>';
-  actions.appendChild(settingsBtn);
-
-  top.appendChild(actions);
-  header.appendChild(top);
 
   const tabsWrap = document.createElement('div');
   tabsWrap.className = 'map-tabs';
@@ -341,14 +308,20 @@ function buildMapHeader(activeTab) {
   });
   tabsWrap.appendChild(tabList);
 
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'map-tab-add';
+  addBtn.setAttribute('aria-label', 'Create new map tab');
+  addBtn.textContent = '+';
+  addBtn.addEventListener('click', () => {
+    createMapTab();
+  });
+  tabsWrap.appendChild(addBtn);
+
   header.appendChild(tabsWrap);
 
-  return { header, settingsButton: settingsBtn };
-}
-
-function buildMapSearchHud() {
   const searchWrap = document.createElement('div');
-  searchWrap.className = 'map-search-container floating';
+  searchWrap.className = 'map-search-container';
 
   const form = document.createElement('form');
   form.className = 'map-search';
@@ -383,49 +356,22 @@ function buildMapSearchHud() {
   feedback.className = 'map-search-feedback';
   searchWrap.appendChild(feedback);
 
+  header.appendChild(searchWrap);
+
+  wrapper.appendChild(header);
+
   mapState.searchInput = input;
   mapState.searchFeedbackEl = feedback;
   applyStoredSearchFeedback();
-
-  return searchWrap;
 }
 
-function buildMapNav() {
-  const tabs = Array.isArray(mapState.availableTabs) ? mapState.availableTabs.filter(tab => tab && tab !== 'Map') : [];
-  if (!tabs.length) return null;
-  const nav = document.createElement('nav');
-  nav.className = 'map-nav';
-
-  const title = document.createElement('span');
-  title.className = 'map-nav-title';
-  title.textContent = 'Navigate';
-  nav.appendChild(title);
-
-  const list = document.createElement('div');
-  list.className = 'map-nav-list';
-  tabs.forEach(tab => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'map-nav-btn';
-    btn.textContent = tab;
-    btn.addEventListener('click', () => {
-      if (typeof mapState.navigate === 'function') {
-        mapState.navigate(tab);
-      }
-    });
-    list.appendChild(btn);
-  });
-  nav.appendChild(list);
-  return nav;
-}
-
-function buildMapControls(activeTab) {
+function buildMapControls(wrapper, activeTab) {
   const controls = document.createElement('div');
   controls.className = 'map-controls';
   if (!activeTab) {
-    return null;
+    wrapper.appendChild(controls);
+    return;
   }
-  controls.classList.toggle('manual-active', Boolean(activeTab.manualMode));
 
   const titleRow = document.createElement('div');
   titleRow.className = 'map-controls-row';
@@ -609,8 +555,8 @@ function buildMapControls(activeTab) {
 
   const resetBtn = document.createElement('button');
   resetBtn.type = 'button';
-  resetBtn.className = 'btn ghost map-reset-filters';
-  resetBtn.textContent = 'Reset filters';
+  resetBtn.className = 'btn map-reset-filters';
+  resetBtn.textContent = 'Clear filters';
   resetBtn.disabled = Boolean(activeTab.manualMode);
   resetBtn.addEventListener('click', async () => {
     activeTab.filter.blockId = '';
@@ -623,7 +569,7 @@ function buildMapControls(activeTab) {
 
   controls.appendChild(filterRow);
 
-  return controls;
+  wrapper.appendChild(controls);
 }
 
 function buildMapPalette(items, activeTab) {
@@ -883,12 +829,10 @@ function setAreaInteracting(active) {
   mapState.root.classList.toggle('map-area-interacting', Boolean(active));
 }
 
-export async function renderMap(root, options = {}) {
+export async function renderMap(root) {
   if (mapState.root && mapState.root !== root) {
     mapState.root.classList.remove('map-area-interacting');
   }
-  mapState.navigate = typeof options.navigate === 'function' ? options.navigate : null;
-  mapState.availableTabs = Array.isArray(options.tabs) ? options.tabs : [];
   mapState.root = root;
   root.innerHTML = '';
   mapState.nodeDrag = null;
@@ -940,86 +884,26 @@ export async function renderMap(root, options = {}) {
   wrapper.className = 'map-wrapper';
   root.appendChild(wrapper);
 
+  buildMapHeader(wrapper, activeTab);
+  buildMapControls(wrapper, activeTab);
+
+  const content = document.createElement('div');
+  content.className = 'map-content';
+  wrapper.appendChild(content);
+
+  const palette = buildMapPalette(items, activeTab);
+  if (palette) {
+    content.appendChild(palette);
+  }
+
   const stage = document.createElement('div');
   stage.className = 'map-stage';
-  wrapper.appendChild(stage);
+  content.appendChild(stage);
 
   const container = document.createElement('div');
   container.className = 'map-container';
   stage.appendChild(container);
   mapState.container = container;
-
-  const overlay = document.createElement('div');
-  overlay.className = 'map-overlay';
-  wrapper.appendChild(overlay);
-
-  const drawer = document.createElement('div');
-  drawer.className = 'map-drawer';
-  overlay.appendChild(drawer);
-
-  const handle = document.createElement('button');
-  handle.type = 'button';
-  handle.className = 'map-drawer-handle';
-  handle.setAttribute('aria-label', 'Toggle map menu');
-  handle.innerHTML = '<span>☰</span>';
-  drawer.appendChild(handle);
-
-  const menu = document.createElement('aside');
-  menu.className = 'map-menu';
-  drawer.appendChild(menu);
-
-  const nav = buildMapNav();
-  if (nav) {
-    menu.appendChild(nav);
-  }
-
-  const { header, settingsButton } = buildMapHeader(activeTab);
-  menu.appendChild(header);
-
-  const controls = buildMapControls(activeTab);
-  if (controls) {
-    menu.appendChild(controls);
-  }
-
-  const palette = buildMapPalette(items, activeTab);
-  if (palette) {
-    menu.appendChild(palette);
-  }
-
-  const searchHud = buildMapSearchHud();
-  overlay.appendChild(searchHud);
-
-  handle.addEventListener('click', () => {
-    drawer.classList.toggle('open');
-  });
-
-  drawer.addEventListener('mouseleave', () => {
-    if (!drawer.matches(':focus-within')) {
-      drawer.classList.remove('open');
-    }
-  });
-
-  drawer.addEventListener('focusout', () => {
-    requestAnimationFrame(() => {
-      if (!drawer.matches(':hover') && !drawer.matches(':focus-within')) {
-        drawer.classList.remove('open');
-      }
-    });
-  });
-
-  if (settingsButton && controls) {
-    const applyExpanded = expanded => {
-      controls.classList.toggle('expanded', expanded);
-      settingsButton.setAttribute('aria-pressed', expanded ? 'true' : 'false');
-      settingsButton.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-      settingsButton.classList.toggle('active', expanded);
-    };
-    applyExpanded(false);
-    settingsButton.addEventListener('click', () => {
-      const next = !controls.classList.contains('expanded');
-      applyExpanded(next);
-    });
-  }
 
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.classList.add('map-svg');
