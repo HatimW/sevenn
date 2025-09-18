@@ -1839,20 +1839,22 @@ input[type="checkbox"]:checked::after {
   color: var(--accent);
 }
 
+
 .card-settings {
   position: relative;
   margin-left: auto;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 10px;
   z-index: 5;
+  flex: 0 0 auto;
 }
 
 .card-settings-toggle {
-  width: 40px;
-  height: 40px;
-  border-radius: 14px;
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
   transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -1864,19 +1866,20 @@ input[type="checkbox"]:checked::after {
 }
 
 .card-settings-toggle svg {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
 }
 
 .card-menu {
   position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
+  top: 50%;
+  right: 56px;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 10px;
+  padding: 10px 14px;
   min-width: max-content;
   background: linear-gradient(155deg, rgba(15, 23, 42, 0.94), rgba(8, 13, 23, 0.96));
   border-radius: var(--radius);
@@ -1920,8 +1923,8 @@ input[type="checkbox"]:checked::after {
 }
 
 .icon-btn.card-settings-toggle {
-  width: 40px;
-  height: 40px;
+  width: 46px;
+  height: 46px;
 }
 
 .icon-btn:hover {
@@ -3030,7 +3033,7 @@ body.map-toolbox-dragging {
   font-weight: 600;
   line-height: 1;
   min-height: 44px;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .palette-button:hover {
@@ -3040,24 +3043,38 @@ body.map-toolbox-dragging {
 }
 
 .palette-button.active {
-  background: linear-gradient(135deg, rgba(96, 165, 250, 0.92), rgba(56, 189, 248, 0.9));
-  color: #041026;
-  border-color: transparent;
-  box-shadow: 0 14px 28px rgba(2, 6, 23, 0.35);
+  border-color: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.7), 0 16px 28px rgba(15, 23, 42, 0.38);
+  color: #031633;
+  transform: translateY(-1px);
 }
 
-.palette-button.answered:not(.active) {
-  border-color: rgba(56, 189, 248, 0.7);
+.palette-button.active:not(.flagged):not(.answered) {
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.95), rgba(56, 189, 248, 0.92));
+}
+
+.palette-button.answered {
+  background: linear-gradient(135deg, rgba(224, 242, 254, 0.95), rgba(186, 230, 253, 0.92));
+  border-color: transparent;
+  color: #0c4a6e;
+  box-shadow: 0 10px 22px rgba(56, 189, 248, 0.18);
 }
 
 .palette-button.flagged {
-  border-color: rgba(244, 114, 182, 0.75);
-  box-shadow: 0 0 0 2px rgba(244, 114, 182, 0.25);
+  background: linear-gradient(135deg, rgba(254, 243, 199, 0.96), rgba(250, 204, 21, 0.92));
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #422006;
+  box-shadow: 0 12px 24px rgba(250, 204, 21, 0.26);
+}
+
+.palette-button.answered.active {
+  border-color: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.7), 0 16px 26px rgba(56, 189, 248, 0.28);
 }
 
 .palette-button.flagged.active {
-  background: linear-gradient(135deg, rgba(244, 114, 182, 0.94), rgba(248, 113, 113, 0.88));
-  color: #1f0411;
+  border-color: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.75), 0 18px 30px rgba(234, 179, 8, 0.32);
 }
 
 .exam-sidebar-info {
