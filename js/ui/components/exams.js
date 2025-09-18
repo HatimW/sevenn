@@ -674,13 +674,20 @@ function renderPalette(sidebar, sess, render) {
     ? (sess.result.flagged || [])
     : Object.entries(sess.flagged || {}).filter(([_, v]) => v).map(([idx]) => Number(idx)));
 
-  sess.exam.questions.forEach((_, idx) => {
+  sess.exam.questions.forEach((question, idx) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = String(idx + 1);
     btn.className = 'palette-button';
     if (sess.idx === idx) btn.classList.add('active');
-    if (answers[idx] != null) btn.classList.add('answered');
+    const answer = answers[idx];
+    const hasAnswer = question.options.some(opt => opt.id === answer);
+    if (hasAnswer) {
+      btn.classList.add('answered');
+      if (sess.mode === 'review') {
+        btn.classList.add(answer === question.answer ? 'correct' : 'incorrect');
+      }
+    }
     if (flaggedSet.has(idx)) btn.classList.add('flagged');
     btn.addEventListener('click', () => {
       sess.idx = idx;
@@ -827,7 +834,15 @@ export function renderExamRunner(root, render) {
     if (sess.mode === 'taking') choice.type = 'button';
     choice.className = 'exam-option';
     if (sess.mode === 'review') choice.classList.add('review');
-    choice.textContent = opt.text || '(Empty option)';
+
+    const indicator = document.createElement('span');
+    indicator.className = 'option-indicator';
+    choice.appendChild(indicator);
+
+    const label = document.createElement('span');
+    label.className = 'option-text';
+    label.textContent = opt.text || '(Empty option)';
+    choice.appendChild(label);
     const isSelected = selected === opt.id;
     if (sess.mode === 'taking') {
       if (isSelected) choice.classList.add('selected');
