@@ -38,3 +38,15 @@ export function buildTokens(item) {
   });
   return Array.from(new Set(tokenize(fields.join(' ')))).slice(0,200).join(' ');
 }
+
+export function buildSearchMeta(item) {
+  const pieces = [];
+  if (item.name) pieces.push(item.name);
+  if (item.concept) pieces.push(item.concept);
+  pieces.push(...(item.tags || []));
+  pieces.push(...(item.blocks || []));
+  if (Array.isArray(item.lectures)) {
+    pieces.push(...item.lectures.map(l => l?.name || ''));
+  }
+  return pieces.join(' ').toLowerCase();
+}

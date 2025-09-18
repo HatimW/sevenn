@@ -283,8 +283,25 @@ export function createItemCard(item, onChange){
   return card;
 }
 
-export async function renderCardList(container, items, kind, onChange){
+export async function renderCardList(container, itemSource, kind, onChange){
   container.innerHTML = '';
+  const items = [];
+  if (itemSource) {
+    if (typeof itemSource?.[Symbol.asyncIterator] === 'function') {
+      for await (const batch of itemSource) {
+        if (Array.isArray(batch)) {
+          items.push(...batch);
+        } else if (batch) {
+          items.push(batch);
+        }
+      }
+    } else if (typeof itemSource?.toArray === 'function') {
+      const collected = await itemSource.toArray();
+      items.push(...collected);
+    } else if (Array.isArray(itemSource)) {
+      items.push(...itemSource);
+    }
+  }
   const blocks = await listBlocks();
   const blockTitle = id => blocks.find(b => b.blockId === id)?.title || id;
   const orderMap = new Map(blocks.map((b,i)=>[b.blockId,i]));
