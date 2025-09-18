@@ -4760,13 +4760,20 @@ var Sevenn = (() => {
     grid.className = "exam-palette-grid";
     const answers = sess.mode === "review" ? sess.result.answers || {} : sess.answers || {};
     const flaggedSet = new Set(sess.mode === "review" ? sess.result.flagged || [] : Object.entries(sess.flagged || {}).filter(([_, v]) => v).map(([idx]) => Number(idx)));
-    sess.exam.questions.forEach((_, idx) => {
+    sess.exam.questions.forEach((question, idx) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = String(idx + 1);
       btn.className = "palette-button";
       if (sess.idx === idx) btn.classList.add("active");
-      if (answers[idx] != null) btn.classList.add("answered");
+      const answer = answers[idx];
+      const hasAnswer = answer !== void 0 && answer !== null && answer !== "";
+      if (hasAnswer) {
+        btn.classList.add("answered");
+        if (sess.mode === "review") {
+          btn.classList.add(answer === question.answer ? "correct" : "incorrect");
+        }
+      }
       if (flaggedSet.has(idx)) btn.classList.add("flagged");
       btn.addEventListener("click", () => {
         sess.idx = idx;
@@ -4896,8 +4903,10 @@ var Sevenn = (() => {
       choice.className = "exam-option";
       if (sess.mode === "review") choice.classList.add("review");
       choice.textContent = opt.text || "(Empty option)";
+      const isSelected = selected === opt.id;
       if (sess.mode === "taking") {
-        if (selected === opt.id) choice.classList.add("selected");
+        if (isSelected) choice.classList.add("selected");
+        choice.setAttribute("aria-pressed", isSelected ? "true" : "false");
         choice.addEventListener("click", () => {
           sess.answers[sess.idx] = opt.id;
           if (sess.exam.timerMode !== "timed" && sess.checked) {
@@ -4908,12 +4917,12 @@ var Sevenn = (() => {
         if (isInstantCheck) {
           const cls = answerClass(question, selected, opt.id);
           if (cls) choice.classList.add(cls);
-          if (selected === opt.id) choice.classList.add("chosen");
+          if (isSelected) choice.classList.add("chosen");
         }
       } else {
         const cls = answerClass(question, selected, opt.id);
         if (cls) choice.classList.add(cls);
-        if (selected === opt.id) choice.classList.add("chosen");
+        if (isSelected) choice.classList.add("chosen");
       }
       optionsWrap.appendChild(choice);
     });
