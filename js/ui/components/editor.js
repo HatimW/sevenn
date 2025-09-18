@@ -183,12 +183,12 @@ export async function openEditor(kind, onSave, existing = null) {
 
     const weekWrap = document.createElement('div');
     weekWrap.className = 'builder-sub';
-    weekWrap.style.display = blkCb.checked ? 'block' : 'none';
+    weekWrap.style.display = blkCb.checked ? 'flex' : 'none';
     blockDiv.appendChild(weekWrap);
 
     blkCb.addEventListener('change', () => {
       if (blkCb.checked) blockSet.add(b.blockId); else blockSet.delete(b.blockId);
-      weekWrap.style.display = blkCb.checked ? 'block' : 'none';
+      weekWrap.style.display = blkCb.checked ? 'flex' : 'none';
     });
 
     const weeks = Array.from({ length: b.weeks || 0 }, (_, i) => i + 1);
@@ -205,12 +205,12 @@ export async function openEditor(kind, onSave, existing = null) {
 
       const lecWrap = document.createElement('div');
       lecWrap.className = 'builder-sub';
-      lecWrap.style.display = wkCb.checked ? 'block' : 'none';
+      lecWrap.style.display = wkCb.checked ? 'flex' : 'none';
       wkLabel.appendChild(lecWrap);
 
       wkCb.addEventListener('change', () => {
         if (wkCb.checked) weekSet.add(wkKey); else weekSet.delete(wkKey);
-        lecWrap.style.display = wkCb.checked ? 'block' : 'none';
+        lecWrap.style.display = wkCb.checked ? 'flex' : 'none';
       });
 
       (b.lectures || []).filter(l => l.week === w).forEach(l => {

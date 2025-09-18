@@ -230,23 +230,35 @@ export function createRichTextEditor({ value = '' } = {}){
   const colorGroup = createGroup();
   colorGroup.appendChild(colorWrap);
 
-  const highlightWrap = document.createElement('label');
-  highlightWrap.className = 'rich-editor-color';
-  highlightWrap.title = 'Highlight color';
-  const highlightInput = document.createElement('input');
-  highlightInput.type = 'color';
-  highlightInput.value = '#ffff00';
-  highlightInput.dataset.lastColor = '#ffff00';
-  highlightInput.addEventListener('input', () => {
-    if (!hasActiveSelection()) {
-      highlightInput.value = highlightInput.dataset.lastColor || '#ffff00';
-      return;
-    }
-    exec('hiliteColor', highlightInput.value);
-    highlightInput.dataset.lastColor = highlightInput.value;
+  const highlightPalette = document.createElement('div');
+  highlightPalette.className = 'rich-editor-highlight';
+  const highlightLabel = document.createElement('span');
+  highlightLabel.className = 'rich-editor-highlight-label';
+  highlightLabel.textContent = 'Highlight';
+  highlightPalette.appendChild(highlightLabel);
+
+  const highlightColors = [
+    ['#facc15', 'Yellow'],
+    ['#f472b6', 'Pink'],
+    ['#f87171', 'Red'],
+    ['#4ade80', 'Green'],
+    ['#38bdf8', 'Blue']
+  ];
+
+  highlightColors.forEach(([color, label]) => {
+    const swatch = document.createElement('button');
+    swatch.type = 'button';
+    swatch.className = 'rich-editor-highlight-swatch';
+    swatch.style.setProperty('--swatch-color', color);
+    swatch.title = label;
+    swatch.addEventListener('click', () => {
+      if (!hasActiveSelection()) return;
+      exec('hiliteColor', color);
+    });
+    highlightPalette.appendChild(swatch);
   });
-  highlightWrap.appendChild(highlightInput);
-  colorGroup.appendChild(highlightWrap);
+
+  colorGroup.appendChild(highlightPalette);
 
   const listGroup = createGroup();
   const listSelect = document.createElement('select');
@@ -388,11 +400,8 @@ export function createRichTextEditor({ value = '' } = {}){
   utilityGroup.appendChild(clearBtn);
 
   const clearHighlightBtn = createToolbarButton('⨯', 'Remove highlight', () => {
-    focusEditor();
-    document.execCommand('hiliteColor', false, 'transparent');
-    highlightInput.value = '#ffff00';
-    highlightInput.dataset.lastColor = '#ffff00';
-    editable.dispatchEvent(new Event('input'));
+    if (!hasActiveSelection()) return;
+    exec('hiliteColor', 'transparent');
   });
   utilityGroup.appendChild(clearHighlightBtn);
 
