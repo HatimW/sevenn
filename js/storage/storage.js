@@ -16,6 +16,8 @@ const DEFAULT_MAP_CONFIG = {
       includeLinked: true,
       manualMode: false,
       manualIds: [],
+      layout: {},
+      layoutSeeded: true,
       filter: { blockId: '', week: '', lectureKey: '' }
     }
   ]
