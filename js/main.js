@@ -32,20 +32,26 @@ async function render() {
   brand.className = 'brand';
   brand.textContent = '✨ Sevenn';
   left.appendChild(brand);
-  header.appendChild(left);
-
-  const right = document.createElement('div');
-  right.className = 'header-right';
 
   const nav = document.createElement('nav');
   nav.className = 'tabs';
   nav.setAttribute('aria-label', 'Primary sections');
-
+  const tabClassMap = {
+    Diseases: 'tab-disease',
+    Drugs: 'tab-drug',
+    Concepts: 'tab-concept',
+    Cards: 'tab-cards',
+    Study: 'tab-study',
+    Exams: 'tab-exams',
+    Map: 'tab-map'
+  };
   tabs.forEach(t => {
     const btn = document.createElement('button');
-    const kindClass = { Diseases:'disease', Drugs:'drug', Concepts:'concept' }[t];
-    btn.className = 'tab' + (state.tab === t ? ' active' : '');
-    if (kindClass) btn.classList.add(kindClass);
+    btn.type = 'button';
+    btn.className = 'tab';
+    if (state.tab === t) btn.classList.add('active');
+    const variant = tabClassMap[t];
+    if (variant) btn.classList.add(variant);
     btn.textContent = t;
     btn.addEventListener('click', () => {
       setTab(t);
@@ -53,35 +59,53 @@ async function render() {
     });
     nav.appendChild(btn);
   });
+  left.appendChild(nav);
+  header.appendChild(left);
 
-  right.appendChild(nav);
+  const right = document.createElement('div');
+  right.className = 'header-right';
+
+  const searchField = document.createElement('label');
+  searchField.className = 'search-field';
+  searchField.setAttribute('aria-label', 'Search entries');
+
+  const searchIcon = document.createElement('span');
+  searchIcon.className = 'search-icon';
+  searchIcon.setAttribute('aria-hidden', 'true');
+  searchIcon.innerHTML = '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 14.5L18 18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="9" cy="9" r="5.8" stroke="currentColor" stroke-width="1.6"/></svg>';
+  searchField.appendChild(searchIcon);
 
   const search = document.createElement('input');
   search.type = 'search';
-  search.placeholder = 'Search';
+  search.placeholder = 'Search entries';
   search.value = state.query;
   search.autocomplete = 'off';
   search.spellcheck = false;
   search.className = 'search-input';
-  search.setAttribute('aria-label', 'Search entries');
   search.dataset.role = 'global-search';
   search.addEventListener('input', e => {
     setQuery(e.target.value);
     render();
   });
-  right.appendChild(search);
+  search.addEventListener('search', e => {
+    setQuery(e.target.value);
+    render();
+  });
+  searchField.appendChild(search);
+  right.appendChild(searchField);
 
   const settingsBtn = document.createElement('button');
   settingsBtn.type = 'button';
-  settingsBtn.className = 'tab settings-tab' + (state.tab === 'Settings' ? ' active' : '');
+  settingsBtn.className = 'header-settings-btn';
+  if (state.tab === 'Settings') settingsBtn.classList.add('active');
   settingsBtn.setAttribute('aria-label', 'Settings');
-  settingsBtn.innerHTML = '<span aria-hidden="true">&#9881;</span>';
-  settingsBtn.title = 'Settings';
+  settingsBtn.innerHTML = '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11.78 2.75c-.5-1-2-.99-2.5 0l-.46.95a1 1 0 0 1-1.03.56l-1.05-.13c-1.13-.14-1.93 1.04-1.34 2.04l.52.88a1 1 0 0 1-.26 1.26l-.82.62c-.9.68-.6 2.11.5 2.37l1.02.24a1 1 0 0 1 .75.83l.11 1.05c.11 1.14 1.56 1.64 2.35.86l.75-.75a1 1 0 0 1 1.29-.1l.86.6c.93.64 2.19-.16 2.04-1.25l-.15-1.06a1 1 0 0 1 .58-1.05l.97-.4c1.06-.44 1.06-1.96 0-2.4l-.97-.4a1 1 0 0 1-.58-1.05l.15-1.06c.15-1.09-1.11-1.89-2.04-1.25l-.86.6a1 1 0 0 1-1.29-.1l-.75-.75a1 1 0 0 1-.25-.4z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="10" cy="10" r="2.4" stroke="currentColor" stroke-width="1.3"/></svg>';
   settingsBtn.addEventListener('click', () => {
     setTab('Settings');
     render();
   });
   right.appendChild(settingsBtn);
+
   header.appendChild(right);
   root.appendChild(header);
 

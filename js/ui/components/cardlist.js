@@ -86,12 +86,46 @@ export function createItemCard(item, onChange){
   settings.className = 'card-settings';
   const menu = document.createElement('div');
   menu.className = 'card-menu hidden';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-hidden', 'true');
   const gear = document.createElement('button');
-  gear.className = 'icon-btn';
-  gear.textContent = '⚙️';
-  gear.addEventListener('click', e => { e.stopPropagation(); menu.classList.toggle('hidden'); });
-  settings.append(menu, gear);
+  gear.type = 'button';
+  gear.className = 'icon-btn card-settings-toggle';
+  gear.title = 'Entry options';
+  gear.setAttribute('aria-haspopup', 'true');
+  gear.setAttribute('aria-expanded', 'false');
+  gear.innerHTML = '<svg viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.38 1.8c-.36-.72-1.4-.72-1.76 0l-.34.68a.9.9 0 0 1-.93.5l-.76-.09c-.85-.1-1.46.79-1.02 1.55l.38.68a.9.9 0 0 1-.2 1.11l-.6.46c-.66.5-.44 1.62.37 1.82l.73.18a.9.9 0 0 1 .53.63l.08.77c.08.84 1.14 1.2 1.7.63l.54-.55a.9.9 0 0 1 1.18-.08l.62.44c.69.47 1.63-.12 1.52-.9l-.11-.78a.9.9 0 0 1 .43-.78l.7-.28c.77-.32.77-1.43 0-1.74l-.7-.28a.9.9 0 0 1-.43-.78l.11-.78c.11-.78-.83-1.37-1.52-.9l-.62.44a.9.9 0 0 1-1.18-.08l-.54-.55a.9.9 0 0 1-.23-.3z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="9" r="1.8" stroke="currentColor" stroke-width="1.2"/></svg>';
+  settings.append(gear, menu);
   header.appendChild(settings);
+
+  function closeMenu() {
+    menu.classList.add('hidden');
+    menu.setAttribute('aria-hidden', 'true');
+    settings.classList.remove('open');
+    gear.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('mousedown', handleOutside);
+  }
+
+  function openMenu() {
+    menu.classList.remove('hidden');
+    menu.setAttribute('aria-hidden', 'false');
+    settings.classList.add('open');
+    gear.setAttribute('aria-expanded', 'true');
+    document.addEventListener('mousedown', handleOutside);
+  }
+
+  function handleOutside(e) {
+    if (!settings.contains(e.target)) {
+      closeMenu();
+    }
+  }
+
+  gear.addEventListener('click', e => {
+    e.stopPropagation();
+    if (menu.classList.contains('hidden')) openMenu(); else closeMenu();
+  });
+
+  menu.addEventListener('click', e => e.stopPropagation());
 
   const fav = document.createElement('button');
   fav.className = 'icon-btn';
@@ -100,6 +134,7 @@ export function createItemCard(item, onChange){
   fav.setAttribute('aria-label','Toggle Favorite');
   fav.addEventListener('click', async e => {
     e.stopPropagation();
+    closeMenu();
     item.favorite = !item.favorite;
     await upsertItem(item);
     fav.textContent = item.favorite ? '★' : '☆';
@@ -112,7 +147,11 @@ export function createItemCard(item, onChange){
   link.textContent = '🪢';
   link.title = 'Links';
   link.setAttribute('aria-label','Manage links');
-  link.addEventListener('click', e => { e.stopPropagation(); openLinker(item, onChange); });
+  link.addEventListener('click', e => {
+    e.stopPropagation();
+    closeMenu();
+    openLinker(item, onChange);
+  });
   menu.appendChild(link);
 
   const edit = document.createElement('button');
@@ -120,7 +159,11 @@ export function createItemCard(item, onChange){
   edit.textContent = '✏️';
   edit.title = 'Edit';
   edit.setAttribute('aria-label','Edit');
-  edit.addEventListener('click', e => { e.stopPropagation(); openEditor(item.kind, onChange, item); });
+  edit.addEventListener('click', e => {
+    e.stopPropagation();
+    closeMenu();
+    openEditor(item.kind, onChange, item);
+  });
   menu.appendChild(edit);
 
   const copy = document.createElement('button');
@@ -130,17 +173,19 @@ export function createItemCard(item, onChange){
   copy.setAttribute('aria-label','Copy Title');
   copy.addEventListener('click', e => {
     e.stopPropagation();
+    closeMenu();
     navigator.clipboard && navigator.clipboard.writeText(item.name || item.concept || '');
   });
   menu.appendChild(copy);
 
   const del = document.createElement('button');
-  del.className = 'icon-btn';
+  del.className = 'icon-btn danger';
   del.textContent = '🗑️';
   del.title = 'Delete';
   del.setAttribute('aria-label','Delete');
   del.addEventListener('click', async e => {
     e.stopPropagation();
+    closeMenu();
     if (await confirmModal('Delete this item?')) {
       await deleteItem(item.id);
       onChange && onChange();

@@ -13,7 +13,7 @@ export function createEntryAddControl(onAdded, initialKind = 'disease') {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'fab-btn';
-  button.innerHTML = '<span>＋</span>';
+  button.innerHTML = '<span class="sr-only">Add new entry</span><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   button.setAttribute('aria-label', 'Add new entry');
   const menu = document.createElement('div');
   menu.className = 'entry-add-menu hidden';

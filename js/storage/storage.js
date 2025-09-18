@@ -205,8 +205,15 @@ export async function findItemsByFilter(filter) {
   if (filter.query && filter.query.trim()) {
     const toks = tokenize(filter.query);
     items = items.filter(it => {
-      const t = it.tokens || '';
-      return toks.every(tok => t.includes(tok));
+      const tokens = it.tokens || '';
+      if (toks.every(tok => tokens.includes(tok))) return true;
+      const extra = [
+        titleOf(it),
+        ...(it.tags || []),
+        ...(it.blocks || []),
+        ...(it.lectures || []).map(l => l.name || '')
+      ].join(' ').toLowerCase();
+      return toks.every(tok => extra.includes(tok));
     });
   }
   if (filter.sort === 'name') {
