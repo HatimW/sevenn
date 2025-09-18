@@ -162,73 +162,189 @@ export async function openEditor(kind, onSave, existing = null) {
     lectSet.add(`${l.blockId}|${l.id}`);
   });
 
-  const blockWrap = document.createElement('div');
-  blockWrap.className = 'tag-wrap editor-tags';
+  const blockWrap = document.createElement('section');
+  blockWrap.className = 'editor-tags';
   const blockTitle = document.createElement('div');
   blockTitle.className = 'editor-tags-title';
   blockTitle.textContent = 'Curriculum tags';
   blockWrap.appendChild(blockTitle);
 
-  blocks.forEach(b => {
-    const blockDiv = document.createElement('div');
-    blockDiv.className = 'editor-tag-block';
-    const blkLabel = document.createElement('label');
-    blkLabel.className = 'row';
-    const blkCb = document.createElement('input');
-    blkCb.type = 'checkbox';
-    blkCb.checked = blockSet.has(b.blockId);
-    blkLabel.appendChild(blkCb);
-    blkLabel.appendChild(document.createTextNode(b.title || b.blockId));
-    blockDiv.appendChild(blkLabel);
+  const blockChipRow = document.createElement('div');
+  blockChipRow.className = 'editor-chip-row';
+  blockWrap.appendChild(blockChipRow);
 
-    const weekWrap = document.createElement('div');
-    weekWrap.className = 'builder-sub';
-    weekWrap.style.display = blkCb.checked ? 'block' : 'none';
-    blockDiv.appendChild(weekWrap);
+  const blockPanels = document.createElement('div');
+  blockPanels.className = 'editor-block-panels';
+  blockWrap.appendChild(blockPanels);
 
-    blkCb.addEventListener('change', () => {
-      if (blkCb.checked) blockSet.add(b.blockId); else blockSet.delete(b.blockId);
-      weekWrap.style.display = blkCb.checked ? 'block' : 'none';
-    });
+  function createTagChip(label, variant, active = false) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = `tag-chip tag-chip-${variant}`;
+    chip.textContent = label;
+    if (active) chip.classList.add('active');
+    return chip;
+  }
 
-    const weeks = Array.from({ length: b.weeks || 0 }, (_, i) => i + 1);
-    weeks.forEach(w => {
-      const wkLabel = document.createElement('label');
-      wkLabel.className = 'row';
-      const wkCb = document.createElement('input');
-      wkCb.type = 'checkbox';
-      const wkKey = `${b.blockId}|${w}`;
-      wkCb.checked = weekSet.has(wkKey);
-      wkLabel.appendChild(wkCb);
-      wkLabel.appendChild(document.createTextNode(`Week ${w}`));
-      weekWrap.appendChild(wkLabel);
+  function pruneBlock(blockId) {
+    for (const key of Array.from(weekSet)) {
+      if (key.startsWith(`${blockId}|`)) weekSet.delete(key);
+    }
+    for (const key of Array.from(lectSet)) {
+      if (key.startsWith(`${blockId}|`)) lectSet.delete(key);
+    }
+  }
 
-      const lecWrap = document.createElement('div');
-      lecWrap.className = 'builder-sub';
-      lecWrap.style.display = wkCb.checked ? 'block' : 'none';
-      wkLabel.appendChild(lecWrap);
-
-      wkCb.addEventListener('change', () => {
-        if (wkCb.checked) weekSet.add(wkKey); else weekSet.delete(wkKey);
-        lecWrap.style.display = wkCb.checked ? 'block' : 'none';
+  function renderBlockChips() {
+    blockChipRow.innerHTML = '';
+    if (!blocks.length) {
+      const empty = document.createElement('div');
+      empty.className = 'editor-tags-empty';
+      empty.textContent = 'No curriculum blocks have been created yet.';
+      blockChipRow.appendChild(empty);
+      return;
+    }
+    blocks.forEach(b => {
+      const chip = createTagChip(b.title || b.blockId, 'block', blockSet.has(b.blockId));
+      chip.addEventListener('click', () => {
+        if (blockSet.has(b.blockId)) {
+          blockSet.delete(b.blockId);
+          pruneBlock(b.blockId);
+        } else {
+          blockSet.add(b.blockId);
+        }
+        renderBlockChips();
+        renderBlockPanels();
       });
+      blockChipRow.appendChild(chip);
+    });
+  }
 
-      (b.lectures || []).filter(l => l.week === w).forEach(l => {
-        const key = `${b.blockId}|${l.id}`;
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'chip' + (lectSet.has(key) ? ' active' : '');
-        btn.textContent = l.name;
-        btn.addEventListener('click', () => {
-          if (lectSet.has(key)) lectSet.delete(key); else lectSet.add(key);
-          btn.classList.toggle('active');
+  function renderBlockPanels() {
+    blockPanels.innerHTML = '';
+    if (!blockSet.size) {
+      const empty = document.createElement('div');
+      empty.className = 'editor-tags-empty';
+      empty.textContent = 'Choose a block to pick weeks and lectures.';
+      blockPanels.appendChild(empty);
+      return;
+    }
+
+    Array.from(blockSet).forEach(blockId => {
+      const block = blockMap.get(blockId);
+      if (!block) return;
+
+      const panel = document.createElement('div');
+      panel.className = 'editor-block-panel';
+
+      const header = document.createElement('div');
+      header.className = 'editor-block-panel-header';
+      const title = document.createElement('h4');
+      title.textContent = block.title || blockId;
+      header.appendChild(title);
+      const meta = document.createElement('span');
+      meta.className = 'editor-block-meta';
+      const lectureCount = block.lectures?.length || 0;
+      const weekTotal = block.weeks || new Set((block.lectures || []).map(l => l.week)).size;
+      const metaParts = [];
+      if (weekTotal) metaParts.push(`${weekTotal} week${weekTotal === 1 ? '' : 's'}`);
+      if (lectureCount) metaParts.push(`${lectureCount} lecture${lectureCount === 1 ? '' : 's'}`);
+      meta.textContent = metaParts.join(' • ') || 'No weeks defined yet';
+      header.appendChild(meta);
+      panel.appendChild(header);
+
+      const weekList = document.createElement('div');
+      weekList.className = 'editor-week-list';
+
+      const weekNumbers = new Set();
+      if (block.weeks) {
+        for (let i = 1; i <= block.weeks; i++) weekNumbers.add(i);
+      }
+      (block.lectures || []).forEach(l => {
+        if (typeof l.week === 'number') weekNumbers.add(l.week);
+      });
+      const sortedWeeks = Array.from(weekNumbers).sort((a, b) => a - b);
+
+      if (!sortedWeeks.length) {
+        const noWeeks = document.createElement('div');
+        noWeeks.className = 'editor-tags-empty subtle';
+        noWeeks.textContent = 'Add weeks or lectures to this block to start tagging.';
+        weekList.appendChild(noWeeks);
+      } else {
+        sortedWeeks.forEach(w => {
+          const weekKey = `${blockId}|${w}`;
+          const section = document.createElement('div');
+          section.className = 'editor-week-section';
+          if (weekSet.has(weekKey)) section.classList.add('active');
+
+          const weekChip = createTagChip(`Week ${w}`, 'week', weekSet.has(weekKey));
+          weekChip.addEventListener('click', () => {
+            const wasActive = weekSet.has(weekKey);
+            if (wasActive) {
+              weekSet.delete(weekKey);
+              section.classList.remove('active');
+              lectureWrap.classList.add('collapsed');
+              (block.lectures || []).filter(l => l.week === w).forEach(l => {
+                const key = `${blockId}|${l.id}`;
+                lectSet.delete(key);
+                const chip = lectureWrap.querySelector(`[data-lecture='${key}']`);
+                if (chip) chip.classList.remove('active');
+              });
+            } else {
+              weekSet.add(weekKey);
+              section.classList.add('active');
+              lectureWrap.classList.remove('collapsed');
+            }
+            weekChip.classList.toggle('active', weekSet.has(weekKey));
+          });
+          section.appendChild(weekChip);
+
+          const lectureWrap = document.createElement('div');
+          lectureWrap.className = 'editor-lecture-list';
+          if (!weekSet.has(weekKey)) lectureWrap.classList.add('collapsed');
+
+          const lectures = (block.lectures || []).filter(l => l.week === w);
+          if (!lectures.length) {
+            const empty = document.createElement('div');
+            empty.className = 'editor-tags-empty subtle';
+            empty.textContent = 'No lectures linked to this week yet.';
+            lectureWrap.appendChild(empty);
+          } else {
+            lectures.forEach(l => {
+              const key = `${blockId}|${l.id}`;
+              const lectureChip = createTagChip(l.name || `Lecture ${l.id}`, 'lecture', lectSet.has(key));
+              lectureChip.dataset.lecture = key;
+              lectureChip.addEventListener('click', () => {
+                if (lectSet.has(key)) {
+                  lectSet.delete(key);
+                  lectureChip.classList.remove('active');
+                } else {
+                  lectSet.add(key);
+                  lectureChip.classList.add('active');
+                  if (!weekSet.has(weekKey)) {
+                    weekSet.add(weekKey);
+                    section.classList.add('active');
+                    weekChip.classList.add('active');
+                    lectureWrap.classList.remove('collapsed');
+                  }
+                }
+              });
+              lectureWrap.appendChild(lectureChip);
+            });
+          }
+
+          section.appendChild(lectureWrap);
+          weekList.appendChild(section);
         });
-        lecWrap.appendChild(btn);
-      });
-    });
+      }
 
-    blockWrap.appendChild(blockDiv);
-  });
+      panel.appendChild(weekList);
+      blockPanels.appendChild(panel);
+    });
+  }
+
+  renderBlockChips();
+  renderBlockPanels();
 
   form.appendChild(blockWrap);
 
