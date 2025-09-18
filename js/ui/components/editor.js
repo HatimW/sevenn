@@ -85,17 +85,25 @@ export async function openEditor(kind, onSave, existing = null) {
 
   const fieldInputs = {};
   fieldMap[kind].forEach(([field, label]) => {
-    const lbl = document.createElement('label');
-    lbl.className = 'editor-field';
-    lbl.textContent = label;
+    const fieldWrap = document.createElement('div');
+    fieldWrap.className = 'editor-field';
+
+    const labelEl = document.createElement('label');
+    labelEl.className = 'editor-field-label';
+    labelEl.textContent = label;
+    const labelId = `field-${field}-${uid()}`;
+    labelEl.id = labelId;
+    fieldWrap.appendChild(labelEl);
+
     const editor = createRichTextEditor({
       value: existing ? existing[field] || '' : '',
-      onChange: markDirty
+      onChange: markDirty,
+      ariaLabelledBy: labelId
     });
     const inp = editor.element;
     fieldInputs[field] = editor;
-    lbl.appendChild(inp);
-    form.appendChild(lbl);
+    fieldWrap.appendChild(inp);
+    form.appendChild(fieldWrap);
   });
 
   const extrasWrap = document.createElement('section');

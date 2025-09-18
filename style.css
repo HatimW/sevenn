@@ -793,6 +793,11 @@ input[type="checkbox"]:checked::after {
   font-size: 0.95rem;
 }
 
+.editor-field-label {
+  font-weight: 600;
+  color: var(--text);
+}
+
 .editor-tags {
   margin-top: var(--pad);
   padding: var(--pad);
