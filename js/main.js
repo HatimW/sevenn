@@ -12,22 +12,34 @@ import { renderExams, renderExamRunner } from './ui/components/exams.js';
 import { renderMap } from './ui/components/map.js';
 import { createEntryAddControl } from './ui/components/entry-controls.js';
 
-const tabs = ["Diseases","Drugs","Concepts","Cards","Study","Exams","Map","Settings"];
+const tabs = ["Diseases","Drugs","Concepts","Cards","Study","Exams","Map"];
 
 async function render() {
   const root = document.getElementById('app');
+  const activeEl = document.activeElement;
+  const shouldRestoreSearch = activeEl && activeEl.dataset && activeEl.dataset.role === 'global-search';
+  const selectionStart = shouldRestoreSearch && typeof activeEl.selectionStart === 'number' ? activeEl.selectionStart : null;
+  const selectionEnd = shouldRestoreSearch && typeof activeEl.selectionEnd === 'number' ? activeEl.selectionEnd : null;
+
   root.innerHTML = '';
 
   const header = document.createElement('header');
-  header.className = 'header row';
+  header.className = 'header';
 
+  const left = document.createElement('div');
+  left.className = 'header-left';
   const brand = document.createElement('div');
   brand.className = 'brand';
   brand.textContent = '✨ Sevenn';
-  header.appendChild(brand);
+  left.appendChild(brand);
+  header.appendChild(left);
+
+  const right = document.createElement('div');
+  right.className = 'header-right';
 
   const nav = document.createElement('nav');
-  nav.className = 'tabs row';
+  nav.className = 'tabs';
+  nav.setAttribute('aria-label', 'Primary sections');
 
   tabs.forEach(t => {
     const btn = document.createElement('button');
@@ -42,15 +54,48 @@ async function render() {
     nav.appendChild(btn);
   });
 
-  header.appendChild(nav);
+  right.appendChild(nav);
 
   const search = document.createElement('input');
   search.type = 'search';
   search.placeholder = 'Search';
   search.value = state.query;
-  search.addEventListener('input', e => { setQuery(e.target.value); render(); });
-  header.appendChild(search);
+  search.autocomplete = 'off';
+  search.spellcheck = false;
+  search.className = 'search-input';
+  search.setAttribute('aria-label', 'Search entries');
+  search.dataset.role = 'global-search';
+  search.addEventListener('input', e => {
+    setQuery(e.target.value);
+    render();
+  });
+  right.appendChild(search);
+
+  const settingsBtn = document.createElement('button');
+  settingsBtn.type = 'button';
+  settingsBtn.className = 'tab settings-tab' + (state.tab === 'Settings' ? ' active' : '');
+  settingsBtn.setAttribute('aria-label', 'Settings');
+  settingsBtn.innerHTML = '<span aria-hidden="true">&#9881;</span>';
+  settingsBtn.title = 'Settings';
+  settingsBtn.addEventListener('click', () => {
+    setTab('Settings');
+    render();
+  });
+  right.appendChild(settingsBtn);
+  header.appendChild(right);
   root.appendChild(header);
+
+  if (shouldRestoreSearch) {
+    requestAnimationFrame(() => {
+      search.focus();
+      if (selectionStart !== null && selectionEnd !== null && search.setSelectionRange) {
+        search.setSelectionRange(selectionStart, selectionEnd);
+      } else {
+        const len = search.value.length;
+        if (search.setSelectionRange) search.setSelectionRange(len, len);
+      }
+    });
+  }
 
   const main = document.createElement('main');
   if (state.tab === 'Map') main.className = 'map-main';
