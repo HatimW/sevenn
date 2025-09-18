@@ -46,7 +46,7 @@ function escapeHtml(str = '') {
 export async function openEditor(kind, onSave, existing = null) {
   const win = createFloatingWindow({
     title: `${existing ? 'Edit' : 'Add'} ${titleMap[kind] || kind}`,
-    width: 600
+    width: 720
   });
 
   const form = document.createElement('form');
