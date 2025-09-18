@@ -154,6 +154,20 @@ var Sevenn = (() => {
         return results;
       });
     }
+    getAllKeys(value) {
+      return new MemoryRequest(this.store.tx, () => {
+        const results = [];
+        for (const [key, item] of this.store._map()) {
+          const extracted = this.extractor(item);
+          if (this.multiEntry && Array.isArray(extracted)) {
+            if (extracted.includes(value)) results.push(key);
+          } else if (extracted === value) {
+            results.push(key);
+          }
+        }
+        return results;
+      });
+    }
   };
   var MemoryStore = class {
     constructor(tx, name) {
@@ -206,11 +220,23 @@ var Sevenn = (() => {
       });
     }
     index(name) {
-      if (this.name === "items" && name === "by_kind") {
-        return new MemoryIndex(this, (item) => item.kind || null);
+      if (this.name === "items") {
+        switch (name) {
+          case "by_kind":
+            return new MemoryIndex(this, (item) => item.kind || null);
+          case "by_blocks":
+            return new MemoryIndex(this, (item) => item.blocks || [], true);
+          case "by_weeks":
+            return new MemoryIndex(this, (item) => item.weeks || [], true);
+          case "by_favorite":
+            return new MemoryIndex(this, (item) => !!item.favorite);
+          default:
+            break;
+        }
       }
       return {
-        getAll: () => new MemoryRequest(this.tx, () => [])
+        getAll: () => new MemoryRequest(this.tx, () => []),
+        getAllKeys: () => new MemoryRequest(this.tx, () => [])
       };
     }
   };
@@ -459,6 +485,17 @@ var Sevenn = (() => {
     });
     return Array.from(new Set(tokenize(fields.join(" ")))).slice(0, 200).join(" ");
   }
+  function buildSearchMeta(item) {
+    const pieces = [];
+    if (item.name) pieces.push(item.name);
+    if (item.concept) pieces.push(item.concept);
+    pieces.push(...item.tags || []);
+    pieces.push(...item.blocks || []);
+    if (Array.isArray(item.lectures)) {
+      pieces.push(...item.lectures.map((l) => l?.name || ""));
+    }
+    return pieces.join(" ").toLowerCase();
+  }
 
   // js/storage/export.js
   function prom(req) {
@@ -619,6 +656,8 @@ var Sevenn = (() => {
 
   // js/storage/storage.js
   var dbPromise;
+  var DEFAULT_KINDS = ["disease", "drug", "concept"];
+  var RESULT_BATCH_SIZE = 50;
   function prom2(req) {
     return new Promise((resolve, reject) => {
       req.onsuccess = () => resolve(req.result);
@@ -686,6 +725,7 @@ var Sevenn = (() => {
         }
         if (changed) {
           it.tokens = buildTokens(it);
+          it.searchMeta = buildSearchMeta(it);
           await prom2(i.put(it));
         }
       }
@@ -717,6 +757,7 @@ var Sevenn = (() => {
         }
         if ((it.blocks?.length || 0) !== beforeBlocks || (it.lectures?.length || 0) !== beforeLects) {
           it.tokens = buildTokens(it);
+          it.searchMeta = buildSearchMeta(it);
           await prom2(i.put(it));
         }
       }
@@ -740,6 +781,7 @@ var Sevenn = (() => {
           const validWeeks = new Set((it.lectures || []).map((l) => l.week));
           it.weeks = Array.from(validWeeks);
           it.tokens = buildTokens(it);
+          it.searchMeta = buildSearchMeta(it);
           await prom2(i.put(it));
         }
       }
@@ -769,6 +811,7 @@ var Sevenn = (() => {
         const validWeeks = new Set((it.lectures || []).map((l) => l.week));
         it.weeks = Array.from(validWeeks);
         it.tokens = buildTokens(it);
+        it.searchMeta = buildSearchMeta(it);
         await prom2(i.put(it));
       }
     }
@@ -781,45 +824,115 @@ var Sevenn = (() => {
   function titleOf(item) {
     return item.name || item.concept || "";
   }
-  async function findItemsByFilter(filter) {
-    const i = await store("items");
-    let items = await prom2(i.getAll());
-    if (filter.types && filter.types.length) {
-      items = items.filter((it) => filter.types.includes(it.kind));
+  function normalizeFilter(filter = {}) {
+    const rawTypes = Array.isArray(filter.types) ? filter.types.filter((t) => typeof t === "string" && t) : [];
+    const types = rawTypes.length ? Array.from(new Set(rawTypes)) : DEFAULT_KINDS;
+    const block = typeof filter.block === "string" ? filter.block : "";
+    const weekRaw = filter.week;
+    let week = null;
+    if (typeof weekRaw === "number" && !Number.isNaN(weekRaw)) {
+      week = weekRaw;
+    } else if (typeof weekRaw === "string" && weekRaw.trim()) {
+      const parsed = Number(weekRaw);
+      if (!Number.isNaN(parsed)) week = parsed;
     }
-    if (filter.block) {
-      if (filter.block === "__unlabeled") {
-        items = items.filter((it) => !it.blocks || !it.blocks.length);
-      } else {
-        items = items.filter((it) => (it.blocks || []).includes(filter.block));
+    const onlyFav = Boolean(filter.onlyFav);
+    const query = typeof filter.query === "string" ? filter.query.trim() : "";
+    const tokens = query ? tokenize(query) : [];
+    return {
+      types,
+      block,
+      week,
+      onlyFav,
+      tokens: tokens.length ? tokens : null,
+      sort: filter.sort === "name" ? "name" : "updated"
+    };
+  }
+  async function getKeySet(storeRef, indexName, value) {
+    if (value === null || value === void 0 || value === "" || value !== value) return null;
+    if (typeof storeRef.index !== "function") return null;
+    const idx = storeRef.index(indexName);
+    if (!idx || typeof idx.getAllKeys !== "function") return null;
+    const keys = await prom2(idx.getAllKeys(value));
+    return new Set(keys);
+  }
+  async function keysForKinds(storeRef, kinds) {
+    const idx = typeof storeRef.index === "function" ? storeRef.index("by_kind") : null;
+    const seen = /* @__PURE__ */ new Set();
+    const allKeys = [];
+    for (const kind of kinds) {
+      if (!kind) continue;
+      let keys = [];
+      if (idx && typeof idx.getAllKeys === "function") {
+        keys = await prom2(idx.getAllKeys(kind));
+      } else if (idx && typeof idx.getAll === "function") {
+        const values = await prom2(idx.getAll(kind));
+        keys = values.map((v) => v?.id).filter(Boolean);
+      }
+      for (const key of keys) {
+        if (!seen.has(key)) {
+          seen.add(key);
+          allKeys.push(key);
+        }
       }
     }
-    if (filter.week) {
-      items = items.filter((it) => (it.weeks || []).includes(filter.week));
+    return allKeys;
+  }
+  async function executeItemQuery(filter) {
+    const normalized2 = normalizeFilter(filter);
+    const itemsStore = await store("items");
+    const blockSet = normalized2.block && normalized2.block !== "__unlabeled" ? await getKeySet(itemsStore, "by_blocks", normalized2.block) : null;
+    const weekSet = normalized2.week != null ? await getKeySet(itemsStore, "by_weeks", normalized2.week) : null;
+    const favoriteSet = normalized2.onlyFav ? await getKeySet(itemsStore, "by_favorite", true) : null;
+    const baseKeys = await keysForKinds(itemsStore, normalized2.types);
+    const filteredKeys = baseKeys.filter((id) => {
+      if (!id) return false;
+      if (blockSet && !blockSet.has(id)) return false;
+      if (weekSet && !weekSet.has(id)) return false;
+      if (favoriteSet && !favoriteSet.has(id)) return false;
+      return true;
+    });
+    const results = [];
+    for (let i = 0; i < filteredKeys.length; i += RESULT_BATCH_SIZE) {
+      const chunk = filteredKeys.slice(i, i + RESULT_BATCH_SIZE);
+      const fetched = await Promise.all(chunk.map((id) => prom2(itemsStore.get(id))));
+      for (const item of fetched) {
+        if (!item) continue;
+        if (normalized2.block === "__unlabeled" && Array.isArray(item.blocks) && item.blocks.length) continue;
+        if (normalized2.tokens) {
+          const tokenField = item.tokens || "";
+          const metaField = item.searchMeta || buildSearchMeta(item);
+          const matches = normalized2.tokens.every((tok) => tokenField.includes(tok) || metaField.includes(tok));
+          if (!matches) continue;
+        }
+        results.push(item);
+      }
     }
-    if (filter.onlyFav) {
-      items = items.filter((it) => it.favorite);
-    }
-    if (filter.query && filter.query.trim()) {
-      const toks = tokenize(filter.query);
-      items = items.filter((it) => {
-        const tokens = it.tokens || "";
-        if (toks.every((tok) => tokens.includes(tok))) return true;
-        const extra = [
-          titleOf(it),
-          ...it.tags || [],
-          ...it.blocks || [],
-          ...(it.lectures || []).map((l) => l.name || "")
-        ].join(" ").toLowerCase();
-        return toks.every((tok) => extra.includes(tok));
-      });
-    }
-    if (filter.sort === "name") {
-      items.sort((a, b) => titleOf(a).localeCompare(titleOf(b)));
+    if (normalized2.sort === "name") {
+      results.sort((a, b) => titleOf(a).localeCompare(titleOf(b)));
     } else {
-      items.sort((a, b) => b.updatedAt - a.updatedAt);
+      results.sort((a, b) => b.updatedAt - a.updatedAt);
     }
-    return items;
+    return results;
+  }
+  function findItemsByFilter(filter) {
+    let memo;
+    const run = () => {
+      if (!memo) memo = executeItemQuery(filter);
+      return memo;
+    };
+    return {
+      async toArray() {
+        const items = await run();
+        return items.slice();
+      },
+      async *[Symbol.asyncIterator]() {
+        const items = await run();
+        for (let i = 0; i < items.length; i += RESULT_BATCH_SIZE) {
+          yield items.slice(i, i + RESULT_BATCH_SIZE);
+        }
+      }
+    };
   }
   async function getItem(id) {
     const i = await store("items");
@@ -835,6 +948,7 @@ var Sevenn = (() => {
       updatedAt: now
     });
     next.tokens = buildTokens(next);
+    next.searchMeta = buildSearchMeta(next);
     for (const link of next.links) {
       const other = await prom2(i.get(link.id));
       if (other) {
@@ -842,6 +956,7 @@ var Sevenn = (() => {
         if (!other.links.find((l) => l.id === next.id)) {
           other.links.push({ id: next.id, type: link.type });
           other.tokens = buildTokens(other);
+          other.searchMeta = buildSearchMeta(other);
           await prom2(i.put(other));
         }
       }
@@ -855,6 +970,7 @@ var Sevenn = (() => {
       if (it.links?.some((l) => l.id === id)) {
         it.links = it.links.filter((l) => l.id !== id);
         it.tokens = buildTokens(it);
+        it.searchMeta = buildSearchMeta(it);
         await prom2(i.put(it));
       }
     }
@@ -1633,7 +1749,7 @@ var Sevenn = (() => {
     btn.addEventListener("click", onClick);
     return btn;
   }
-  function createRichTextEditor({ value = "", onChange } = {}) {
+  function createRichTextEditor({ value = "", onChange, ariaLabel, ariaLabelledBy } = {}) {
     const wrapper = document.createElement("div");
     wrapper.className = "rich-editor";
     const toolbar = document.createElement("div");
@@ -1646,23 +1762,89 @@ var Sevenn = (() => {
     editable.contentEditable = "true";
     editable.spellcheck = true;
     editable.innerHTML = normalizeInput(value);
+    if (ariaLabel) editable.setAttribute("aria-label", ariaLabel);
+    if (ariaLabelledBy) editable.setAttribute("aria-labelledby", ariaLabelledBy);
     wrapper.appendChild(editable);
     const commandButtons = [];
     function focusEditor() {
       editable.focus({ preventScroll: false });
     }
+    let savedRange = null;
+    let suppressSelectionCapture = false;
+    function rangeWithinEditor(range, { allowCollapsed = true } = {}) {
+      if (!range) return false;
+      if (!allowCollapsed && range.collapsed) return false;
+      const { startContainer, endContainer } = range;
+      if (!startContainer || !endContainer) return false;
+      return editable.contains(startContainer) && editable.contains(endContainer);
+    }
+    function captureSelectionRange() {
+      if (suppressSelectionCapture) return;
+      const selection = window.getSelection();
+      if (!selection?.rangeCount) return;
+      const range = selection.getRangeAt(0);
+      if (!rangeWithinEditor(range)) return;
+      savedRange = range.cloneRange();
+    }
+    function getSavedRange({ requireSelection = false } = {}) {
+      if (!savedRange) return null;
+      return rangeWithinEditor(savedRange, { allowCollapsed: !requireSelection }) ? savedRange : null;
+    }
+    function restoreSavedRange({ requireSelection = false } = {}) {
+      const range = getSavedRange({ requireSelection });
+      if (!range) return false;
+      const selection = window.getSelection();
+      if (!selection) return false;
+      selection.removeAllRanges();
+      const clone3 = range.cloneRange();
+      selection.addRange(clone3);
+      savedRange = clone3.cloneRange();
+      return true;
+    }
     function runCommand(action, { requireSelection = false } = {}) {
-      if (requireSelection && !hasActiveSelection()) return false;
-      focusEditor();
+      const existing = getSavedRange({ requireSelection });
+      if (!existing) return false;
+      const preservedRange = existing.cloneRange();
+      let restored = false;
+      suppressSelectionCapture = true;
+      try {
+        focusEditor();
+        savedRange = preservedRange.cloneRange();
+        restored = restoreSavedRange({ requireSelection });
+      } finally {
+        suppressSelectionCapture = false;
+      }
+      if (!restored) return false;
+      let inputFired = false;
+      const handleInput = () => {
+        inputFired = true;
+      };
+      editable.addEventListener("input", handleInput, { once: true });
       const result = action();
-      editable.dispatchEvent(new Event("input"));
+      editable.removeEventListener("input", handleInput);
+      captureSelectionRange();
+      if (!inputFired) {
+        editable.dispatchEvent(new Event("input", { bubbles: true }));
+      }
       updateInlineState();
       return result;
     }
     function exec(command, arg = null, { requireSelection = false, styleWithCss = true } = {}) {
       return runCommand(() => {
-        document.execCommand("styleWithCSS", false, styleWithCss);
-        return document.execCommand(command, false, arg);
+        let previousStyleWithCss = null;
+        try {
+          previousStyleWithCss = document.queryCommandState("styleWithCSS");
+        } catch (err) {
+          previousStyleWithCss = null;
+        }
+        try {
+          document.execCommand("styleWithCSS", false, styleWithCss);
+          return document.execCommand(command, false, arg);
+        } finally {
+          if (previousStyleWithCss !== null) {
+            document.execCommand("styleWithCSS", false, previousStyleWithCss);
+          }
+        }
       }, { requireSelection });
     }
     function selectionWithinEditor({ allowCollapsed = true } = {}) {
@@ -1675,17 +1857,67 @@ var Sevenn = (() => {
       return editable.contains(anchor) && editable.contains(focus);
     }
     function hasActiveSelection() {
-      return selectionWithinEditor({ allowCollapsed: false });
+      return Boolean(getSavedRange({ requireSelection: true }));
+    }
+    function collapsedInlineState() {
+      const selection = window.getSelection();
+      if (!selection?.anchorNode) return null;
+      let node = selection.anchorNode;
+      const state2 = { bold: false, italic: false, underline: false, strike: false };
+      const applyFromElement = (el) => {
+        const tag = el.tagName?.toLowerCase();
+        if (tag === "b" || tag === "strong") state2.bold = true;
+        if (tag === "i" || tag === "em") state2.italic = true;
+        if (tag === "u") state2.underline = true;
+        if (tag === "s" || tag === "strike" || tag === "del") state2.strike = true;
+        if (el instanceof Element) {
+          const inlineStyle = el.style;
+          if (inlineStyle) {
+            if (!state2.bold) {
+              const weightRaw = inlineStyle.fontWeight || "";
+              const weightText = typeof weightRaw === "string" ? weightRaw.toLowerCase() : `${weightRaw}`.toLowerCase();
+              const weightValue = Number.parseInt(weightText, 10);
+              if (weightText === "bold" || weightText === "bolder" || Number.isFinite(weightValue) && weightValue >= 600) {
+                state2.bold = true;
+              }
+            }
+            if (!state2.italic && inlineStyle.fontStyle === "italic") state2.italic = true;
+            const deco = `${inlineStyle.textDecorationLine || inlineStyle.textDecoration || ""}`.toLowerCase();
+            if (!state2.underline && deco.includes("underline")) state2.underline = true;
+            if (!state2.strike && (deco.includes("line-through") || deco.includes("strikethrough"))) state2.strike = true;
+          }
+        }
+      };
+      while (node && node !== editable) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          node = node.parentNode;
+          continue;
+        }
+        if (!(node instanceof Element)) {
+          node = node.parentNode;
+          continue;
+        }
+        applyFromElement(node);
+        node = node.parentNode;
+      }
+      return state2;
     }
     function updateInlineState() {
       const inEditor = selectionWithinEditor();
-      commandButtons.forEach(({ btn, command }) => {
+      const selection = window.getSelection();
+      const collapsed = Boolean(selection?.isCollapsed);
+      const collapsedState = inEditor && collapsed ? collapsedInlineState() : null;
+      commandButtons.forEach(({ btn, command, stateKey }) => {
         let active = false;
         if (inEditor) {
-          try {
-            active = document.queryCommandState(command);
-          } catch (err) {
-            active = false;
+          if (collapsed && collapsedState && stateKey) {
+            active = collapsedState[stateKey];
+          } else {
+            try {
+              active = document.queryCommandState(command);
+            } catch (err) {
+              active = false;
+            }
           }
         }
         const isActive = Boolean(active);
@@ -1703,14 +1935,14 @@ var Sevenn = (() => {
     }
     const inlineGroup = createGroup();
     [
-      ["B", "Bold", "bold"],
-      ["I", "Italic", "italic"],
-      ["U", "Underline", "underline"],
-      ["S", "Strikethrough", "strikeThrough"]
-    ].forEach(([label, title, command]) => {
+      ["B", "Bold", "bold", "bold"],
+      ["I", "Italic", "italic", "italic"],
+      ["U", "Underline", "underline", "underline"],
+      ["S", "Strikethrough", "strikeThrough", "strike"]
+    ].forEach(([label, title, command, stateKey]) => {
       const btn = createToolbarButton(label, title, () => exec(command));
       btn.dataset.command = command;
-      commandButtons.push({ btn, command });
+      commandButtons.push({ btn, command, stateKey });
       inlineGroup.appendChild(btn);
     });
     const colorWrap = document.createElement("label");
@@ -1721,7 +1953,7 @@ var Sevenn = (() => {
     colorInput.value = "#ffffff";
     colorInput.dataset.lastColor = "#ffffff";
     colorInput.addEventListener("input", () => {
-      if (!hasActiveSelection()) {
+      if (!getSavedRange({ requireSelection: true })) {
         const previous = colorInput.dataset.lastColor || "#ffffff";
         colorInput.value = previous;
         return;
@@ -1743,7 +1975,7 @@ var Sevenn = (() => {
       ["#38bdf8", "Blue"]
     ];
     function applyHighlight(color) {
-      if (!hasActiveSelection()) return;
+      if (!getSavedRange({ requireSelection: true })) return;
       exec("hiliteColor", color, { requireSelection: true });
     }
     const clearSwatch = document.createElement("button");
@@ -1907,6 +2139,7 @@ var Sevenn = (() => {
         document.removeEventListener("selectionchange", selectionHandler);
         return;
       }
+      captureSelectionRange();
       updateInlineState();
     };
     document.addEventListener("selectionchange", selectionHandler);
@@ -2007,17 +2240,23 @@ var Sevenn = (() => {
     nameInput.addEventListener("input", markDirty);
     const fieldInputs = {};
     fieldMap[kind].forEach(([field, label]) => {
-      const lbl = document.createElement("label");
-      lbl.className = "editor-field";
-      lbl.textContent = label;
+      const fieldWrap = document.createElement("div");
+      fieldWrap.className = "editor-field";
+      const labelEl = document.createElement("label");
+      labelEl.className = "editor-field-label";
+      labelEl.textContent = label;
+      const labelId = `field-${field}-${uid()}`;
+      labelEl.id = labelId;
+      fieldWrap.appendChild(labelEl);
       const editor = createRichTextEditor({
         value: existing ? existing[field] || "" : "",
-        onChange: markDirty
+        onChange: markDirty,
+        ariaLabelledBy: labelId
       });
       const inp = editor.element;
       fieldInputs[field] = editor;
-      lbl.appendChild(inp);
-      form.appendChild(lbl);
+      fieldWrap.appendChild(inp);
+      form.appendChild(fieldWrap);
     });
     const extrasWrap = document.createElement("section");
     extrasWrap.className = "editor-extras";
@@ -2713,8 +2952,25 @@ var Sevenn = (() => {
     requestAnimationFrame(fit);
     return card;
   }
-  async function renderCardList(container, items, kind, onChange) {
+  async function renderCardList(container, itemSource, kind, onChange) {
     container.innerHTML = "";
+    const items = [];
+    if (itemSource) {
+      if (typeof itemSource?.[Symbol.asyncIterator] === "function") {
+        for await (const batch of itemSource) {
+          if (Array.isArray(batch)) {
+            items.push(...batch);
+          } else if (batch) {
+            items.push(batch);
+          }
+        }
+      } else if (typeof itemSource?.toArray === "function") {
+        const collected = await itemSource.toArray();
+        items.push(...collected);
+      } else if (Array.isArray(itemSource)) {
+        items.push(...itemSource);
+      }
+    }
     const blocks = await listBlocks();
     const blockTitle = (id) => blocks.find((b) => b.blockId === id)?.title || id;
     const orderMap = new Map(blocks.map((b, i) => [b.blockId, i]));
@@ -7407,15 +7663,16 @@ var Sevenn = (() => {
       listHost.className = "tab-content";
       main.appendChild(listHost);
       const filter = { ...state.filters, types: [kind], query: state.query };
-      const items = await findItemsByFilter(filter);
-      await renderCardList(listHost, items, kind, render);
+      const query = findItemsByFilter(filter);
+      await renderCardList(listHost, query, kind, render);
     } else if (state.tab === "Cards") {
       main.appendChild(createEntryAddControl(render, "disease"));
       const content = document.createElement("div");
       content.className = "tab-content";
       main.appendChild(content);
       const filter = { ...state.filters, query: state.query };
-      const items = await findItemsByFilter(filter);
+      const query = findItemsByFilter(filter);
+      const items = await query.toArray();
       renderCards(content, items, render);
     } else if (state.tab === "Study") {
       main.appendChild(createEntryAddControl(render, "disease"));
@@ -7434,7 +7691,12 @@ var Sevenn = (() => {
         subnav.className = "tabs row subtabs";
         ["Flashcards", "Review", "Quiz", "Blocks"].forEach((st) => {
           const sb = document.createElement("button");
-          sb.className = "tab" + (state.subtab.Study === st ? " active" : "");
+          sb.className = "tab";
+          const isActive = state.subtab.Study === st;
+          if (isActive) sb.classList.add("active");
+          sb.dataset.toggle = "true";
+          sb.dataset.active = isActive ? "true" : "false";
+          sb.setAttribute("aria-pressed", isActive ? "true" : "false");
           sb.textContent = st;
           sb.addEventListener("click", () => {
             setSubtab("Study", st);
