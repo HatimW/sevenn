@@ -2931,9 +2931,9 @@ body.map-toolbox-dragging {
 }
 
 .exam-option.selected {
-  border-color: var(--blue);
-  box-shadow: 0 0 0 2px rgba(166, 217, 255, 0.25);
-  background: rgba(166, 217, 255, 0.12);
+  border-color: #60a5fa;
+  background: linear-gradient(135deg, rgba(191, 219, 254, 0.85), rgba(147, 197, 253, 0.9));
+  color: #0f172a;
 }
 
 .exam-option.correct-answer {
@@ -3043,38 +3043,32 @@ body.map-toolbox-dragging {
 }
 
 .palette-button.active {
-  border-color: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.7), 0 16px 28px rgba(15, 23, 42, 0.38);
-  color: #031633;
-  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.65);
+  color: #0f172a;
 }
 
 .palette-button.active:not(.flagged):not(.answered) {
-  background: linear-gradient(135deg, rgba(96, 165, 250, 0.95), rgba(56, 189, 248, 0.92));
+  background: linear-gradient(135deg, rgba(191, 219, 254, 0.92), rgba(147, 197, 253, 0.9));
 }
 
 .palette-button.answered {
-  background: linear-gradient(135deg, rgba(224, 242, 254, 0.95), rgba(186, 230, 253, 0.92));
-  border-color: transparent;
-  color: #0c4a6e;
-  box-shadow: 0 10px 22px rgba(56, 189, 248, 0.18);
+  background: linear-gradient(135deg, rgba(219, 234, 254, 0.95), rgba(191, 219, 254, 0.9));
+  border-color: rgba(147, 197, 253, 0.6);
+  color: #0f172a;
 }
 
 .palette-button.flagged {
-  background: linear-gradient(135deg, rgba(254, 243, 199, 0.96), rgba(250, 204, 21, 0.92));
-  border-color: rgba(255, 255, 255, 0.5);
-  color: #422006;
-  box-shadow: 0 12px 24px rgba(250, 204, 21, 0.26);
+  background: linear-gradient(135deg, rgba(254, 249, 195, 0.94), rgba(253, 230, 138, 0.9));
+  border-color: rgba(250, 204, 21, 0.4);
+  color: #854d0e;
 }
 
 .palette-button.answered.active {
-  border-color: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.7), 0 16px 26px rgba(56, 189, 248, 0.28);
+  border-color: rgba(147, 197, 253, 0.9);
 }
 
 .palette-button.flagged.active {
-  border-color: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.75), 0 18px 30px rgba(234, 179, 8, 0.32);
+  border-color: rgba(250, 204, 21, 0.7);
 }
 
 .exam-sidebar-info {
