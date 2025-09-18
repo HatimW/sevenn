@@ -828,8 +828,10 @@ export function renderExamRunner(root, render) {
     choice.className = 'exam-option';
     if (sess.mode === 'review') choice.classList.add('review');
     choice.textContent = opt.text || '(Empty option)';
+    const isSelected = selected === opt.id;
     if (sess.mode === 'taking') {
-      if (selected === opt.id) choice.classList.add('selected');
+      if (isSelected) choice.classList.add('selected');
+      choice.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
       choice.addEventListener('click', () => {
         sess.answers[sess.idx] = opt.id;
         if (sess.exam.timerMode !== 'timed' && sess.checked) {
@@ -840,12 +842,12 @@ export function renderExamRunner(root, render) {
       if (isInstantCheck) {
         const cls = answerClass(question, selected, opt.id);
         if (cls) choice.classList.add(cls);
-        if (selected === opt.id) choice.classList.add('chosen');
+        if (isSelected) choice.classList.add('chosen');
       }
     } else {
       const cls = answerClass(question, selected, opt.id);
       if (cls) choice.classList.add(cls);
-      if (selected === opt.id) choice.classList.add('chosen');
+      if (isSelected) choice.classList.add('chosen');
     }
     optionsWrap.appendChild(choice);
   });
