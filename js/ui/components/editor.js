@@ -171,20 +171,11 @@ export async function openEditor(kind, onSave, existing = null) {
 
   const blockChipRow = document.createElement('div');
   blockChipRow.className = 'editor-chip-row';
+  blockWrap.appendChild(blockChipRow);
 
   const blockPanels = document.createElement('div');
   blockPanels.className = 'editor-block-panels';
-
-  const layout = document.createElement('div');
-  layout.className = 'editor-tag-layout';
-  const chipColumn = document.createElement('div');
-  chipColumn.className = 'editor-chip-column';
-  chipColumn.appendChild(blockChipRow);
-  const panelColumn = document.createElement('div');
-  panelColumn.className = 'editor-panel-column';
-  panelColumn.appendChild(blockPanels);
-  layout.append(chipColumn, panelColumn);
-  blockWrap.appendChild(layout);
+  blockWrap.appendChild(blockPanels);
 
   function createTagChip(label, variant, active = false) {
     const chip = document.createElement('button');
