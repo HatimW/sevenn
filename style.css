@@ -68,45 +68,76 @@ button {
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: background 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
 }
 
 button:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: 3px;
 }
 
-button {
-  background: var(--muted);
+button:not(.tab):not(.fab-btn) {
+  background: rgba(148, 163, 184, 0.14);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 6px 12px;
-  cursor: pointer;
+  padding: 8px 14px;
   box-shadow: none;
-  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
 }
-button:hover {
-  background: rgba(148, 163, 184, 0.18);
-  color: var(--text);
-  box-shadow: none;
+
+button:not(.tab):not(.fab-btn):hover {
+  background: rgba(148, 163, 184, 0.22);
 }
 
 .header {
-  padding: var(--pad);
+  padding: var(--pad) var(--pad-lg);
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex: 1;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .row {
-  display:flex;
-  gap:6px;
-  align-items:center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .brand {
   font-weight: 600;
+  font-size: 1.1rem;
+  letter-spacing: 0.01em;
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(15, 23, 42, 0.55);
+  padding: 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.4);
+  flex-wrap: wrap;
 }
 
 
@@ -125,24 +156,29 @@ button:hover {
   width: 52px;
   height: 52px;
   border-radius: 50%;
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.88), rgba(192, 132, 252, 0.88));
+  background: linear-gradient(145deg, rgba(56, 189, 248, 0.92), rgba(255, 138, 189, 0.92));
   border: none;
-  color: #041021;
+  color: var(--bg);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 28px;
-  box-shadow: 0 16px 30px rgba(2, 6, 23, 0.45);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 18px 34px rgba(2, 6, 23, 0.45);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
 
 .fab-btn span {
   transform: translateY(-1px);
 }
 
+.fab-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 22px 38px rgba(2, 6, 23, 0.5);
+}
+
 .entry-add-control.open .fab-btn {
   transform: rotate(45deg);
-  box-shadow: 0 12px 22px rgba(2, 6, 23, 0.38);
+  box-shadow: 0 14px 28px rgba(2, 6, 23, 0.4);
 }
 
 .entry-add-menu {
@@ -208,25 +244,144 @@ button:hover {
   flex: 1;
 }
 
-.tabs .tab {
-  background: var(--muted);
+.tab {
+  font: inherit;
+  position: relative;
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  background: rgba(148, 163, 184, 0.12);
+  transition: background 0.25s ease, color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+}
+
+.tab:hover {
   color: var(--text);
-  padding: 6px 12px;
-  cursor: pointer;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
+  background: rgba(148, 163, 184, 0.2);
 }
 
 .tab.active {
-  background: var(--blue);
-  color: #000;
+  color: var(--bg);
+  box-shadow: 0 14px 30px rgba(56, 189, 248, 0.18);
+  transform: translateY(-1px);
 }
-.tab.disease { background: var(--purple); color:#000; opacity:0.7; }
-.tab.disease.active { opacity:1; }
-.tab.drug { background: var(--blue); color:#000; opacity:0.7; }
-.tab.drug.active { opacity:1; }
-.tab.concept { background: var(--green); color:#000; opacity:0.7; }
-.tab.concept.active { opacity:1; }
+
+.tab.disease {
+  background: rgba(255, 138, 189, 0.22);
+  border-color: rgba(255, 138, 189, 0.35);
+}
+
+.tab.disease:hover {
+  background: rgba(255, 138, 189, 0.3);
+}
+
+.tab.disease.active {
+  background: linear-gradient(135deg, rgba(255, 138, 189, 0.92), rgba(255, 180, 213, 0.95));
+}
+
+.tab.drug {
+  background: rgba(96, 165, 250, 0.2);
+  border-color: rgba(96, 165, 250, 0.35);
+}
+
+.tab.drug:hover {
+  background: rgba(96, 165, 250, 0.3);
+}
+
+.tab.drug.active {
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.95), rgba(56, 189, 248, 0.95));
+}
+
+.tab.concept {
+  background: rgba(74, 222, 128, 0.2);
+  border-color: rgba(74, 222, 128, 0.35);
+}
+
+.tab.concept:hover {
+  background: rgba(74, 222, 128, 0.28);
+}
+
+.tab.concept.active {
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.95), rgba(134, 239, 172, 0.95));
+}
+
+.tab.settings-tab {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  padding: 0;
+  background: rgba(148, 163, 184, 0.16);
+  border-color: rgba(148, 163, 184, 0.3);
+}
+
+.tab.settings-tab span {
+  transform: translateY(-1px);
+}
+
+.tab.settings-tab.active {
+  background: linear-gradient(135deg, rgba(192, 132, 252, 0.95), rgba(56, 189, 248, 0.95));
+  color: var(--bg);
+}
+
+.tab.settings-tab:hover {
+  background: rgba(192, 132, 252, 0.22);
+  color: var(--text);
+}
+
+.subtabs .tab {
+  font-size: 0.9rem;
+  padding: 6px 14px;
+}
+
+.search-input {
+  min-width: 220px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(8, 13, 23, 0.65);
+  color: var(--text);
+  font: inherit;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
+}
+
+.search-input::placeholder {
+  color: rgba(148, 163, 184, 0.55);
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: rgba(56, 189, 248, 0.8);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.25);
+  background: rgba(15, 23, 42, 0.95);
+}
+
+@media (max-width: 768px) {
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 18px;
+  }
+
+  .header-right {
+    width: 100%;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .search-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .tabs {
+    justify-content: center;
+  }
+}
 
 .card {
   background: linear-gradient(150deg, rgba(15, 23, 42, 0.85), rgba(8, 13, 23, 0.9));
