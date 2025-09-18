@@ -249,7 +249,7 @@ export function createRichTextEditor({ value = '', onChange } = {}){
     ['U', 'Underline', 'underline'],
     ['S', 'Strikethrough', 'strikeThrough']
   ].forEach(([label, title, command]) => {
-    const btn = createToolbarButton(label, title, () => exec(command, null, { requireSelection: true }));
+    const btn = createToolbarButton(label, title, () => exec(command));
     btn.dataset.command = command;
     commandButtons.push({ btn, command });
     inlineGroup.appendChild(btn);
