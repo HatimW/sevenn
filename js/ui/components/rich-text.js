@@ -231,6 +231,7 @@ export function createRichTextEditor({ value = '', onChange } = {}){
       btn.classList.toggle('is-active', isActive);
       btn.dataset.active = isActive ? 'true' : 'false';
       btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+
     });
   }
 

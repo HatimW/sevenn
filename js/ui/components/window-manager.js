@@ -169,10 +169,12 @@ export function createFloatingWindow({ title, width = 520, onClose, onBeforeClos
   }
 
   win.addEventListener('mousedown', (event) => {
+
     if (isInteractiveTarget(event.target)) {
       requestAnimationFrame(() => bringToFront(win));
       return;
     }
+
     bringToFront(win);
   });
 
