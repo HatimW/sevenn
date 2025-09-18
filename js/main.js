@@ -145,7 +145,7 @@ async function render() {
     main.appendChild(content);
     const filter = { ...state.filters, query: state.query };
     const items = await findItemsByFilter(filter);
-    renderCards(content, items, render);
+    await renderCards(content, items, render);
   } else if (state.tab === 'Study') {
     main.appendChild(createEntryAddControl(render, 'disease'));
     const content = document.createElement('div');
