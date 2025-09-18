@@ -40,6 +40,14 @@ using IndexedDB.
 Browse views include a global search box in the header to filter items by
 matching text tokens.
 
+## Manual QA
+
+When working on the rich text editor, validate formatting commands with the following smoke test:
+
+1. Open `index.html` in a browser and create or edit a note so the rich text editor appears.
+2. Enter sample text, select a portion of it, and click one of the highlight color swatches.
+3. Click back into the highlighted text—confirm the toolbar's **B** (bold) button does **not** toggle unexpectedly.
+
 ## Roadmap
 
 See the implementation blueprint in the repository for planned modules and features
