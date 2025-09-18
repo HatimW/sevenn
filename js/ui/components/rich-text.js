@@ -160,12 +160,14 @@ function createToolbarButton(label, title, onClick){
   return btn;
 }
 
-export function createRichTextEditor({ value = '' } = {}){
+export function createRichTextEditor({ value = '', onChange } = {}){
   const wrapper = document.createElement('div');
   wrapper.className = 'rich-editor';
 
   const toolbar = document.createElement('div');
   toolbar.className = 'rich-editor-toolbar';
+  toolbar.setAttribute('role', 'toolbar');
+  toolbar.setAttribute('aria-label', 'Text formatting toolbar');
   wrapper.appendChild(toolbar);
 
   const editable = document.createElement('div');
@@ -179,11 +181,19 @@ export function createRichTextEditor({ value = '' } = {}){
     editable.focus({ preventScroll: false });
   }
 
-  function exec(command, arg = null){
+  function runCommand(action, { requireSelection = false } = {}){
+    if (requireSelection && !hasActiveSelection()) return false;
     focusEditor();
-    document.execCommand('styleWithCSS', false, true);
-    document.execCommand(command, false, arg);
+    const result = action();
     editable.dispatchEvent(new Event('input'));
+    return result;
+  }
+
+  function exec(command, arg = null, { requireSelection = false, styleWithCss = true } = {}){
+    return runCommand(() => {
+      document.execCommand('styleWithCSS', false, styleWithCss);
+      return document.execCommand(command, false, arg);
+    }, { requireSelection });
   }
 
   function hasActiveSelection(){
@@ -195,19 +205,20 @@ export function createRichTextEditor({ value = '' } = {}){
     return editable.contains(anchor) && editable.contains(focus);
   }
 
-  function createGroup(){
+  function createGroup(extraClass){
     const group = document.createElement('div');
     group.className = 'rich-editor-group';
+    if (extraClass) group.classList.add(extraClass);
     toolbar.appendChild(group);
     return group;
   }
 
   const inlineGroup = createGroup();
   [
-    createToolbarButton('B', 'Bold', () => exec('bold')),
-    createToolbarButton('I', 'Italic', () => exec('italic')),
-    createToolbarButton('U', 'Underline', () => exec('underline')),
-    createToolbarButton('S', 'Strikethrough', () => exec('strikeThrough'))
+    createToolbarButton('B', 'Bold', () => exec('bold', null, { requireSelection: true })),
+    createToolbarButton('I', 'Italic', () => exec('italic', null, { requireSelection: true })),
+    createToolbarButton('U', 'Underline', () => exec('underline', null, { requireSelection: true })),
+    createToolbarButton('S', 'Strikethrough', () => exec('strikeThrough', null, { requireSelection: true }))
   ].forEach(btn => inlineGroup.appendChild(btn));
 
   const colorWrap = document.createElement('label');
@@ -223,19 +234,16 @@ export function createRichTextEditor({ value = '' } = {}){
       colorInput.value = previous;
       return;
     }
-    exec('foreColor', colorInput.value);
+    exec('foreColor', colorInput.value, { requireSelection: true });
     colorInput.dataset.lastColor = colorInput.value;
   });
   colorWrap.appendChild(colorInput);
-  const colorGroup = createGroup();
+  const colorGroup = createGroup('rich-editor-color-group');
   colorGroup.appendChild(colorWrap);
 
-  const highlightGroup = createGroup();
-  highlightGroup.classList.add('rich-editor-highlight-group');
-  const highlightLabel = document.createElement('span');
-  highlightLabel.className = 'rich-editor-label';
-  highlightLabel.textContent = 'Highlight';
-  highlightGroup.appendChild(highlightLabel);
+  const highlightRow = document.createElement('div');
+  highlightRow.className = 'rich-editor-highlight-row';
+  colorGroup.appendChild(highlightRow);
 
   const highlightColors = [
     ['#facc15', 'Yellow'],
@@ -245,16 +253,22 @@ export function createRichTextEditor({ value = '' } = {}){
     ['#38bdf8', 'Blue']
   ];
 
-  function clearHighlight() {
-    focusEditor();
-    document.execCommand('hiliteColor', false, 'transparent');
-    editable.dispatchEvent(new Event('input'));
-  }
-
   function applyHighlight(color) {
     if (!hasActiveSelection()) return;
-    exec('hiliteColor', color);
+    exec('hiliteColor', color, { requireSelection: true });
   }
+
+  const clearSwatch = document.createElement('button');
+  clearSwatch.type = 'button';
+  clearSwatch.className = 'rich-editor-swatch rich-editor-swatch--clear';
+  clearSwatch.title = 'Remove highlight';
+  clearSwatch.setAttribute('aria-label', 'Remove highlight');
+  clearSwatch.textContent = '×';
+  clearSwatch.addEventListener('mousedown', e => e.preventDefault());
+  clearSwatch.addEventListener('click', () => {
+    exec('hiliteColor', 'transparent', { requireSelection: true });
+  });
+  highlightRow.appendChild(clearSwatch);
 
   highlightColors.forEach(([color, label]) => {
     const swatch = document.createElement('button');
@@ -265,39 +279,10 @@ export function createRichTextEditor({ value = '' } = {}){
     swatch.setAttribute('aria-label', `${label} highlight`);
     swatch.addEventListener('mousedown', e => e.preventDefault());
     swatch.addEventListener('click', () => applyHighlight(color));
-    highlightGroup.appendChild(swatch);
+    highlightRow.appendChild(swatch);
   });
 
-  const clearSwatch = document.createElement('button');
-  clearSwatch.type = 'button';
-  clearSwatch.className = 'rich-editor-swatch rich-editor-swatch--clear';
-  clearSwatch.title = 'Remove highlight';
-  clearSwatch.setAttribute('aria-label', 'Remove highlight');
-  clearSwatch.textContent = '✕';
-  clearSwatch.addEventListener('mousedown', e => e.preventDefault());
-  clearSwatch.addEventListener('click', clearHighlight);
-  highlightGroup.appendChild(clearSwatch);
-
-  const listGroup = createGroup();
-  const listSelect = document.createElement('select');
-  listSelect.className = 'rich-editor-select';
-  [
-    ['', 'Lists'],
-    ['unordered', 'Bulleted'],
-    ['ordered', 'Numbered'],
-    ['lower-alpha', 'Lettered'],
-    ['lower-roman', 'Roman numerals']
-  ].forEach(([value, label]) => {
-    const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = label;
-    listSelect.appendChild(opt);
-  });
-  if (listSelect.firstElementChild) {
-    listSelect.firstElementChild.disabled = true;
-    listSelect.firstElementChild.hidden = true;
-  }
-  listSelect.value = '';
+  const listGroup = createGroup('rich-editor-list-group');
 
   function applyOrderedStyle(style){
     const selection = window.getSelection();
@@ -314,20 +299,24 @@ export function createRichTextEditor({ value = '' } = {}){
     }
   }
 
-  listSelect.addEventListener('change', () => {
-    const value = listSelect.value;
-    if (!value) return;
-    focusEditor();
-    if (value === 'unordered') {
-      exec('insertUnorderedList');
-    } else {
-      exec('insertOrderedList');
-      applyOrderedStyle(value === 'ordered' ? '' : value);
-    }
-    editable.dispatchEvent(new Event('input'));
-    listSelect.value = '';
+  function insertOrdered(style){
+    runCommand(() => {
+      document.execCommand('styleWithCSS', false, false);
+      document.execCommand('insertOrderedList', false, null);
+      if (style) applyOrderedStyle(style);
+    });
+  }
+
+  const listButtons = [
+    ['•', 'Bulleted list', () => exec('insertUnorderedList', null, { styleWithCss: false })],
+    ['1.', 'Numbered list', () => insertOrdered('')],
+    ['a.', 'Lettered list', () => insertOrdered('lower-alpha')],
+    ['i.', 'Roman numeral list', () => insertOrdered('lower-roman')]
+  ];
+  listButtons.forEach(([label, title, handler]) => {
+    const btn = createToolbarButton(label, title, handler);
+    listGroup.appendChild(btn);
   });
-  listGroup.appendChild(listSelect);
 
   const sizeSelect = document.createElement('select');
   sizeSelect.className = 'rich-editor-size';
@@ -345,56 +334,58 @@ export function createRichTextEditor({ value = '' } = {}){
     sizeSelect.appendChild(opt);
   });
   sizeSelect.addEventListener('change', () => {
-    focusEditor();
-    document.execCommand('styleWithCSS', false, true);
-    document.execCommand('fontSize', false, 4);
-    const selection = window.getSelection();
-    if (selection?.rangeCount) {
-      const walker = document.createTreeWalker(editable, NodeFilter.SHOW_ELEMENT, {
-        acceptNode: (node) => node.tagName?.toLowerCase() === 'font' ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
-      });
-      const toAdjust = [];
-      while (walker.nextNode()) {
-        toAdjust.push(walker.currentNode);
-      }
-      toAdjust.forEach(node => {
-        if (sizeSelect.value) {
-          const span = document.createElement('span');
-          span.style.fontSize = sizeSelect.value;
-          while (node.firstChild) span.appendChild(node.firstChild);
-          node.parentNode.replaceChild(span, node);
-        } else {
-          const parent = node.parentNode;
-          while (node.firstChild) parent.insertBefore(node.firstChild, node);
-          parent.removeChild(node);
-        }
-      });
+    if (!hasActiveSelection()) {
+      sizeSelect.value = '';
+      return;
     }
-    editable.dispatchEvent(new Event('input'));
+    runCommand(() => {
+      document.execCommand('styleWithCSS', false, true);
+      document.execCommand('fontSize', false, 4);
+      const selection = window.getSelection();
+      if (selection?.rangeCount) {
+        const walker = document.createTreeWalker(editable, NodeFilter.SHOW_ELEMENT, {
+          acceptNode: (node) => node.tagName?.toLowerCase() === 'font' ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+        });
+        const toAdjust = [];
+        while (walker.nextNode()) {
+          toAdjust.push(walker.currentNode);
+        }
+        toAdjust.forEach(node => {
+          if (sizeSelect.value) {
+            const span = document.createElement('span');
+            span.style.fontSize = sizeSelect.value;
+            while (node.firstChild) span.appendChild(node.firstChild);
+            node.parentNode.replaceChild(span, node);
+          } else {
+            const parent = node.parentNode;
+            while (node.firstChild) parent.insertBefore(node.firstChild, node);
+            parent.removeChild(node);
+          }
+        });
+      }
+    }, { requireSelection: true });
     sizeSelect.value = '';
   });
   listGroup.appendChild(sizeSelect);
 
-  const mediaGroup = createGroup();
+  const mediaGroup = createGroup('rich-editor-media-group');
 
   const linkBtn = createToolbarButton('🔗', 'Insert link', () => {
-    focusEditor();
+    if (!hasActiveSelection()) return;
     const url = prompt('Enter URL');
     if (!url) return;
-    exec('createLink', url);
+    exec('createLink', url, { requireSelection: true });
   });
   mediaGroup.appendChild(linkBtn);
 
   const imageBtn = createToolbarButton('🖼', 'Insert image', () => {
-    focusEditor();
     const url = prompt('Enter image URL');
     if (!url) return;
-    exec('insertImage', url);
+    exec('insertImage', url, { styleWithCss: false });
   });
   mediaGroup.appendChild(imageBtn);
 
   const mediaBtn = createToolbarButton('🎬', 'Insert media', () => {
-    focusEditor();
     const url = prompt('Enter media URL');
     if (!url) return;
     const typePrompt = prompt('Media type (video/audio/embed)', 'video');
@@ -408,23 +399,25 @@ export function createRichTextEditor({ value = '' } = {}){
     } else {
       html = `<video controls src="${safeUrl}"></video>`;
     }
-    document.execCommand('insertHTML', false, html);
-    editable.dispatchEvent(new Event('input'));
+    runCommand(() => document.execCommand('insertHTML', false, html));
   });
   mediaGroup.appendChild(mediaBtn);
 
-  const clearBtn = createToolbarButton('⌫', 'Clear formatting', () => exec('removeFormat'));
-  const utilityGroup = createGroup();
+  const clearBtn = createToolbarButton('⌫', 'Clear formatting', () => exec('removeFormat', null, { requireSelection: true, styleWithCss: false }));
+  const utilityGroup = createGroup('rich-editor-utility-group');
   utilityGroup.appendChild(clearBtn);
-
-  const clearHighlightBtn = createToolbarButton('⨯', 'Remove highlight', clearHighlight);
-  utilityGroup.appendChild(clearHighlightBtn);
 
   editable.addEventListener('keydown', (e) => {
     if (e.key === 'Tab') {
       e.preventDefault();
       if (e.shiftKey) exec('outdent'); else exec('indent');
     }
+  });
+
+  let settingValue = false;
+  editable.addEventListener('input', () => {
+    if (settingValue) return;
+    if (typeof onChange === 'function') onChange();
   });
 
   return {
@@ -434,7 +427,9 @@ export function createRichTextEditor({ value = '' } = {}){
       return isEmptyHtml(sanitized) ? '' : sanitized;
     },
     setValue(val){
+      settingValue = true;
       editable.innerHTML = normalizeInput(val);
+      settingValue = false;
     },
     focus(){
       focusEditor();

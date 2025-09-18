@@ -60,7 +60,7 @@ function setupDragging(win, header){
   }
 }
 
-export function createFloatingWindow({ title, width = 520, onClose } = {}){
+export function createFloatingWindow({ title, width = 520, onClose, onBeforeClose } = {}){
   ensureDock();
   const win = document.createElement('div');
   win.className = 'floating-window';
@@ -141,14 +141,24 @@ export function createFloatingWindow({ title, width = 520, onClose } = {}){
 
   minimizeBtn.addEventListener('click', handleMinimize);
 
-  function close(reason){
+  async function close(reason){
+    if (typeof onBeforeClose === 'function') {
+      try {
+        const shouldClose = await onBeforeClose(reason);
+        if (shouldClose === false) return false;
+      } catch (err) {
+        console.error(err);
+        return false;
+      }
+    }
     destroyDockButton();
     windows.delete(win);
     if (win.parentElement) win.parentElement.removeChild(win);
     if (typeof onClose === 'function') onClose(reason);
+    return true;
   }
 
-  closeBtn.addEventListener('click', () => close('close'));
+  closeBtn.addEventListener('click', () => { void close('close'); });
 
   win.addEventListener('mousedown', () => bringToFront(win));
 

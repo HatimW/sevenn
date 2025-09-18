@@ -1,4 +1,4 @@
-(() => {
+var Sevenn = (() => {
   // js/state.js
   var state = {
     tab: "Diseases",
@@ -1260,6 +1260,23 @@
     const g = globalThis;
     return g.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
   }
+  function setToggleState(element, active, className = "active") {
+    if (!element) return;
+    const isActive = Boolean(active);
+    if (element.dataset) {
+      element.dataset.toggle = "true";
+      element.dataset.active = isActive ? "true" : "false";
+    }
+    if (className && element.classList) {
+      element.classList.toggle(className, isActive);
+    }
+    if (typeof HTMLElement !== "undefined" && element instanceof HTMLElement) {
+      const role = element.getAttribute("role");
+      if ((element.tagName === "BUTTON" || role === "button") && typeof element.setAttribute === "function") {
+        element.setAttribute("aria-pressed", isActive ? "true" : "false");
+      }
+    }
+  }
 
   // js/ui/components/window-manager.js
   var windows = /* @__PURE__ */ new Set();
@@ -1315,7 +1332,7 @@
       document.removeEventListener("mouseup", stopDrag);
     }
   }
-  function createFloatingWindow({ title, width = 520, onClose } = {}) {
+  function createFloatingWindow({ title, width = 520, onClose, onBeforeClose } = {}) {
     ensureDock();
     const win = document.createElement("div");
     win.className = "floating-window";
@@ -1384,13 +1401,25 @@
       destroyDockButton();
     }
     minimizeBtn.addEventListener("click", handleMinimize);
-    function close(reason) {
+    async function close(reason) {
+      if (typeof onBeforeClose === "function") {
+        try {
+          const shouldClose = await onBeforeClose(reason);
+          if (shouldClose === false) return false;
+        } catch (err) {
+          console.error(err);
+          return false;
+        }
+      }
       destroyDockButton();
       windows.delete(win);
       if (win.parentElement) win.parentElement.removeChild(win);
       if (typeof onClose === "function") onClose(reason);
+      return true;
     }
-    closeBtn.addEventListener("click", () => close("close"));
+    closeBtn.addEventListener("click", () => {
+      void close("close");
+    });
     win.addEventListener("mousedown", () => bringToFront(win));
     setupDragging(win, header);
     document.body.appendChild(win);
@@ -1587,11 +1616,13 @@
     btn.addEventListener("click", onClick);
     return btn;
   }
-  function createRichTextEditor({ value = "" } = {}) {
+  function createRichTextEditor({ value = "", onChange } = {}) {
     const wrapper = document.createElement("div");
     wrapper.className = "rich-editor";
     const toolbar = document.createElement("div");
     toolbar.className = "rich-editor-toolbar";
+    toolbar.setAttribute("role", "toolbar");
+    toolbar.setAttribute("aria-label", "Text formatting toolbar");
     wrapper.appendChild(toolbar);
     const editable = document.createElement("div");
     editable.className = "rich-editor-area input";
@@ -1602,11 +1633,18 @@
     function focusEditor() {
       editable.focus({ preventScroll: false });
     }
-    function exec(command, arg = null) {
+    function runCommand(action, { requireSelection = false } = {}) {
+      if (requireSelection && !hasActiveSelection()) return false;
       focusEditor();
-      document.execCommand("styleWithCSS", false, true);
-      document.execCommand(command, false, arg);
+      const result = action();
       editable.dispatchEvent(new Event("input"));
+      return result;
+    }
+    function exec(command, arg = null, { requireSelection = false, styleWithCss = true } = {}) {
+      return runCommand(() => {
+        document.execCommand("styleWithCSS", false, styleWithCss);
+        return document.execCommand(command, false, arg);
+      }, { requireSelection });
     }
     function hasActiveSelection() {
       const selection = window.getSelection();
@@ -1616,18 +1654,19 @@
       if (!anchor || !focus) return false;
       return editable.contains(anchor) && editable.contains(focus);
     }
-    function createGroup() {
+    function createGroup(extraClass) {
       const group = document.createElement("div");
       group.className = "rich-editor-group";
+      if (extraClass) group.classList.add(extraClass);
       toolbar.appendChild(group);
       return group;
     }
     const inlineGroup = createGroup();
     [
-      createToolbarButton("B", "Bold", () => exec("bold")),
-      createToolbarButton("I", "Italic", () => exec("italic")),
-      createToolbarButton("U", "Underline", () => exec("underline")),
-      createToolbarButton("S", "Strikethrough", () => exec("strikeThrough"))
+      createToolbarButton("B", "Bold", () => exec("bold", null, { requireSelection: true })),
+      createToolbarButton("I", "Italic", () => exec("italic", null, { requireSelection: true })),
+      createToolbarButton("U", "Underline", () => exec("underline", null, { requireSelection: true })),
+      createToolbarButton("S", "Strikethrough", () => exec("strikeThrough", null, { requireSelection: true }))
     ].forEach((btn) => inlineGroup.appendChild(btn));
     const colorWrap = document.createElement("label");
     colorWrap.className = "rich-editor-color";
@@ -1642,18 +1681,15 @@
         colorInput.value = previous;
         return;
       }
-      exec("foreColor", colorInput.value);
+      exec("foreColor", colorInput.value, { requireSelection: true });
       colorInput.dataset.lastColor = colorInput.value;
     });
     colorWrap.appendChild(colorInput);
-    const colorGroup = createGroup();
+    const colorGroup = createGroup("rich-editor-color-group");
     colorGroup.appendChild(colorWrap);
-    const highlightGroup = createGroup();
-    highlightGroup.classList.add("rich-editor-highlight-group");
-    const highlightLabel = document.createElement("span");
-    highlightLabel.className = "rich-editor-label";
-    highlightLabel.textContent = "Highlight";
-    highlightGroup.appendChild(highlightLabel);
+    const highlightRow = document.createElement("div");
+    highlightRow.className = "rich-editor-highlight-row";
+    colorGroup.appendChild(highlightRow);
     const highlightColors = [
       ["#facc15", "Yellow"],
       ["#f472b6", "Pink"],
@@ -1661,15 +1697,21 @@
       ["#4ade80", "Green"],
       ["#38bdf8", "Blue"]
     ];
-    function clearHighlight() {
-      focusEditor();
-      document.execCommand("hiliteColor", false, "transparent");
-      editable.dispatchEvent(new Event("input"));
-    }
     function applyHighlight(color) {
       if (!hasActiveSelection()) return;
-      exec("hiliteColor", color);
+      exec("hiliteColor", color, { requireSelection: true });
     }
+    const clearSwatch = document.createElement("button");
+    clearSwatch.type = "button";
+    clearSwatch.className = "rich-editor-swatch rich-editor-swatch--clear";
+    clearSwatch.title = "Remove highlight";
+    clearSwatch.setAttribute("aria-label", "Remove highlight");
+    clearSwatch.textContent = "\xD7";
+    clearSwatch.addEventListener("mousedown", (e) => e.preventDefault());
+    clearSwatch.addEventListener("click", () => {
+      exec("hiliteColor", "transparent", { requireSelection: true });
+    });
+    highlightRow.appendChild(clearSwatch);
     highlightColors.forEach(([color, label]) => {
       const swatch = document.createElement("button");
       swatch.type = "button";
@@ -1679,37 +1721,9 @@
       swatch.setAttribute("aria-label", `${label} highlight`);
       swatch.addEventListener("mousedown", (e) => e.preventDefault());
       swatch.addEventListener("click", () => applyHighlight(color));
-      highlightGroup.appendChild(swatch);
+      highlightRow.appendChild(swatch);
     });
-    const clearSwatch = document.createElement("button");
-    clearSwatch.type = "button";
-    clearSwatch.className = "rich-editor-swatch rich-editor-swatch--clear";
-    clearSwatch.title = "Remove highlight";
-    clearSwatch.setAttribute("aria-label", "Remove highlight");
-    clearSwatch.textContent = "\u2715";
-    clearSwatch.addEventListener("mousedown", (e) => e.preventDefault());
-    clearSwatch.addEventListener("click", clearHighlight);
-    highlightGroup.appendChild(clearSwatch);
-    const listGroup = createGroup();
-    const listSelect = document.createElement("select");
-    listSelect.className = "rich-editor-select";
-    [
-      ["", "Lists"],
-      ["unordered", "Bulleted"],
-      ["ordered", "Numbered"],
-      ["lower-alpha", "Lettered"],
-      ["lower-roman", "Roman numerals"]
-    ].forEach(([value2, label]) => {
-      const opt = document.createElement("option");
-      opt.value = value2;
-      opt.textContent = label;
-      listSelect.appendChild(opt);
-    });
-    if (listSelect.firstElementChild) {
-      listSelect.firstElementChild.disabled = true;
-      listSelect.firstElementChild.hidden = true;
-    }
-    listSelect.value = "";
+    const listGroup = createGroup("rich-editor-list-group");
     function applyOrderedStyle(style) {
       const selection = window.getSelection();
       if (!selection?.rangeCount) return;
@@ -1724,20 +1738,23 @@
         node = node.parentNode;
       }
     }
-    listSelect.addEventListener("change", () => {
-      const value2 = listSelect.value;
-      if (!value2) return;
-      focusEditor();
-      if (value2 === "unordered") {
-        exec("insertUnorderedList");
-      } else {
-        exec("insertOrderedList");
-        applyOrderedStyle(value2 === "ordered" ? "" : value2);
-      }
-      editable.dispatchEvent(new Event("input"));
-      listSelect.value = "";
+    function insertOrdered(style) {
+      runCommand(() => {
+        document.execCommand("styleWithCSS", false, false);
+        document.execCommand("insertOrderedList", false, null);
+        if (style) applyOrderedStyle(style);
+      });
+    }
+    const listButtons = [
+      ["\u2022", "Bulleted list", () => exec("insertUnorderedList", null, { styleWithCss: false })],
+      ["1.", "Numbered list", () => insertOrdered("")],
+      ["a.", "Lettered list", () => insertOrdered("lower-alpha")],
+      ["i.", "Roman numeral list", () => insertOrdered("lower-roman")]
+    ];
+    listButtons.forEach(([label, title, handler]) => {
+      const btn = createToolbarButton(label, title, handler);
+      listGroup.appendChild(btn);
     });
-    listGroup.appendChild(listSelect);
     const sizeSelect = document.createElement("select");
     sizeSelect.className = "rich-editor-size";
     const sizes = [
@@ -1754,52 +1771,54 @@
       sizeSelect.appendChild(opt);
     });
     sizeSelect.addEventListener("change", () => {
-      focusEditor();
-      document.execCommand("styleWithCSS", false, true);
-      document.execCommand("fontSize", false, 4);
-      const selection = window.getSelection();
-      if (selection?.rangeCount) {
-        const walker = document.createTreeWalker(editable, NodeFilter.SHOW_ELEMENT, {
-          acceptNode: (node) => node.tagName?.toLowerCase() === "font" ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
-        });
-        const toAdjust = [];
-        while (walker.nextNode()) {
-          toAdjust.push(walker.currentNode);
-        }
-        toAdjust.forEach((node) => {
-          if (sizeSelect.value) {
-            const span = document.createElement("span");
-            span.style.fontSize = sizeSelect.value;
-            while (node.firstChild) span.appendChild(node.firstChild);
-            node.parentNode.replaceChild(span, node);
-          } else {
-            const parent = node.parentNode;
-            while (node.firstChild) parent.insertBefore(node.firstChild, node);
-            parent.removeChild(node);
-          }
-        });
+      if (!hasActiveSelection()) {
+        sizeSelect.value = "";
+        return;
       }
-      editable.dispatchEvent(new Event("input"));
+      runCommand(() => {
+        document.execCommand("styleWithCSS", false, true);
+        document.execCommand("fontSize", false, 4);
+        const selection = window.getSelection();
+        if (selection?.rangeCount) {
+          const walker = document.createTreeWalker(editable, NodeFilter.SHOW_ELEMENT, {
+            acceptNode: (node) => node.tagName?.toLowerCase() === "font" ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+          });
+          const toAdjust = [];
+          while (walker.nextNode()) {
+            toAdjust.push(walker.currentNode);
+          }
+          toAdjust.forEach((node) => {
+            if (sizeSelect.value) {
+              const span = document.createElement("span");
+              span.style.fontSize = sizeSelect.value;
+              while (node.firstChild) span.appendChild(node.firstChild);
+              node.parentNode.replaceChild(span, node);
+            } else {
+              const parent = node.parentNode;
+              while (node.firstChild) parent.insertBefore(node.firstChild, node);
+              parent.removeChild(node);
+            }
+          });
+        }
+      }, { requireSelection: true });
       sizeSelect.value = "";
     });
     listGroup.appendChild(sizeSelect);
-    const mediaGroup = createGroup();
+    const mediaGroup = createGroup("rich-editor-media-group");
     const linkBtn = createToolbarButton("\u{1F517}", "Insert link", () => {
-      focusEditor();
+      if (!hasActiveSelection()) return;
       const url = prompt("Enter URL");
       if (!url) return;
-      exec("createLink", url);
+      exec("createLink", url, { requireSelection: true });
     });
     mediaGroup.appendChild(linkBtn);
     const imageBtn = createToolbarButton("\u{1F5BC}", "Insert image", () => {
-      focusEditor();
       const url = prompt("Enter image URL");
       if (!url) return;
-      exec("insertImage", url);
+      exec("insertImage", url, { styleWithCss: false });
     });
     mediaGroup.appendChild(imageBtn);
     const mediaBtn = createToolbarButton("\u{1F3AC}", "Insert media", () => {
-      focusEditor();
       const url = prompt("Enter media URL");
       if (!url) return;
       const typePrompt = prompt("Media type (video/audio/embed)", "video");
@@ -1813,21 +1832,23 @@
       } else {
         html = `<video controls src="${safeUrl}"></video>`;
       }
-      document.execCommand("insertHTML", false, html);
-      editable.dispatchEvent(new Event("input"));
+      runCommand(() => document.execCommand("insertHTML", false, html));
     });
     mediaGroup.appendChild(mediaBtn);
-    const clearBtn = createToolbarButton("\u232B", "Clear formatting", () => exec("removeFormat"));
-    const utilityGroup = createGroup();
+    const clearBtn = createToolbarButton("\u232B", "Clear formatting", () => exec("removeFormat", null, { requireSelection: true, styleWithCss: false }));
+    const utilityGroup = createGroup("rich-editor-utility-group");
     utilityGroup.appendChild(clearBtn);
-    const clearHighlightBtn = createToolbarButton("\u2A2F", "Remove highlight", clearHighlight);
-    utilityGroup.appendChild(clearHighlightBtn);
     editable.addEventListener("keydown", (e) => {
       if (e.key === "Tab") {
         e.preventDefault();
         if (e.shiftKey) exec("outdent");
         else exec("indent");
       }
+    });
+    let settingValue = false;
+    editable.addEventListener("input", () => {
+      if (settingValue) return;
+      if (typeof onChange === "function") onChange();
     });
     return {
       element: wrapper,
@@ -1836,7 +1857,9 @@
         return isEmptyHtml(sanitized) ? "" : sanitized;
       },
       setValue(val) {
+        settingValue = true;
         editable.innerHTML = normalizeInput(val);
+        settingValue = false;
       },
       focus() {
         focusEditor();
@@ -1888,9 +1911,22 @@
     return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
   async function openEditor(kind, onSave, existing = null) {
+    let isDirty = false;
+    let status;
     const win = createFloatingWindow({
       title: `${existing ? "Edit" : "Add"} ${titleMap[kind] || kind}`,
-      width: 600
+      width: 660,
+      onBeforeClose: async (reason) => {
+        if (reason === "saved") return true;
+        if (!isDirty) return true;
+        if (reason !== "close") return true;
+        const shouldSave = await confirmModal("Save changes before closing?");
+        if (shouldSave) {
+          await persist(true);
+          return false;
+        }
+        return true;
+      }
     });
     const form = document.createElement("form");
     form.className = "editor-form";
@@ -1902,12 +1938,20 @@
     nameInput.value = existing ? existing.name || existing.concept || "" : "";
     nameLabel.appendChild(nameInput);
     form.appendChild(nameLabel);
+    const markDirty = () => {
+      isDirty = true;
+      if (status) status.textContent = "";
+    };
+    nameInput.addEventListener("input", markDirty);
     const fieldInputs = {};
     fieldMap[kind].forEach(([field, label]) => {
       const lbl = document.createElement("label");
       lbl.className = "editor-field";
       lbl.textContent = label;
-      const editor = createRichTextEditor({ value: existing ? existing[field] || "" : "" });
+      const editor = createRichTextEditor({
+        value: existing ? existing[field] || "" : "",
+        onChange: markDirty
+      });
       const inp = editor.element;
       fieldInputs[field] = editor;
       lbl.appendChild(inp);
@@ -1931,8 +1975,9 @@
     extrasWrap.appendChild(extrasList);
     form.appendChild(extrasWrap);
     const extraControls = /* @__PURE__ */ new Map();
-    function addExtra(extra = {}) {
-      const id = extra.id || uid();
+    function addExtra(extra = null) {
+      const data = extra || {};
+      const id = data.id || uid();
       const row = document.createElement("div");
       row.className = "editor-extra";
       row.dataset.id = id;
@@ -1941,7 +1986,7 @@
       const titleInput = document.createElement("input");
       titleInput.className = "input editor-extra-title";
       titleInput.placeholder = "Section title";
-      titleInput.value = extra.title || "";
+      titleInput.value = data.title || "";
       titleRow.appendChild(titleInput);
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
@@ -1951,13 +1996,17 @@
       removeBtn.addEventListener("click", () => {
         extraControls.delete(id);
         row.remove();
+        markDirty();
       });
       titleRow.appendChild(removeBtn);
       row.appendChild(titleRow);
-      const editor = createRichTextEditor({ value: extra.body || "" });
+      const editor = createRichTextEditor({ value: data.body || "", onChange: markDirty });
       row.appendChild(editor.element);
       extrasList.appendChild(row);
       extraControls.set(id, { id, titleInput, editor });
+      titleInput.addEventListener("input", markDirty);
+      row.addEventListener("input", markDirty);
+      if (!extra) markDirty();
     }
     addExtraBtn.addEventListener("click", () => addExtra());
     const legacyExtras = (() => {
@@ -1981,6 +2030,7 @@
     colorInput.value = existing?.color || "#ffffff";
     colorLabel.appendChild(colorInput);
     form.appendChild(colorLabel);
+    colorInput.addEventListener("input", markDirty);
     const blocks = await listBlocks();
     const blockMap = new Map(blocks.map((b) => [b.blockId, b]));
     const blockSet = new Set(existing?.blocks || []);
@@ -2008,7 +2058,7 @@
       chip.type = "button";
       chip.className = `tag-chip tag-chip-${variant}`;
       chip.textContent = label;
-      if (active) chip.classList.add("active");
+      setToggleState(chip, active);
       return chip;
     }
     function pruneBlock(blockId) {
@@ -2037,6 +2087,7 @@
           } else {
             blockSet.add(b.blockId);
           }
+          markDirty();
           renderBlockChips();
           renderBlockPanels();
         });
@@ -2104,14 +2155,15 @@
                   const key = `${blockId}|${l.id}`;
                   lectSet.delete(key);
                   const chip = lectureWrap.querySelector(`[data-lecture='${key}']`);
-                  if (chip) chip.classList.remove("active");
+                  if (chip) setToggleState(chip, false);
                 });
               } else {
                 weekSet.add(weekKey);
                 section.classList.add("active");
                 lectureWrap.classList.remove("collapsed");
               }
-              weekChip.classList.toggle("active", weekSet.has(weekKey));
+              setToggleState(weekChip, weekSet.has(weekKey));
+              markDirty();
             });
             section.appendChild(weekChip);
             const lectureWrap = document.createElement("div");
@@ -2131,17 +2183,18 @@
                 lectureChip.addEventListener("click", () => {
                   if (lectSet.has(key)) {
                     lectSet.delete(key);
-                    lectureChip.classList.remove("active");
+                    setToggleState(lectureChip, false);
                   } else {
                     lectSet.add(key);
-                    lectureChip.classList.add("active");
+                    setToggleState(lectureChip, true);
                     if (!weekSet.has(weekKey)) {
                       weekSet.add(weekKey);
                       section.classList.add("active");
-                      weekChip.classList.add("active");
+                      setToggleState(weekChip, true);
                       lectureWrap.classList.remove("collapsed");
                     }
                   }
+                  markDirty();
                 });
                 lectureWrap.appendChild(lectureChip);
               });
@@ -2159,7 +2212,7 @@
     form.appendChild(blockWrap);
     const actionBar = document.createElement("div");
     actionBar.className = "editor-actions";
-    const status = document.createElement("span");
+    status = document.createElement("span");
     status.className = "editor-status";
     async function persist(closeAfter) {
       const titleKey = kind === "concept" ? "concept" : "name";
@@ -2195,38 +2248,38 @@
       }
       item.lectures = lectures;
       item.color = colorInput.value;
-      await upsertItem(item);
+      try {
+        await upsertItem(item);
+      } catch (err) {
+        console.error(err);
+        status.textContent = "Failed to save.";
+        throw err;
+      }
       existing = item;
       updateTitle();
-      status.textContent = closeAfter ? "" : "Saved";
+      isDirty = false;
       if (onSave) onSave();
       if (closeAfter) {
         win.close("saved");
+      } else {
+        status.textContent = "Saved";
       }
     }
     const saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.className = "btn";
     saveBtn.textContent = "Save";
-    saveBtn.addEventListener("click", () => persist(false));
-    const saveCloseBtn = document.createElement("button");
-    saveCloseBtn.type = "button";
-    saveCloseBtn.className = "btn";
-    saveCloseBtn.textContent = "Save & Close";
-    saveCloseBtn.addEventListener("click", () => persist(true));
-    const discardBtn = document.createElement("button");
-    discardBtn.type = "button";
-    discardBtn.className = "btn secondary";
-    discardBtn.textContent = "Close without Saving";
-    discardBtn.addEventListener("click", () => win.close("discard"));
+    saveBtn.addEventListener("click", () => {
+      persist(true).catch(() => {
+      });
+    });
     actionBar.appendChild(saveBtn);
-    actionBar.appendChild(saveCloseBtn);
-    actionBar.appendChild(discardBtn);
     actionBar.appendChild(status);
     form.appendChild(actionBar);
     form.addEventListener("submit", (e) => {
       e.preventDefault();
-      persist(false);
+      persist(true).catch(() => {
+      });
     });
     win.setContent(form);
     const updateTitle = () => {
@@ -2648,7 +2701,8 @@
     viewToggle.className = "layout-toggle";
     const listBtn = document.createElement("button");
     listBtn.type = "button";
-    listBtn.className = "layout-btn" + (layoutState.mode === "list" ? " active" : "");
+    listBtn.className = "layout-btn";
+    setToggleState(listBtn, layoutState.mode === "list");
     listBtn.textContent = "List";
     listBtn.addEventListener("click", () => {
       if (layoutState.mode === "list") return;
@@ -2658,7 +2712,8 @@
     });
     const gridBtn = document.createElement("button");
     gridBtn.type = "button";
-    gridBtn.className = "layout-btn" + (layoutState.mode === "grid" ? " active" : "");
+    gridBtn.className = "layout-btn";
+    setToggleState(gridBtn, layoutState.mode === "grid");
     gridBtn.textContent = "Grid";
     gridBtn.addEventListener("click", () => {
       if (layoutState.mode === "grid") return;
@@ -2672,6 +2727,7 @@
     const controlsToggle = document.createElement("button");
     controlsToggle.type = "button";
     controlsToggle.className = "layout-advanced-toggle";
+    setToggleState(controlsToggle, layoutState.controlsVisible);
     controlsToggle.addEventListener("click", () => {
       setEntryLayout({ controlsVisible: !state.entryLayout.controlsVisible });
       updateToolbar();
@@ -2726,14 +2782,14 @@
     container.appendChild(toolbar);
     function updateToolbar() {
       const { mode, controlsVisible } = state.entryLayout;
-      listBtn.classList.toggle("active", mode === "list");
-      gridBtn.classList.toggle("active", mode === "grid");
+      setToggleState(listBtn, mode === "list");
+      setToggleState(gridBtn, mode === "grid");
       columnWrap.style.display = mode === "grid" ? "" : "none";
       controlsWrap.style.display = controlsVisible ? "" : "none";
       controlsWrap.setAttribute("aria-hidden", controlsVisible ? "false" : "true");
       controlsToggle.textContent = controlsVisible ? "Hide layout tools" : "Show layout tools";
       controlsToggle.setAttribute("aria-expanded", controlsVisible ? "true" : "false");
-      controlsToggle.classList.toggle("active", controlsVisible);
+      setToggleState(controlsToggle, controlsVisible);
     }
     function applyLayout() {
       const lists = container.querySelectorAll(".card-list");
@@ -3430,7 +3486,7 @@
       const variants = Array.isArray(variant) ? variant : variant.split(" ");
       variants.filter(Boolean).forEach((name) => btn.classList.add(`builder-pill-${name}`));
     }
-    if (active) btn.classList.add("active");
+    setToggleState(btn, active);
     btn.textContent = label;
     btn.addEventListener("click", onClick);
     return btn;
@@ -3511,6 +3567,8 @@
     sectionsFor(item).forEach(([label, field]) => {
       const sec = document.createElement("div");
       sec.className = "flash-section";
+      sec.setAttribute("role", "button");
+      sec.tabIndex = 0;
       const head = document.createElement("div");
       head.className = "flash-heading";
       head.textContent = label;
@@ -3519,8 +3577,17 @@
       renderRichText(body, item[field] || "");
       sec.appendChild(head);
       sec.appendChild(body);
-      sec.addEventListener("click", () => {
-        sec.classList.toggle("revealed");
+      setToggleState(sec, false, "revealed");
+      const toggleReveal = () => {
+        const next2 = sec.dataset.active !== "true";
+        setToggleState(sec, next2, "revealed");
+      };
+      sec.addEventListener("click", toggleReveal);
+      sec.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggleReveal();
+        }
       });
       card.appendChild(sec);
     });
@@ -4765,10 +4832,9 @@
       btn.type = "button";
       btn.textContent = String(idx + 1);
       btn.className = "palette-button";
-      if (sess.idx === idx) btn.classList.add("active");
+      setToggleState(btn, sess.idx === idx);
       const answer = answers[idx];
       const hasAnswer = question.options.some((opt) => opt.id === answer);
-
       if (hasAnswer) {
         btn.classList.add("answered");
         if (sess.mode === "review") {
@@ -4853,7 +4919,7 @@
     flagBtn.type = "button";
     flagBtn.className = "flag-btn";
     const isFlagged = sess.mode === "review" ? (sess.result.flagged || []).includes(sess.idx) : Boolean(sess.flagged?.[sess.idx]);
-    flagBtn.classList.toggle("active", isFlagged);
+    setToggleState(flagBtn, isFlagged);
     flagBtn.textContent = isFlagged ? "\u{1F6A9} Flagged" : "Flag question";
     if (sess.mode === "taking") {
       flagBtn.addEventListener("click", () => {
@@ -4903,7 +4969,6 @@
       if (sess.mode === "taking") choice.type = "button";
       choice.className = "exam-option";
       if (sess.mode === "review") choice.classList.add("review");
-
       const indicator = document.createElement("span");
       indicator.className = "option-indicator";
       choice.appendChild(indicator);
@@ -4911,11 +4976,9 @@
       label.className = "option-text";
       label.textContent = opt.text || "(Empty option)";
       choice.appendChild(label);
-
       const isSelected = selected === opt.id;
       if (sess.mode === "taking") {
-        if (isSelected) choice.classList.add("selected");
-        choice.setAttribute("aria-pressed", isSelected ? "true" : "false");
+        setToggleState(choice, isSelected, "selected");
         choice.addEventListener("click", () => {
           sess.answers[sess.idx] = opt.id;
           if (sess.exam.timerMode !== "timed" && sess.checked) {
