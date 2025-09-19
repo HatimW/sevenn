@@ -1,6 +1,6 @@
 
 import { state, setFlashSession, setSubtab, setCohort } from '../../state.js';
-import { collectDueSections } from '../../review/scheduler.js';
+import { collectDueSections, collectUpcomingSections } from '../../review/scheduler.js';
 import { listBlocks } from '../../storage/storage.js';
 import { getSectionLabel } from './section-utils.js';
 import { hydrateStudySessions, getStudySessionEntry, removeStudySession } from '../../study/study-sessions.js';
@@ -35,6 +35,17 @@ function formatOverdue(due, now) {
   if (hours < 24) return `${hours} hr overdue`;
   const days = Math.round(hours / 24);
   return `${days} day${days === 1 ? '' : 's'} overdue`;
+}
+
+function formatTimeUntil(due, now) {
+  const diffMs = Math.max(0, due - now);
+  if (diffMs < 60 * 1000) return 'due in under a minute';
+  const minutes = Math.round(diffMs / (60 * 1000));
+  if (minutes < 60) return `due in ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `due in ${hours} hr`;
+  const days = Math.round(hours / 24);
+  return `due in ${days} day${days === 1 ? '' : 's'}`;
 }
 
 function groupByBlock(entries, blockTitles) {
@@ -85,43 +96,92 @@ function renderEmptyState(container) {
   container.appendChild(empty);
 }
 
-function renderAllView(container, entries, now, start) {
+function renderAllView(container, dueEntries, upcomingEntries, now, start) {
   const actionRow = document.createElement('div');
   actionRow.className = 'review-actions';
   const startBtn = document.createElement('button');
   startBtn.className = 'btn';
-  startBtn.textContent = `Start review (${entries.length})`;
-  startBtn.disabled = entries.length === 0;
+  startBtn.textContent = `Start review (${dueEntries.length})`;
+  startBtn.disabled = dueEntries.length === 0;
   startBtn.addEventListener('click', () => {
-    if (!entries.length) return;
-
-    start(buildSessionPayload(entries), { scope: 'all', label: 'All due cards' });
-
+    if (!dueEntries.length) return;
+    start(buildSessionPayload(dueEntries), { scope: 'all', label: 'All due cards' });
   });
   actionRow.appendChild(startBtn);
+
+  if (upcomingEntries.length) {
+    const upcomingBtn = document.createElement('button');
+    upcomingBtn.className = 'btn secondary';
+    upcomingBtn.textContent = `Review upcoming (${upcomingEntries.length})`;
+    upcomingBtn.addEventListener('click', () => {
+      if (!upcomingEntries.length) return;
+      start(buildSessionPayload(upcomingEntries), { scope: 'upcoming', label: 'Upcoming cards' });
+    });
+    actionRow.appendChild(upcomingBtn);
+  }
   container.appendChild(actionRow);
 
-  if (!entries.length) {
+  if (!dueEntries.length && !upcomingEntries.length) {
     renderEmptyState(container);
     return;
   }
 
-  const list = document.createElement('ul');
-  list.className = 'review-entry-list';
-  entries.forEach(entry => {
-    const item = document.createElement('li');
-    item.className = 'review-entry';
-    const title = document.createElement('div');
-    title.className = 'review-entry-title';
-    title.textContent = titleOf(entry.item);
-    const meta = document.createElement('div');
-    meta.className = 'review-entry-meta';
-    meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} • ${formatOverdue(entry.due, now)}`;
-    item.appendChild(title);
-    item.appendChild(meta);
-    list.appendChild(item);
-  });
-  container.appendChild(list);
+  if (!dueEntries.length) {
+    const info = document.createElement('div');
+    info.className = 'review-empty';
+    info.textContent = 'No cards are due right now. Upcoming cards are listed below.';
+    container.appendChild(info);
+  } else {
+    const list = document.createElement('ul');
+    list.className = 'review-entry-list';
+    dueEntries.forEach(entry => {
+      const item = document.createElement('li');
+      item.className = 'review-entry';
+      const title = document.createElement('div');
+      title.className = 'review-entry-title';
+      title.textContent = titleOf(entry.item);
+      const meta = document.createElement('div');
+      meta.className = 'review-entry-meta';
+      meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} • ${formatOverdue(entry.due, now)}`;
+      item.appendChild(title);
+      item.appendChild(meta);
+      list.appendChild(item);
+    });
+    container.appendChild(list);
+  }
+
+  if (upcomingEntries.length) {
+    const upcomingSection = document.createElement('div');
+    upcomingSection.className = 'review-upcoming-section';
+
+    const heading = document.createElement('div');
+    heading.className = 'review-upcoming-title';
+    heading.textContent = 'Upcoming cards';
+    upcomingSection.appendChild(heading);
+
+    const note = document.createElement('div');
+    note.className = 'review-upcoming-note';
+    note.textContent = `Next ${upcomingEntries.length} card${upcomingEntries.length === 1 ? '' : 's'} in the queue`;
+    upcomingSection.appendChild(note);
+
+    const list = document.createElement('ul');
+    list.className = 'review-entry-list';
+    upcomingEntries.forEach(entry => {
+      const item = document.createElement('li');
+      item.className = 'review-entry is-upcoming';
+      const title = document.createElement('div');
+      title.className = 'review-entry-title';
+      title.textContent = titleOf(entry.item);
+      const meta = document.createElement('div');
+      meta.className = 'review-entry-meta';
+      meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} • ${formatTimeUntil(entry.due, now)}`;
+      item.appendChild(title);
+      item.appendChild(meta);
+      list.appendChild(item);
+    });
+    upcomingSection.appendChild(list);
+    container.appendChild(upcomingSection);
+  }
 }
 
 
@@ -183,6 +243,7 @@ export async function renderReview(root, redraw) {
 
   const now = Date.now();
   const dueEntries = collectDueSections(cohort, { now });
+  const upcomingEntries = collectUpcomingSections(cohort, { now, limit: 50 });
   const blocks = await listBlocks();
   const blockTitles = ensureBlockTitleMap(blocks);
 
@@ -212,7 +273,7 @@ export async function renderReview(root, redraw) {
 
   const summary = document.createElement('div');
   summary.className = 'review-summary';
-  summary.textContent = `Cards due: ${dueEntries.length}`;
+  summary.textContent = `Cards due: ${dueEntries.length} • Upcoming: ${upcomingEntries.length}`;
   wrapper.appendChild(summary);
 
   if (savedEntry?.session) {
@@ -272,7 +333,7 @@ export async function renderReview(root, redraw) {
   };
 
   if (activeScope === 'all') {
-    renderAllView(body, dueEntries, now, startSession);
+    renderAllView(body, dueEntries, upcomingEntries, now, startSession);
   } else if (activeScope === 'blocks') {
     const groups = groupByBlock(dueEntries, blockTitles);
 

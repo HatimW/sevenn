@@ -508,8 +508,8 @@ function renderModeCard(rerender, redraw) {
 
   controls.appendChild(actions);
 
-  layout.appendChild(controls);
   layout.appendChild(modeColumn);
+  layout.appendChild(controls);
 
   card.appendChild(layout);
   return card;

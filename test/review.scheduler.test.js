@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { rateSection, collectDueSections } from '../js/review/scheduler.js';
+import { rateSection, collectDueSections, collectUpcomingSections } from '../js/review/scheduler.js';
 import { DEFAULT_REVIEW_STEPS, RETIRE_RATING } from '../js/review/constants.js';
 
 const baseDurations = { ...DEFAULT_REVIEW_STEPS };
@@ -90,4 +90,47 @@ test('collectDueSections returns only active overdue sections', () => {
   assert.equal(results.length, 1);
   assert.equal(results[0].itemId, 'due-1');
   assert.equal(results[0].sectionKey, 'etiology');
+});
+
+test('collectUpcomingSections lists future reviews in order', () => {
+  const now = Date.now();
+  const soon = createItem({
+    id: 'future-soon',
+    fields: { etiology: '<p>soon</p>' },
+    sr: {
+      version: 2,
+      sections: {
+        etiology: { streak: 2, lastRating: 'good', last: now - 5_000, due: now + 5 * 60_000, retired: false }
+      }
+    }
+  });
+  const later = createItem({
+    id: 'future-later',
+    fields: { etiology: '<p>later</p>' },
+    sr: {
+      version: 2,
+      sections: {
+        etiology: { streak: 3, lastRating: 'easy', last: now - 5_000, due: now + 120 * 60_000, retired: false }
+      }
+    }
+  });
+  const overdue = createItem({
+    id: 'due-now',
+    fields: { etiology: '<p>now</p>' },
+    sr: {
+      version: 2,
+      sections: {
+        etiology: { streak: 1, lastRating: 'good', last: now - 5_000, due: now - 60_000, retired: false }
+      }
+    }
+  });
+
+  const results = collectUpcomingSections([soon, later, overdue], { now });
+  assert.equal(results.length, 2);
+  assert.equal(results[0].itemId, 'future-soon');
+  assert.equal(results[1].itemId, 'future-later');
+
+  const limited = collectUpcomingSections([soon, later, overdue], { now, limit: 1 });
+  assert.equal(limited.length, 1);
+  assert.equal(limited[0].itemId, 'future-soon');
 });

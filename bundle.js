@@ -1469,7 +1469,7 @@ var Sevenn = (() => {
     const text = String(raw).replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").trim();
     return text.length > 0;
   }
-  function collectDueSections(items, { now = Date.now() } = {}) {
+  function collectReviewEntries(items, { now = Date.now(), predicate } = {}) {
     const results = [];
     if (!Array.isArray(items) || !items.length) return results;
     const defsMap = allSectionDefs();
@@ -1479,7 +1479,7 @@ var Sevenn = (() => {
         if (!hasContentForSection(item, def.key)) continue;
         const snapshot = getSectionStateSnapshot(item, def.key);
         if (!snapshot || snapshot.retired) continue;
-        if (!snapshot.last || snapshot.due > now) continue;
+        if (typeof predicate === "function" && !predicate(snapshot, now, item, def)) continue;
         results.push({
           item,
           itemId: item.id,
@@ -1491,6 +1491,28 @@ var Sevenn = (() => {
     }
     results.sort((a, b) => a.due - b.due);
     return results;
+  }
+  function collectDueSections(items, { now = Date.now() } = {}) {
+    return collectReviewEntries(items, {
+      now,
+      predicate: (snapshot, currentNow) => Boolean(snapshot.last) && snapshot.due <= currentNow
+    });
+  }
+  function collectUpcomingSections(items, { now = Date.now(), limit = 50 } = {}) {
+    const entries = collectReviewEntries(items, {
+      now,
+      predicate: (snapshot, currentNow) => {
+        if (!snapshot.last) return false;
+        const due = snapshot.due;
+        if (!Number.isFinite(due)) return false;
+        if (due === Number.MAX_SAFE_INTEGER) return false;
+        return due > currentNow;
+      }
+    });
+    if (Number.isFinite(limit) && limit > 0) {
+      return entries.slice(0, limit);
+    }
+    return entries;
   }
 
   // js/ui/components/confirm.js
@@ -5175,8 +5197,8 @@ var Sevenn = (() => {
     actions.appendChild(resumeBtn);
     actions.appendChild(reviewBtn);
     controls.appendChild(actions);
-    layout.appendChild(controls);
     layout.appendChild(modeColumn);
+    layout.appendChild(controls);
     card.appendChild(layout);
     return card;
   }
@@ -5845,6 +5867,16 @@ var Sevenn = (() => {
     const days = Math.round(hours / 24);
     return `${days} day${days === 1 ? "" : "s"} overdue`;
   }
+  function formatTimeUntil(due, now) {
+    const diffMs = Math.max(0, due - now);
+    if (diffMs < 60 * 1e3) return "due in under a minute";
+    const minutes = Math.round(diffMs / (60 * 1e3));
+    if (minutes < 60) return `due in ${minutes} min`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `due in ${hours} hr`;
+    const days = Math.round(hours / 24);
+    return `due in ${days} day${days === 1 ? "" : "s"}`;
+  }
   function groupByBlock(entries, blockTitles) {
     const groups = /* @__PURE__ */ new Map();
     entries.forEach((entry) => {
@@ -5885,39 +5917,85 @@ var Sevenn = (() => {
     empty.textContent = "No cards are due right now. Nice work!";
     container.appendChild(empty);
   }
-  function renderAllView(container, entries, now, start) {
+  function renderAllView(container, dueEntries, upcomingEntries, now, start) {
     const actionRow = document.createElement("div");
     actionRow.className = "review-actions";
     const startBtn = document.createElement("button");
     startBtn.className = "btn";
-    startBtn.textContent = `Start review (${entries.length})`;
-    startBtn.disabled = entries.length === 0;
+    startBtn.textContent = `Start review (${dueEntries.length})`;
+    startBtn.disabled = dueEntries.length === 0;
     startBtn.addEventListener("click", () => {
-      if (!entries.length) return;
-      start(buildSessionPayload(entries), { scope: "all", label: "All due cards" });
+      if (!dueEntries.length) return;
+      start(buildSessionPayload(dueEntries), { scope: "all", label: "All due cards" });
     });
     actionRow.appendChild(startBtn);
+    if (upcomingEntries.length) {
+      const upcomingBtn = document.createElement("button");
+      upcomingBtn.className = "btn secondary";
+      upcomingBtn.textContent = `Review upcoming (${upcomingEntries.length})`;
+      upcomingBtn.addEventListener("click", () => {
+        if (!upcomingEntries.length) return;
+        start(buildSessionPayload(upcomingEntries), { scope: "upcoming", label: "Upcoming cards" });
+      });
+      actionRow.appendChild(upcomingBtn);
+    }
     container.appendChild(actionRow);
-    if (!entries.length) {
+    if (!dueEntries.length && !upcomingEntries.length) {
       renderEmptyState(container);
       return;
     }
-    const list = document.createElement("ul");
-    list.className = "review-entry-list";
-    entries.forEach((entry) => {
-      const item = document.createElement("li");
-      item.className = "review-entry";
-      const title = document.createElement("div");
-      title.className = "review-entry-title";
-      title.textContent = titleOf2(entry.item);
-      const meta = document.createElement("div");
-      meta.className = "review-entry-meta";
-      meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} \u2022 ${formatOverdue(entry.due, now)}`;
-      item.appendChild(title);
-      item.appendChild(meta);
-      list.appendChild(item);
-    });
-    container.appendChild(list);
+    if (!dueEntries.length) {
+      const info = document.createElement("div");
+      info.className = "review-empty";
+      info.textContent = "No cards are due right now. Upcoming cards are listed below.";
+      container.appendChild(info);
+    } else {
+      const list = document.createElement("ul");
+      list.className = "review-entry-list";
+      dueEntries.forEach((entry) => {
+        const item = document.createElement("li");
+        item.className = "review-entry";
+        const title = document.createElement("div");
+        title.className = "review-entry-title";
+        title.textContent = titleOf2(entry.item);
+        const meta = document.createElement("div");
+        meta.className = "review-entry-meta";
+        meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} \u2022 ${formatOverdue(entry.due, now)}`;
+        item.appendChild(title);
+        item.appendChild(meta);
+        list.appendChild(item);
+      });
+      container.appendChild(list);
+    }
+    if (upcomingEntries.length) {
+      const upcomingSection = document.createElement("div");
+      upcomingSection.className = "review-upcoming-section";
+      const heading = document.createElement("div");
+      heading.className = "review-upcoming-title";
+      heading.textContent = "Upcoming cards";
+      upcomingSection.appendChild(heading);
+      const note = document.createElement("div");
+      note.className = "review-upcoming-note";
+      note.textContent = `Next ${upcomingEntries.length} card${upcomingEntries.length === 1 ? "" : "s"} in the queue`;
+      upcomingSection.appendChild(note);
+      const list = document.createElement("ul");
+      list.className = "review-entry-list";
+      upcomingEntries.forEach((entry) => {
+        const item = document.createElement("li");
+        item.className = "review-entry is-upcoming";
+        const title = document.createElement("div");
+        title.className = "review-entry-title";
+        title.textContent = titleOf2(entry.item);
+        const meta = document.createElement("div");
+        meta.className = "review-entry-meta";
+        meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} \u2022 ${formatTimeUntil(entry.due, now)}`;
+        item.appendChild(title);
+        item.appendChild(meta);
+        list.appendChild(item);
+      });
+      upcomingSection.appendChild(list);
+      container.appendChild(upcomingSection);
+    }
   }
   function renderGroupView(container, groups, label, start, metaBuilder = null) {
     if (!groups.length) {
@@ -5968,6 +6046,7 @@ var Sevenn = (() => {
     await hydrateStudySessions().catch((err) => console.error("Failed to load saved sessions", err));
     const now = Date.now();
     const dueEntries = collectDueSections(cohort, { now });
+    const upcomingEntries = collectUpcomingSections(cohort, { now, limit: 50 });
     const blocks = await listBlocks();
     const blockTitles = ensureBlockTitleMap(blocks);
     const savedEntry = getStudySessionEntry("review");
@@ -5990,7 +6069,7 @@ var Sevenn = (() => {
     wrapper.appendChild(heading);
     const summary = document.createElement("div");
     summary.className = "review-summary";
-    summary.textContent = `Cards due: ${dueEntries.length}`;
+    summary.textContent = `Cards due: ${dueEntries.length} \u2022 Upcoming: ${upcomingEntries.length}`;
     wrapper.appendChild(summary);
     if (savedEntry?.session) {
       const resumeRow = document.createElement("div");
@@ -6042,7 +6121,7 @@ var Sevenn = (() => {
       redraw();
     };
     if (activeScope === "all") {
-      renderAllView(body, dueEntries, now, startSession);
+      renderAllView(body, dueEntries, upcomingEntries, now, startSession);
     } else if (activeScope === "blocks") {
       const groups = groupByBlock(dueEntries, blockTitles);
       renderGroupView(body, groups, "block review", startSession, (group) => ({
@@ -10996,40 +11075,15 @@ var Sevenn = (() => {
       } else if (state.quizSession) {
         renderQuiz(content, render);
       } else {
-        const wrap = document.createElement("div");
-        await renderBuilder(wrap, render);
-        content.appendChild(wrap);
-        const subnav = document.createElement("div");
-        subnav.className = "tabs row subtabs";
-        const buttons = [
-          { key: "Builder", label: "Study home" },
-          { key: "Review", label: "Review" }
-        ];
-        const activeKey = state.subtab.Study === "Blocks" ? "Builder" : state.subtab.Study;
-        buttons.forEach(({ key, label }) => {
-          const sb = document.createElement("button");
-          sb.className = "tab";
-          const isActive = activeKey === key;
-          if (isActive) sb.classList.add("active");
-          sb.dataset.toggle = "true";
-          sb.dataset.active = isActive ? "true" : "false";
-          sb.setAttribute("aria-pressed", isActive ? "true" : "false");
-          sb.textContent = label;
-          sb.addEventListener("click", () => {
-            setSubtab("Study", key);
-            render();
-          });
-          subnav.appendChild(sb);
-        });
-        content.appendChild(subnav);
-        if (state.flashSession) {
-          renderFlashcards(content, render);
-        } else if (state.quizSession) {
-          renderQuiz(content, render);
-        } else if (state.subtab.Study === "Blocks") {
-          renderBlockMode(content, render);
-        } else if (state.subtab.Study === "Review") {
+        const activeStudy = state.subtab.Study === "Blocks" ? "Blocks" : state.subtab.Study || "Builder";
+        if (activeStudy === "Review") {
           await renderReview(content, render);
+        } else if (activeStudy === "Blocks") {
+          renderBlockMode(content, render);
+        } else {
+          const wrap = document.createElement("div");
+          await renderBuilder(wrap, render);
+          content.appendChild(wrap);
         }
       }
     } else if (state.tab === "Exams") {

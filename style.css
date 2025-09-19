@@ -1894,13 +1894,13 @@ input[type="checkbox"]:checked::after {
 
 .builder-mode-layout {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--pad);
 }
 
 .builder-mode-controls {
-  flex: 1 1 240px;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: var(--pad-sm);
@@ -1918,7 +1918,7 @@ input[type="checkbox"]:checked::after {
 }
 
 .builder-mode-option-column {
-  flex: 1 1 200px;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: var(--pad-sm);
@@ -1999,7 +1999,7 @@ input[type="checkbox"]:checked::after {
 
 @media (max-width: 960px) {
   .builder-mode-layout {
-    flex-direction: column;
+    gap: var(--pad);
   }
 }
 
@@ -5375,7 +5375,13 @@ body.map-toolbox-dragging {
 .review-actions {
   display: flex;
   justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: var(--pad-sm);
   margin-bottom: var(--pad-sm);
+}
+
+.review-actions .btn {
+  flex: none;
 }
 
 .review-entry-list {
@@ -5402,6 +5408,30 @@ body.map-toolbox-dragging {
   color: var(--gray);
   font-size: 0.85rem;
   margin-top: 4px;
+}
+
+.review-entry.is-upcoming {
+  background: rgba(148, 163, 184, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.28);
+}
+
+.review-upcoming-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad-sm);
+}
+
+.review-upcoming-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--gray);
+}
+
+.review-upcoming-note {
+  color: var(--gray);
+  font-size: 0.85rem;
 }
 
 .review-group-list {
