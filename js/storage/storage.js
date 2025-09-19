@@ -6,6 +6,11 @@ let dbPromise;
 const DEFAULT_KINDS = ['disease', 'drug', 'concept'];
 const RESULT_BATCH_SIZE = 50;
 const MAP_CONFIG_KEY = 'map-config';
+const MAP_CONFIG_BACKUP_KEY = 'sevenn-map-config-backup';
+const DATA_BACKUP_KEY = 'sevenn-backup-snapshot';
+const DATA_BACKUP_STORES = ['items', 'blocks', 'exams', 'settings', 'exam_sessions'];
+
+let backupTimer = null;
 
 const DEFAULT_MAP_CONFIG = {
   activeTabId: 'default',
@@ -35,13 +40,122 @@ async function store(name, mode = 'readonly') {
   return db.transaction(name, mode).objectStore(name);
 }
 
+function canUseStorage() {
+  return typeof localStorage !== 'undefined';
+}
+
+function readMapConfigBackup() {
+  if (!canUseStorage()) return null;
+  try {
+    const raw = localStorage.getItem(MAP_CONFIG_BACKUP_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      return parsed;
+    }
+  } catch (err) {
+    console.warn('Failed to read map backup', err);
+  }
+  return null;
+}
+
+function writeMapConfigBackup(config) {
+  if (!canUseStorage()) return;
+  try {
+    localStorage.setItem(MAP_CONFIG_BACKUP_KEY, JSON.stringify(config));
+  } catch (err) {
+    console.warn('Failed to persist map backup', err);
+  }
+}
+
+async function writeDataBackup() {
+  if (!canUseStorage()) return;
+  try {
+    const db = await dbPromise;
+    if (!db || typeof db.transaction !== 'function') return;
+    const snapshot = {};
+    for (const name of DATA_BACKUP_STORES) {
+      try {
+        const tx = db.transaction(name, 'readonly');
+        const s = tx.objectStore(name);
+        const all = await prom(s.getAll());
+        snapshot[name] = Array.isArray(all) ? all : [];
+      } catch (err) {
+        console.warn(`Failed to snapshot store ${name}`, err);
+        snapshot[name] = [];
+      }
+    }
+    snapshot.__timestamp = Date.now();
+    localStorage.setItem(DATA_BACKUP_KEY, JSON.stringify(snapshot));
+  } catch (err) {
+    console.warn('Failed to persist data backup', err);
+  }
+}
+
+function scheduleBackup() {
+  if (!canUseStorage()) return;
+  if (backupTimer) clearTimeout(backupTimer);
+  backupTimer = setTimeout(() => {
+    backupTimer = null;
+    writeDataBackup().catch(err => console.warn('Backup write failed', err));
+  }, 1000);
+}
+
+async function maybeRestoreFromBackup() {
+  if (!canUseStorage()) return;
+  let parsed;
+  try {
+    const raw = localStorage.getItem(DATA_BACKUP_KEY);
+    if (!raw) return;
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    console.warn('Failed to parse saved backup', err);
+    return;
+  }
+  if (!parsed || typeof parsed !== 'object') return;
+  try {
+    const db = await dbPromise;
+    if (!db || typeof db.transaction !== 'function') return;
+    const emptyChecks = await Promise.all(DATA_BACKUP_STORES.map(async name => {
+      try {
+        const tx = db.transaction(name, 'readonly');
+        const s = tx.objectStore(name);
+        const existing = await prom(s.getAll());
+        return !existing || existing.length === 0;
+      } catch (err) {
+        console.warn(`Failed to inspect store ${name}`, err);
+        return false;
+      }
+    }));
+    if (!emptyChecks.every(Boolean)) return;
+    for (const name of DATA_BACKUP_STORES) {
+      const list = Array.isArray(parsed[name]) ? parsed[name] : [];
+      if (!list.length) continue;
+      try {
+        const tx = db.transaction(name, 'readwrite');
+        const s = tx.objectStore(name);
+        for (const entry of list) {
+          await prom(s.put(entry));
+        }
+      } catch (err) {
+        console.warn(`Failed to restore store ${name}`, err);
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to restore data from backup', err);
+  }
+}
+
 export async function initDB() {
   if (!dbPromise) dbPromise = openDB();
+  await maybeRestoreFromBackup();
   const s = await store('settings', 'readwrite');
   const existing = await prom(s.get('app'));
   if (!existing) {
-    await prom(s.put({ id: 'app', dailyCount: 20, theme: 'dark' }));
+    const defaults = { id: 'app', dailyCount: 20, theme: 'dark' };
+    await prom(s.put(defaults));
   }
+  scheduleBackup();
 }
 
 export async function getSettings() {
@@ -55,6 +169,7 @@ export async function saveSettings(patch) {
   const current = await prom(s.get('app')) || { id: 'app', dailyCount: 20, theme: 'dark' };
   const next = { ...current, ...patch, id: 'app' };
   await prom(s.put(next));
+  scheduleBackup();
 }
 
 function cloneConfig(config) {
@@ -66,13 +181,29 @@ export async function getMapConfig() {
     const s = await store('settings', 'readwrite');
     const existing = await prom(s.get(MAP_CONFIG_KEY));
     if (existing && existing.config) {
-      return cloneConfig(existing.config);
+      const config = cloneConfig(existing.config);
+      writeMapConfigBackup(config);
+      return config;
+    }
+    const backup = readMapConfigBackup();
+    if (backup) {
+      const payload = cloneConfig(backup);
+      await prom(s.put({ id: MAP_CONFIG_KEY, config: payload }));
+      writeMapConfigBackup(payload);
+      scheduleBackup();
+      return payload;
     }
     const fallback = cloneConfig(DEFAULT_MAP_CONFIG);
     await prom(s.put({ id: MAP_CONFIG_KEY, config: fallback }));
+    writeMapConfigBackup(fallback);
+    scheduleBackup();
     return fallback;
   } catch (err) {
     console.warn('getMapConfig failed', err);
+    const backup = readMapConfigBackup();
+    if (backup) {
+      return cloneConfig(backup);
+    }
     return cloneConfig(DEFAULT_MAP_CONFIG);
   }
 }
@@ -81,6 +212,8 @@ export async function saveMapConfig(config) {
   const payload = config ? cloneConfig(config) : cloneConfig(DEFAULT_MAP_CONFIG);
   const s = await store('settings', 'readwrite');
   await prom(s.put({ id: MAP_CONFIG_KEY, config: payload }));
+  writeMapConfigBackup(payload);
+  scheduleBackup();
 }
 
 export async function listBlocks() {
@@ -136,6 +269,7 @@ export async function upsertBlock(def) {
     updatedAt: now
   };
   await prom(b.put(next));
+  scheduleBackup();
 }
 
 export async function deleteBlock(blockId) {
@@ -162,6 +296,7 @@ export async function deleteBlock(blockId) {
       }
     }
   }
+  scheduleBackup();
 }
 
 export async function deleteLecture(blockId, lectureId) {
@@ -187,6 +322,7 @@ export async function deleteLecture(blockId, lectureId) {
       }
     }
   }
+  scheduleBackup();
 }
 
 export async function updateLecture(blockId, lecture) {
@@ -217,6 +353,7 @@ export async function updateLecture(blockId, lecture) {
       await prom(i.put(it));
     }
   }
+  scheduleBackup();
 }
 
 import { buildTokens, tokenize, buildSearchMeta } from '../search.js';
@@ -388,6 +525,7 @@ export async function upsertItem(item) {
     }
   }
   await prom(i.put(next));
+  scheduleBackup();
 }
 
 export async function deleteItem(id) {
@@ -402,6 +540,7 @@ export async function deleteItem(id) {
     }
   }
   await prom(i.delete(id));
+  scheduleBackup();
 }
 
 export async function listExams() {
@@ -420,11 +559,13 @@ export async function upsertExam(exam) {
     results: exam.results || existing?.results || []
   };
   await prom(e.put(next));
+  scheduleBackup();
 }
 
 export async function deleteExam(id) {
   const e = await store('exams', 'readwrite');
   await prom(e.delete(id));
+  scheduleBackup();
 }
 
 export async function listExamSessions() {
@@ -441,11 +582,13 @@ export async function saveExamSessionProgress(progress) {
   const s = await store('exam_sessions', 'readwrite');
   const now = Date.now();
   await prom(s.put({ ...progress, updatedAt: now }));
+  scheduleBackup();
 }
 
 export async function deleteExamSessionProgress(examId) {
   const s = await store('exam_sessions', 'readwrite');
   await prom(s.delete(examId));
+  scheduleBackup();
 }
 
 // export/import helpers

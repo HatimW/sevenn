@@ -47,17 +47,27 @@ function escapeHtml(str = '') {
 export async function openEditor(kind, onSave, existing = null) {
   let isDirty = false;
   let status;
+  let autoSaveTimer = null;
+  const AUTOSAVE_DELAY = 2000;
 
   const win = createFloatingWindow({
     title: `${existing ? 'Edit' : 'Add'} ${titleMap[kind] || kind}`,
     width: 660,
     onBeforeClose: async (reason) => {
       if (reason === 'saved') return true;
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+      }
       if (!isDirty) return true;
       if (reason !== 'close') return true;
       const shouldSave = await confirmModal('Save changes before closing?');
       if (shouldSave) {
-        await persist(true);
+        try {
+          await persist({ closeAfter: true });
+        } catch (err) {
+          console.error(err);
+        }
         return false;
       }
       return true;
@@ -76,9 +86,30 @@ export async function openEditor(kind, onSave, existing = null) {
   nameLabel.appendChild(nameInput);
   form.appendChild(nameLabel);
 
+  const cancelAutoSave = () => {
+    if (autoSaveTimer) {
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = null;
+    }
+  };
+
+  const queueAutoSave = () => {
+    cancelAutoSave();
+    if (!isDirty) return;
+    if (!nameInput.value.trim()) return;
+    autoSaveTimer = setTimeout(() => {
+      autoSaveTimer = null;
+      if (!isDirty) return;
+      persist({ silent: true }).catch(err => {
+        console.error('Autosave failed', err);
+      });
+    }, AUTOSAVE_DELAY);
+  };
+
   const markDirty = () => {
     isDirty = true;
     if (status) status.textContent = '';
+    queueAutoSave();
   };
 
   nameInput.addEventListener('input', markDirty);
@@ -397,14 +428,21 @@ export async function openEditor(kind, onSave, existing = null) {
   status = document.createElement('span');
   status.className = 'editor-status';
 
-  async function persist(closeAfter){
+  async function persist(options = {}) {
+    const opts = typeof options === 'boolean' ? { closeAfter: options } : options;
+    const { closeAfter = false, silent = false } = opts;
+    cancelAutoSave();
     const titleKey = kind === 'concept' ? 'concept' : 'name';
     const trimmed = nameInput.value.trim();
     if (!trimmed) {
-      status.textContent = 'Name is required.';
-      return;
+      if (!silent) {
+        status.textContent = 'Name is required.';
+      }
+      return false;
     }
-    status.textContent = 'Saving…';
+    if (!silent) {
+      status.textContent = 'Saving…';
+    }
     const item = existing || { id: uid(), kind };
     item[titleKey] = trimmed;
     fieldMap[kind].forEach(([field]) => {
@@ -435,7 +473,7 @@ export async function openEditor(kind, onSave, existing = null) {
       await upsertItem(item);
     } catch (err) {
       console.error(err);
-      status.textContent = 'Failed to save.';
+      status.textContent = silent ? 'Autosave failed' : 'Failed to save.';
       throw err;
     }
     existing = item;
@@ -445,8 +483,9 @@ export async function openEditor(kind, onSave, existing = null) {
     if (closeAfter) {
       win.close('saved');
     } else {
-      status.textContent = 'Saved';
+      status.textContent = silent ? 'Autosaved' : 'Saved';
     }
+    return true;
   }
 
   const saveBtn = document.createElement('button');
@@ -454,7 +493,7 @@ export async function openEditor(kind, onSave, existing = null) {
   saveBtn.className = 'btn';
   saveBtn.textContent = 'Save';
   saveBtn.addEventListener('click', () => {
-    persist(true).catch(() => {});
+    persist({ closeAfter: true }).catch(() => {});
   });
 
   actionBar.appendChild(saveBtn);
@@ -463,7 +502,7 @@ export async function openEditor(kind, onSave, existing = null) {
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    persist(true).catch(() => {});
+    persist({ closeAfter: true }).catch(() => {});
   });
 
   win.setContent(form);
