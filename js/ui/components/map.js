@@ -1073,9 +1073,6 @@ export async function renderMap(root) {
 
   applyMenuState();
 
-  const openMenu = () => setMenuOpen(true);
-  const closeMenu = () => setMenuOpen(false);
-
   toggle.addEventListener('click', evt => {
     evt.preventDefault();
     if (mapState.menuPinned) {
