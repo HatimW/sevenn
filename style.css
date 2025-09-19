@@ -105,7 +105,9 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):hove
   transition: background 0.25s ease, color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
 }
 
+
 [data-toggle="true"][data-active="true"]:not(.builder-pill):not(.builder-mode-toggle) {
+
   background: linear-gradient(135deg, rgba(56, 189, 248, 0.96), rgba(192, 132, 252, 0.92));
   border-color: transparent;
   color: #031327;
@@ -2367,10 +2369,12 @@ button.builder-pill.builder-pill-outline {
   font-style: italic;
 }
 
+
 .flash-rating.is-locked .flash-rating-status.flash-rating-status-action {
   font-style: normal;
   color: color-mix(in srgb, var(--flash-accent) 68%, #0284c7);
 }
+
 
 .flash-empty {
   background: var(--muted);

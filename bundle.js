@@ -5594,11 +5594,13 @@ var Sevenn = (() => {
     good: "",
     easy: ""
   };
+
   function getFlashcardAccent(item) {
     if (item?.color) return item.color;
     if (item?.kind && KIND_ACCENTS[item.kind]) return KIND_ACCENTS[item.kind];
     return "var(--accent)";
   }
+
   function queueStatusLabel(snapshot) {
     if (!snapshot || snapshot.retired) return "Already in review queue";
     const rating = snapshot.lastRating;
@@ -5708,6 +5710,7 @@ var Sevenn = (() => {
     card.appendChild(title);
     const durationsPromise = getReviewDurations().catch(() => ({ ...DEFAULT_REVIEW_STEPS }));
     const sectionBlocks = sections.length ? sections : [];
+    const sectionRequirements = /* @__PURE__ */ new Map();
     if (!sectionBlocks.length) {
       const empty = document.createElement("div");
       empty.className = "flash-empty";
@@ -5717,8 +5720,10 @@ var Sevenn = (() => {
     sectionBlocks.forEach(({ key, label }) => {
       const ratingId = ratingKey(item, key);
       const previousRating = active.ratings[ratingId] || null;
+
       const snapshot = getSectionStateSnapshot(item, key);
       const lockedByQueue = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
+
       const sec = document.createElement("div");
       sec.className = "flash-section";
       sec.setAttribute("role", "button");
@@ -5742,18 +5747,22 @@ var Sevenn = (() => {
           const btnValue = btn.dataset.value;
           const isSelected = btnValue === value;
           btn.classList.toggle("is-selected", isSelected);
+
           if (isSelected) {
             ratingButtons.dataset.selected = value;
           } else if (ratingButtons.dataset.selected === btnValue) {
             delete ratingButtons.dataset.selected;
           }
+
           btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
         });
         status.classList.remove("is-error");
         commitSession({ ratings: { ...active.ratings } });
+
       };
       const handleRating = async (value) => {
         if (ratingLocked) return;
+
         const durations = await durationsPromise;
         setToggleState(sec, true, "revealed");
         ratingRow.classList.add("is-saving");
@@ -5829,6 +5838,7 @@ var Sevenn = (() => {
       }
       if (previousRating) {
         selectRating(previousRating);
+
       }
       ratingRow.appendChild(ratingButtons);
       ratingRow.appendChild(status);
@@ -5872,6 +5882,7 @@ var Sevenn = (() => {
     next.className = "btn";
     const isLast = active.idx >= items.length - 1;
     next.textContent = isLast ? isReview ? "Finish review" : "Finish" : "Next";
+
     next.addEventListener("click", () => {
       const idx = active.idx + 1;
       if (idx >= items.length) {
@@ -5951,11 +5962,13 @@ var Sevenn = (() => {
         prev.click();
       }
     });
+
     const accent = getFlashcardAccent(item);
     card.style.setProperty("--flash-accent", accent);
     card.style.setProperty("--flash-accent-soft", `color-mix(in srgb, ${accent} 16%, transparent)`);
     card.style.setProperty("--flash-accent-strong", `color-mix(in srgb, ${accent} 32%, rgba(15, 23, 42, 0.08))`);
     card.style.setProperty("--flash-accent-border", `color-mix(in srgb, ${accent} 42%, transparent)`);
+
   }
 
   // js/ui/components/review.js

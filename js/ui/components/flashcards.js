@@ -29,11 +29,13 @@ const RATING_CLASS = {
   easy: ''
 };
 
+
 function getFlashcardAccent(item) {
   if (item?.color) return item.color;
   if (item?.kind && KIND_ACCENTS[item.kind]) return KIND_ACCENTS[item.kind];
   return 'var(--accent)';
 }
+
 
 function queueStatusLabel(snapshot) {
   if (!snapshot || snapshot.retired) return 'Already in review queue';
@@ -100,6 +102,7 @@ export function renderFlashcards(root, redraw) {
   active.ratings = active.ratings || {};
   const items = Array.isArray(active.pool) && active.pool.length ? active.pool : fallbackPool;
 
+
   const resolvePool = () => (Array.isArray(active.pool) && active.pool.length ? active.pool : items);
   const commitSession = (patch = {}) => {
     const pool = resolvePool();
@@ -159,6 +162,7 @@ export function renderFlashcards(root, redraw) {
 
   const durationsPromise = getReviewDurations().catch(() => ({ ...DEFAULT_REVIEW_STEPS }));
   const sectionBlocks = sections.length ? sections : [];
+  const sectionRequirements = new Map();
   if (!sectionBlocks.length) {
     const empty = document.createElement('div');
     empty.className = 'flash-empty';
@@ -171,6 +175,15 @@ export function renderFlashcards(root, redraw) {
     const previousRating = active.ratings[ratingId] || null;
     const snapshot = getSectionStateSnapshot(item, key);
     const lockedByQueue = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
+
+    const snapshot = getSectionStateSnapshot(item, key);
+    const alreadyQueued = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
+    const requiresRating = isReview || !alreadyQueued;
+    sectionRequirements.set(key, requiresRating);
+    if (!requiresRating && !ratedSections.has(key)) {
+      const recorded = snapshot?.lastRating || 'queued';
+      ratedSections.set(key, recorded);
+    }
 
     const sec = document.createElement('div');
     sec.className = 'flash-section';
@@ -202,19 +215,23 @@ export function renderFlashcards(root, redraw) {
         const btnValue = btn.dataset.value;
         const isSelected = btnValue === value;
         btn.classList.toggle('is-selected', isSelected);
+
         if (isSelected) {
           ratingButtons.dataset.selected = value;
         } else if (ratingButtons.dataset.selected === btnValue) {
           delete ratingButtons.dataset.selected;
         }
+
         btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
       });
       status.classList.remove('is-error');
       commitSession({ ratings: { ...active.ratings } });
+
     };
 
     const handleRating = async (value) => {
       if (ratingLocked) return;
+
       const durations = await durationsPromise;
       setToggleState(sec, true, 'revealed');
       ratingRow.classList.add('is-saving');
@@ -251,9 +268,8 @@ export function renderFlashcards(root, redraw) {
       });
       btn.addEventListener('keydown', (event) => {
         event.stopPropagation();
+
       });
-      ratingButtons.appendChild(btn);
-    });
 
     const unlockRating = () => {
       if (!ratingLocked) return;
@@ -294,6 +310,7 @@ export function renderFlashcards(root, redraw) {
 
     if (previousRating) {
       selectRating(previousRating);
+
     }
 
     ratingRow.appendChild(ratingButtons);
@@ -333,7 +350,9 @@ export function renderFlashcards(root, redraw) {
   prev.disabled = active.idx === 0;
   prev.addEventListener('click', () => {
     if (active.idx > 0) {
+
       commitSession({ idx: active.idx - 1 });
+
       redraw();
     }
   });
@@ -344,12 +363,16 @@ export function renderFlashcards(root, redraw) {
   const isLast = active.idx >= items.length - 1;
 
   next.textContent = isLast ? (isReview ? 'Finish review' : 'Finish') : 'Next';
+
   next.addEventListener('click', () => {
+    const pool = Array.isArray(active.pool) ? active.pool : items;
     const idx = active.idx + 1;
     if (idx >= items.length) {
       setFlashSession(null);
     } else {
+
       commitSession({ idx });
+
     }
     redraw();
   });
@@ -367,6 +390,7 @@ export function renderFlashcards(root, redraw) {
         const pool = resolvePool();
         await persistStudySession('flashcards', {
           session: { ...active, idx: active.idx, pool, ratings: { ...(active.ratings || {}) } },
+
           cohort: pool
         });
         setFlashSession(null);
@@ -392,9 +416,11 @@ export function renderFlashcards(root, redraw) {
       saveExit.disabled = true;
       saveExit.textContent = 'Saving…';
       try {
+
         const pool = resolvePool();
         await persistStudySession('review', {
           session: { ...active, idx: active.idx, pool, ratings: { ...(active.ratings || {}) } },
+
           cohort: state.cohort,
           metadata: active.metadata || { label: 'Review session' }
         });
@@ -425,9 +451,11 @@ export function renderFlashcards(root, redraw) {
     }
   });
 
+
   const accent = getFlashcardAccent(item);
   card.style.setProperty('--flash-accent', accent);
   card.style.setProperty('--flash-accent-soft', `color-mix(in srgb, ${accent} 16%, transparent)`);
   card.style.setProperty('--flash-accent-strong', `color-mix(in srgb, ${accent} 32%, rgba(15, 23, 42, 0.08))`);
   card.style.setProperty('--flash-accent-border', `color-mix(in srgb, ${accent} 42%, transparent)`);
+
 }
