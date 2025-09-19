@@ -3249,7 +3249,9 @@
   }
 
   // js/ui/components/cards.js
+
   var KIND_COLORS = { disease: "var(--pink)", drug: "var(--blue)", concept: "var(--green)" };
+
   var UNASSIGNED_BLOCK_KEY = "__unassigned__";
   var MISC_LECTURE_KEY = "__misc__";
   function formatWeekLabel(value) {
@@ -3261,6 +3263,7 @@
   function titleFromItem(item) {
     return item?.name || item?.concept || "Untitled Card";
   }
+
   function deckColorFromCards(cards = []) {
     for (const card of cards) {
       if (card?.color) return card.color;
@@ -3275,6 +3278,7 @@
     container.classList.add("cards-tab");
     const itemLookup = new Map(items.filter((it) => it && it.id != null).map((it) => [it.id, it]));
     const overlayCardCache = /* @__PURE__ */ new Map();
+
     const blockDefs = await listBlocks();
     const blockLookup = new Map(blockDefs.map((def) => [def.blockId, def]));
     const blockOrder = new Map(blockDefs.map((def, idx) => [def.blockId, idx]));
@@ -3424,9 +3428,11 @@
       closeBtn.addEventListener("click", closeDeck);
       header.appendChild(closeBtn);
       viewer.appendChild(header);
+
       const accent = deckColorFromCards(lecture.cards);
       viewer.style.setProperty("--deck-accent", accent);
       overlay.style.setProperty("--deck-accent", accent);
+
       const stage = document.createElement("div");
       stage.className = "deck-stage";
       const prev = document.createElement("button");
@@ -3436,6 +3442,7 @@
       const cardHolder = document.createElement("div");
       cardHolder.className = "deck-card-stage";
       cardHolder.tabIndex = -1;
+
       const next = document.createElement("button");
       next.type = "button";
       next.className = "deck-nav deck-next";
@@ -3453,6 +3460,7 @@
       toggle.textContent = "Show related cards";
       toolbar.appendChild(toggle);
       viewer.appendChild(toolbar);
+
       const filmstrip = document.createElement("div");
       filmstrip.className = "deck-filmstrip";
       const chipButtons = lecture.cards.map((cardItem, cardIndex) => {
@@ -3476,6 +3484,7 @@
         filmstrip.dataset.single = "true";
       }
       viewer.appendChild(filmstrip);
+
       const relatedWrap = document.createElement("div");
       relatedWrap.className = "deck-related";
       relatedWrap.dataset.visible = "false";
@@ -3489,6 +3498,7 @@
           return;
         }
         const current = lecture.cards[idx];
+
         const seen = /* @__PURE__ */ new Set();
         (current.links || []).forEach((link) => {
           const linkId = link?.id;
@@ -3505,6 +3515,7 @@
       }
       function renderCard() {
         cardHolder.innerHTML = "";
+
         const item = lecture.cards[idx];
         const cacheKey = item?.id ?? `${lecture.key || lecture.title}-${idx}`;
         let card = overlayCardCache.get(cacheKey);
@@ -3520,6 +3531,7 @@
           chip.dataset.active = active ? "true" : "false";
           chip.setAttribute("aria-pressed", active ? "true" : "false");
         });
+
       }
       prev.addEventListener("click", () => {
         idx = (idx - 1 + lecture.cards.length) % lecture.cards.length;
@@ -3568,6 +3580,7 @@
       const stack = document.createElement("div");
       stack.className = "deck-stack";
       stack.style.setProperty("--deck-color", accent);
+
       const preview = lecture.cards.slice(0, 5);
       stack.style.setProperty("--spread", preview.length > 0 ? (preview.length - 1) / 2 : 0);
       if (!preview.length) {
@@ -3614,6 +3627,7 @@
         }
       });
       return tile;
+
     }
     if (!blockSections.length) {
       const empty = document.createElement("div");
@@ -3628,6 +3642,7 @@
       return;
     }
     const blockFragment = document.createDocumentFragment();
+
     blockSections.forEach((block) => {
       const section = document.createElement("section");
       section.className = "card-block-section";
@@ -3655,7 +3670,9 @@
       section.appendChild(header);
       const body = document.createElement("div");
       body.className = "card-block-body";
+
       const weekFragment = document.createDocumentFragment();
+
       block.weeks.forEach((week) => {
         const weekSection = document.createElement("div");
         weekSection.className = "card-week-section";
@@ -3674,6 +3691,7 @@
         weekHeader.appendChild(createCollapseIcon());
         const deckGrid = document.createElement("div");
         deckGrid.className = "deck-grid";
+
         const deckFragment = document.createDocumentFragment();
         week.lectures.forEach((lecture) => {
           deckFragment.appendChild(createDeckTile(block, week, lecture));
@@ -3682,20 +3700,25 @@
         weekSection.appendChild(weekHeader);
         weekSection.appendChild(deckGrid);
         weekFragment.appendChild(weekSection);
+
         weekHeader.addEventListener("click", () => {
           const collapsed = weekSection.classList.toggle("is-collapsed");
           weekHeader.setAttribute("aria-expanded", collapsed ? "false" : "true");
         });
       });
+
       body.appendChild(weekFragment);
+
       section.appendChild(body);
       header.addEventListener("click", () => {
         const collapsed = section.classList.toggle("is-collapsed");
         header.setAttribute("aria-expanded", collapsed ? "false" : "true");
       });
+
       blockFragment.appendChild(section);
     });
     catalog.appendChild(blockFragment);
+
   }
 
   // js/ui/components/builder.js

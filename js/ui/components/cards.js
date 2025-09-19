@@ -1,7 +1,9 @@
 import { listBlocks } from '../../storage/storage.js';
 import { createItemCard } from './cardlist.js';
 
+
 const KIND_COLORS = { disease: 'var(--pink)', drug: 'var(--blue)', concept: 'var(--green)' };
+
 
 const UNASSIGNED_BLOCK_KEY = '__unassigned__';
 const MISC_LECTURE_KEY = '__misc__';
@@ -17,6 +19,7 @@ function titleFromItem(item) {
   return item?.name || item?.concept || 'Untitled Card';
 }
 
+
 function deckColorFromCards(cards = []) {
   for (const card of cards) {
     if (card?.color) return card.color;
@@ -26,6 +29,7 @@ function deckColorFromCards(cards = []) {
   }
   return 'var(--accent)';
 }
+
 
 /**
  * Render lecture-based decks combining all item types with block/week groupings.
@@ -37,8 +41,10 @@ export async function renderCards(container, items, onChange) {
   container.innerHTML = '';
   container.classList.add('cards-tab');
 
+
   const itemLookup = new Map(items.filter(it => it && it.id != null).map(it => [it.id, it]));
   const overlayCardCache = new Map();
+
 
   const blockDefs = await listBlocks();
   const blockLookup = new Map(blockDefs.map(def => [def.blockId, def]));
@@ -222,6 +228,7 @@ export async function renderCards(container, items, onChange) {
     viewer.style.setProperty('--deck-accent', accent);
     overlay.style.setProperty('--deck-accent', accent);
 
+
     const stage = document.createElement('div');
     stage.className = 'deck-stage';
 
@@ -233,6 +240,7 @@ export async function renderCards(container, items, onChange) {
     const cardHolder = document.createElement('div');
     cardHolder.className = 'deck-card-stage';
     cardHolder.tabIndex = -1;
+
 
     const next = document.createElement('button');
     next.type = 'button';
@@ -255,6 +263,7 @@ export async function renderCards(container, items, onChange) {
     toolbar.appendChild(toggle);
 
     viewer.appendChild(toolbar);
+
 
     const filmstrip = document.createElement('div');
     filmstrip.className = 'deck-filmstrip';
@@ -280,6 +289,7 @@ export async function renderCards(container, items, onChange) {
     }
     viewer.appendChild(filmstrip);
 
+
     const relatedWrap = document.createElement('div');
     relatedWrap.className = 'deck-related';
     relatedWrap.dataset.visible = 'false';
@@ -295,6 +305,7 @@ export async function renderCards(container, items, onChange) {
         return;
       }
       const current = lecture.cards[idx];
+
       const seen = new Set();
       (current.links || []).forEach(link => {
         const linkId = link?.id;
@@ -302,6 +313,7 @@ export async function renderCards(container, items, onChange) {
         const related = itemLookup.get(linkId);
         if (related) {
           seen.add(linkId);
+
           const card = createItemCard(related, onChange);
           card.classList.add('related-card');
           relatedWrap.appendChild(card);
@@ -312,6 +324,7 @@ export async function renderCards(container, items, onChange) {
 
     function renderCard() {
       cardHolder.innerHTML = '';
+
       const item = lecture.cards[idx];
       const cacheKey = item?.id ?? `${lecture.key || lecture.title}-${idx}`;
       let card = overlayCardCache.get(cacheKey);
@@ -327,6 +340,7 @@ export async function renderCards(container, items, onChange) {
         chip.dataset.active = active ? 'true' : 'false';
         chip.setAttribute('aria-pressed', active ? 'true' : 'false');
       });
+
     }
 
     prev.addEventListener('click', () => {
@@ -379,12 +393,14 @@ export async function renderCards(container, items, onChange) {
     tile.className = 'deck-tile';
     tile.setAttribute('aria-label', `${lecture.title} (${lecture.cards.length} cards)`);
 
+
     const accent = deckColorFromCards(lecture.cards);
     tile.style.setProperty('--deck-color', accent);
 
     const stack = document.createElement('div');
     stack.className = 'deck-stack';
     stack.style.setProperty('--deck-color', accent);
+
     const preview = lecture.cards.slice(0, 5);
     stack.style.setProperty('--spread', preview.length > 0 ? (preview.length - 1) / 2 : 0);
     if (!preview.length) {
@@ -410,7 +426,9 @@ export async function renderCards(container, items, onChange) {
     const count = document.createElement('span');
     count.className = 'deck-count-pill';
     count.textContent = `${lecture.cards.length} card${lecture.cards.length === 1 ? '' : 's'}`;
+
     count.style.setProperty('--deck-color', accent);
+
     info.appendChild(count);
 
     const label = document.createElement('h3');
@@ -455,6 +473,7 @@ export async function renderCards(container, items, onChange) {
 
   const blockFragment = document.createDocumentFragment();
 
+
   blockSections.forEach(block => {
     const section = document.createElement('section');
     section.className = 'card-block-section';
@@ -492,7 +511,9 @@ export async function renderCards(container, items, onChange) {
     const body = document.createElement('div');
     body.className = 'card-block-body';
 
+
     const weekFragment = document.createDocumentFragment();
+
 
     block.weeks.forEach(week => {
       const weekSection = document.createElement('div');
@@ -518,11 +539,13 @@ export async function renderCards(container, items, onChange) {
       const deckGrid = document.createElement('div');
       deckGrid.className = 'deck-grid';
 
+
       const deckFragment = document.createDocumentFragment();
       week.lectures.forEach(lecture => {
         deckFragment.appendChild(createDeckTile(block, week, lecture));
       });
       deckGrid.appendChild(deckFragment);
+
 
       weekSection.appendChild(weekHeader);
       weekSection.appendChild(deckGrid);
@@ -537,6 +560,7 @@ export async function renderCards(container, items, onChange) {
 
     body.appendChild(weekFragment);
 
+
     section.appendChild(body);
 
     header.addEventListener('click', () => {
@@ -548,4 +572,5 @@ export async function renderCards(container, items, onChange) {
   });
 
   catalog.appendChild(blockFragment);
+
 }
