@@ -352,10 +352,46 @@ function renderModeCard(rerender, redraw) {
   title.textContent = 'Modes';
   card.appendChild(title);
 
-  const modeRow = document.createElement('div');
-  modeRow.className = 'builder-mode-options';
+  const layout = document.createElement('div');
+  layout.className = 'builder-mode-layout';
+
+  const controls = document.createElement('div');
+  controls.className = 'builder-mode-controls';
+
+  const status = document.createElement('div');
+  status.className = 'builder-mode-status';
+  controls.appendChild(status);
+
+  const actions = document.createElement('div');
+  actions.className = 'builder-mode-actions';
+
+  const startBtn = document.createElement('button');
+  startBtn.type = 'button';
+  startBtn.className = 'btn builder-start-btn';
+
+  const resumeBtn = document.createElement('button');
+  resumeBtn.type = 'button';
+  resumeBtn.className = 'btn builder-resume-btn';
+  resumeBtn.textContent = 'Resume';
+
+  const reviewBtn = document.createElement('button');
+  reviewBtn.type = 'button';
+  reviewBtn.className = 'btn secondary builder-review-link';
+  reviewBtn.textContent = 'Review';
+
   const modes = ['Flashcards', 'Quiz', 'Blocks'];
   const selected = state.study?.selectedMode || 'Flashcards';
+
+  const modeColumn = document.createElement('div');
+  modeColumn.className = 'builder-mode-option-column';
+
+  const modeLabel = document.createElement('div');
+  modeLabel.className = 'builder-mode-options-title';
+  modeLabel.textContent = 'Choose a mode';
+  modeColumn.appendChild(modeLabel);
+
+  const modeRow = document.createElement('div');
+  modeRow.className = 'builder-mode-options';
   modes.forEach(mode => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -371,30 +407,24 @@ function renderModeCard(rerender, redraw) {
     });
     modeRow.appendChild(btn);
   });
-  card.appendChild(modeRow);
-
-  const status = document.createElement('div');
-  status.className = 'builder-mode-status';
-  card.appendChild(status);
-
-  const startBtn = document.createElement('button');
-  startBtn.type = 'button';
-  startBtn.className = 'btn builder-start-btn';
+  modeColumn.appendChild(modeRow);
 
   const storageKey = MODE_KEY[selected] || null;
   const savedEntry = storageKey ? getStudySessionEntry(storageKey) : null;
   const hasSaved = !!(savedEntry && savedEntry.session);
   const cohort = Array.isArray(state.cohort) ? state.cohort : [];
   const hasCohort = cohort.length > 0;
-  const canStartFresh = selected === 'Blocks' ? hasCohort : hasCohort;
-  const buttonEnabled = hasSaved || canStartFresh;
+  const canStart = selected === 'Blocks' ? hasCohort : hasCohort;
   const labelTitle = selected.toLowerCase();
-  startBtn.textContent = `${hasSaved ? 'Resume' : 'Start'} ${selected}`;
-  startBtn.disabled = !buttonEnabled;
 
-  startBtn.classList.toggle('is-ready', buttonEnabled && !hasSaved);
-  startBtn.classList.toggle('is-resume', hasSaved);
+  startBtn.textContent = 'Start';
+  startBtn.disabled = !canStart;
+  startBtn.classList.toggle('is-ready', canStart);
 
+  resumeBtn.disabled = !hasSaved;
+  resumeBtn.classList.toggle('is-ready', hasSaved);
+
+  reviewBtn.disabled = !hasCohort;
 
   if (hasSaved) {
     const count = Array.isArray(savedEntry?.cohort) ? savedEntry.cohort.length : 0;
@@ -408,7 +438,7 @@ function renderModeCard(rerender, redraw) {
   }
 
   startBtn.addEventListener('click', async () => {
-    if (!buttonEnabled) return;
+    if (!canStart) return;
     setStudySelectedMode(selected);
     if (selected === 'Blocks') {
       setSubtab('Study', 'Blocks');
@@ -421,22 +451,9 @@ function renderModeCard(rerender, redraw) {
 
     const handleError = (err) => console.warn('Failed to update study session state', err);
 
-    if (hasSaved && savedEntry) {
-      await removeStudySession(key).catch(handleError);
-      const restoredCohort = Array.isArray(savedEntry.cohort) ? savedEntry.cohort : [];
-      setCohort(restoredCohort);
-      if (selected === 'Flashcards') {
-        setFlashSession(savedEntry.session);
-      } else if (selected === 'Quiz') {
-        setQuizSession(savedEntry.session);
-      }
-      setSubtab('Study', 'Builder');
-      redraw();
-      return;
-    }
-
-    if (!cohort.length) return;
     await removeStudySession(key).catch(handleError);
+    if (!cohort.length) return;
+
     if (selected === 'Flashcards') {
       setFlashSession({ idx: 0, pool: cohort, ratings: {}, mode: 'study' });
     } else if (selected === 'Quiz') {
@@ -446,7 +463,37 @@ function renderModeCard(rerender, redraw) {
     redraw();
   });
 
-  card.appendChild(startBtn);
+  resumeBtn.addEventListener('click', async () => {
+    if (!hasSaved || !storageKey || !savedEntry) return;
+    setStudySelectedMode(selected);
+    const handleError = (err) => console.warn('Failed to update study session state', err);
+    await removeStudySession(storageKey).catch(handleError);
+    const restoredCohort = Array.isArray(savedEntry.cohort) ? savedEntry.cohort : [];
+    setCohort(restoredCohort);
+    if (selected === 'Flashcards') {
+      setFlashSession(savedEntry.session);
+    } else if (selected === 'Quiz') {
+      setQuizSession(savedEntry.session);
+    }
+    setSubtab('Study', 'Builder');
+    redraw();
+  });
+
+  reviewBtn.addEventListener('click', () => {
+    setSubtab('Study', 'Review');
+    redraw();
+  });
+
+  actions.appendChild(startBtn);
+  actions.appendChild(resumeBtn);
+  actions.appendChild(reviewBtn);
+
+  controls.appendChild(actions);
+
+  layout.appendChild(controls);
+  layout.appendChild(modeColumn);
+
+  card.appendChild(layout);
   return card;
 }
 
