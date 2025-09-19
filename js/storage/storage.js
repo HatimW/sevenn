@@ -1,5 +1,7 @@
 import { openDB } from './idb.js';
 import { exportJSON, importJSON, exportAnkiCSV } from './export.js';
+import { DEFAULT_REVIEW_STEPS } from '../review/constants.js';
+import { normalizeReviewSteps } from '../review/settings.js';
 
 let dbPromise;
 
@@ -9,6 +11,7 @@ const MAP_CONFIG_KEY = 'map-config';
 const MAP_CONFIG_BACKUP_KEY = 'sevenn-map-config-backup';
 const DATA_BACKUP_KEY = 'sevenn-backup-snapshot';
 const DATA_BACKUP_STORES = ['items', 'blocks', 'exams', 'settings', 'exam_sessions'];
+const DEFAULT_APP_SETTINGS = { id: 'app', dailyCount: 20, theme: 'dark', reviewSteps: { ...DEFAULT_REVIEW_STEPS } };
 
 let backupTimer = null;
 
@@ -152,8 +155,7 @@ export async function initDB() {
   const s = await store('settings', 'readwrite');
   const existing = await prom(s.get('app'));
   if (!existing) {
-    const defaults = { id: 'app', dailyCount: 20, theme: 'dark' };
-    await prom(s.put(defaults));
+    await prom(s.put(DEFAULT_APP_SETTINGS));
   }
   scheduleBackup();
 }
@@ -161,13 +163,21 @@ export async function initDB() {
 export async function getSettings() {
   const s = await store('settings');
   const settings = await prom(s.get('app'));
-  return settings || { id: 'app', dailyCount: 20, theme: 'dark' };
+  if (!settings) return { ...DEFAULT_APP_SETTINGS };
+  const merged = { ...DEFAULT_APP_SETTINGS, ...settings };
+  merged.reviewSteps = normalizeReviewSteps(settings.reviewSteps || merged.reviewSteps);
+  return merged;
 }
 
 export async function saveSettings(patch) {
   const s = await store('settings', 'readwrite');
-  const current = await prom(s.get('app')) || { id: 'app', dailyCount: 20, theme: 'dark' };
-  const next = { ...current, ...patch, id: 'app' };
+  const current = await prom(s.get('app')) || { ...DEFAULT_APP_SETTINGS };
+  const mergedSteps = normalizeReviewSteps({
+    ...DEFAULT_APP_SETTINGS.reviewSteps,
+    ...(current.reviewSteps || {}),
+    ...(patch.reviewSteps || {})
+  });
+  const next = { ...current, ...patch, id: 'app', reviewSteps: mergedSteps };
   await prom(s.put(next));
   scheduleBackup();
 }

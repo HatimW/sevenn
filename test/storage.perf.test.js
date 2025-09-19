@@ -5,7 +5,7 @@ import { initDB, upsertItem, findItemsByFilter } from '../js/storage/storage.js'
 
 const TOTAL_ITEMS = 120;
 
-const srDefaults = { box: 0, last: 0, due: 0, ease: 2.5 };
+const srDefaults = { version: 2, sections: {} };
 
 function createBaseDisease(id, name) {
   return {

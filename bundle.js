@@ -77,9 +77,6 @@ var Sevenn = (() => {
   function setQuizSession(sess) {
     state.quizSession = sess;
   }
-  function setReviewConfig(patch) {
-    Object.assign(state.review, patch);
-  }
   function setExamSession(sess) {
     state.examSession = sess;
   }
@@ -633,6 +630,74 @@ var Sevenn = (() => {
     return new Blob([csv], { type: "text/csv" });
   }
 
+  // js/review/constants.js
+  var REVIEW_RATINGS = ["again", "hard", "good", "easy"];
+  var RETIRE_RATING = "retire";
+  var DEFAULT_REVIEW_STEPS = {
+    again: 10,
+    hard: 60,
+    good: 720,
+    easy: 2160
+  };
+
+  // js/review/settings.js
+  function normalizeReviewSteps(raw) {
+    const normalized2 = { ...DEFAULT_REVIEW_STEPS };
+    if (!raw || typeof raw !== "object") return normalized2;
+    for (const key of REVIEW_RATINGS) {
+      const value = raw[key];
+      const num = Number(value);
+      if (Number.isFinite(num) && num > 0) {
+        normalized2[key] = num;
+      }
+    }
+    return normalized2;
+  }
+
+  // js/review/sr-data.js
+  var SR_VERSION = 2;
+  function sanitizeNumber(value, fallback = 0) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num < 0) return fallback;
+    return num;
+  }
+  function defaultSectionState() {
+    return {
+      streak: 0,
+      lastRating: null,
+      last: 0,
+      due: 0,
+      retired: false
+    };
+  }
+  function normalizeSectionRecord(record) {
+    const base = defaultSectionState();
+    if (!record || typeof record !== "object") return base;
+    if (typeof record.streak === "number" && Number.isFinite(record.streak) && record.streak > 0) {
+      base.streak = Math.max(0, Math.round(record.streak));
+    }
+    if (typeof record.lastRating === "string") {
+      const rating = record.lastRating;
+      if (REVIEW_RATINGS.includes(rating) || rating === RETIRE_RATING) {
+        base.lastRating = rating;
+      }
+    }
+    base.last = sanitizeNumber(record.last, 0);
+    base.due = sanitizeNumber(record.due, 0);
+    base.retired = Boolean(record.retired);
+    return base;
+  }
+  function normalizeSrRecord(sr) {
+    const normalized2 = { version: SR_VERSION, sections: {} };
+    if (!sr || typeof sr !== "object") return normalized2;
+    const sections = sr.sections && typeof sr.sections === "object" ? sr.sections : {};
+    for (const [key, value] of Object.entries(sections)) {
+      if (!key) continue;
+      normalized2.sections[key] = normalizeSectionRecord(value);
+    }
+    return normalized2;
+  }
+
   // js/validators.js
   var randomId = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
   function escapeHtml(str = "") {
@@ -671,7 +736,7 @@ var Sevenn = (() => {
       lectures: item.lectures || [],
       mapPos: item.mapPos || null,
       mapHidden: !!item.mapHidden,
-      sr: item.sr || { box: 0, last: 0, due: 0, ease: 2.5 }
+      sr: normalizeSrRecord(item.sr)
     };
   }
 
@@ -683,6 +748,7 @@ var Sevenn = (() => {
   var MAP_CONFIG_BACKUP_KEY = "sevenn-map-config-backup";
   var DATA_BACKUP_KEY = "sevenn-backup-snapshot";
   var DATA_BACKUP_STORES = ["items", "blocks", "exams", "settings", "exam_sessions"];
+  var DEFAULT_APP_SETTINGS = { id: "app", dailyCount: 20, theme: "dark", reviewSteps: { ...DEFAULT_REVIEW_STEPS } };
   var backupTimer = null;
   var DEFAULT_MAP_CONFIG = {
     activeTabId: "default",
@@ -815,20 +881,27 @@ var Sevenn = (() => {
     const s = await store("settings", "readwrite");
     const existing = await prom2(s.get("app"));
     if (!existing) {
-      const defaults = { id: "app", dailyCount: 20, theme: "dark" };
-      await prom2(s.put(defaults));
+      await prom2(s.put(DEFAULT_APP_SETTINGS));
     }
     scheduleBackup();
   }
   async function getSettings() {
     const s = await store("settings");
     const settings = await prom2(s.get("app"));
-    return settings || { id: "app", dailyCount: 20, theme: "dark" };
+    if (!settings) return { ...DEFAULT_APP_SETTINGS };
+    const merged = { ...DEFAULT_APP_SETTINGS, ...settings };
+    merged.reviewSteps = normalizeReviewSteps(settings.reviewSteps || merged.reviewSteps);
+    return merged;
   }
   async function saveSettings(patch) {
     const s = await store("settings", "readwrite");
-    const current = await prom2(s.get("app")) || { id: "app", dailyCount: 20, theme: "dark" };
-    const next = { ...current, ...patch, id: "app" };
+    const current = await prom2(s.get("app")) || { ...DEFAULT_APP_SETTINGS };
+    const mergedSteps = normalizeReviewSteps({
+      ...DEFAULT_APP_SETTINGS.reviewSteps,
+      ...current.reviewSteps || {},
+      ...patch.reviewSteps || {}
+    });
+    const next = { ...current, ...patch, id: "app", reviewSteps: mergedSteps };
     await prom2(s.put(next));
     scheduleBackup();
   }
@@ -1210,6 +1283,156 @@ var Sevenn = (() => {
     scheduleBackup();
   }
 
+  // js/ui/components/sections.js
+  var SECTION_DEFS = {
+    disease: [
+      { key: "etiology", label: "Etiology" },
+      { key: "pathophys", label: "Pathophys" },
+      { key: "clinical", label: "Clinical Presentation" },
+      { key: "diagnosis", label: "Diagnosis" },
+      { key: "treatment", label: "Treatment" },
+      { key: "complications", label: "Complications" },
+      { key: "mnemonic", label: "Mnemonic" }
+    ],
+    drug: [
+      { key: "moa", label: "Mechanism" },
+      { key: "uses", label: "Uses" },
+      { key: "sideEffects", label: "Side Effects" },
+      { key: "contraindications", label: "Contraindications" },
+      { key: "mnemonic", label: "Mnemonic" }
+    ],
+    concept: [
+      { key: "definition", label: "Definition" },
+      { key: "mechanism", label: "Mechanism" },
+      { key: "clinicalRelevance", label: "Clinical Relevance" },
+      { key: "example", label: "Example" },
+      { key: "mnemonic", label: "Mnemonic" }
+    ]
+  };
+  function sectionDefsForKind(kind) {
+    return SECTION_DEFS[kind] || [];
+  }
+  function allSectionDefs() {
+    return SECTION_DEFS;
+  }
+
+  // js/review/scheduler.js
+  var cachedDurations = null;
+  async function getReviewDurations() {
+    if (cachedDurations) return cachedDurations;
+    try {
+      const settings = await getSettings();
+      cachedDurations = normalizeReviewSteps(settings?.reviewSteps);
+    } catch (err) {
+      console.warn("Failed to load review settings, using defaults", err);
+      cachedDurations = { ...DEFAULT_REVIEW_STEPS };
+    }
+    return cachedDurations;
+  }
+  function invalidateReviewDurationsCache() {
+    cachedDurations = null;
+  }
+  function ensureItemSr(item) {
+    if (!item || typeof item !== "object") return { version: SR_VERSION, sections: {} };
+    const sr = item.sr && typeof item.sr === "object" ? item.sr : { version: SR_VERSION, sections: {} };
+    if (sr.version !== SR_VERSION || typeof sr.sections !== "object" || !sr.sections) {
+      item.sr = normalizeSrRecord(sr);
+      return item.sr;
+    }
+    item.sr.sections = item.sr.sections || {};
+    return item.sr;
+  }
+  function ensureSectionState(item, key) {
+    const sr = ensureItemSr(item);
+    if (!sr.sections[key] || typeof sr.sections[key] !== "object") {
+      sr.sections[key] = defaultSectionState();
+    } else {
+      sr.sections[key] = normalizeSectionRecord(sr.sections[key]);
+    }
+    return sr.sections[key];
+  }
+  function getSectionStateSnapshot(item, key) {
+    const sr = item?.sr;
+    if (!sr || typeof sr !== "object") return null;
+    const entry = sr.sections && typeof sr.sections === "object" ? sr.sections[key] : null;
+    if (!entry || typeof entry !== "object") return null;
+    return normalizeSectionRecord(entry);
+  }
+  function rateSection(item, key, rating, durations, now = Date.now()) {
+    if (!item || !key) return null;
+    const steps = normalizeReviewSteps(durations);
+    if (rating === RETIRE_RATING) {
+      const section2 = ensureSectionState(item, key);
+      section2.streak = 0;
+      section2.lastRating = RETIRE_RATING;
+      section2.last = now;
+      section2.due = Number.MAX_SAFE_INTEGER;
+      section2.retired = true;
+      return section2;
+    }
+    const normalizedRating = REVIEW_RATINGS.includes(rating) ? rating : "good";
+    const section = ensureSectionState(item, key);
+    let streak = Number.isFinite(section.streak) ? section.streak : 0;
+    switch (normalizedRating) {
+      case "again":
+        streak = 0;
+        break;
+      case "hard":
+        streak = Math.max(1, streak || 0);
+        break;
+      case "good":
+        streak = (streak || 0) + 1;
+        break;
+      case "easy":
+        streak = (streak || 0) + 2;
+        break;
+      default:
+        streak = (streak || 0) + 1;
+        break;
+    }
+    const baseMinutes = steps[normalizedRating] ?? DEFAULT_REVIEW_STEPS[normalizedRating];
+    const multiplier = normalizedRating === "again" ? 1 : Math.max(1, streak || 1);
+    const intervalMinutes = baseMinutes * multiplier;
+    section.streak = streak;
+    section.lastRating = normalizedRating;
+    section.last = now;
+    section.retired = false;
+    section.due = now + Math.round(intervalMinutes * 60 * 1e3);
+    return section;
+  }
+  function hasContentForSection(item, key) {
+    if (!item || !key) return false;
+    const defs = sectionDefsForKind(item.kind);
+    if (!defs.find((def) => def.key === key)) return false;
+    const raw = item[key];
+    if (raw === null || raw === void 0) return false;
+    const text = String(raw).replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").trim();
+    return text.length > 0;
+  }
+  function collectDueSections(items, { now = Date.now() } = {}) {
+    const results = [];
+    if (!Array.isArray(items) || !items.length) return results;
+    const defsMap = allSectionDefs();
+    for (const item of items) {
+      const defs = defsMap[item?.kind] || [];
+      for (const def of defs) {
+        if (!hasContentForSection(item, def.key)) continue;
+        const snapshot = getSectionStateSnapshot(item, def.key);
+        if (!snapshot || snapshot.retired) continue;
+        if (!snapshot.last || snapshot.due > now) continue;
+        results.push({
+          item,
+          itemId: item.id,
+          sectionKey: def.key,
+          sectionLabel: def.label,
+          due: snapshot.due
+        });
+      }
+    }
+    results.sort((a, b) => a.due - b.due);
+    return results;
+  }
+
   // js/ui/components/confirm.js
   function confirmModal(message) {
     return new Promise((resolve) => {
@@ -1283,6 +1506,37 @@ var Sevenn = (() => {
     });
     dailyLabel.appendChild(dailyInput);
     settingsCard.appendChild(dailyLabel);
+    const timingHeader = document.createElement("h3");
+    timingHeader.className = "settings-subheading";
+    timingHeader.textContent = "Review timing (minutes)";
+    settingsCard.appendChild(timingHeader);
+    const timingGrid = document.createElement("div");
+    timingGrid.className = "settings-review-grid";
+    const ratingLabels = { again: "Again", hard: "Hard", good: "Good", easy: "Easy" };
+    const stepValues = settings.reviewSteps || {};
+    REVIEW_RATINGS.forEach((key) => {
+      const row = document.createElement("label");
+      row.className = "settings-review-row";
+      row.textContent = `${ratingLabels[key]}:`;
+      const input = document.createElement("input");
+      input.type = "number";
+      input.className = "input settings-review-input";
+      input.min = "1";
+      input.step = "1";
+      input.value = stepValues[key] ?? "";
+      input.addEventListener("change", async () => {
+        const value = Number(input.value);
+        if (!Number.isFinite(value) || value <= 0) {
+          input.value = stepValues[key] ?? "";
+          return;
+        }
+        await saveSettings({ reviewSteps: { [key]: value } });
+        invalidateReviewDurationsCache();
+      });
+      row.appendChild(input);
+      timingGrid.appendChild(row);
+    });
+    settingsCard.appendChild(timingGrid);
     root.appendChild(settingsCard);
     const blocksCard = document.createElement("section");
     blocksCard.className = "card";
@@ -4475,7 +4729,7 @@ var Sevenn = (() => {
       const clearBtn = createAction("Clear block", () => {
         clearBlock(blockId);
         rerender();
-      });
+      }, "danger");
       actions.appendChild(clearBtn);
     }
     header.appendChild(actions);
@@ -4538,7 +4792,7 @@ var Sevenn = (() => {
     const clearBtn = createAction("Clear", () => {
       clearWeek(block, week);
       rerender();
-    });
+    }, "danger");
     if (areAllLecturesSelected(blockId, lectures)) {
       allBtn.disabled = true;
     }
@@ -4635,7 +4889,7 @@ var Sevenn = (() => {
     actions.appendChild(buildBtn);
     const clearBtn = document.createElement("button");
     clearBtn.type = "button";
-    clearBtn.className = "btn secondary";
+    clearBtn.className = "btn secondary builder-clear-btn";
     clearBtn.textContent = "Clear selection";
     clearBtn.disabled = !hasAnySelection();
     clearBtn.addEventListener("click", () => {
@@ -4884,10 +5138,14 @@ var Sevenn = (() => {
     btn.addEventListener("click", onClick);
     return btn;
   }
-  function createAction(label, onClick) {
+  function createAction(label, onClick, variant = "") {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "builder-action";
+    if (variant) {
+      const variants = Array.isArray(variant) ? variant : variant.split(" ");
+      variants.filter(Boolean).forEach((name) => btn.classList.add(`builder-action-${name}`));
+    }
     btn.textContent = label;
     btn.addEventListener("click", onClick);
     return btn;
@@ -4904,40 +5162,56 @@ var Sevenn = (() => {
     return btn;
   }
 
-  // js/ui/components/sections.js
-  var SECTION_DEFS = {
-    disease: [
-      { key: "etiology", label: "Etiology" },
-      { key: "pathophys", label: "Pathophys" },
-      { key: "clinical", label: "Clinical Presentation" },
-      { key: "diagnosis", label: "Diagnosis" },
-      { key: "treatment", label: "Treatment" },
-      { key: "complications", label: "Complications" },
-      { key: "mnemonic", label: "Mnemonic" }
-    ],
-    drug: [
-      { key: "moa", label: "Mechanism" },
-      { key: "uses", label: "Uses" },
-      { key: "sideEffects", label: "Side Effects" },
-      { key: "contraindications", label: "Contraindications" },
-      { key: "mnemonic", label: "Mnemonic" }
-    ],
-    concept: [
-      { key: "definition", label: "Definition" },
-      { key: "mechanism", label: "Mechanism" },
-      { key: "clinicalRelevance", label: "Clinical Relevance" },
-      { key: "example", label: "Example" },
-      { key: "mnemonic", label: "Mnemonic" }
-    ]
-  };
-  function sectionDefsForKind(kind) {
-    return SECTION_DEFS[kind] || [];
+  // js/ui/components/section-utils.js
+  function stripHtml2(value) {
+    return String(value || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function hasSectionContent(item, key) {
+    if (!item || !key) return false;
+    const defs = sectionDefsForKind(item.kind);
+    if (!defs.some((def) => def.key === key)) return false;
+    const raw = item[key];
+    if (raw === null || raw === void 0) return false;
+    return stripHtml2(raw).length > 0;
+  }
+  function sectionsForItem(item, allowedKeys = null) {
+    const defs = sectionDefsForKind(item.kind);
+    const allowSet = allowedKeys ? new Set(allowedKeys) : null;
+    return defs.filter((def) => (!allowSet || allowSet.has(def.key)) && hasSectionContent(item, def.key)).map((def) => ({ key: def.key, label: def.label }));
+  }
+  function getSectionLabel(item, key) {
+    const defs = sectionDefsForKind(item.kind);
+    const def = defs.find((entry) => entry.key === key);
+    return def ? def.label : key;
   }
 
   // js/ui/components/flashcards.js
+  var RATING_LABELS = {
+    again: "Again",
+    hard: "Hard",
+    good: "Good",
+    easy: "Easy",
+    [RETIRE_RATING]: "Retire"
+  };
+  var RATING_CLASS = {
+    again: "danger",
+    hard: "secondary",
+    good: "",
+    easy: "",
+    [RETIRE_RATING]: "secondary"
+  };
+  function ratingKey(item, sectionKey) {
+    const id = item?.id || "item";
+    return `${id}::${sectionKey}`;
+  }
+  function sessionEntryAt(session, idx) {
+    const pool = Array.isArray(session.pool) ? session.pool : [];
+    return pool[idx] || null;
+  }
   function renderFlashcards(root, redraw) {
-    const session = state.flashSession || { idx: 0, pool: state.cohort };
-    const items = session.pool || state.cohort;
+    const active = state.flashSession || { idx: 0, pool: state.cohort, ratings: {}, mode: "study" };
+    active.ratings = active.ratings || {};
+    const items = Array.isArray(active.pool) && active.pool.length ? active.pool : state.cohort;
     root.innerHTML = "";
     if (!items.length) {
       const msg = document.createElement("div");
@@ -4945,19 +5219,41 @@ var Sevenn = (() => {
       root.appendChild(msg);
       return;
     }
-    if (session.idx >= items.length) {
+    if (active.idx >= items.length) {
       setFlashSession(null);
       redraw();
       return;
     }
-    const item = items[session.idx];
+    const entry = sessionEntryAt(active, active.idx);
+    const item = entry && entry.item ? entry.item : entry;
+    if (!item) {
+      setFlashSession(null);
+      redraw();
+      return;
+    }
+    const allowedSections = entry && entry.sections ? entry.sections : null;
+    const sections = sectionsForItem(item, allowedSections);
     const card = document.createElement("section");
     card.className = "card flashcard";
     card.tabIndex = 0;
     const title = document.createElement("h2");
     title.textContent = item.name || item.concept || "";
     card.appendChild(title);
-    sectionsFor(item).forEach(([label, field]) => {
+    const durationsPromise = getReviewDurations().catch(() => ({ ...DEFAULT_REVIEW_STEPS }));
+    const ratedSections = /* @__PURE__ */ new Map();
+    const sectionBlocks = sections.length ? sections : [];
+    if (!sectionBlocks.length) {
+      const empty = document.createElement("div");
+      empty.className = "flash-empty";
+      empty.textContent = "No content available for this card.";
+      card.appendChild(empty);
+    }
+    sectionBlocks.forEach(({ key, label }) => {
+      const ratingId = ratingKey(item, key);
+      const previousRating = active.ratings[ratingId] || null;
+      if (previousRating) {
+        ratedSections.set(key, previousRating);
+      }
       const sec = document.createElement("div");
       sec.className = "flash-section";
       sec.setAttribute("role", "button");
@@ -4967,51 +5263,125 @@ var Sevenn = (() => {
       head.textContent = label;
       const body = document.createElement("div");
       body.className = "flash-body";
-      renderRichText(body, item[field] || "");
-      sec.appendChild(head);
-      sec.appendChild(body);
+      renderRichText(body, item[key] || "");
+      const ratingRow = document.createElement("div");
+      ratingRow.className = "flash-rating";
+      const ratingButtons = document.createElement("div");
+      ratingButtons.className = "flash-rating-options";
+      const status = document.createElement("span");
+      status.className = "flash-rating-status";
+      const selectRating = (value) => {
+        ratedSections.set(key, value);
+        active.ratings[ratingId] = value;
+        Array.from(ratingButtons.querySelectorAll("button")).forEach((btn) => {
+          const btnValue = btn.dataset.value;
+          const isSelected = btnValue === value;
+          btn.classList.toggle("is-selected", isSelected);
+          if (isSelected) {
+            btn.setAttribute("aria-pressed", "true");
+          } else {
+            btn.setAttribute("aria-pressed", "false");
+          }
+        });
+        updateNextState();
+      };
+      const handleRating = async (value) => {
+        const durations = await durationsPromise;
+        setToggleState(sec, true, "revealed");
+        ratingRow.classList.add("is-saving");
+        status.textContent = "Saving\u2026";
+        status.classList.remove("is-error");
+        try {
+          rateSection(item, key, value, durations, Date.now());
+          await upsertItem(item);
+          selectRating(value);
+          status.textContent = value === RETIRE_RATING ? "Retired" : "Saved";
+        } catch (err) {
+          console.error("Failed to record rating", err);
+          status.textContent = "Save failed";
+          status.classList.add("is-error");
+        } finally {
+          ratingRow.classList.remove("is-saving");
+        }
+      };
+      [...REVIEW_RATINGS, RETIRE_RATING].forEach((value) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.dataset.value = value;
+        btn.className = "btn flash-rating-btn";
+        const variant = RATING_CLASS[value];
+        if (variant) btn.classList.add(variant);
+        btn.textContent = RATING_LABELS[value];
+        btn.setAttribute("aria-pressed", "false");
+        btn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          handleRating(value);
+        });
+        btn.addEventListener("keydown", (event) => {
+          event.stopPropagation();
+        });
+        ratingButtons.appendChild(btn);
+      });
+      if (previousRating) {
+        selectRating(previousRating);
+        status.textContent = previousRating === RETIRE_RATING ? "Retired" : "Saved";
+      }
+      ratingRow.appendChild(ratingButtons);
+      ratingRow.appendChild(status);
       setToggleState(sec, false, "revealed");
       const toggleReveal = () => {
+        if (sec.classList.contains("flash-section-disabled")) return;
+        if (sec.contains(document.activeElement) && document.activeElement?.tagName === "BUTTON") return;
         const next2 = sec.dataset.active !== "true";
         setToggleState(sec, next2, "revealed");
       };
-      sec.addEventListener("click", toggleReveal);
+      sec.addEventListener("click", (event) => {
+        if (event.target instanceof HTMLElement && event.target.closest(".flash-rating")) return;
+        toggleReveal();
+      });
       sec.addEventListener("keydown", (e) => {
+        if (e.target instanceof HTMLElement && e.target.closest(".flash-rating")) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           toggleReveal();
         }
       });
+      sec.appendChild(head);
+      sec.appendChild(body);
+      sec.appendChild(ratingRow);
       card.appendChild(sec);
     });
     const controls = document.createElement("div");
-    controls.className = "row";
+    controls.className = "row flash-controls";
     const prev = document.createElement("button");
     prev.className = "btn";
     prev.textContent = "Prev";
-    prev.disabled = session.idx === 0;
+    prev.disabled = active.idx === 0;
     prev.addEventListener("click", () => {
-      if (session.idx > 0) {
-        setFlashSession({ idx: session.idx - 1, pool: items });
+      if (active.idx > 0) {
+        setFlashSession({ idx: active.idx - 1, pool: items, ratings: active.ratings, mode: active.mode });
         redraw();
       }
     });
     controls.appendChild(prev);
     const next = document.createElement("button");
     next.className = "btn";
-    next.textContent = session.idx < items.length - 1 ? "Next" : "Finish";
+    const isLast = active.idx >= items.length - 1;
+    const isReview = active.mode === "review";
+    next.textContent = isLast ? isReview ? "Finish review" : "Finish" : "Next";
+    next.disabled = sectionBlocks.length > 0;
     next.addEventListener("click", () => {
-      const idx = session.idx + 1;
+      const idx = active.idx + 1;
       if (idx >= items.length) {
         setFlashSession(null);
       } else {
-        setFlashSession({ idx, pool: items });
+        setFlashSession({ idx, pool: items, ratings: active.ratings, mode: active.mode });
       }
       redraw();
     });
     controls.appendChild(next);
     const exit = document.createElement("button");
-    exit.className = "btn";
+    exit.className = "btn secondary";
     exit.textContent = "End";
     exit.addEventListener("click", () => {
       setFlashSession(null);
@@ -5028,92 +5398,222 @@ var Sevenn = (() => {
         prev.click();
       }
     });
-  }
-  function sectionsFor(item) {
-    return sectionDefsForKind(item.kind).map((def) => [def.label, def.key]);
+    updateNextState();
+    function updateNextState() {
+      if (!sectionBlocks.length) {
+        next.disabled = false;
+        return;
+      }
+      const allRated = sectionBlocks.every((sec) => ratedSections.get(sec.key));
+      next.disabled = !allRated;
+    }
   }
 
   // js/ui/components/review.js
-  function renderReview(root, redraw) {
-    const cfg = state.review;
-    const section = document.createElement("section");
-    section.className = "review-controls";
-    const countLabel = document.createElement("label");
-    countLabel.textContent = "Count:";
-    const countInput = document.createElement("input");
-    countInput.type = "number";
-    countInput.min = "1";
-    countInput.value = cfg.count;
-    countInput.addEventListener("change", () => setReviewConfig({ count: Number(countInput.value) }));
-    countLabel.appendChild(countInput);
-    section.appendChild(countLabel);
-    const formatLabel = document.createElement("label");
-    formatLabel.textContent = "Format:";
-    const formatSel = document.createElement("select");
-    ["flashcards", "quiz"].forEach((f) => {
-      const opt = document.createElement("option");
-      opt.value = f;
-      opt.textContent = f;
-      if (cfg.format === f) opt.selected = true;
-      formatSel.appendChild(opt);
+  var REVIEW_SCOPES = ["all", "blocks", "lectures"];
+  var activeScope = "all";
+  var blockTitleCache = null;
+  function ensureBlockTitleMap(blocks) {
+    if (blockTitleCache) return blockTitleCache;
+    const map = /* @__PURE__ */ new Map();
+    blocks.forEach((block) => {
+      if (!block || !block.blockId) return;
+      map.set(block.blockId, block.title || block.blockId);
     });
-    formatSel.addEventListener("change", () => setReviewConfig({ format: formatSel.value }));
-    formatLabel.appendChild(formatSel);
-    section.appendChild(formatLabel);
+    blockTitleCache = map;
+    return map;
+  }
+  function titleOf2(item) {
+    return item?.name || item?.concept || "Untitled";
+  }
+  function formatOverdue(due, now) {
+    const diffMs = Math.max(0, now - due);
+    if (diffMs < 60 * 1e3) return "due now";
+    const minutes = Math.round(diffMs / (60 * 1e3));
+    if (minutes < 60) return `${minutes} min overdue`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours} hr overdue`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? "" : "s"} overdue`;
+  }
+  function groupByBlock(entries, blockTitles) {
+    const groups = /* @__PURE__ */ new Map();
+    entries.forEach((entry) => {
+      const blocks = Array.isArray(entry.item.blocks) && entry.item.blocks.length ? entry.item.blocks : ["__unassigned"];
+      blocks.forEach((blockId) => {
+        const group = groups.get(blockId) || { id: blockId, entries: [] };
+        group.entries.push(entry);
+        groups.set(blockId, group);
+      });
+    });
+    return Array.from(groups.values()).map((group) => ({
+      id: group.id,
+      title: group.id === "__unassigned" ? "Unassigned" : blockTitles.get(group.id) || group.id,
+      entries: group.entries
+    })).sort((a, b) => b.entries.length - a.entries.length);
+  }
+  function groupByLecture(entries, blockTitles) {
+    const groups = /* @__PURE__ */ new Map();
+    entries.forEach((entry) => {
+      const lectures = Array.isArray(entry.item.lectures) && entry.item.lectures.length ? entry.item.lectures : [{ blockId: "__unassigned", id: "__none", name: "Unassigned lecture" }];
+      lectures.forEach((lec) => {
+        const key = `${lec.blockId || "__unassigned"}::${lec.id}`;
+        const blockTitle = blockTitles.get(lec.blockId) || lec.blockId || "Unassigned";
+        const title = lec.name ? `${blockTitle} \u2013 ${lec.name}` : `${blockTitle} \u2013 Lecture ${lec.id}`;
+        const group = groups.get(key) || { id: key, title, entries: [] };
+        group.entries.push(entry);
+        groups.set(key, group);
+      });
+    });
+    return Array.from(groups.values()).sort((a, b) => b.entries.length - a.entries.length);
+  }
+  function buildSessionPayload(entries) {
+    return entries.map((entry) => ({ item: entry.item, sections: [entry.sectionKey] }));
+  }
+  function renderEmptyState(container) {
+    const empty = document.createElement("div");
+    empty.className = "review-empty";
+    empty.textContent = "No cards are due right now. Nice work!";
+    container.appendChild(empty);
+  }
+  function renderAllView(container, entries, now, start) {
+    const actionRow = document.createElement("div");
+    actionRow.className = "review-actions";
     const startBtn = document.createElement("button");
     startBtn.className = "btn";
-    startBtn.textContent = "Start Review";
+    startBtn.textContent = `Start review (${entries.length})`;
+    startBtn.disabled = entries.length === 0;
     startBtn.addEventListener("click", () => {
-      const items = sampleItems(state.cohort, cfg.count);
-      if (!items.length) return;
-      if (cfg.format === "flashcards") {
-        setFlashSession({ idx: 0, pool: items });
-      } else {
-        setQuizSession({ idx: 0, score: 0, pool: items });
-      }
-      redraw();
+      if (!entries.length) return;
+      start(buildSessionPayload(entries));
     });
-    section.appendChild(startBtn);
-    root.appendChild(section);
+    actionRow.appendChild(startBtn);
+    container.appendChild(actionRow);
+    if (!entries.length) {
+      renderEmptyState(container);
+      return;
+    }
+    const list = document.createElement("ul");
+    list.className = "review-entry-list";
+    entries.forEach((entry) => {
+      const item = document.createElement("li");
+      item.className = "review-entry";
+      const title = document.createElement("div");
+      title.className = "review-entry-title";
+      title.textContent = titleOf2(entry.item);
+      const meta = document.createElement("div");
+      meta.className = "review-entry-meta";
+      meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} \u2022 ${formatOverdue(entry.due, now)}`;
+      item.appendChild(title);
+      item.appendChild(meta);
+      list.appendChild(item);
+    });
+    container.appendChild(list);
   }
-  function sampleItems(cohort, count) {
-    const sorted = [...cohort].sort((a, b) => {
-      const ad = a.sr && a.sr.due || a.updatedAt || 0;
-      const bd = b.sr && b.sr.due || b.updatedAt || 0;
-      return ad - bd;
+  function renderGroupView(container, groups, label, start) {
+    if (!groups.length) {
+      renderEmptyState(container);
+      return;
+    }
+    const list = document.createElement("div");
+    list.className = "review-group-list";
+    groups.forEach((group) => {
+      const card = document.createElement("div");
+      card.className = "review-group-card";
+      const heading = document.createElement("div");
+      heading.className = "review-group-heading";
+      const title = document.createElement("div");
+      title.className = "review-group-title";
+      title.textContent = group.title;
+      const count = document.createElement("span");
+      count.className = "review-group-count";
+      count.textContent = `${group.entries.length} card${group.entries.length === 1 ? "" : "s"}`;
+      heading.appendChild(title);
+      heading.appendChild(count);
+      card.appendChild(heading);
+      const actions = document.createElement("div");
+      actions.className = "review-group-actions";
+      const startBtn = document.createElement("button");
+      startBtn.className = "btn";
+      startBtn.textContent = `Start ${label}`;
+      startBtn.addEventListener("click", () => {
+        start(buildSessionPayload(group.entries));
+      });
+      actions.appendChild(startBtn);
+      card.appendChild(actions);
+      list.appendChild(card);
     });
-    if (sorted.length <= count) return sorted;
-    const third = Math.ceil(sorted.length / 3);
-    const oldest = sorted.slice(0, third);
-    const middle = sorted.slice(third, third * 2);
-    const newest = sorted.slice(third * 2);
-    const take = (arr, n) => {
-      const out = [];
-      for (let i = 0; i < n && arr.length; i++) {
-        const idx = Math.floor(Math.random() * arr.length);
-        out.push(arr.splice(idx, 1)[0]);
-      }
-      return out;
+    container.appendChild(list);
+  }
+  async function renderReview(root, redraw) {
+    root.innerHTML = "";
+    const cohort = state.cohort || [];
+    if (!cohort.length) {
+      const empty = document.createElement("div");
+      empty.className = "review-empty";
+      empty.textContent = "Build a study set to generate review cards.";
+      root.appendChild(empty);
+      return;
+    }
+    const now = Date.now();
+    const dueEntries = collectDueSections(cohort, { now });
+    const blocks = await listBlocks();
+    const blockTitles = ensureBlockTitleMap(blocks);
+    const wrapper = document.createElement("section");
+    wrapper.className = "card review-panel";
+    const heading = document.createElement("h2");
+    heading.textContent = "Review queue";
+    wrapper.appendChild(heading);
+    const summary = document.createElement("div");
+    summary.className = "review-summary";
+    summary.textContent = `Cards due: ${dueEntries.length}`;
+    wrapper.appendChild(summary);
+    const tabs2 = document.createElement("div");
+    tabs2.className = "review-tabs";
+    REVIEW_SCOPES.forEach((scope) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "tab";
+      const label = scope === "all" ? "All" : scope === "blocks" ? "By block" : "By lecture";
+      if (activeScope === scope) btn.classList.add("active");
+      btn.textContent = label;
+      btn.addEventListener("click", () => {
+        if (activeScope === scope) return;
+        activeScope = scope;
+        renderReview(root, redraw);
+      });
+      tabs2.appendChild(btn);
+    });
+    wrapper.appendChild(tabs2);
+    const body = document.createElement("div");
+    body.className = "review-body";
+    wrapper.appendChild(body);
+    const startSession = (pool) => {
+      if (!pool.length) return;
+      setFlashSession({ idx: 0, pool, ratings: {}, mode: "review" });
+      redraw();
     };
-    const res = [];
-    const nOld = Math.round(count * 0.6);
-    const nMid = Math.round(count * 0.3);
-    const nNew = count - nOld - nMid;
-    res.push(...take(oldest, nOld));
-    res.push(...take(middle, nMid));
-    res.push(...take(newest, nNew));
-    return res;
+    if (activeScope === "all") {
+      renderAllView(body, dueEntries, now, startSession);
+    } else if (activeScope === "blocks") {
+      const groups = groupByBlock(dueEntries, blockTitles);
+      renderGroupView(body, groups, "block review", startSession);
+    } else {
+      const groups = groupByLecture(dueEntries, blockTitles);
+      renderGroupView(body, groups, "lecture review", startSession);
+    }
+    root.appendChild(wrapper);
   }
 
   // js/ui/components/quiz.js
-  function titleOf2(item) {
+  function titleOf3(item) {
     return item.name || item.concept || "";
   }
   function renderQuiz(root, redraw) {
     const sess = state.quizSession;
     if (!sess) return;
     if (!sess.dict) {
-      sess.dict = sess.pool.map((it) => ({ id: it.id, title: titleOf2(it), lower: titleOf2(it).toLowerCase() }));
+      sess.dict = sess.pool.map((it) => ({ id: it.id, title: titleOf3(it), lower: titleOf3(it).toLowerCase() }));
     }
     const item = sess.pool[sess.idx];
     if (!item) {
@@ -5135,7 +5635,7 @@ var Sevenn = (() => {
     form.className = "quiz-form";
     const info = document.createElement("div");
     info.className = "quiz-info";
-    sectionsFor2(item).forEach(([label, field]) => {
+    sectionsFor(item).forEach(([label, field]) => {
       if (!item[field]) return;
       const sec = document.createElement("div");
       sec.className = "section";
@@ -5175,7 +5675,7 @@ var Sevenn = (() => {
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       const ans = input.value.trim().toLowerCase();
-      const correct = titleOf2(item).toLowerCase();
+      const correct = titleOf3(item).toLowerCase();
       if (ans === correct) sess.score++;
       sess.idx++;
       setQuizSession(sess);
@@ -5183,7 +5683,7 @@ var Sevenn = (() => {
     });
     root.appendChild(form);
   }
-  function sectionsFor2(item) {
+  function sectionsFor(item) {
     const map = {
       disease: [
         ["Etiology", "etiology"],
@@ -7651,7 +8151,7 @@ var Sevenn = (() => {
     function renderList() {
       list.innerHTML = "";
       const query = searchInput.value.trim().toLowerCase();
-      const available = items.filter((it) => !manualSet.has(it.id)).filter((it) => !query || titleOf3(it).toLowerCase().includes(query)).sort((a, b) => titleOf3(a).localeCompare(titleOf3(b)));
+      const available = items.filter((it) => !manualSet.has(it.id)).filter((it) => !query || titleOf4(it).toLowerCase().includes(query)).sort((a, b) => titleOf4(a).localeCompare(titleOf4(b)));
       if (!available.length) {
         const empty = document.createElement("div");
         empty.className = "map-palette-empty";
@@ -7663,7 +8163,7 @@ var Sevenn = (() => {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "map-palette-item";
-        btn.textContent = titleOf3(it) || it.id;
+        btn.textContent = titleOf4(it) || it.id;
         btn.addEventListener("mousedown", (evt) => {
           const sourceItem = itemMap[it.id] || it;
           startMenuDrag(sourceItem, evt, { source: "palette" });
@@ -7695,12 +8195,12 @@ var Sevenn = (() => {
         const row = document.createElement("div");
         row.className = "map-palette-active-item";
         const label = document.createElement("span");
-        label.textContent = titleOf3(item) || id;
+        label.textContent = titleOf4(item) || id;
         row.appendChild(label);
         const removeBtn = document.createElement("button");
         removeBtn.type = "button";
         removeBtn.className = "icon-btn ghost";
-        removeBtn.setAttribute("aria-label", `Remove ${titleOf3(item) || "item"} from this map`);
+        removeBtn.setAttribute("aria-label", `Remove ${titleOf4(item) || "item"} from this map`);
         removeBtn.textContent = "\u2715";
         removeBtn.addEventListener("click", async () => {
           const tab = getActiveTab();
@@ -7728,9 +8228,9 @@ var Sevenn = (() => {
     mapState.searchValue = rawQuery;
     const items = mapState.visibleItems || [];
     const lower = query.toLowerCase();
-    let match = items.find((it) => (titleOf3(it) || "").toLowerCase() === lower);
+    let match = items.find((it) => (titleOf4(it) || "").toLowerCase() === lower);
     if (!match) {
-      match = items.find((it) => (titleOf3(it) || "").toLowerCase().includes(lower));
+      match = items.find((it) => (titleOf4(it) || "").toLowerCase().includes(lower));
     }
     if (!match) {
       updateSearchFeedback("No matching concept on this map.", "error");
@@ -7739,7 +8239,7 @@ var Sevenn = (() => {
     }
     const success = centerOnNode(match.id);
     if (success) {
-      updateSearchFeedback(`Centered on ${titleOf3(match)}.`, "success");
+      updateSearchFeedback(`Centered on ${titleOf4(match)}.`, "success");
       setSearchInputState({ notFound: false });
     } else {
       updateSearchFeedback("Could not focus on that concept.", "error");
@@ -8227,7 +8727,7 @@ var Sevenn = (() => {
           }
           mapState.nodeWasDragged = false;
         } else if (mapState.tool === TOOL.HIDE) {
-          if (confirm(`Remove ${titleOf3(it)} from the map?`)) {
+          if (confirm(`Remove ${titleOf4(it)} from the map?`)) {
             await setNodeHidden(it.id, true);
             await renderMap(root);
           }
@@ -8787,11 +9287,11 @@ var Sevenn = (() => {
         empty.textContent = "No hidden nodes.";
         list.appendChild(empty);
       } else {
-        hiddenNodes.slice().sort((a, b) => titleOf3(a).localeCompare(titleOf3(b))).forEach((it) => {
+        hiddenNodes.slice().sort((a, b) => titleOf4(a).localeCompare(titleOf4(b))).forEach((it) => {
           const item = document.createElement("div");
           item.className = "map-hidden-item";
           item.classList.add("draggable");
-          item.textContent = titleOf3(it) || it.id;
+          item.textContent = titleOf4(it) || it.id;
           item.addEventListener("mousedown", (e) => {
             if (mapState.tool !== TOOL.HIDE) return;
             startMenuDrag(it, e, { source: "hidden" });
@@ -8813,7 +9313,7 @@ var Sevenn = (() => {
           const item = document.createElement("div");
           item.className = "map-hidden-item";
           const label = document.createElement("span");
-          label.textContent = `${titleOf3(link.a)} \u2194 ${titleOf3(link.b)}`;
+          label.textContent = `${titleOf4(link.a)} \u2194 ${titleOf4(link.b)}`;
           item.appendChild(label);
           const btn = document.createElement("button");
           btn.type = "button";
@@ -8846,7 +9346,7 @@ var Sevenn = (() => {
     event.preventDefault();
     const ghost = document.createElement("div");
     ghost.className = "map-drag-ghost";
-    ghost.textContent = titleOf3(item) || item.id;
+    ghost.textContent = titleOf4(item) || item.id;
     document.body.appendChild(ghost);
     mapState.menuDrag = {
       id: item.id,
@@ -9077,7 +9577,7 @@ var Sevenn = (() => {
       updatePendingHighlight();
       return;
     }
-    if (!confirm(`Create a link between ${titleOf3(from)} and ${titleOf3(to)}?`)) {
+    if (!confirm(`Create a link between ${titleOf4(from)} and ${titleOf4(to)}?`)) {
       mapState.pendingLink = null;
       updatePendingHighlight();
       return;
@@ -9400,7 +9900,7 @@ var Sevenn = (() => {
   async function setLinkHidden(aId, bId, hidden) {
     await updateLink(aId, bId, { hidden });
   }
-  function titleOf3(item) {
+  function titleOf4(item) {
     return item?.name || item?.concept || "";
   }
   async function openLineMenu(evt, line, aId, bId) {
@@ -9705,12 +10205,12 @@ var Sevenn = (() => {
             startBtn.className = "btn";
             startBtn.textContent = "Start Flashcards";
             startBtn.addEventListener("click", () => {
-              setFlashSession({ idx: 0, pool: state.cohort });
+              setFlashSession({ idx: 0, pool: state.cohort, ratings: {}, mode: "study" });
               render();
             });
             content.appendChild(startBtn);
           } else if (state.subtab.Study === "Review") {
-            renderReview(content, render);
+            await renderReview(content, render);
           } else if (state.subtab.Study === "Quiz") {
             const startBtn = document.createElement("button");
             startBtn.className = "btn";
