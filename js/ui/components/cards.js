@@ -79,14 +79,49 @@ function getItemAccent(item) {
   return 'var(--accent)';
 }
 
-function getLectureAccent(cards) {
-  if (!Array.isArray(cards) || !cards.length) return 'var(--accent)';
-  const colored = cards.find(card => card?.color);
-  if (colored?.color) return colored.color;
-  const kindMatch = cards.find(card => card?.kind && KIND_COLORS[card.kind]);
-  if (kindMatch?.kind) return KIND_COLORS[kindMatch.kind];
-  return 'var(--accent)';
+function collectLectureColors(cards, limit = 5) {
+  if (!Array.isArray(cards) || !cards.length) {
+    return ['var(--accent)'];
+  }
+  const seen = new Set();
+  const colors = [];
+  cards.forEach(card => {
+    const accent = getItemAccent(card);
+    if (!seen.has(accent)) {
+      seen.add(accent);
+      colors.push(accent);
+    }
+  });
+  if (!colors.length) colors.push('var(--accent)');
+  return colors.slice(0, Math.max(1, limit));
 }
+
+function buildGradient(colors) {
+  const palette = colors && colors.length ? colors : ['var(--accent)'];
+  if (palette.length === 1) {
+    const single = palette[0];
+    return `linear-gradient(135deg, ${single} 0%, color-mix(in srgb, ${single} 38%, transparent) 100%)`;
+  }
+  const stops = palette.map((color, idx) => {
+    const pct = palette.length === 1 ? 0 : Math.round((idx / (palette.length - 1)) * 100);
+    return `${color} ${pct}%`;
+  });
+  return `linear-gradient(135deg, ${stops.join(', ')})`;
+}
+
+function getLecturePalette(cards) {
+  const colors = collectLectureColors(cards);
+  return {
+    accent: colors[0] || 'var(--accent)',
+    colors,
+    gradient: buildGradient(colors)
+  };
+}
+
+function getLectureAccent(cards) {
+  return getLecturePalette(cards).accent;
+}
+
 
 
 /**
@@ -346,6 +381,7 @@ export async function renderCards(container, items, onChange) {
   container.appendChild(overlay);
 
   let activeKeyHandler = null;
+  let persistRelatedVisibility = false;
 
   function closeDeck() {
     overlay.dataset.active = 'false';
@@ -354,6 +390,7 @@ export async function renderCards(container, items, onChange) {
       document.removeEventListener('keydown', activeKeyHandler);
       activeKeyHandler = null;
     }
+    persistRelatedVisibility = false;
   }
 
   overlay.addEventListener('click', evt => {
@@ -457,7 +494,9 @@ export async function renderCards(container, items, onChange) {
       const initialIdx = lecture.cards.findIndex(card => card.id === targetCardId);
       if (initialIdx >= 0) idx = initialIdx;
     }
-    let showRelated = false;
+
+    let showRelated = persistRelatedVisibility;
+
 
 
     function updateToggle(current) {
@@ -515,6 +554,7 @@ export async function renderCards(container, items, onChange) {
     toggle.addEventListener('click', () => {
       if (toggle.disabled) return;
       showRelated = !showRelated;
+      persistRelatedVisibility = showRelated;
 
       updateToggle(lecture.cards[idx]);
       renderRelated(lecture.cards[idx]);
@@ -549,17 +589,46 @@ export async function renderCards(container, items, onChange) {
     return icon;
   }
 
+  const FAN_DELAY_MS = 900;
+
+  function enableDelayedFan(tile) {
+    let fanTimer = 0;
+    const cancel = () => {
+      if (fanTimer) {
+        clearTimeout(fanTimer);
+        fanTimer = 0;
+      }
+      tile.classList.remove('is-fanned');
+    };
+    const arm = () => {
+      if (fanTimer) return;
+      fanTimer = setTimeout(() => {
+        tile.classList.add('is-fanned');
+        fanTimer = 0;
+      }, FAN_DELAY_MS);
+    };
+    tile.addEventListener('pointerenter', arm);
+    tile.addEventListener('pointerleave', cancel);
+    tile.addEventListener('pointercancel', cancel);
+    tile.addEventListener('focus', arm);
+    tile.addEventListener('blur', cancel);
+  }
+
   function createDeckTile(block, week, lecture) {
     const tile = document.createElement('button');
     tile.type = 'button';
     tile.className = 'deck-tile';
     tile.setAttribute('aria-label', `${lecture.title} (${lecture.cards.length} cards)`);
 
-    const accent = getLectureAccent(lecture.cards);
+
+    const palette = getLecturePalette(lecture.cards);
+    const accent = palette.accent;
+
 
     const stack = document.createElement('div');
     stack.className = 'deck-stack';
     stack.style.setProperty('--deck-accent', accent);
+    stack.style.setProperty('--deck-gradient', palette.gradient);
     const preview = lecture.cards.slice(0, 4);
 
     stack.style.setProperty('--spread', preview.length > 0 ? (preview.length - 1) / 2 : 0);
@@ -578,6 +647,8 @@ export async function renderCards(container, items, onChange) {
         stack.appendChild(mini);
       });
     }
+    tile.style.setProperty('--deck-accent', accent);
+    tile.style.setProperty('--deck-gradient', palette.gradient);
     tile.appendChild(stack);
 
     const info = document.createElement('div');
@@ -612,6 +683,8 @@ export async function renderCards(container, items, onChange) {
         open();
       }
     });
+
+    enableDelayedFan(tile);
 
     return tile;
   }
