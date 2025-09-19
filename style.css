@@ -1603,8 +1603,8 @@ input[type="checkbox"]:checked::after {
 }
 
 .builder-pill {
-  background: rgba(56, 189, 248, 0.12);
-  border: 1px solid rgba(56, 189, 248, 0.28);
+  background: rgba(148, 163, 184, 0.16);
+  border: 1px solid rgba(148, 163, 184, 0.32);
   border-radius: 999px;
   color: var(--text);
   padding: 6px 16px;
@@ -1614,37 +1614,26 @@ input[type="checkbox"]:checked::after {
 
 .builder-pill:hover {
   transform: translateY(-1px);
-  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(148, 163, 184, 0.26);
+  border-color: rgba(56, 189, 248, 0.45);
 }
 
 .builder-pill.active {
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.94), rgba(192, 132, 252, 0.92));
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.92), rgba(14, 165, 233, 0.9));
   color: #041021;
   border-color: transparent;
-  box-shadow: 0 16px 30px rgba(2, 6, 23, 0.32);
-  font-weight: 700;
-}
-
-.builder-pill-week {
-  background: rgba(59, 130, 246, 0.16);
-  border-color: rgba(59, 130, 246, 0.32);
-  font-weight: 600;
-}
-
-.builder-pill-week.active {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.96), rgba(125, 211, 252, 0.92));
+  box-shadow: 0 12px 24px rgba(2, 6, 23, 0.3);
 }
 
 .builder-pill-lecture {
-  background: rgba(134, 239, 172, 0.16);
-  border-color: rgba(134, 239, 172, 0.32);
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.28);
   font-size: 0.9rem;
 }
 
 .builder-pill-lecture.active {
-  background: linear-gradient(135deg, rgba(134, 239, 172, 0.98), rgba(59, 130, 246, 0.92));
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.96), rgba(56, 189, 248, 0.92));
   color: #041021;
-  font-weight: 700;
 }
 
 .builder-pill-small {
@@ -1670,6 +1659,22 @@ input[type="checkbox"]:checked::after {
 .builder-action:hover {
   background: rgba(166, 217, 255, 0.1);
   color: #fff;
+}
+
+.builder-action[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: none;
+  color: var(--gray);
+  pointer-events: none;
+}
+
+.builder-week-title {
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text);
 }
 
 .builder-empty {
