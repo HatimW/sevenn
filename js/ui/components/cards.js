@@ -88,21 +88,6 @@ function getLectureAccent(cards) {
   return 'var(--accent)';
 }
 
-
-const UNASSIGNED_BLOCK_KEY = '__unassigned__';
-const MISC_LECTURE_KEY = '__misc__';
-
-function formatWeekLabel(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return `Week ${value}`;
-  }
-  return 'Unscheduled';
-}
-
-function titleFromItem(item) {
-  return item?.name || item?.concept || 'Untitled Card';
-}
-
 /**
  * Render lecture-based decks combining all item types with block/week groupings.
  * @param {HTMLElement} container
@@ -118,7 +103,9 @@ export async function renderCards(container, items, onChange) {
   const blockOrder = new Map(blockDefs.map((def, idx) => [def.blockId, idx]));
 
   const itemLookup = new Map(items.map(item => [item.id, item]));
-
+  /** @type {Map<string | number, { block:any, week:any, lecture:any }[]>} */
+  const itemContexts = new Map();
+  const slideCache = new Map();
 
   /** @type {Map<string, { key:string, blockId:string|null, title:string, accent?:string|null, order:number, weeks:Map<string, any> }>} */
   const blockBuckets = new Map();
@@ -231,6 +218,21 @@ export async function renderCards(container, items, onChange) {
     .filter(block => block.totalCards > 0)
     .sort((a, b) => (a.order - b.order) || a.title.localeCompare(b.title));
 
+  blockSections.forEach(block => {
+    block.weeks.forEach(week => {
+      week.lectures.forEach(lecture => {
+        const context = { block, week, lecture };
+        lecture.cards.forEach(card => {
+          const key = card?.id ?? titleFromItem(card);
+          if (!itemContexts.has(key)) {
+            itemContexts.set(key, []);
+          }
+          itemContexts.get(key).push(context);
+        });
+      });
+    });
+  });
+
   const catalog = document.createElement('div');
   catalog.className = 'card-catalog';
   container.appendChild(catalog);
@@ -241,7 +243,7 @@ export async function renderCards(container, items, onChange) {
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
   const viewer = document.createElement('div');
-  viewer.className = 'deck-viewer';
+  viewer.className = 'deck-viewer deck-viewer-compact';
   overlay.appendChild(viewer);
   container.appendChild(overlay);
 
@@ -260,13 +262,28 @@ export async function renderCards(container, items, onChange) {
     if (evt.target === overlay) closeDeck();
   });
 
-  function openDeck(context) {
+  function getSlideNode(item, context) {
+    const baseId = item?.id ?? titleFromItem(item);
+    const blockKey = context.block?.key ?? context.block?.blockId ?? '';
+    const weekKey = context.week?.key ?? context.week?.value ?? '';
+    const lectureKey = context.lecture?.key ?? context.lecture?.title ?? '';
+    const cacheKey = [baseId, blockKey, weekKey, lectureKey].join('::');
+    let template = slideCache.get(cacheKey);
+    if (!template) {
+      template = createDeckSlide(item, context);
+      slideCache.set(cacheKey, template);
+    }
+    return template.cloneNode(true);
+  }
+
+  function openDeck(context, initialCardId) {
     const { block, week, lecture } = context;
     overlay.dataset.active = 'true';
     viewer.innerHTML = '';
+    viewer.scrollTop = 0;
 
     const header = document.createElement('div');
-    header.className = 'deck-viewer-header';
+    header.className = 'deck-viewer-header deck-viewer-header--compact';
 
     const crumb = document.createElement('div');
     crumb.className = 'deck-viewer-crumb';
@@ -282,16 +299,8 @@ export async function renderCards(container, items, onChange) {
     header.appendChild(title);
 
     const counter = document.createElement('div');
-    counter.className = 'deck-counter';
+    counter.className = 'deck-counter deck-counter--compact';
     header.appendChild(counter);
-
-
-    const progress = document.createElement('div');
-    progress.className = 'deck-progress';
-    const progressFill = document.createElement('span');
-    progressFill.className = 'deck-progress-fill';
-    progress.appendChild(progressFill);
-    header.appendChild(progress);
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
@@ -303,17 +312,15 @@ export async function renderCards(container, items, onChange) {
     viewer.appendChild(header);
 
     const stage = document.createElement('div');
-    stage.className = 'deck-stage';
+    stage.className = 'deck-stage deck-stage-fan';
 
     const prev = document.createElement('button');
     prev.type = 'button';
     prev.className = 'deck-nav deck-prev';
     prev.innerHTML = '<span class="sr-only">Previous card</span><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.5 15L7.5 10L12.5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-
     const slideHolder = document.createElement('div');
-    slideHolder.className = 'deck-card-stage';
-
+    slideHolder.className = 'deck-card-stage deck-card-stage-fan';
 
     const next = document.createElement('button');
     next.type = 'button';
@@ -321,14 +328,12 @@ export async function renderCards(container, items, onChange) {
     next.innerHTML = '<span class="sr-only">Next card</span><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.5 5L12.5 10L7.5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
     stage.appendChild(prev);
-
     stage.appendChild(slideHolder);
     stage.appendChild(next);
     viewer.appendChild(stage);
 
     const footer = document.createElement('div');
-    footer.className = 'deck-footer';
-
+    footer.className = 'deck-footer deck-footer--compact';
 
     const toggle = document.createElement('button');
     toggle.type = 'button';
@@ -340,15 +345,21 @@ export async function renderCards(container, items, onChange) {
 
     viewer.appendChild(footer);
 
-
     const relatedWrap = document.createElement('div');
     relatedWrap.className = 'deck-related';
     relatedWrap.dataset.visible = 'false';
     viewer.appendChild(relatedWrap);
 
-    let idx = 0;
-    let showRelated = false;
+    const cardKeyFromItem = item => item?.id ?? titleFromItem(item);
 
+    let idx = 0;
+    if (initialCardId) {
+      const initialIndex = lecture.cards.findIndex(card => cardKeyFromItem(card) === initialCardId);
+      if (initialIndex >= 0) {
+        idx = initialIndex;
+      }
+    }
+    let showRelated = false;
 
     function updateToggle(current) {
       const linkCount = Array.isArray(current?.links) ? current.links.length : 0;
@@ -359,8 +370,27 @@ export async function renderCards(container, items, onChange) {
         : 'No related cards';
     }
 
-    function renderRelated(current) {
+    function focusCard(target) {
+      if (!target) return;
+      const targetKey = cardKeyFromItem(target);
+      const localIndex = lecture.cards.findIndex(card => cardKeyFromItem(card) === targetKey);
+      if (localIndex >= 0) {
+        idx = localIndex;
+        renderActive();
+        return;
+      }
+      const contexts = itemContexts.get(targetKey);
+      if (Array.isArray(contexts) && contexts.length) {
+        if (activeKeyHandler) {
+          document.removeEventListener('keydown', activeKeyHandler);
+          activeKeyHandler = null;
+        }
+        const nextContext = contexts.find(ctx => ctx.lecture?.cards?.some(card => cardKeyFromItem(card) === targetKey)) || contexts[0];
+        openDeck(nextContext, targetKey);
+      }
+    }
 
+    function renderRelated(current) {
       relatedWrap.innerHTML = '';
       if (!showRelated) {
         relatedWrap.dataset.visible = 'false';
@@ -371,45 +401,59 @@ export async function renderCards(container, items, onChange) {
       links.forEach(link => {
         const related = itemLookup.get(link.id);
         if (related) {
-          relatedWrap.appendChild(createRelatedCard(related));
-
+          relatedWrap.appendChild(createRelatedCard(related, focusCard));
         }
       });
       relatedWrap.dataset.visible = relatedWrap.children.length ? 'true' : 'false';
     }
 
-    function renderCard() {
-
-      const current = lecture.cards[idx];
+    function renderStack() {
       slideHolder.innerHTML = '';
-      slideHolder.appendChild(createDeckSlide(current, { block, week, lecture }));
-      const accent = getItemAccent(current);
-      viewer.style.setProperty('--viewer-accent', accent);
-      counter.textContent = `Card ${idx + 1} of ${lecture.cards.length}`;
-      const progressValue = ((idx + 1) / lecture.cards.length) * 100;
-      progressFill.style.width = `${progressValue}%`;
+      const windowRadius = 2;
+      const total = lecture.cards.length;
+      const start = Math.max(0, idx - windowRadius);
+      const end = Math.min(total, idx + windowRadius + 1);
+      for (let i = start; i < end; i += 1) {
+        const card = lecture.cards[i];
+        const node = getSlideNode(card, context);
+        node.classList.add('deck-fan-card');
+        const offset = i - idx;
+        node.style.setProperty('--fan-offset', String(offset));
+        node.style.setProperty('--fan-depth', String(Math.abs(offset)));
+        if (offset === 0) {
+          node.classList.add('is-active');
+          node.removeAttribute('aria-hidden');
+        } else {
+          node.classList.remove('is-active');
+          node.setAttribute('aria-hidden', 'true');
+        }
+        slideHolder.appendChild(node);
+      }
+    }
+
+    function renderActive() {
+      const current = lecture.cards[idx];
+      renderStack();
+      counter.textContent = `${idx + 1} / ${lecture.cards.length}`;
       updateToggle(current);
       renderRelated(current);
-
     }
 
     prev.addEventListener('click', () => {
       idx = (idx - 1 + lecture.cards.length) % lecture.cards.length;
-      renderCard();
+      renderActive();
     });
 
     next.addEventListener('click', () => {
       idx = (idx + 1) % lecture.cards.length;
-      renderCard();
+      renderActive();
     });
 
     toggle.addEventListener('click', () => {
       if (toggle.disabled) return;
       showRelated = !showRelated;
-
       updateToggle(lecture.cards[idx]);
       renderRelated(lecture.cards[idx]);
-
     });
 
     const keyHandler = event => {
@@ -428,9 +472,8 @@ export async function renderCards(container, items, onChange) {
     document.addEventListener('keydown', keyHandler);
     activeKeyHandler = keyHandler;
 
-    renderCard();
+    renderActive();
     requestAnimationFrame(() => closeBtn.focus());
-
   }
 
   function createCollapseIcon() {
@@ -466,6 +509,7 @@ export async function renderCards(container, items, onChange) {
         const mini = document.createElement('div');
         mini.className = 'stack-card';
         mini.style.setProperty('--index', String(idx));
+        mini.style.setProperty('--card-accent', getItemAccent(card));
         mini.textContent = titleFromItem(card);
         stack.appendChild(mini);
       });
@@ -631,8 +675,9 @@ export async function renderCards(container, items, onChange) {
     return slide;
   }
 
-  function createRelatedCard(item) {
-    const entry = document.createElement('div');
+  function createRelatedCard(item, onSelect) {
+    const entry = document.createElement('button');
+    entry.type = 'button';
     entry.className = 'related-card-chip';
     const accent = getItemAccent(item);
     entry.style.setProperty('--related-accent', accent);
@@ -647,6 +692,8 @@ export async function renderCards(container, items, onChange) {
     kind.className = 'related-card-kind';
     kind.textContent = item.kind ? item.kind.toUpperCase() : '';
     entry.appendChild(kind);
+
+    entry.addEventListener('click', () => onSelect?.(item));
 
     return entry;
   }
