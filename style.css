@@ -1654,11 +1654,14 @@ button.builder-pill:hover {
   border-color: rgba(56, 189, 248, 0.45);
 }
 
+
 button.builder-pill.active {
+
   background: linear-gradient(135deg, rgba(125, 211, 252, 0.95), rgba(199, 210, 254, 0.92));
   color: #0b162d;
   border-color: transparent;
   box-shadow: 0 14px 26px rgba(2, 6, 23, 0.32);
+
 }
 
 button.builder-pill.active:hover,
@@ -1668,16 +1671,19 @@ button.builder-pill.active:focus-visible {
 }
 
 button.builder-pill.builder-pill-lecture {
+
   background: rgba(165, 180, 252, 0.16);
   border-color: rgba(165, 180, 252, 0.32);
   font-size: 0.9rem;
 }
 
 button.builder-pill.builder-pill-lecture.active {
+
   background: linear-gradient(135deg, rgba(191, 219, 254, 0.98), rgba(224, 231, 255, 0.96));
   border-color: transparent;
   color: #0a1530;
   box-shadow: 0 10px 22px rgba(15, 23, 42, 0.38);
+
 }
 
 button.builder-pill.builder-pill-lecture.active:hover,
