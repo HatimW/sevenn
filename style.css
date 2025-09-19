@@ -88,7 +88,7 @@ button:focus-visible {
   outline-offset: 3px;
 }
 
-button:not(.tab):not(.fab-btn):not(.builder-pill) {
+button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle) {
   background: rgba(148, 163, 184, 0.14);
   color: var(--text);
   border: 1px solid var(--border);
@@ -97,7 +97,7 @@ button:not(.tab):not(.fab-btn):not(.builder-pill) {
   box-shadow: none;
 }
 
-button:not(.tab):not(.fab-btn):not(.builder-pill):hover {
+button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):hover {
   background: rgba(148, 163, 184, 0.22);
 }
 
@@ -105,7 +105,7 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):hover {
   transition: background 0.25s ease, color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
 }
 
-[data-toggle="true"][data-active="true"] {
+[data-toggle="true"][data-active="true"]:not(.builder-pill):not(.builder-mode-toggle) {
   background: linear-gradient(135deg, rgba(56, 189, 248, 0.96), rgba(192, 132, 252, 0.92));
   border-color: transparent;
   color: #031327;
@@ -114,8 +114,8 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):hover {
   transform: translateY(-1px);
 }
 
-[data-toggle="true"][data-active="true"]:hover,
-[data-toggle="true"][data-active="true"]:focus-visible {
+[data-toggle="true"][data-active="true"]:not(.builder-pill):not(.builder-mode-toggle):hover,
+[data-toggle="true"][data-active="true"]:not(.builder-pill):not(.builder-mode-toggle):focus-visible {
   background: linear-gradient(135deg, rgba(56, 189, 248, 0.98), rgba(192, 132, 252, 0.96));
   color: #020a16;
 }
@@ -756,6 +756,21 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):hover {
 .quiz-suggestions li:hover {
   background: rgba(56, 189, 248, 0.18);
   border-color: rgba(56, 189, 248, 0.36);
+}
+
+.quiz-answer-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--pad-xs);
+}
+
+.quiz-answer-actions .btn {
+  min-width: 0;
+}
+
+.quiz-reveal-btn {
+  white-space: nowrap;
 }
 
 .quiz-feedback {
@@ -1951,12 +1966,51 @@ input[type="checkbox"]:checked::after {
   transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
+.builder-mode-toggle[data-mode="flashcards"]:not(.is-active) {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: rgba(207, 250, 222, 0.85);
+}
+
+.builder-mode-toggle[data-mode="quiz"]:not(.is-active) {
+  background: rgba(129, 140, 248, 0.16);
+  border-color: rgba(129, 140, 248, 0.34);
+  color: rgba(224, 231, 255, 0.85);
+}
+
+.builder-mode-toggle[data-mode="blocks"]:not(.is-active) {
+  background: rgba(249, 115, 22, 0.16);
+  border-color: rgba(249, 115, 22, 0.32);
+  color: rgba(254, 226, 226, 0.85);
+}
+
 .builder-mode-toggle:hover,
 .builder-mode-toggle:focus-visible {
   background: rgba(56, 189, 248, 0.18);
   border-color: rgba(56, 189, 248, 0.36);
   color: var(--text);
   transform: translateY(-1px);
+}
+
+.builder-mode-toggle[data-mode="flashcards"]:not(.is-active):hover,
+.builder-mode-toggle[data-mode="flashcards"]:not(.is-active):focus-visible {
+  background: rgba(34, 197, 94, 0.24);
+  border-color: rgba(34, 197, 94, 0.5);
+  color: #eafff3;
+}
+
+.builder-mode-toggle[data-mode="quiz"]:not(.is-active):hover,
+.builder-mode-toggle[data-mode="quiz"]:not(.is-active):focus-visible {
+  background: rgba(129, 140, 248, 0.26);
+  border-color: rgba(129, 140, 248, 0.52);
+  color: #fdf4ff;
+}
+
+.builder-mode-toggle[data-mode="blocks"]:not(.is-active):hover,
+.builder-mode-toggle[data-mode="blocks"]:not(.is-active):focus-visible {
+  background: rgba(249, 115, 22, 0.26);
+  border-color: rgba(249, 115, 22, 0.5);
+  color: #fff7ed;
 }
 
 .builder-mode-toggle.is-active {
@@ -2145,6 +2199,11 @@ button.builder-pill.builder-pill-outline {
 
 /* Flashcards */
 .flashcard {
+  --flash-accent: var(--accent);
+  --flash-accent-soft: color-mix(in srgb, var(--flash-accent) 18%, rgba(15, 23, 42, 0.06));
+  --flash-accent-strong: color-mix(in srgb, var(--flash-accent) 32%, rgba(15, 23, 42, 0.12));
+  --flash-accent-border: color-mix(in srgb, var(--flash-accent) 42%, rgba(15, 23, 42, 0.2));
+  --flash-accent-subtle: color-mix(in srgb, var(--flash-accent) 10%, rgba(148, 163, 184, 0.16));
   display: flex;
   flex-direction: column;
   gap: var(--pad);
@@ -2155,7 +2214,8 @@ button.builder-pill.builder-pill-outline {
   cursor: pointer;
   border-radius: var(--radius);
   padding: var(--pad-sm);
-  border: 1px solid transparent;
+  border: 1px solid var(--flash-accent-subtle);
+  background: color-mix(in srgb, var(--flash-accent) 8%, rgba(15, 23, 42, 0.04));
   transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
 }
 
@@ -2165,14 +2225,14 @@ button.builder-pill.builder-pill-outline {
 }
 
 .flash-section[data-active="true"] {
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.24), rgba(192, 132, 252, 0.26));
-  border-color: rgba(56, 189, 248, 0.45);
-  box-shadow: 0 16px 32px rgba(2, 6, 23, 0.32);
+  background: linear-gradient(135deg, var(--flash-accent-soft), var(--flash-accent-strong));
+  border-color: var(--flash-accent-border);
+  box-shadow: 0 14px 28px rgba(2, 6, 23, 0.24);
   color: var(--text);
 }
 
 .flash-section[data-active="true"] .flash-heading {
-  color: #041021;
+  color: color-mix(in srgb, var(--flash-accent) 82%, #041021);
 }
 
 .flash-heading {
@@ -2208,16 +2268,81 @@ button.builder-pill.builder-pill-outline {
 }
 
 .flash-rating-btn {
-  min-width: 84px;
+  min-width: 92px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--flash-accent) 18%, rgba(148, 163, 184, 0.32));
+  background: color-mix(in srgb, var(--flash-accent) 6%, rgba(15, 23, 42, 0.05));
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  box-shadow: none;
+}
+
+.flash-rating-btn.danger {
+  border-color: rgba(248, 113, 113, 0.36);
+}
+
+.flash-rating-btn.secondary {
+  border-color: rgba(251, 191, 36, 0.34);
+}
+
+.flash-rating-btn:hover,
+.flash-rating-btn:focus-visible {
+  background: color-mix(in srgb, var(--flash-accent) 12%, rgba(15, 23, 42, 0.08));
+  border-color: color-mix(in srgb, var(--flash-accent) 28%, rgba(148, 163, 184, 0.45));
+  transform: translateY(-1px);
+}
+
+.flash-rating-btn:active {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .flash-rating-btn.is-selected {
-  box-shadow: 0 0 0 2px var(--accent);
+  color: #041021;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--flash-accent) 60%, rgba(14, 116, 144, 0.35));
+}
+
+.flash-rating-btn[data-rating="again"].is-selected {
+  background: linear-gradient(135deg, rgba(254, 202, 202, 0.95), rgba(248, 113, 113, 0.88));
+  border-color: rgba(248, 113, 113, 0.6);
+}
+
+.flash-rating-btn[data-rating="hard"].is-selected {
+  background: linear-gradient(135deg, rgba(253, 230, 138, 0.95), rgba(251, 191, 36, 0.86));
+  border-color: rgba(251, 191, 36, 0.58);
+}
+
+.flash-rating-btn[data-rating="good"].is-selected {
+  background: linear-gradient(135deg, rgba(187, 247, 208, 0.96), rgba(134, 239, 172, 0.88));
+  border-color: rgba(134, 239, 172, 0.58);
+}
+
+.flash-rating-btn[data-rating="easy"].is-selected {
+  background: linear-gradient(135deg, rgba(191, 219, 254, 0.96), rgba(165, 180, 252, 0.9));
+  border-color: rgba(165, 180, 252, 0.56);
 }
 
 .flash-rating-status {
   font-size: 0.8rem;
   color: var(--gray);
+}
+
+.flash-rating-status-action {
+  color: color-mix(in srgb, var(--flash-accent) 72%, #0ea5e9);
+  font-style: normal;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.flash-rating-status-action:hover,
+.flash-rating-status-action:focus-visible {
+  color: color-mix(in srgb, var(--flash-accent) 82%, #38bdf8);
 }
 
 .flash-rating-status.is-error {
@@ -2231,6 +2356,20 @@ button.builder-pill.builder-pill-outline {
 .flash-rating.is-saving .flash-rating-btn {
   pointer-events: none;
   opacity: 0.75;
+}
+
+.flash-rating.is-locked .flash-rating-options {
+  display: none;
+}
+
+.flash-rating.is-locked .flash-rating-status {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.flash-rating.is-locked .flash-rating-status.flash-rating-status-action {
+  font-style: normal;
+  color: color-mix(in srgb, var(--flash-accent) 68%, #0284c7);
 }
 
 .flash-empty {

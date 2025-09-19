@@ -33,18 +33,23 @@ function ratingKey(item, sectionKey) {
 function ensureSessionDefaults(session) {
   if (!session) return;
   if (!Array.isArray(session.pool)) session.pool = [];
-  if (!session.dict) {
-    session.dict = session.pool.map(it => ({
-      id: it.id,
-      title: titleOf(it),
-      lower: titleOf(it).toLowerCase()
-    }));
-  }
+  session.dict = session.pool.map(it => ({
+    id: it.id,
+    title: titleOf(it),
+    lower: titleOf(it).toLowerCase()
+  }));
   if (!session.answers || typeof session.answers !== 'object') {
     session.answers = {};
   }
   if (!session.ratings || typeof session.ratings !== 'object') {
     session.ratings = {};
+  }
+  if (typeof session.idx !== 'number' || Number.isNaN(session.idx)) {
+    session.idx = 0;
+  }
+  session.idx = Math.max(0, Math.min(Math.floor(session.idx), session.pool.length ? session.pool.length - 1 : 0));
+  if (typeof session.score !== 'number' || Number.isNaN(session.score)) {
+    session.score = computeScore(session.answers);
   }
 }
 
@@ -109,9 +114,11 @@ export function renderQuiz(root, redraw) {
     return;
   }
 
-  const answer = session.answers[session.idx] || { value: '', isCorrect: false, checked: false };
-  const hasSubmitted = Boolean(answer.checked);
-  const wasCorrect = hasSubmitted && answer.isCorrect;
+  const answer = session.answers[session.idx] || { value: '', isCorrect: false, checked: false, revealed: false };
+  const hasResult = Boolean(answer.checked);
+  const wasCorrect = hasResult && answer.isCorrect;
+  const wasRevealed = hasResult && answer.revealed;
+  const isSolved = wasCorrect || wasRevealed;
 
   const card = document.createElement('section');
   card.className = 'card quiz-card';
@@ -181,25 +188,56 @@ export function renderQuiz(root, redraw) {
   suggestions.className = 'quiz-suggestions';
   form.appendChild(suggestions);
 
+  const actions = document.createElement('div');
+  actions.className = 'quiz-answer-actions';
+
+  const checkBtn = document.createElement('button');
+  checkBtn.type = 'button';
+  checkBtn.className = 'btn quiz-check-btn';
+  checkBtn.textContent = 'Check';
+  checkBtn.disabled = !input.value.trim();
+  checkBtn.addEventListener('click', () => gradeAnswer());
+  actions.appendChild(checkBtn);
+
+  const revealBtn = document.createElement('button');
+  revealBtn.type = 'button';
+  revealBtn.className = 'btn secondary quiz-reveal-btn';
+  revealBtn.textContent = 'Show answer';
+  revealBtn.hidden = !(hasResult && !wasCorrect && !wasRevealed);
+  actions.appendChild(revealBtn);
+
+  form.appendChild(actions);
+
   const feedback = document.createElement('div');
   feedback.className = 'quiz-feedback';
-  if (hasSubmitted) {
-    feedback.textContent = wasCorrect ? 'Correct!' : `Incorrect • Answer: ${titleOf(item)}`;
-    feedback.classList.add(wasCorrect ? 'is-correct' : 'is-incorrect');
+  if (wasCorrect) {
+    feedback.textContent = 'Correct!';
+    feedback.classList.add('is-correct');
+  } else if (wasRevealed) {
+    feedback.textContent = `Answer: ${titleOf(item)}`;
+    feedback.classList.add('is-incorrect');
+  } else if (hasResult) {
+    feedback.textContent = 'Incorrect. Try again or reveal the answer.';
+    feedback.classList.add('is-incorrect');
   }
   form.appendChild(feedback);
 
   card.appendChild(form);
 
   input.addEventListener('input', () => {
+    checkBtn.disabled = !input.value.trim();
     const v = input.value.toLowerCase();
     const existing = session.answers[session.idx];
     if (existing && existing.checked) {
-      delete session.answers[session.idx];
-      session.score = computeScore(session.answers);
+      const answers = { ...session.answers };
+      delete answers[session.idx];
+      session.answers = answers;
+      session.score = computeScore(answers);
       setQuizSession({ ...session });
       feedback.textContent = '';
       feedback.classList.remove('is-correct', 'is-incorrect');
+      revealBtn.hidden = true;
+      revealBtn.disabled = false;
       tally.textContent = `Score: ${session.score}`;
       updateNavState();
     }
@@ -218,6 +256,22 @@ export function renderQuiz(root, redraw) {
     });
   });
 
+  revealBtn.addEventListener('click', () => {
+    const revealValue = titleOf(item);
+    const answers = { ...session.answers, [session.idx]: { value: revealValue, isCorrect: false, checked: true, revealed: true } };
+    session.answers = answers;
+    session.score = computeScore(answers);
+    setQuizSession({ ...session });
+    input.value = revealValue;
+    feedback.textContent = `Answer: ${titleOf(item)}`;
+    feedback.classList.remove('is-correct');
+    feedback.classList.add('is-incorrect');
+    revealBtn.hidden = true;
+    suggestions.innerHTML = '';
+    tally.textContent = `Score: ${session.score}`;
+    updateNavState();
+  });
+
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     gradeAnswer();
@@ -228,18 +282,9 @@ export function renderQuiz(root, redraw) {
   ratingPanel.className = 'quiz-rating-panel';
   card.appendChild(ratingPanel);
 
-  const ratingTitle = document.createElement('h3');
-  ratingTitle.textContent = 'How well did you know this card?';
-  ratingPanel.appendChild(ratingTitle);
-
   const ratingRow = document.createElement('div');
   ratingRow.className = 'quiz-rating-row';
   ratingPanel.appendChild(ratingRow);
-
-  const ratingLabel = document.createElement('div');
-  ratingLabel.className = 'quiz-rating-label';
-  ratingLabel.textContent = 'Rate this card';
-  ratingRow.appendChild(ratingLabel);
 
   const options = document.createElement('div');
   options.className = 'quiz-rating-options';
@@ -267,7 +312,8 @@ export function renderQuiz(root, redraw) {
   };
 
   const handleRating = async (value) => {
-    if (!session.answers[session.idx]) return;
+    const current = session.answers[session.idx];
+    if (!(current && current.checked && (current.isCorrect || current.revealed))) return;
     status.textContent = 'Saving…';
     status.classList.remove('is-error');
     try {
@@ -295,7 +341,7 @@ export function renderQuiz(root, redraw) {
     const variant = RATING_CLASS[value];
     if (variant) btn.classList.add(variant);
     btn.textContent = RATING_LABELS[value];
-    btn.disabled = !hasSubmitted;
+    btn.disabled = !isSolved;
     btn.setAttribute('aria-pressed', 'false');
     btn.addEventListener('click', () => handleRating(value));
     options.appendChild(btn);
@@ -326,17 +372,6 @@ export function renderQuiz(root, redraw) {
     redraw();
   });
   controls.appendChild(backBtn);
-
-
-  const submitBtn = document.createElement('button');
-  submitBtn.type = 'submit';
-  submitBtn.className = 'btn';
-  submitBtn.textContent = hasSubmitted ? 'Resubmit' : 'Submit';
-  submitBtn.disabled = !input.value.trim();
-  form.addEventListener('input', () => {
-    submitBtn.disabled = !input.value.trim();
-  });
-  controls.appendChild(submitBtn);
 
   const nextBtn = document.createElement('button');
   nextBtn.type = 'button';
@@ -401,29 +436,39 @@ export function renderQuiz(root, redraw) {
     const normalized = guess.toLowerCase();
     const correct = titleOf(item).toLowerCase();
     const isCorrect = normalized === correct;
-    const answers = { ...session.answers, [session.idx]: { value: guess, isCorrect, checked: true } };
+    const answers = {
+      ...session.answers,
+      [session.idx]: { value: guess, isCorrect, checked: true, revealed: false }
+    };
     const nextScore = computeScore(answers);
     session.answers = answers;
     session.score = nextScore;
     setQuizSession({ ...session });
     tally.textContent = `Score: ${session.score}`;
-    feedback.textContent = isCorrect ? 'Correct!' : `Incorrect • Answer: ${titleOf(item)}`;
+    feedback.textContent = isCorrect ? 'Correct!' : 'Incorrect. Try again or reveal the answer.';
     feedback.classList.remove('is-correct', 'is-incorrect');
     feedback.classList.add(isCorrect ? 'is-correct' : 'is-incorrect');
+    suggestions.innerHTML = '';
+    revealBtn.hidden = isCorrect;
+    if (!isCorrect) {
+      revealBtn.disabled = false;
+      revealBtn.focus();
+    }
     updateNavState();
   }
 
   function updateNavState() {
     const currentAnswer = session.answers[session.idx];
-    const answered = Boolean(currentAnswer && currentAnswer.checked);
+    const solved = Boolean(currentAnswer && currentAnswer.checked && (currentAnswer.isCorrect || currentAnswer.revealed));
     const hasRating = !sections.length || Boolean(selectedRating);
-    nextBtn.disabled = !(answered && hasRating);
-    submitBtn.textContent = answered ? 'Resubmit' : 'Submit';
+    nextBtn.disabled = !(solved && hasRating);
     Array.from(options.querySelectorAll('button')).forEach(btn => {
-      btn.disabled = !answered;
+      btn.disabled = !solved;
     });
-    if (!answered) {
+    if (!solved) {
       status.textContent = '';
+    } else {
+      revealBtn.hidden = true;
     }
   }
 }
