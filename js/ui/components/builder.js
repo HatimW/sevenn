@@ -1,4 +1,4 @@
-import { state, setBuilder, setCohort, resetBlockMode, setSubtab, setFlashSession, setQuizSession, setStudySelectedMode } from '../../state.js';
+import { state, setBuilder, setCohort, resetBlockMode, setBlockMode, setSubtab, setFlashSession, setQuizSession, setStudySelectedMode } from '../../state.js';
 import { listBlocks, listItemsByKind } from '../../storage/storage.js';
 import { setToggleState } from '../../utils.js';
 import { hydrateStudySessions, getStudySessionEntry, removeAllStudySessions, removeStudySession } from '../../study/study-sessions.js';
@@ -8,7 +8,8 @@ import { collectDueSections } from '../../review/scheduler.js';
 
 const MODE_KEY = {
   Flashcards: 'flashcards',
-  Quiz: 'quiz'
+  Quiz: 'quiz',
+  Blocks: 'blocks'
 };
 
 
@@ -437,19 +438,24 @@ function renderModeCard(rerender, redraw) {
     status.textContent = `Ready to start ${labelTitle}.`;
   }
 
+  const handleError = (err) => console.warn('Failed to update study session state', err);
+
   startBtn.addEventListener('click', async () => {
     if (!canStart) return;
     setStudySelectedMode(selected);
+    const key = MODE_KEY[selected];
+
     if (selected === 'Blocks') {
+      if (key) {
+        await removeStudySession(key).catch(handleError);
+      }
+      resetBlockMode();
       setSubtab('Study', 'Blocks');
       redraw();
       return;
     }
 
-    const key = MODE_KEY[selected];
     if (!key) return;
-
-    const handleError = (err) => console.warn('Failed to update study session state', err);
 
     await removeStudySession(key).catch(handleError);
     if (!cohort.length) return;
@@ -463,13 +469,24 @@ function renderModeCard(rerender, redraw) {
     redraw();
   });
 
+
   resumeBtn.addEventListener('click', async () => {
     if (!hasSaved || !storageKey || !savedEntry) return;
     setStudySelectedMode(selected);
-    const handleError = (err) => console.warn('Failed to update study session state', err);
     await removeStudySession(storageKey).catch(handleError);
     const restoredCohort = Array.isArray(savedEntry.cohort) ? savedEntry.cohort : [];
     setCohort(restoredCohort);
+    if (selected === 'Blocks') {
+      resetBlockMode();
+      if (savedEntry.session && typeof savedEntry.session === 'object') {
+        setBlockMode(savedEntry.session);
+      }
+      setSubtab('Study', 'Blocks');
+      redraw();
+      return;
+    }
+
+
     if (selected === 'Flashcards') {
       setFlashSession(savedEntry.session);
     } else if (selected === 'Quiz') {
@@ -478,6 +495,7 @@ function renderModeCard(rerender, redraw) {
     setSubtab('Study', 'Builder');
     redraw();
   });
+
 
   reviewBtn.addEventListener('click', () => {
     setSubtab('Study', 'Review');

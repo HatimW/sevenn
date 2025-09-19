@@ -194,7 +194,7 @@ async function render() {
       } else if (state.quizSession) {
         renderQuiz(content, render);
       } else if (state.subtab.Study === 'Blocks') {
-        renderBlockMode(content);
+        renderBlockMode(content, render);
       } else if (state.subtab.Study === 'Review') {
         await renderReview(content, render);
       }

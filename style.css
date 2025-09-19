@@ -5494,6 +5494,23 @@ body.map-toolbox-dragging {
   font-size: 0.95rem;
 }
 
+.block-mode-footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad-sm);
+}
+
+.block-mode-footer-status {
+  color: var(--gray);
+  font-size: 0.85rem;
+}
+
+.block-mode-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pad-sm);
+}
+
 .block-mode-empty {
   text-align: center;
   color: var(--gray);

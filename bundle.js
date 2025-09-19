@@ -6,7 +6,7 @@ var Sevenn = (() => {
       Diseases: "Browse",
       Drugs: "Browse",
       Concepts: "Browse",
-      Study: "Flashcards",
+      Study: "Builder",
       Exams: "",
       // placeholder
       Map: "",
@@ -38,7 +38,10 @@ var Sevenn = (() => {
     examSession: null,
     examAttemptExpanded: {},
     map: { panzoom: false },
-    blockMode: { section: "", assignments: {}, reveal: {}, order: {} }
+    blockMode: { section: "", assignments: {}, reveal: {}, order: {} },
+    study: { selectedMode: "Flashcards" },
+    studySessions: {},
+    studySessionsLoaded: false
   };
   function setTab(t) {
     state.tab = t;
@@ -111,17 +114,42 @@ var Sevenn = (() => {
       layout.controlsVisible = Boolean(patch.controlsVisible);
     }
   }
+  function setStudySelectedMode(mode) {
+    if (!state.study) state.study = { selectedMode: "Flashcards" };
+    if (mode === "Flashcards" || mode === "Quiz" || mode === "Blocks") {
+      state.study.selectedMode = mode;
+    }
+  }
+  function setStudySessions(map) {
+    state.studySessions = map ? { ...map } : {};
+    state.studySessionsLoaded = true;
+  }
+  function setStudySessionEntry(mode, entry) {
+    if (!mode) return;
+    const next = { ...state.studySessions || {} };
+    if (entry) {
+      next[mode] = entry;
+    } else {
+      delete next[mode];
+    }
+    state.studySessions = next;
+  }
+  function clearStudySessionsState() {
+    state.studySessions = {};
+    state.studySessionsLoaded = false;
+  }
 
   // js/storage/idb.js
   var DB_NAME = "sevenn-db";
-  var DB_VERSION = 3;
+  var DB_VERSION = 4;
   var MEMORY_STORAGE_KEY = "sevenn-memory-db";
   var STORE_KEY_PATHS = {
     items: "id",
     blocks: "blockId",
     exams: "id",
     settings: "id",
-    exam_sessions: "examId"
+    exam_sessions: "examId",
+    study_sessions: "mode"
   };
   var enqueue = typeof queueMicrotask === "function" ? queueMicrotask.bind(globalThis) : ((cb) => Promise.resolve().then(cb));
   function clone(value) {
@@ -444,6 +472,10 @@ var Sevenn = (() => {
           const sessions = db.createObjectStore("exam_sessions", { keyPath: "examId" });
           sessions.createIndex("by_updatedAt", "updatedAt");
         }
+        if (!db.objectStoreNames.contains("study_sessions")) {
+          const sessions = db.createObjectStore("study_sessions", { keyPath: "mode" });
+          sessions.createIndex("by_updatedAt", "updatedAt");
+        }
       };
       req.onsuccess = () => {
         if (settled) return;
@@ -747,7 +779,7 @@ var Sevenn = (() => {
   var MAP_CONFIG_KEY = "map-config";
   var MAP_CONFIG_BACKUP_KEY = "sevenn-map-config-backup";
   var DATA_BACKUP_KEY = "sevenn-backup-snapshot";
-  var DATA_BACKUP_STORES = ["items", "blocks", "exams", "settings", "exam_sessions"];
+  var DATA_BACKUP_STORES = ["items", "blocks", "exams", "settings", "exam_sessions", "study_sessions"];
   var DEFAULT_APP_SETTINGS = { id: "app", dailyCount: 20, theme: "dark", reviewSteps: { ...DEFAULT_REVIEW_STEPS } };
   var backupTimer = null;
   var DEFAULT_MAP_CONFIG = {
@@ -1280,6 +1312,34 @@ var Sevenn = (() => {
   async function deleteExamSessionProgress(examId) {
     const s = await store("exam_sessions", "readwrite");
     await prom2(s.delete(examId));
+    scheduleBackup();
+  }
+  async function listStudySessions() {
+    try {
+      const s = await store("study_sessions");
+      const list = await prom2(s.getAll());
+      return Array.isArray(list) ? list : [];
+    } catch (err) {
+      console.warn("Failed to list study sessions", err);
+      return [];
+    }
+  }
+  async function saveStudySessionRecord(record) {
+    if (!record || !record.mode) throw new Error("Study session record requires a mode");
+    const s = await store("study_sessions", "readwrite");
+    const now = Date.now();
+    await prom2(s.put({ ...record, updatedAt: now }));
+    scheduleBackup();
+  }
+  async function deleteStudySessionRecord(mode) {
+    if (!mode) return;
+    const s = await store("study_sessions", "readwrite");
+    await prom2(s.delete(mode));
+    scheduleBackup();
+  }
+  async function clearAllStudySessionRecords() {
+    const s = await store("study_sessions", "readwrite");
+    await prom2(s.clear());
     scheduleBackup();
   }
 
@@ -2249,9 +2309,9 @@ var Sevenn = (() => {
       const selection = window.getSelection();
       if (!selection) return false;
       selection.removeAllRanges();
-      const clone3 = range.cloneRange();
-      selection.addRange(clone3);
-      savedRange = clone3.cloneRange();
+      const clone4 = range.cloneRange();
+      selection.addRange(clone4);
+      savedRange = clone4.cloneRange();
       return true;
     }
     function runCommand(action, { requireSelection = false } = {}) {
@@ -4640,26 +4700,104 @@ var Sevenn = (() => {
     pump();
   }
 
+  // js/study/study-sessions.js
+  var pendingLoad = null;
+  function clone2(value) {
+    return JSON.parse(JSON.stringify(value ?? null));
+  }
+  async function hydrateStudySessions(force = false) {
+    if (!force && state.studySessionsLoaded) {
+      return state.studySessions || {};
+    }
+    if (!pendingLoad) {
+      pendingLoad = listStudySessions().then((entries) => {
+        const map = {};
+        entries.forEach((entry) => {
+          if (entry && entry.mode) {
+            map[entry.mode] = entry;
+          }
+        });
+        setStudySessions(map);
+        return state.studySessions;
+      }).catch((err) => {
+        console.error("Failed to load study sessions", err);
+        clearStudySessionsState();
+        setStudySessions({});
+        return state.studySessions;
+      }).finally(() => {
+        pendingLoad = null;
+      });
+    }
+    return pendingLoad;
+  }
+  function getStudySessionEntry(mode) {
+    return state.studySessions && state.studySessions[mode] || null;
+  }
+  async function persistStudySession(mode, payload) {
+    if (!mode) throw new Error("Mode is required to save study session");
+    const entry = {
+      mode,
+      updatedAt: Date.now(),
+      session: clone2(payload?.session ?? {}),
+      cohort: clone2(payload?.cohort ?? []),
+      metadata: clone2(payload?.metadata ?? {})
+    };
+    await saveStudySessionRecord(entry);
+    setStudySessionEntry(mode, entry);
+    return entry;
+  }
+  async function removeStudySession(mode) {
+    if (!mode) return;
+    await deleteStudySessionRecord(mode);
+    setStudySessionEntry(mode, null);
+  }
+  async function removeAllStudySessions() {
+    await clearAllStudySessionRecords();
+    setStudySessions({});
+  }
+
   // js/ui/components/builder.js
-  async function renderBuilder(root) {
-    const blocks = await loadBlocks();
+  var MODE_KEY = {
+    Flashcards: "flashcards",
+    Quiz: "quiz",
+    Blocks: "blocks"
+  };
+  function collectReviewCount(items) {
+    try {
+      return collectDueSections(items, { now: Date.now() }).length;
+    } catch (err) {
+      console.warn("Failed to calculate review queue size", err);
+      return 0;
+    }
+  }
+  function notifyBuilderChanged() {
+    removeAllStudySessions().catch((err) => console.warn("Failed to clear saved sessions", err));
+  }
+  async function renderBuilder(root, redraw) {
+    const [blocks] = await Promise.all([
+      loadBlocks(),
+      hydrateStudySessions().catch((err) => {
+        console.error("Unable to load study sessions", err);
+        return null;
+      })
+    ]);
     root.innerHTML = "";
     const wrap = document.createElement("div");
     wrap.className = "builder";
     root.appendChild(wrap);
-    drawBuilder(wrap, blocks);
+    drawBuilder(wrap, blocks, redraw);
   }
   async function loadBlocks() {
     const blocks = await listBlocks();
     blocks.push({ blockId: "__unlabeled", title: "Unlabeled", weeks: 0, lectures: [] });
     return blocks;
   }
-  function drawBuilder(container, blocks) {
+  function drawBuilder(container, blocks, redraw) {
     container.innerHTML = "";
     if (state.builder.weeks.length) {
       setBuilder({ weeks: [] });
     }
-    const rerender = () => drawBuilder(container, blocks);
+    const rerender = () => drawBuilder(container, blocks, redraw);
     const layout = document.createElement("div");
     layout.className = "builder-layout";
     container.appendChild(layout);
@@ -4669,7 +4807,7 @@ var Sevenn = (() => {
     blocks.forEach((block) => {
       blockColumn.appendChild(renderBlockPanel(block, rerender));
     });
-    const controls = renderControls(rerender);
+    const controls = renderControls(rerender, redraw);
     layout.appendChild(controls);
   }
   function renderBlockPanel(block, rerender) {
@@ -4822,11 +4960,13 @@ var Sevenn = (() => {
     }, "lecture");
     return pill;
   }
-  function renderControls(rerender) {
+  function renderControls(rerender, redraw) {
     const aside = document.createElement("aside");
     aside.className = "builder-controls";
     aside.appendChild(renderFilterCard(rerender));
-    aside.appendChild(renderSummaryCard(rerender));
+    aside.appendChild(renderSummaryCard(rerender, redraw));
+    aside.appendChild(renderModeCard(rerender, redraw));
+    aside.appendChild(renderReviewCard(redraw));
     return aside;
   }
   function renderFilterCard(rerender) {
@@ -4853,12 +4993,13 @@ var Sevenn = (() => {
     card.appendChild(pillRow);
     const favToggle = createPill(state.builder.onlyFav, "Only favorites", () => {
       setBuilder({ onlyFav: !state.builder.onlyFav });
+      notifyBuilderChanged();
       rerender();
     }, "small outline");
     card.appendChild(favToggle);
     return card;
   }
-  function renderSummaryCard(rerender) {
+  function renderSummaryCard(rerender, redraw) {
     const card = document.createElement("div");
     card.className = "card builder-summary-card";
     const title = document.createElement("h3");
@@ -4885,6 +5026,8 @@ var Sevenn = (() => {
     buildBtn.textContent = "Build set";
     buildBtn.addEventListener("click", async () => {
       await buildSet(buildBtn, count, rerender);
+      await removeAllStudySessions().catch((err) => console.warn("Failed to clear saved sessions", err));
+      redraw();
     });
     actions.appendChild(buildBtn);
     const clearBtn = document.createElement("button");
@@ -4894,9 +5037,192 @@ var Sevenn = (() => {
     clearBtn.disabled = !hasAnySelection();
     clearBtn.addEventListener("click", () => {
       setBuilder({ blocks: [], weeks: [], lectures: [] });
+      notifyBuilderChanged();
       rerender();
     });
     actions.appendChild(clearBtn);
+    card.appendChild(actions);
+    return card;
+  }
+  function renderModeCard(rerender, redraw) {
+    const card = document.createElement("div");
+    card.className = "card builder-mode-card";
+    const title = document.createElement("h3");
+    title.textContent = "Modes";
+    card.appendChild(title);
+    const layout = document.createElement("div");
+    layout.className = "builder-mode-layout";
+    const controls = document.createElement("div");
+    controls.className = "builder-mode-controls";
+    const status = document.createElement("div");
+    status.className = "builder-mode-status";
+    controls.appendChild(status);
+    const actions = document.createElement("div");
+    actions.className = "builder-mode-actions";
+    const startBtn = document.createElement("button");
+    startBtn.type = "button";
+    startBtn.className = "btn builder-start-btn";
+    const resumeBtn = document.createElement("button");
+    resumeBtn.type = "button";
+    resumeBtn.className = "btn builder-resume-btn";
+    resumeBtn.textContent = "Resume";
+    const reviewBtn = document.createElement("button");
+    reviewBtn.type = "button";
+    reviewBtn.className = "btn secondary builder-review-link";
+    reviewBtn.textContent = "Review";
+    const modes = ["Flashcards", "Quiz", "Blocks"];
+    const selected = state.study?.selectedMode || "Flashcards";
+    const modeColumn = document.createElement("div");
+    modeColumn.className = "builder-mode-option-column";
+    const modeLabel = document.createElement("div");
+    modeLabel.className = "builder-mode-options-title";
+    modeLabel.textContent = "Choose a mode";
+    modeColumn.appendChild(modeLabel);
+    const modeRow = document.createElement("div");
+    modeRow.className = "builder-mode-options";
+    modes.forEach((mode) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "builder-mode-toggle";
+      const isActive = mode === selected;
+      if (isActive) btn.classList.add("is-active");
+      btn.dataset.active = isActive ? "true" : "false";
+      btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+      btn.textContent = mode;
+      btn.addEventListener("click", () => {
+        setStudySelectedMode(mode);
+        rerender();
+      });
+      modeRow.appendChild(btn);
+    });
+    modeColumn.appendChild(modeRow);
+    const storageKey = MODE_KEY[selected] || null;
+    const savedEntry = storageKey ? getStudySessionEntry(storageKey) : null;
+    const hasSaved = !!(savedEntry && savedEntry.session);
+    const cohort = Array.isArray(state.cohort) ? state.cohort : [];
+    const hasCohort = cohort.length > 0;
+    const canStart = selected === "Blocks" ? hasCohort : hasCohort;
+    const labelTitle = selected.toLowerCase();
+    startBtn.textContent = "Start";
+    startBtn.disabled = !canStart;
+    startBtn.classList.toggle("is-ready", canStart);
+    resumeBtn.disabled = !hasSaved;
+    resumeBtn.classList.toggle("is-ready", hasSaved);
+    reviewBtn.disabled = !hasCohort;
+    if (hasSaved) {
+      const count = Array.isArray(savedEntry?.cohort) ? savedEntry.cohort.length : 0;
+      status.textContent = `Saved ${labelTitle} session${count ? ` \u2022 ${count} cards` : ""}`;
+    } else if (!hasCohort && selected !== "Blocks") {
+      status.textContent = "Build a study set to enable this mode.";
+    } else if (selected === "Blocks" && !hasCohort) {
+      status.textContent = "Assemble a study set to open Blocks mode.";
+    } else {
+      status.textContent = `Ready to start ${labelTitle}.`;
+    }
+    const handleError = (err) => console.warn("Failed to update study session state", err);
+    startBtn.addEventListener("click", async () => {
+      if (!canStart) return;
+      setStudySelectedMode(selected);
+      const key = MODE_KEY[selected];
+      if (selected === "Blocks") {
+        if (key) {
+          await removeStudySession(key).catch(handleError);
+        }
+        resetBlockMode();
+        setSubtab("Study", "Blocks");
+        redraw();
+        return;
+      }
+      if (!key) return;
+      await removeStudySession(key).catch(handleError);
+      if (!cohort.length) return;
+      if (selected === "Flashcards") {
+        setFlashSession({ idx: 0, pool: cohort, ratings: {}, mode: "study" });
+      } else if (selected === "Quiz") {
+        setQuizSession({ idx: 0, score: 0, pool: cohort });
+      }
+      setSubtab("Study", "Builder");
+      redraw();
+    });
+    resumeBtn.addEventListener("click", async () => {
+      if (!hasSaved || !storageKey || !savedEntry) return;
+      setStudySelectedMode(selected);
+      await removeStudySession(storageKey).catch(handleError);
+      const restoredCohort = Array.isArray(savedEntry.cohort) ? savedEntry.cohort : [];
+      setCohort(restoredCohort);
+      if (selected === "Blocks") {
+        resetBlockMode();
+        if (savedEntry.session && typeof savedEntry.session === "object") {
+          setBlockMode(savedEntry.session);
+        }
+        setSubtab("Study", "Blocks");
+        redraw();
+        return;
+      }
+      if (selected === "Flashcards") {
+        setFlashSession(savedEntry.session);
+      } else if (selected === "Quiz") {
+        setQuizSession(savedEntry.session);
+      }
+      setSubtab("Study", "Builder");
+      redraw();
+    });
+    reviewBtn.addEventListener("click", () => {
+      setSubtab("Study", "Review");
+      redraw();
+    });
+    actions.appendChild(startBtn);
+    actions.appendChild(resumeBtn);
+    actions.appendChild(reviewBtn);
+    controls.appendChild(actions);
+    layout.appendChild(controls);
+    layout.appendChild(modeColumn);
+    card.appendChild(layout);
+    return card;
+  }
+  function renderReviewCard(redraw) {
+    const card = document.createElement("div");
+    card.className = "card builder-review-card";
+    const title = document.createElement("h3");
+    title.textContent = "Review";
+    card.appendChild(title);
+    const cohort = Array.isArray(state.cohort) ? state.cohort : [];
+    const dueCount = cohort.length ? collectReviewCount(cohort) : 0;
+    const status = document.createElement("div");
+    status.className = "builder-review-status";
+    status.textContent = dueCount ? `${dueCount} card${dueCount === 1 ? "" : "s"} due` : "All caught up!";
+    card.appendChild(status);
+    const actions = document.createElement("div");
+    actions.className = "builder-review-actions";
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "btn secondary";
+    openBtn.textContent = "Open review";
+    openBtn.disabled = !cohort.length;
+    openBtn.addEventListener("click", () => {
+      setSubtab("Study", "Review");
+      redraw();
+    });
+    actions.appendChild(openBtn);
+    const saved = getStudySessionEntry("review");
+    if (saved?.session) {
+      const resumeBtn = document.createElement("button");
+      resumeBtn.type = "button";
+      resumeBtn.className = "btn builder-review-resume";
+      resumeBtn.textContent = "Resume review";
+      resumeBtn.addEventListener("click", async () => {
+        await removeStudySession("review").catch((err) => console.warn("Failed to clear review session stub", err));
+        const restored = Array.isArray(saved.cohort) ? saved.cohort : null;
+        if (restored) {
+          setCohort(restored);
+        }
+        setFlashSession(saved.session);
+        setSubtab("Study", "Review");
+        redraw();
+      });
+      actions.appendChild(resumeBtn);
+      status.textContent = saved.metadata?.label ? `Saved \u2022 ${saved.metadata.label}` : "Saved review session ready";
+    }
     card.appendChild(actions);
     return card;
   }
@@ -4953,6 +5279,7 @@ var Sevenn = (() => {
     } else {
       blockSet.add(blockId);
     }
+    notifyBuilderChanged();
     setBuilder({
       blocks: Array.from(blockSet),
       lectures: Array.from(lectureSet),
@@ -4966,6 +5293,7 @@ var Sevenn = (() => {
       if (key.startsWith(`${blockId}|`)) lectureSet.delete(key);
     }
     blockSet.delete(blockId);
+    notifyBuilderChanged();
     setBuilder({
       blocks: Array.from(blockSet),
       lectures: Array.from(lectureSet),
@@ -4982,6 +5310,7 @@ var Sevenn = (() => {
       }
     });
     syncBlockWithLectureSelection(blockSet, lectureSet, block);
+    notifyBuilderChanged();
     setBuilder({
       lectures: Array.from(lectureSet),
       blocks: Array.from(blockSet),
@@ -4998,6 +5327,7 @@ var Sevenn = (() => {
       }
     });
     syncBlockWithLectureSelection(blockSet, lectureSet, block);
+    notifyBuilderChanged();
     setBuilder({
       lectures: Array.from(lectureSet),
       blocks: Array.from(blockSet),
@@ -5014,6 +5344,7 @@ var Sevenn = (() => {
       lectureSet.add(key);
     }
     syncBlockWithLectureSelection(blockSet, lectureSet, block);
+    notifyBuilderChanged();
     setBuilder({
       lectures: Array.from(lectureSet),
       blocks: Array.from(blockSet),
@@ -5024,6 +5355,7 @@ var Sevenn = (() => {
     const types = new Set(state.builder.types);
     if (types.has(type)) types.delete(type);
     else types.add(type);
+    notifyBuilderChanged();
     setBuilder({ types: Array.from(types) });
   }
   function isBlockCollapsed(blockId) {
@@ -5212,6 +5544,7 @@ var Sevenn = (() => {
     const active = state.flashSession || { idx: 0, pool: state.cohort, ratings: {}, mode: "study" };
     active.ratings = active.ratings || {};
     const items = Array.isArray(active.pool) && active.pool.length ? active.pool : state.cohort;
+    const isReview = active.mode === "review";
     root.innerHTML = "";
     if (!items.length) {
       const msg = document.createElement("div");
@@ -5221,6 +5554,13 @@ var Sevenn = (() => {
     }
     if (active.idx >= items.length) {
       setFlashSession(null);
+      setStudySelectedMode("Flashcards");
+      setSubtab("Study", isReview ? "Review" : "Builder");
+      if (isReview) {
+        removeStudySession("review").catch((err) => console.warn("Failed to clear review session", err));
+      } else {
+        removeStudySession("flashcards").catch((err) => console.warn("Failed to clear flashcard session", err));
+      }
       redraw();
       return;
     }
@@ -5359,7 +5699,7 @@ var Sevenn = (() => {
     prev.disabled = active.idx === 0;
     prev.addEventListener("click", () => {
       if (active.idx > 0) {
-        setFlashSession({ idx: active.idx - 1, pool: items, ratings: active.ratings, mode: active.mode });
+        setFlashSession({ ...active, idx: active.idx - 1, pool: items });
         redraw();
       }
     });
@@ -5367,7 +5707,6 @@ var Sevenn = (() => {
     const next = document.createElement("button");
     next.className = "btn";
     const isLast = active.idx >= items.length - 1;
-    const isReview = active.mode === "review";
     next.textContent = isLast ? isReview ? "Finish review" : "Finish" : "Next";
     next.disabled = sectionBlocks.length > 0;
     next.addEventListener("click", () => {
@@ -5375,19 +5714,89 @@ var Sevenn = (() => {
       if (idx >= items.length) {
         setFlashSession(null);
       } else {
-        setFlashSession({ idx, pool: items, ratings: active.ratings, mode: active.mode });
+        setFlashSession({ ...active, idx, pool: items });
       }
       redraw();
     });
     controls.appendChild(next);
-    const exit = document.createElement("button");
-    exit.className = "btn secondary";
-    exit.textContent = "End";
-    exit.addEventListener("click", () => {
-      setFlashSession(null);
-      redraw();
-    });
-    controls.appendChild(exit);
+    if (!isReview) {
+      const saveExit = document.createElement("button");
+      saveExit.className = "btn secondary";
+      saveExit.textContent = "Save & exit";
+      saveExit.addEventListener("click", async () => {
+        const original = saveExit.textContent;
+        saveExit.disabled = true;
+        saveExit.textContent = "Saving\u2026";
+        try {
+          await persistStudySession("flashcards", {
+            session: { ...active, idx: active.idx, pool: items, ratings: active.ratings },
+            cohort: items
+          });
+          setFlashSession(null);
+          setStudySelectedMode("Flashcards");
+          setSubtab("Study", "Builder");
+          redraw();
+        } catch (err) {
+          console.error("Failed to save flashcard progress", err);
+          saveExit.textContent = "Save failed";
+          setTimeout(() => {
+            saveExit.textContent = original;
+          }, 2e3);
+        } finally {
+          saveExit.disabled = false;
+        }
+      });
+      controls.appendChild(saveExit);
+      const exit = document.createElement("button");
+      exit.className = "btn secondary";
+      exit.textContent = "Exit without saving";
+      exit.addEventListener("click", () => {
+        removeStudySession("flashcards").catch((err) => console.warn("Failed to discard flashcard session", err));
+        setFlashSession(null);
+        setStudySelectedMode("Flashcards");
+        setSubtab("Study", "Builder");
+        redraw();
+      });
+      controls.appendChild(exit);
+    } else {
+      const saveExit = document.createElement("button");
+      saveExit.className = "btn secondary";
+      saveExit.textContent = "Save & exit";
+      saveExit.addEventListener("click", async () => {
+        const original = saveExit.textContent;
+        saveExit.disabled = true;
+        saveExit.textContent = "Saving\u2026";
+        try {
+          await persistStudySession("review", {
+            session: { ...active, idx: active.idx, pool: items, ratings: active.ratings },
+            cohort: state.cohort,
+            metadata: active.metadata || { label: "Review session" }
+          });
+          setFlashSession(null);
+          setSubtab("Study", "Review");
+          redraw();
+        } catch (err) {
+          console.error("Failed to save review session", err);
+          saveExit.textContent = "Save failed";
+          setTimeout(() => {
+            saveExit.textContent = original;
+          }, 2e3);
+        } finally {
+          saveExit.disabled = false;
+        }
+      });
+      controls.appendChild(saveExit);
+      const exitReview = document.createElement("button");
+      exitReview.className = "btn secondary";
+      exitReview.textContent = "Exit without saving";
+      exitReview.addEventListener("click", () => {
+        removeStudySession("review").catch((err) => console.warn("Failed to discard review session", err));
+        setFlashSession(null);
+        setSubtab("Study", "Review");
+        redraw();
+      });
+      controls.appendChild(exitReview);
+    }
     card.appendChild(controls);
     root.appendChild(card);
     card.focus();
@@ -5485,7 +5894,7 @@ var Sevenn = (() => {
     startBtn.disabled = entries.length === 0;
     startBtn.addEventListener("click", () => {
       if (!entries.length) return;
-      start(buildSessionPayload(entries));
+      start(buildSessionPayload(entries), { scope: "all", label: "All due cards" });
     });
     actionRow.appendChild(startBtn);
     container.appendChild(actionRow);
@@ -5510,7 +5919,7 @@ var Sevenn = (() => {
     });
     container.appendChild(list);
   }
-  function renderGroupView(container, groups, label, start) {
+  function renderGroupView(container, groups, label, start, metaBuilder = null) {
     if (!groups.length) {
       renderEmptyState(container);
       return;
@@ -5537,7 +5946,8 @@ var Sevenn = (() => {
       startBtn.className = "btn";
       startBtn.textContent = `Start ${label}`;
       startBtn.addEventListener("click", () => {
-        start(buildSessionPayload(group.entries));
+        const metadata = typeof metaBuilder === "function" ? metaBuilder(group) : { label };
+        start(buildSessionPayload(group.entries), metadata);
       });
       actions.appendChild(startBtn);
       card.appendChild(actions);
@@ -5555,12 +5965,26 @@ var Sevenn = (() => {
       root.appendChild(empty);
       return;
     }
+    await hydrateStudySessions().catch((err) => console.error("Failed to load saved sessions", err));
     const now = Date.now();
     const dueEntries = collectDueSections(cohort, { now });
     const blocks = await listBlocks();
     const blockTitles = ensureBlockTitleMap(blocks);
+    const savedEntry = getStudySessionEntry("review");
     const wrapper = document.createElement("section");
     wrapper.className = "card review-panel";
+    const backRow = document.createElement("div");
+    backRow.className = "review-back-row";
+    const backBtn = document.createElement("button");
+    backBtn.type = "button";
+    backBtn.className = "btn secondary";
+    backBtn.textContent = "Back to study";
+    backBtn.addEventListener("click", () => {
+      setSubtab("Study", "Builder");
+      redraw();
+    });
+    backRow.appendChild(backBtn);
+    wrapper.appendChild(backRow);
     const heading = document.createElement("h2");
     heading.textContent = "Review queue";
     wrapper.appendChild(heading);
@@ -5568,6 +5992,29 @@ var Sevenn = (() => {
     summary.className = "review-summary";
     summary.textContent = `Cards due: ${dueEntries.length}`;
     wrapper.appendChild(summary);
+    if (savedEntry?.session) {
+      const resumeRow = document.createElement("div");
+      resumeRow.className = "review-resume-row";
+      const resumeLabel = document.createElement("div");
+      resumeLabel.className = "review-resume-label";
+      resumeLabel.textContent = savedEntry.metadata?.label || "Saved review session available";
+      resumeRow.appendChild(resumeLabel);
+      const resumeBtn = document.createElement("button");
+      resumeBtn.type = "button";
+      resumeBtn.className = "btn";
+      resumeBtn.textContent = "Resume";
+      resumeBtn.addEventListener("click", async () => {
+        await removeStudySession("review").catch((err) => console.warn("Failed to clear saved review entry", err));
+        const restored = Array.isArray(savedEntry.cohort) ? savedEntry.cohort : null;
+        if (restored) {
+          setCohort(restored);
+        }
+        setFlashSession(savedEntry.session);
+        redraw();
+      });
+      resumeRow.appendChild(resumeBtn);
+      wrapper.appendChild(resumeRow);
+    }
     const tabs2 = document.createElement("div");
     tabs2.className = "review-tabs";
     REVIEW_SCOPES.forEach((scope) => {
@@ -5588,140 +6035,423 @@ var Sevenn = (() => {
     const body = document.createElement("div");
     body.className = "review-body";
     wrapper.appendChild(body);
-    const startSession = (pool) => {
+    const startSession = async (pool, metadata = {}) => {
       if (!pool.length) return;
-      setFlashSession({ idx: 0, pool, ratings: {}, mode: "review" });
+      await removeStudySession("review").catch((err) => console.warn("Failed to discard existing review save", err));
+      setFlashSession({ idx: 0, pool, ratings: {}, mode: "review", metadata });
       redraw();
     };
     if (activeScope === "all") {
       renderAllView(body, dueEntries, now, startSession);
     } else if (activeScope === "blocks") {
       const groups = groupByBlock(dueEntries, blockTitles);
-      renderGroupView(body, groups, "block review", startSession);
+      renderGroupView(body, groups, "block review", startSession, (group) => ({
+        scope: "block",
+        label: `Block \u2013 ${group.title}`,
+        blockId: group.id
+      }));
     } else {
       const groups = groupByLecture(dueEntries, blockTitles);
-      renderGroupView(body, groups, "lecture review", startSession);
+      renderGroupView(body, groups, "lecture review", startSession, (group) => ({
+        scope: "lecture",
+        label: `Lecture \u2013 ${group.title}`,
+        lectureId: group.id
+      }));
     }
     root.appendChild(wrapper);
   }
 
   // js/ui/components/quiz.js
+  var RATING_LABELS2 = {
+    again: "Again",
+    hard: "Hard",
+    good: "Good",
+    easy: "Easy",
+    [RETIRE_RATING]: "Retire"
+  };
+  var RATING_CLASS2 = {
+    again: "danger",
+    hard: "secondary",
+    good: "",
+    easy: "",
+    [RETIRE_RATING]: "secondary"
+  };
   function titleOf3(item) {
-    return item.name || item.concept || "";
+    return item?.name || item?.concept || "";
+  }
+  function ratingKey2(item, sectionKey) {
+    const id = item?.id || "item";
+    return `${id}::${sectionKey}`;
+  }
+  function ensureSessionDefaults(session) {
+    if (!session) return;
+    if (!Array.isArray(session.pool)) session.pool = [];
+    if (!session.dict) {
+      session.dict = session.pool.map((it) => ({
+        id: it.id,
+        title: titleOf3(it),
+        lower: titleOf3(it).toLowerCase()
+      }));
+    }
+    if (!session.answers || typeof session.answers !== "object") {
+      session.answers = {};
+    }
+    if (!session.ratings || typeof session.ratings !== "object") {
+      session.ratings = {};
+    }
+  }
+  function computeScore(answers) {
+    if (!answers) return 0;
+    return Object.values(answers).filter((entry) => entry && entry.isCorrect).length;
+  }
+  function renderCompletion(root, session, redraw) {
+    removeStudySession("quiz").catch((err) => console.warn("Failed to clear quiz session", err));
+    const wrap = document.createElement("section");
+    wrap.className = "card quiz-summary";
+    const heading = document.createElement("h2");
+    heading.textContent = "Quiz complete";
+    wrap.appendChild(heading);
+    const score = document.createElement("p");
+    const total = Array.isArray(session.pool) ? session.pool.length : 0;
+    score.textContent = `Score ${session.score}/${total}`;
+    wrap.appendChild(score);
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.textContent = "Back to builder";
+    btn.addEventListener("click", () => {
+      setQuizSession(null);
+      setStudySelectedMode("Quiz");
+      setSubtab("Study", "Builder");
+      redraw();
+    });
+    wrap.appendChild(btn);
+    root.appendChild(wrap);
   }
   function renderQuiz(root, redraw) {
-    const sess = state.quizSession;
-    if (!sess) return;
-    if (!sess.dict) {
-      sess.dict = sess.pool.map((it) => ({ id: it.id, title: titleOf3(it), lower: titleOf3(it).toLowerCase() }));
-    }
-    const item = sess.pool[sess.idx];
-    if (!item) {
-      const done = document.createElement("div");
-      done.textContent = `Score ${sess.score}/${sess.pool.length}`;
-      const btn = document.createElement("button");
-      btn.className = "btn";
-      btn.textContent = "Done";
-      btn.addEventListener("click", () => {
-        setQuizSession(null);
-        redraw();
-      });
-      done.appendChild(document.createElement("br"));
-      done.appendChild(btn);
-      root.appendChild(done);
+    const session = state.quizSession;
+    if (!session) return;
+    ensureSessionDefaults(session);
+    const pool = Array.isArray(session.pool) ? session.pool : [];
+    root.innerHTML = "";
+    if (!pool.length) {
+      const empty = document.createElement("div");
+      empty.textContent = "No questions available. Build a study set to begin.";
+      root.appendChild(empty);
       return;
     }
+    if (session.idx >= pool.length) {
+      renderCompletion(root, session, redraw);
+      return;
+    }
+    const item = pool[session.idx];
+    if (!item) {
+      renderCompletion(root, session, redraw);
+      return;
+    }
+    const answer = session.answers[session.idx] || { value: "", isCorrect: false, checked: false };
+    const hasSubmitted = Boolean(answer.checked);
+    const wasCorrect = hasSubmitted && answer.isCorrect;
+    const card = document.createElement("section");
+    card.className = "card quiz-card";
+    root.appendChild(card);
+    const header = document.createElement("div");
+    header.className = "quiz-header";
+    const progress = document.createElement("div");
+    progress.className = "quiz-progress";
+    progress.textContent = `Question ${session.idx + 1} of ${pool.length}`;
+    header.appendChild(progress);
+    const tally = document.createElement("div");
+    tally.className = "quiz-score";
+    tally.textContent = `Score: ${session.score}`;
+    header.appendChild(tally);
+    card.appendChild(header);
+    const prompt2 = document.createElement("p");
+    prompt2.className = "quiz-prompt";
+    prompt2.textContent = "Identify the term based on the details below.";
+    card.appendChild(prompt2);
+    const details = document.createElement("div");
+    details.className = "quiz-details";
+    const sections = sectionsForItem(item);
+    if (!sections.length) {
+      const emptySection = document.createElement("div");
+      emptySection.className = "quiz-empty";
+      emptySection.textContent = "No card content available for this entry.";
+      details.appendChild(emptySection);
+    } else {
+      sections.forEach(({ key, label }) => {
+        const block = document.createElement("div");
+        block.className = "quiz-section";
+        const head = document.createElement("div");
+        head.className = "quiz-section-title";
+        head.textContent = label;
+        block.appendChild(head);
+        const body = document.createElement("div");
+        body.className = "quiz-section-body";
+        renderRichText(body, item[key] || "");
+        block.appendChild(body);
+        details.appendChild(block);
+      });
+    }
+    card.appendChild(details);
     const form = document.createElement("form");
-    form.className = "quiz-form";
-    const info = document.createElement("div");
-    info.className = "quiz-info";
-    sectionsFor(item).forEach(([label, field]) => {
-      if (!item[field]) return;
-      const sec = document.createElement("div");
-      sec.className = "section";
-      const head = document.createElement("div");
-      head.className = "section-title";
-      head.textContent = label;
-      const body = document.createElement("div");
-      renderRichText(body, item[field]);
-      sec.appendChild(head);
-      sec.appendChild(body);
-      info.appendChild(sec);
-    });
-    form.appendChild(info);
+    form.className = "quiz-answer";
     const input = document.createElement("input");
     input.type = "text";
     input.autocomplete = "off";
+    input.placeholder = "Type your answer";
+    input.value = answer.value || "";
     form.appendChild(input);
-    const sug = document.createElement("ul");
-    sug.className = "quiz-suggestions";
-    form.appendChild(sug);
+    const suggestions = document.createElement("ul");
+    suggestions.className = "quiz-suggestions";
+    form.appendChild(suggestions);
+    const feedback = document.createElement("div");
+    feedback.className = "quiz-feedback";
+    if (hasSubmitted) {
+      feedback.textContent = wasCorrect ? "Correct!" : `Incorrect \u2022 Answer: ${titleOf3(item)}`;
+      feedback.classList.add(wasCorrect ? "is-correct" : "is-incorrect");
+    }
+    form.appendChild(feedback);
+    card.appendChild(form);
     input.addEventListener("input", () => {
       const v = input.value.toLowerCase();
-      sug.innerHTML = "";
+      const existing = session.answers[session.idx];
+      if (existing && existing.checked) {
+        delete session.answers[session.idx];
+        session.score = computeScore(session.answers);
+        setQuizSession({ ...session });
+        feedback.textContent = "";
+        feedback.classList.remove("is-correct", "is-incorrect");
+        tally.textContent = `Score: ${session.score}`;
+        updateNavState();
+      }
+      suggestions.innerHTML = "";
       if (!v) return;
-      const starts = sess.dict.filter((d) => d.lower.startsWith(v));
-      const contains = sess.dict.filter((d) => !d.lower.startsWith(v) && d.lower.includes(v));
+      const starts = session.dict.filter((d) => d.lower.startsWith(v));
+      const contains = session.dict.filter((d) => !d.lower.startsWith(v) && d.lower.includes(v));
       [...starts, ...contains].slice(0, 5).forEach((d) => {
         const li = document.createElement("li");
         li.textContent = d.title;
         li.addEventListener("mousedown", () => {
           input.value = d.title;
-          sug.innerHTML = "";
+          suggestions.innerHTML = "";
         });
-        sug.appendChild(li);
+        suggestions.appendChild(li);
       });
     });
-    form.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const ans = input.value.trim().toLowerCase();
-      const correct = titleOf3(item).toLowerCase();
-      if (ans === correct) sess.score++;
-      sess.idx++;
-      setQuizSession(sess);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      gradeAnswer();
+    });
+    const durationsPromise = getReviewDurations().catch(() => ({ ...DEFAULT_REVIEW_STEPS }));
+    const ratedSections = /* @__PURE__ */ new Map();
+    sections.forEach(({ key }) => {
+      const saved = session.ratings[ratingKey2(item, key)];
+      if (saved) ratedSections.set(key, saved);
+    });
+    const ratingPanel = document.createElement("div");
+    ratingPanel.className = "quiz-rating-panel";
+    card.appendChild(ratingPanel);
+    const ratingTitle = document.createElement("h3");
+    ratingTitle.textContent = "Rate each section before continuing";
+    ratingPanel.appendChild(ratingTitle);
+    const ratingList = document.createElement("div");
+    ratingList.className = "quiz-rating-list";
+    ratingPanel.appendChild(ratingList);
+    const ratingStatuses = /* @__PURE__ */ new Map();
+    sections.forEach(({ key, label }) => {
+      const row = document.createElement("div");
+      row.className = "quiz-rating-row";
+      const sectionLabel = document.createElement("div");
+      sectionLabel.className = "quiz-rating-label";
+      sectionLabel.textContent = label;
+      row.appendChild(sectionLabel);
+      const options = document.createElement("div");
+      options.className = "quiz-rating-options";
+      const status = document.createElement("span");
+      status.className = "quiz-rating-status";
+      ratingStatuses.set(key, status);
+      const applyRating = (value) => {
+        ratedSections.set(key, value);
+        session.ratings[ratingKey2(item, key)] = value;
+        setQuizSession({ ...session });
+        Array.from(options.querySelectorAll("button")).forEach((btn) => {
+          const btnValue = btn.dataset.value;
+          const isSelected = btnValue === value;
+          btn.classList.toggle("is-selected", isSelected);
+          btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
+        });
+        updateNavState();
+      };
+      const handleRating = async (value) => {
+        if (!session.answers[session.idx]) return;
+        status.textContent = "Saving\u2026";
+        status.classList.remove("is-error");
+        try {
+          const durations = await durationsPromise;
+          rateSection(item, key, value, durations, Date.now());
+          await upsertItem(item);
+          applyRating(value);
+          status.textContent = value === RETIRE_RATING ? "Retired" : "Saved";
+        } catch (err) {
+          console.error("Failed to record quiz rating", err);
+          status.textContent = "Save failed";
+          status.classList.add("is-error");
+        }
+      };
+      [...REVIEW_RATINGS, RETIRE_RATING].forEach((value) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.dataset.value = value;
+        btn.className = "btn quiz-rating-btn";
+        const variant = RATING_CLASS2[value];
+        if (variant) btn.classList.add(variant);
+        btn.textContent = RATING_LABELS2[value];
+        btn.disabled = !hasSubmitted;
+        btn.setAttribute("aria-pressed", "false");
+        btn.addEventListener("click", () => handleRating(value));
+        options.appendChild(btn);
+      });
+      const previous = ratedSections.get(key);
+      if (previous) {
+        applyRating(previous);
+        status.textContent = previous === RETIRE_RATING ? "Retired" : "Saved";
+      }
+      row.appendChild(options);
+      row.appendChild(status);
+      ratingList.appendChild(row);
+    });
+    if (!sections.length) {
+      const note = document.createElement("div");
+      note.className = "quiz-rating-note";
+      note.textContent = "This card has no reviewable sections.";
+      ratingPanel.appendChild(note);
+    }
+    const controls = document.createElement("div");
+    controls.className = "quiz-controls";
+    const backBtn = document.createElement("button");
+    backBtn.type = "button";
+    backBtn.className = "btn secondary";
+    backBtn.textContent = "Back";
+    backBtn.disabled = session.idx === 0;
+    backBtn.addEventListener("click", () => {
+      setQuizSession({ ...session, idx: Math.max(0, session.idx - 1) });
       redraw();
     });
-    root.appendChild(form);
-  }
-  function sectionsFor(item) {
-    const map = {
-      disease: [
-        ["Etiology", "etiology"],
-        ["Pathophys", "pathophys"],
-        ["Clinical Presentation", "clinical"],
-        ["Diagnosis", "diagnosis"],
-        ["Treatment", "treatment"],
-        ["Complications", "complications"],
-        ["Mnemonic", "mnemonic"]
-      ],
-      drug: [
-        ["Mechanism", "moa"],
-        ["Uses", "uses"],
-        ["Side Effects", "sideEffects"],
-        ["Contraindications", "contraindications"],
-        ["Mnemonic", "mnemonic"]
-      ],
-      concept: [
-        ["Definition", "definition"],
-        ["Mechanism", "mechanism"],
-        ["Clinical Relevance", "clinicalRelevance"],
-        ["Example", "example"],
-        ["Mnemonic", "mnemonic"]
-      ]
-    };
-    return map[item.kind] || [];
+    controls.appendChild(backBtn);
+    const submitBtn = document.createElement("button");
+    submitBtn.type = "submit";
+    submitBtn.className = "btn";
+    submitBtn.textContent = hasSubmitted ? "Resubmit" : "Submit";
+    submitBtn.disabled = !input.value.trim();
+    form.addEventListener("input", () => {
+      submitBtn.disabled = !input.value.trim();
+    });
+    controls.appendChild(submitBtn);
+    const nextBtn = document.createElement("button");
+    nextBtn.type = "button";
+    nextBtn.className = "btn";
+    nextBtn.textContent = session.idx === pool.length - 1 ? "Finish" : "Next";
+    nextBtn.disabled = true;
+    nextBtn.addEventListener("click", () => {
+      setQuizSession({ ...session, idx: session.idx + 1 });
+      redraw();
+    });
+    controls.appendChild(nextBtn);
+    card.appendChild(controls);
+    const footer = document.createElement("div");
+    footer.className = "quiz-footer";
+    const saveExit = document.createElement("button");
+    saveExit.type = "button";
+    saveExit.className = "btn secondary";
+    saveExit.textContent = "Save & exit";
+    saveExit.addEventListener("click", async () => {
+      const original = saveExit.textContent;
+      saveExit.disabled = true;
+      saveExit.textContent = "Saving\u2026";
+      try {
+        await persistStudySession("quiz", {
+          session: {
+            ...session,
+            idx: session.idx,
+            pool,
+            answers: session.answers,
+            ratings: session.ratings
+          },
+          cohort: pool
+        });
+        setQuizSession(null);
+        setStudySelectedMode("Quiz");
+        setSubtab("Study", "Builder");
+        redraw();
+      } catch (err) {
+        console.error("Failed to save quiz progress", err);
+        saveExit.textContent = "Save failed";
+        setTimeout(() => {
+          saveExit.textContent = original;
+        }, 2e3);
+      } finally {
+        saveExit.disabled = false;
+      }
+    });
+    footer.appendChild(saveExit);
+    const exitBtn = document.createElement("button");
+    exitBtn.type = "button";
+    exitBtn.className = "btn secondary";
+    exitBtn.textContent = "Exit without saving";
+    exitBtn.addEventListener("click", () => {
+      removeStudySession("quiz").catch((err) => console.warn("Failed to discard quiz session", err));
+      setQuizSession(null);
+      setStudySelectedMode("Quiz");
+      setSubtab("Study", "Builder");
+      redraw();
+    });
+    footer.appendChild(exitBtn);
+    card.appendChild(footer);
+    updateNavState();
+    function gradeAnswer() {
+      const guess = input.value.trim();
+      if (!guess) return;
+      const normalized2 = guess.toLowerCase();
+      const correct = titleOf3(item).toLowerCase();
+      const isCorrect = normalized2 === correct;
+      const answers = { ...session.answers, [session.idx]: { value: guess, isCorrect, checked: true } };
+      const nextScore = computeScore(answers);
+      session.answers = answers;
+      session.score = nextScore;
+      setQuizSession({ ...session });
+      tally.textContent = `Score: ${session.score}`;
+      feedback.textContent = isCorrect ? "Correct!" : `Incorrect \u2022 Answer: ${titleOf3(item)}`;
+      feedback.classList.remove("is-correct", "is-incorrect");
+      feedback.classList.add(isCorrect ? "is-correct" : "is-incorrect");
+      updateNavState();
+    }
+    function updateNavState() {
+      const currentAnswer = session.answers[session.idx];
+      const answered = Boolean(currentAnswer && currentAnswer.checked);
+      const allRated = !sections.length || sections.every(({ key }) => ratedSections.get(key));
+      nextBtn.disabled = !(answered && allRated);
+      submitBtn.textContent = answered ? "Resubmit" : "Submit";
+      Array.from(ratingList.querySelectorAll("button")).forEach((btn) => {
+        if (!answered) {
+          btn.disabled = true;
+          btn.setAttribute("aria-pressed", "false");
+          return;
+        }
+        btn.disabled = false;
+      });
+    }
   }
 
   // js/ui/components/block-mode.js
-  function renderBlockMode(root) {
+  function renderBlockMode(root, redraw) {
     const shell = document.createElement("section");
     shell.className = "block-mode-shell";
     root.appendChild(shell);
-    drawBlockMode(shell);
+    drawBlockMode(shell, redraw);
   }
-  function drawBlockMode(shell) {
+  function drawBlockMode(shell, globalRedraw) {
     shell.innerHTML = "";
-    const redraw = () => drawBlockMode(shell);
+    const redraw = () => drawBlockMode(shell, globalRedraw);
     const items = state.cohort || [];
     if (!items.length) {
       shell.appendChild(messageCard("Build a study set to unlock Blocks mode. Use the filters above to assemble a cohort."));
@@ -5827,6 +6557,90 @@ var Sevenn = (() => {
       label: sectionData.label,
       entries: orderedBank
     }));
+    shell.appendChild(renderFooter({
+      globalRedraw,
+      sectionLabel: sectionData.label,
+      filledCount,
+      total: results.length
+    }));
+  }
+  function snapshotBlockState() {
+    const source = state.blockMode || {};
+    const clone4 = (value) => JSON.parse(JSON.stringify(value ?? {}));
+    return {
+      section: source.section || "",
+      assignments: clone4(source.assignments),
+      reveal: clone4(source.reveal),
+      order: clone4(source.order)
+    };
+  }
+  function renderFooter({ globalRedraw, sectionLabel, filledCount, total }) {
+    const card = document.createElement("div");
+    card.className = "card block-mode-footer";
+    const status = document.createElement("div");
+    status.className = "block-mode-footer-status";
+    if (total > 0) {
+      status.textContent = filledCount ? `Progress saved for ${filledCount}/${total} prompts` : "No assignments yet";
+    } else {
+      status.textContent = "No prompts in this section yet.";
+    }
+    card.appendChild(status);
+    const actions = document.createElement("div");
+    actions.className = "block-mode-footer-actions";
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "btn";
+    saveBtn.textContent = "Save & exit";
+    saveBtn.addEventListener("click", async () => {
+      const original = saveBtn.textContent;
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Saving\u2026";
+      try {
+        const snapshot = snapshotBlockState();
+        await persistStudySession("blocks", {
+          session: snapshot,
+          cohort: state.cohort,
+          metadata: {
+            label: sectionLabel ? `Blocks \u2013 ${sectionLabel}` : "Blocks session"
+          }
+        });
+        resetBlockMode();
+        setStudySelectedMode("Blocks");
+        setSubtab("Study", "Builder");
+        if (typeof globalRedraw === "function") {
+          globalRedraw();
+        }
+      } catch (err) {
+        console.error("Failed to save blocks progress", err);
+        saveBtn.textContent = "Save failed";
+        setTimeout(() => {
+          saveBtn.textContent = original;
+        }, 2e3);
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+    actions.appendChild(saveBtn);
+    const exitBtn = document.createElement("button");
+    exitBtn.type = "button";
+    exitBtn.className = "btn secondary";
+    exitBtn.textContent = "Exit without saving";
+    exitBtn.addEventListener("click", async () => {
+      exitBtn.disabled = true;
+      try {
+        await removeStudySession("blocks").catch((err) => console.warn("Failed to discard blocks session", err));
+      } finally {
+        resetBlockMode();
+        setStudySelectedMode("Blocks");
+        setSubtab("Study", "Builder");
+        if (typeof globalRedraw === "function") {
+          globalRedraw();
+        }
+      }
+    });
+    actions.appendChild(exitBtn);
+    card.appendChild(actions);
+    return card;
   }
   function renderHeader({ sections, activeKey, filledCount, correctCount, total, bankRemaining, reveal, onSectionChange, onCheck, onReset }) {
     const card = document.createElement("div");
@@ -6090,7 +6904,7 @@ var Sevenn = (() => {
   var keyHandler = null;
   var keyHandlerSession = null;
   var lastExamStatusMessage = "";
-  function clone2(value) {
+  function clone3(value) {
     return value ? JSON.parse(JSON.stringify(value)) : value;
   }
   function totalExamTimeMs(exam) {
@@ -6216,7 +7030,7 @@ var Sevenn = (() => {
     }
   }
   function ensureExamShape(exam) {
-    const next = clone2(exam) || {};
+    const next = clone3(exam) || {};
     let changed = false;
     if (!next.id) {
       next.id = uid();
@@ -6332,7 +7146,7 @@ var Sevenn = (() => {
     };
   }
   function createTakingSession(exam) {
-    const snapshot = clone2(exam);
+    const snapshot = clone3(exam);
     const totalMs = snapshot.timerMode === "timed" ? totalExamTimeMs(snapshot) : null;
     return {
       mode: "taking",
@@ -6348,7 +7162,7 @@ var Sevenn = (() => {
   }
   function hydrateSavedSession(saved, fallbackExam) {
     const baseExam = saved?.exam ? ensureExamShape(saved.exam).exam : fallbackExam;
-    const exam = clone2(baseExam);
+    const exam = clone3(baseExam);
     const questionCount = exam.questions.length;
     const idx = Math.min(Math.max(Number(saved?.idx) || 0, 0), Math.max(0, questionCount - 1));
     const remaining = typeof saved?.remainingMs === "number" ? Math.max(0, saved.remainingMs) : exam.timerMode === "timed" ? totalExamTimeMs(exam) : null;
@@ -6533,7 +7347,7 @@ var Sevenn = (() => {
       reviewBtn.className = "btn secondary";
       reviewBtn.textContent = "Review Last Attempt";
       reviewBtn.addEventListener("click", () => {
-        setExamSession({ mode: "review", exam: clone2(exam), result: clone2(last), idx: 0 });
+        setExamSession({ mode: "review", exam: clone3(exam), result: clone3(last), idx: 0 });
         render2();
       });
       actions.appendChild(reviewBtn);
@@ -6628,7 +7442,7 @@ var Sevenn = (() => {
     review.className = "btn secondary";
     review.textContent = "Review";
     review.addEventListener("click", () => {
-      setExamSession({ mode: "review", exam: clone2(exam), result: clone2(result), idx: 0 });
+      setExamSession({ mode: "review", exam: clone3(exam), result: clone3(result), idx: 0 });
       render2();
     });
     row.appendChild(review);
@@ -7050,7 +7864,7 @@ var Sevenn = (() => {
     stopTimer(sess);
     const payload = {
       examId: sess.exam.id,
-      exam: clone2(sess.exam),
+      exam: clone3(sess.exam),
       idx: sess.idx,
       answers: { ...sess.answers || {} },
       flagged: { ...sess.flagged || {} },
@@ -7095,7 +7909,7 @@ var Sevenn = (() => {
       durationMs: sess.elapsedMs || 0,
       answered: answeredCount
     };
-    const updatedExam = clone2(sess.exam);
+    const updatedExam = clone3(sess.exam);
     updatedExam.results = [...updatedExam.results || [], result];
     updatedExam.updatedAt = Date.now();
     await upsertExam(updatedExam);
@@ -7133,10 +7947,10 @@ var Sevenn = (() => {
     reviewBtn.addEventListener("click", () => {
       setExamSession({
         mode: "review",
-        exam: clone2(sess.exam),
-        result: clone2(sess.latestResult),
+        exam: clone3(sess.exam),
+        result: clone3(sess.latestResult),
         idx: 0,
-        fromSummary: clone2(sess.latestResult)
+        fromSummary: clone3(sess.latestResult)
       });
       render2();
     });
@@ -7722,9 +8536,9 @@ var Sevenn = (() => {
     const deduped = [];
     tabs2.forEach((tab) => {
       if (ids.has(tab.id)) {
-        const clone3 = { ...tab, id: uid() };
-        ids.add(clone3.id);
-        deduped.push(clone3);
+        const clone4 = { ...tab, id: uid() };
+        ids.add(clone4.id);
+        deduped.push(clone4);
       } else {
         ids.add(tab.id);
         deduped.push(tab);
@@ -10085,6 +10899,10 @@ var Sevenn = (() => {
       if (variant) btn.classList.add(variant);
       btn.textContent = t;
       btn.addEventListener("click", () => {
+        const wasActive = state.tab === t;
+        if (t === "Study" && wasActive && state.subtab?.Study === "Review" && !state.flashSession && !state.quizSession) {
+          setSubtab("Study", "Builder");
+        }
         setTab(t);
         render();
       });
@@ -10179,50 +10997,39 @@ var Sevenn = (() => {
         renderQuiz(content, render);
       } else {
         const wrap = document.createElement("div");
-        await renderBuilder(wrap);
+        await renderBuilder(wrap, render);
         content.appendChild(wrap);
         const subnav = document.createElement("div");
         subnav.className = "tabs row subtabs";
-        ["Flashcards", "Review", "Quiz", "Blocks"].forEach((st) => {
+        const buttons = [
+          { key: "Builder", label: "Study home" },
+          { key: "Review", label: "Review" }
+        ];
+        const activeKey = state.subtab.Study === "Blocks" ? "Builder" : state.subtab.Study;
+        buttons.forEach(({ key, label }) => {
           const sb = document.createElement("button");
           sb.className = "tab";
-          const isActive = state.subtab.Study === st;
+          const isActive = activeKey === key;
           if (isActive) sb.classList.add("active");
           sb.dataset.toggle = "true";
           sb.dataset.active = isActive ? "true" : "false";
           sb.setAttribute("aria-pressed", isActive ? "true" : "false");
-          sb.textContent = st;
+          sb.textContent = label;
           sb.addEventListener("click", () => {
-            setSubtab("Study", st);
+            setSubtab("Study", key);
             render();
           });
           subnav.appendChild(sb);
         });
         content.appendChild(subnav);
-        if (state.cohort.length) {
-          if (state.subtab.Study === "Flashcards") {
-            const startBtn = document.createElement("button");
-            startBtn.className = "btn";
-            startBtn.textContent = "Start Flashcards";
-            startBtn.addEventListener("click", () => {
-              setFlashSession({ idx: 0, pool: state.cohort, ratings: {}, mode: "study" });
-              render();
-            });
-            content.appendChild(startBtn);
-          } else if (state.subtab.Study === "Review") {
-            await renderReview(content, render);
-          } else if (state.subtab.Study === "Quiz") {
-            const startBtn = document.createElement("button");
-            startBtn.className = "btn";
-            startBtn.textContent = "Start Quiz";
-            startBtn.addEventListener("click", () => {
-              setQuizSession({ idx: 0, score: 0, pool: state.cohort });
-              render();
-            });
-            content.appendChild(startBtn);
-          } else if (state.subtab.Study === "Blocks") {
-            renderBlockMode(content);
-          }
+        if (state.flashSession) {
+          renderFlashcards(content, render);
+        } else if (state.quizSession) {
+          renderQuiz(content, render);
+        } else if (state.subtab.Study === "Blocks") {
+          renderBlockMode(content, render);
+        } else if (state.subtab.Study === "Review") {
+          await renderReview(content, render);
         }
       }
     } else if (state.tab === "Exams") {
