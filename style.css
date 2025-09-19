@@ -88,7 +88,7 @@ button:focus-visible {
   outline-offset: 3px;
 }
 
-button:not(.tab):not(.fab-btn) {
+button:not(.tab):not(.fab-btn):not(.builder-pill) {
   background: rgba(148, 163, 184, 0.14);
   color: var(--text);
   border: 1px solid var(--border);
@@ -97,7 +97,7 @@ button:not(.tab):not(.fab-btn) {
   box-shadow: none;
 }
 
-button:not(.tab):not(.fab-btn):hover {
+button:not(.tab):not(.fab-btn):not(.builder-pill):hover {
   background: rgba(148, 163, 184, 0.22);
 }
 
@@ -1638,7 +1638,7 @@ input[type="checkbox"]:checked::after {
   gap: var(--pad-sm);
 }
 
-.builder-pill {
+button.builder-pill {
   background: rgba(148, 163, 184, 0.16);
   border: 1px solid rgba(148, 163, 184, 0.32);
   border-radius: 999px;
@@ -1648,50 +1648,56 @@ input[type="checkbox"]:checked::after {
   transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.builder-pill:hover {
+button.builder-pill:hover {
   transform: translateY(-1px);
   background: rgba(148, 163, 184, 0.26);
   border-color: rgba(56, 189, 248, 0.45);
 }
 
-.builder-pill.active {
+
+button.builder-pill.active {
+
   background: linear-gradient(135deg, rgba(125, 211, 252, 0.95), rgba(199, 210, 254, 0.92));
   color: #0b162d;
   border-color: transparent;
   box-shadow: 0 14px 26px rgba(2, 6, 23, 0.32);
+
 }
 
-.builder-pill.active:hover,
-.builder-pill.active:focus-visible {
+button.builder-pill.active:hover,
+button.builder-pill.active:focus-visible {
   background: linear-gradient(135deg, rgba(148, 226, 255, 0.98), rgba(221, 214, 254, 0.96));
   color: #061024;
 }
 
-.builder-pill-lecture {
+button.builder-pill.builder-pill-lecture {
+
   background: rgba(165, 180, 252, 0.16);
   border-color: rgba(165, 180, 252, 0.32);
   font-size: 0.9rem;
 }
 
-.builder-pill-lecture.active {
+button.builder-pill.builder-pill-lecture.active {
+
   background: linear-gradient(135deg, rgba(191, 219, 254, 0.98), rgba(224, 231, 255, 0.96));
   border-color: transparent;
   color: #0a1530;
   box-shadow: 0 10px 22px rgba(15, 23, 42, 0.38);
+
 }
 
-.builder-pill-lecture.active:hover,
-.builder-pill-lecture.active:focus-visible {
+button.builder-pill.builder-pill-lecture.active:hover,
+button.builder-pill.builder-pill-lecture.active:focus-visible {
   background: linear-gradient(135deg, rgba(221, 231, 255, 0.99), rgba(210, 221, 255, 0.97));
   color: #050d1f;
 }
 
-.builder-pill-small {
+button.builder-pill.builder-pill-small {
   font-size: 0.85rem;
   padding: 4px 12px;
 }
 
-.builder-pill-outline {
+button.builder-pill.builder-pill-outline {
   border-style: dashed;
 }
 
