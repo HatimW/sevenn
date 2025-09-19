@@ -525,7 +525,9 @@ function renderReviewCard(redraw) {
   openBtn.type = 'button';
   openBtn.className = 'btn secondary';
   openBtn.textContent = 'Open review';
+
   openBtn.disabled = false;
+
   openBtn.addEventListener('click', () => {
     setSubtab('Study', 'Review');
     redraw();
@@ -567,8 +569,10 @@ function renderReviewCard(redraw) {
         } else {
           status.textContent = base;
         }
+
       } else {
         status.textContent = 'Review queue ready — no cards due yet.';
+
       }
     } catch (err) {
       console.warn('Failed to summarize review queue', err);
