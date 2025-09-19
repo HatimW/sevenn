@@ -54,6 +54,10 @@ async function render() {
     if (variant) btn.classList.add(variant);
     btn.textContent = t;
     btn.addEventListener('click', () => {
+      const wasActive = state.tab === t;
+      if (t === 'Study' && wasActive && state.subtab?.Study === 'Review' && !state.flashSession && !state.quizSession) {
+        setSubtab('Study', 'Builder');
+      }
       setTab(t);
       render();
     });
