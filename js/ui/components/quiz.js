@@ -2,7 +2,7 @@ import { state, setQuizSession, setSubtab, setStudySelectedMode } from '../../st
 import { renderRichText } from './rich-text.js';
 import { persistStudySession, removeStudySession } from '../../study/study-sessions.js';
 import { sectionsForItem } from './section-utils.js';
-import { REVIEW_RATINGS, RETIRE_RATING, DEFAULT_REVIEW_STEPS } from '../../review/constants.js';
+import { REVIEW_RATINGS, DEFAULT_REVIEW_STEPS } from '../../review/constants.js';
 import { getReviewDurations, rateSection } from '../../review/scheduler.js';
 import { upsertItem } from '../../storage/storage.js';
 
@@ -11,16 +11,14 @@ const RATING_LABELS = {
   again: 'Again',
   hard: 'Hard',
   good: 'Good',
-  easy: 'Easy',
-  [RETIRE_RATING]: 'Retire'
+  easy: 'Easy'
 };
 
 const RATING_CLASS = {
   again: 'danger',
   hard: 'secondary',
   good: '',
-  easy: '',
-  [RETIRE_RATING]: 'secondary'
+  easy: ''
 };
 
 function titleOf(item) {
@@ -226,96 +224,87 @@ export function renderQuiz(root, redraw) {
   });
 
   const durationsPromise = getReviewDurations().catch(() => ({ ...DEFAULT_REVIEW_STEPS }));
-  const ratedSections = new Map();
-  sections.forEach(({ key }) => {
-    const saved = session.ratings[ratingKey(item, key)];
-    if (saved) ratedSections.set(key, saved);
-  });
-
   const ratingPanel = document.createElement('div');
   ratingPanel.className = 'quiz-rating-panel';
   card.appendChild(ratingPanel);
 
   const ratingTitle = document.createElement('h3');
-  ratingTitle.textContent = 'Rate each section before continuing';
+  ratingTitle.textContent = 'How well did you know this card?';
   ratingPanel.appendChild(ratingTitle);
 
-  const ratingList = document.createElement('div');
-  ratingList.className = 'quiz-rating-list';
-  ratingPanel.appendChild(ratingList);
+  const ratingRow = document.createElement('div');
+  ratingRow.className = 'quiz-rating-row';
+  ratingPanel.appendChild(ratingRow);
 
-  const ratingStatuses = new Map();
+  const ratingLabel = document.createElement('div');
+  ratingLabel.className = 'quiz-rating-label';
+  ratingLabel.textContent = 'Rate this card';
+  ratingRow.appendChild(ratingLabel);
 
-  sections.forEach(({ key, label }) => {
-    const row = document.createElement('div');
-    row.className = 'quiz-rating-row';
+  const options = document.createElement('div');
+  options.className = 'quiz-rating-options';
+  ratingRow.appendChild(options);
 
-    const sectionLabel = document.createElement('div');
-    sectionLabel.className = 'quiz-rating-label';
-    sectionLabel.textContent = label;
-    row.appendChild(sectionLabel);
+  const status = document.createElement('span');
+  status.className = 'quiz-rating-status';
+  ratingRow.appendChild(status);
 
-    const options = document.createElement('div');
-    options.className = 'quiz-rating-options';
+  const ratingId = ratingKey(item, '__overall__');
+  let selectedRating = session.ratings[ratingId] || null;
 
-    const status = document.createElement('span');
-    status.className = 'quiz-rating-status';
-    ratingStatuses.set(key, status);
-
-    const applyRating = (value) => {
-      ratedSections.set(key, value);
-      session.ratings[ratingKey(item, key)] = value;
-      setQuizSession({ ...session });
-      Array.from(options.querySelectorAll('button')).forEach(btn => {
-        const btnValue = btn.dataset.value;
-        const isSelected = btnValue === value;
-        btn.classList.toggle('is-selected', isSelected);
-        btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
-      });
-      updateNavState();
-    };
-
-    const handleRating = async (value) => {
-      if (!session.answers[session.idx]) return;
-      status.textContent = 'Saving…';
-      status.classList.remove('is-error');
-      try {
-        const durations = await durationsPromise;
-        rateSection(item, key, value, durations, Date.now());
-        await upsertItem(item);
-        applyRating(value);
-        status.textContent = value === RETIRE_RATING ? 'Retired' : 'Saved';
-      } catch (err) {
-        console.error('Failed to record quiz rating', err);
-        status.textContent = 'Save failed';
-        status.classList.add('is-error');
-      }
-    };
-
-    [...REVIEW_RATINGS, RETIRE_RATING].forEach(value => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.dataset.value = value;
-      btn.className = 'btn quiz-rating-btn';
-      const variant = RATING_CLASS[value];
-      if (variant) btn.classList.add(variant);
-      btn.textContent = RATING_LABELS[value];
-      btn.disabled = !hasSubmitted;
-      btn.setAttribute('aria-pressed', 'false');
-      btn.addEventListener('click', () => handleRating(value));
-      options.appendChild(btn);
+  const updateSelection = (value) => {
+    selectedRating = value;
+    session.ratings[ratingId] = value;
+    setQuizSession({ ...session });
+    Array.from(options.querySelectorAll('button')).forEach(btn => {
+      const btnValue = btn.dataset.value;
+      const isSelected = btnValue === value;
+      btn.classList.toggle('is-selected', isSelected);
+      btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
     });
+    status.classList.remove('is-error');
+    updateNavState();
+  };
 
-    const previous = ratedSections.get(key);
-    if (previous) {
-      applyRating(previous);
-      status.textContent = previous === RETIRE_RATING ? 'Retired' : 'Saved';
+  const handleRating = async (value) => {
+    if (!session.answers[session.idx]) return;
+    status.textContent = 'Saving…';
+    status.classList.remove('is-error');
+    try {
+      const durations = await durationsPromise;
+      const timestamp = Date.now();
+      if (sections.length) {
+        sections.forEach(({ key }) => rateSection(item, key, value, durations, timestamp));
+        await upsertItem(item);
+      }
+      session.ratings[ratingId] = value;
+      updateSelection(value);
+      status.textContent = 'Saved';
+    } catch (err) {
+      console.error('Failed to record quiz rating', err);
+      status.textContent = 'Save failed';
+      status.classList.add('is-error');
     }
+  };
 
-    row.appendChild(options);
-    row.appendChild(status);
-    ratingList.appendChild(row);
+  REVIEW_RATINGS.forEach(value => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.value = value;
+    btn.className = 'btn quiz-rating-btn';
+    const variant = RATING_CLASS[value];
+    if (variant) btn.classList.add(variant);
+    btn.textContent = RATING_LABELS[value];
+    btn.disabled = !hasSubmitted;
+    btn.setAttribute('aria-pressed', 'false');
+    btn.addEventListener('click', () => handleRating(value));
+    options.appendChild(btn);
   });
+
+  if (selectedRating) {
+    updateSelection(selectedRating);
+    status.textContent = 'Saved';
+  }
 
   if (!sections.length) {
     const note = document.createElement('div');
@@ -369,7 +358,7 @@ export function renderQuiz(root, redraw) {
   const saveExit = document.createElement('button');
   saveExit.type = 'button';
   saveExit.className = 'btn secondary';
-  saveExit.textContent = 'Save & exit';
+  saveExit.textContent = 'Save & close';
   saveExit.addEventListener('click', async () => {
     const original = saveExit.textContent;
     saveExit.disabled = true;
@@ -402,20 +391,6 @@ export function renderQuiz(root, redraw) {
 
   footer.appendChild(saveExit);
 
-
-  const exitBtn = document.createElement('button');
-  exitBtn.type = 'button';
-  exitBtn.className = 'btn secondary';
-  exitBtn.textContent = 'Exit without saving';
-  exitBtn.addEventListener('click', () => {
-    removeStudySession('quiz').catch(err => console.warn('Failed to discard quiz session', err));
-    setQuizSession(null);
-    setStudySelectedMode('Quiz');
-    setSubtab('Study', 'Builder');
-    redraw();
-  });
-  footer.appendChild(exitBtn);
-
   card.appendChild(footer);
 
   updateNavState();
@@ -441,16 +416,14 @@ export function renderQuiz(root, redraw) {
   function updateNavState() {
     const currentAnswer = session.answers[session.idx];
     const answered = Boolean(currentAnswer && currentAnswer.checked);
-    const allRated = !sections.length || sections.every(({ key }) => ratedSections.get(key));
-    nextBtn.disabled = !(answered && allRated);
+    const hasRating = !sections.length || Boolean(selectedRating);
+    nextBtn.disabled = !(answered && hasRating);
     submitBtn.textContent = answered ? 'Resubmit' : 'Submit';
-    Array.from(ratingList.querySelectorAll('button')).forEach(btn => {
-      if (!answered) {
-        btn.disabled = true;
-        btn.setAttribute('aria-pressed', 'false');
-        return;
-      }
-      btn.disabled = false;
+    Array.from(options.querySelectorAll('button')).forEach(btn => {
+      btn.disabled = !answered;
     });
+    if (!answered) {
+      status.textContent = '';
+    }
   }
 }

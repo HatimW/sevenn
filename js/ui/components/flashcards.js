@@ -2,7 +2,7 @@ import { state, setFlashSession, setSubtab, setStudySelectedMode } from '../../s
 import { setToggleState } from '../../utils.js';
 import { renderRichText } from './rich-text.js';
 import { sectionsForItem } from './section-utils.js';
-import { REVIEW_RATINGS, RETIRE_RATING, DEFAULT_REVIEW_STEPS } from '../../review/constants.js';
+import { REVIEW_RATINGS, DEFAULT_REVIEW_STEPS } from '../../review/constants.js';
 import { getReviewDurations, rateSection } from '../../review/scheduler.js';
 import { upsertItem } from '../../storage/storage.js';
 import { persistStudySession, removeStudySession } from '../../study/study-sessions.js';
@@ -12,16 +12,14 @@ const RATING_LABELS = {
   again: 'Again',
   hard: 'Hard',
   good: 'Good',
-  easy: 'Easy',
-  [RETIRE_RATING]: 'Retire'
+  easy: 'Easy'
 };
 
 const RATING_CLASS = {
   again: 'danger',
   hard: 'secondary',
   good: '',
-  easy: '',
-  [RETIRE_RATING]: 'secondary'
+  easy: ''
 };
 
 function ratingKey(item, sectionKey) {
@@ -149,7 +147,7 @@ export function renderFlashcards(root, redraw) {
         rateSection(item, key, value, durations, Date.now());
         await upsertItem(item);
         selectRating(value);
-        status.textContent = value === RETIRE_RATING ? 'Retired' : 'Saved';
+        status.textContent = 'Saved';
       } catch (err) {
         console.error('Failed to record rating', err);
         status.textContent = 'Save failed';
@@ -159,7 +157,7 @@ export function renderFlashcards(root, redraw) {
       }
     };
 
-    [...REVIEW_RATINGS, RETIRE_RATING].forEach(value => {
+    REVIEW_RATINGS.forEach(value => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.dataset.value = value;
@@ -180,7 +178,7 @@ export function renderFlashcards(root, redraw) {
 
     if (previousRating) {
       selectRating(previousRating);
-      status.textContent = previousRating === RETIRE_RATING ? 'Retired' : 'Saved';
+      status.textContent = 'Saved';
     }
 
     ratingRow.appendChild(ratingButtons);
@@ -247,7 +245,7 @@ export function renderFlashcards(root, redraw) {
   if (!isReview) {
     const saveExit = document.createElement('button');
     saveExit.className = 'btn secondary';
-    saveExit.textContent = 'Save & exit';
+    saveExit.textContent = 'Save & close';
     saveExit.addEventListener('click', async () => {
       const original = saveExit.textContent;
       saveExit.disabled = true;
@@ -272,23 +270,11 @@ export function renderFlashcards(root, redraw) {
       }
     });
     controls.appendChild(saveExit);
-
-    const exit = document.createElement('button');
-    exit.className = 'btn secondary';
-    exit.textContent = 'Exit without saving';
-    exit.addEventListener('click', () => {
-      removeStudySession('flashcards').catch(err => console.warn('Failed to discard flashcard session', err));
-      setFlashSession(null);
-      setStudySelectedMode('Flashcards');
-      setSubtab('Study', 'Builder');
-      redraw();
-    });
-    controls.appendChild(exit);
   } else {
 
     const saveExit = document.createElement('button');
     saveExit.className = 'btn secondary';
-    saveExit.textContent = 'Save & exit';
+    saveExit.textContent = 'Pause & save';
     saveExit.addEventListener('click', async () => {
       const original = saveExit.textContent;
       saveExit.disabled = true;
@@ -311,18 +297,6 @@ export function renderFlashcards(root, redraw) {
       }
     });
     controls.appendChild(saveExit);
-
-    const exitReview = document.createElement('button');
-    exitReview.className = 'btn secondary';
-    exitReview.textContent = 'Exit without saving';
-    exitReview.addEventListener('click', () => {
-      removeStudySession('review').catch(err => console.warn('Failed to discard review session', err));
-
-      setFlashSession(null);
-      setSubtab('Study', 'Review');
-      redraw();
-    });
-    controls.appendChild(exitReview);
   }
 
 

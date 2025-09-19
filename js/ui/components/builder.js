@@ -4,6 +4,7 @@ import { setToggleState } from '../../utils.js';
 import { hydrateStudySessions, getStudySessionEntry, removeAllStudySessions, removeStudySession } from '../../study/study-sessions.js';
 
 import { collectDueSections } from '../../review/scheduler.js';
+import { loadReviewSourceItems } from '../../review/pool.js';
 
 
 const MODE_KEY = {
@@ -375,11 +376,6 @@ function renderModeCard(rerender, redraw) {
   resumeBtn.className = 'btn builder-resume-btn';
   resumeBtn.textContent = 'Resume';
 
-  const reviewBtn = document.createElement('button');
-  reviewBtn.type = 'button';
-  reviewBtn.className = 'btn secondary builder-review-link';
-  reviewBtn.textContent = 'Review';
-
   const modes = ['Flashcards', 'Quiz', 'Blocks'];
   const selected = state.study?.selectedMode || 'Flashcards';
 
@@ -397,6 +393,7 @@ function renderModeCard(rerender, redraw) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'builder-mode-toggle';
+    btn.dataset.mode = mode.toLowerCase();
     const isActive = mode === selected;
     if (isActive) btn.classList.add('is-active');
     btn.dataset.active = isActive ? 'true' : 'false';
@@ -424,8 +421,6 @@ function renderModeCard(rerender, redraw) {
 
   resumeBtn.disabled = !hasSaved;
   resumeBtn.classList.toggle('is-ready', hasSaved);
-
-  reviewBtn.disabled = !hasCohort;
 
   if (hasSaved) {
     const count = Array.isArray(savedEntry?.cohort) ? savedEntry.cohort.length : 0;
@@ -497,14 +492,8 @@ function renderModeCard(rerender, redraw) {
   });
 
 
-  reviewBtn.addEventListener('click', () => {
-    setSubtab('Study', 'Review');
-    redraw();
-  });
-
   actions.appendChild(startBtn);
   actions.appendChild(resumeBtn);
-  actions.appendChild(reviewBtn);
 
   controls.appendChild(actions);
 
@@ -524,12 +513,9 @@ function renderReviewCard(redraw) {
   title.textContent = 'Review';
   card.appendChild(title);
 
-  const cohort = Array.isArray(state.cohort) ? state.cohort : [];
-  const dueCount = cohort.length ? collectReviewCount(cohort) : 0;
-
   const status = document.createElement('div');
   status.className = 'builder-review-status';
-  status.textContent = dueCount ? `${dueCount} card${dueCount === 1 ? '' : 's'} due` : 'All caught up!';
+  status.textContent = 'Loading review queue…';
   card.appendChild(status);
 
   const actions = document.createElement('div');
@@ -539,7 +525,7 @@ function renderReviewCard(redraw) {
   openBtn.type = 'button';
   openBtn.className = 'btn secondary';
   openBtn.textContent = 'Open review';
-  openBtn.disabled = !cohort.length;
+  openBtn.disabled = false;
   openBtn.addEventListener('click', () => {
     setSubtab('Study', 'Review');
     redraw();
@@ -563,11 +549,32 @@ function renderReviewCard(redraw) {
       redraw();
     });
     actions.appendChild(resumeBtn);
-    status.textContent = saved.metadata?.label ? `Saved • ${saved.metadata.label}` : 'Saved review session ready';
   }
 
   card.appendChild(actions);
+  updateReviewSummary(saved);
   return card;
+
+  async function updateReviewSummary(savedEntry = null) {
+    try {
+      const items = await loadReviewSourceItems();
+      const dueCount = collectReviewCount(items);
+      if (items.length) {
+        const base = dueCount ? `${dueCount} card${dueCount === 1 ? '' : 's'} due` : 'All caught up!';
+        if (savedEntry?.session) {
+          const savedLabel = savedEntry.metadata?.label ? savedEntry.metadata.label : 'Saved review session ready';
+          status.textContent = `${base} • ${savedLabel}`;
+        } else {
+          status.textContent = base;
+        }
+      } else {
+        status.textContent = 'Review queue ready — no cards due yet.';
+      }
+    } catch (err) {
+      console.warn('Failed to summarize review queue', err);
+      status.textContent = 'Unable to load review queue.';
+    }
+  }
 }
 
 
