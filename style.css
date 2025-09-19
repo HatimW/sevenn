@@ -2417,6 +2417,27 @@ input[type="checkbox"]:checked::after {
 
 }
 
+.deck-grid.is-loading {
+  position: relative;
+  min-height: clamp(180px, 28vw, 240px);
+}
+
+.deck-grid.is-loading::after {
+  content: 'Loading decks…';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  border-radius: var(--radius-lg);
+  border: 1px dashed rgba(148, 163, 184, 0.24);
+  color: rgba(226, 232, 240, 0.55);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  background: rgba(10, 16, 32, 0.6);
+  pointer-events: none;
+}
+
 .deck-tile {
   position: relative;
   border-radius: var(--radius-lg);
@@ -2442,7 +2463,7 @@ input[type="checkbox"]:checked::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, var(--deck-accent, var(--accent)) 0%, rgba(10, 16, 32, 0.05) 65%);
+  background: linear-gradient(135deg, rgba(148, 163, 184, 0.22) 0%, rgba(10, 16, 32, 0.05) 65%);
   opacity: 0.55;
   mix-blend-mode: screen;
   transition: opacity 0.35s ease;
@@ -2554,8 +2575,8 @@ input[type="checkbox"]:checked::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, var(--deck-accent, var(--accent)) 0%, rgba(15, 23, 42, 0) 80%);
-  opacity: 0.65;
+  background: linear-gradient(135deg, rgba(148, 163, 184, 0.25) 0%, rgba(15, 23, 42, 0) 80%);
+  opacity: 0.6;
   pointer-events: none;
 }
 
@@ -2607,7 +2628,7 @@ input[type="checkbox"]:checked::after {
 }
 
 .deck-viewer {
-  --viewer-accent: var(--accent);
+  --deck-current-accent: var(--accent);
   width: min(960px, 92vw);
   max-height: 90vh;
   background: linear-gradient(155deg, rgba(7, 12, 24, 0.96), rgba(12, 18, 34, 0.9));
@@ -2626,7 +2647,7 @@ input[type="checkbox"]:checked::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at top right, color-mix(in srgb, var(--viewer-accent) 30%, transparent), transparent 70%);
+  background: radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 26%, transparent), transparent 70%);
   opacity: 0.9;
   pointer-events: none;
 }
@@ -2672,9 +2693,9 @@ input[type="checkbox"]:checked::after {
   position: absolute;
   inset: 0;
   width: 0%;
-  background: var(--viewer-accent);
+  background: var(--deck-current-accent, var(--accent));
   border-radius: inherit;
-  box-shadow: 0 10px 24px color-mix(in srgb, var(--viewer-accent) 35%, transparent);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--deck-current-accent, var(--accent)) 35%, transparent);
   transition: width 0.35s ease;
 }
 
@@ -2725,7 +2746,7 @@ input[type="checkbox"]:checked::after {
   border-radius: 50%;
   border: 1px solid rgba(148, 163, 184, 0.22);
   background: rgba(148, 163, 184, 0.14);
-  color: inherit;
+  color: var(--deck-current-accent, var(--accent));
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2741,7 +2762,7 @@ input[type="checkbox"]:checked::after {
   transform: translateY(-2px);
   background: rgba(56, 189, 248, 0.18);
   border-color: rgba(56, 189, 248, 0.38);
-  color: var(--viewer-accent);
+  color: var(--deck-current-accent, var(--accent));
 
 }
 
@@ -2952,6 +2973,12 @@ input[type="checkbox"]:checked::after {
   flex-direction: column;
   gap: 6px;
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.35);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  appearance: none;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease, background 0.25s ease;
 }
 
 .related-card-chip::before {
@@ -2961,6 +2988,26 @@ input[type="checkbox"]:checked::after {
   height: 2px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--related-accent, var(--accent)) 80%, transparent);
+}
+
+.related-card-chip:hover {
+  transform: translateY(-2px);
+  border-color: rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.88);
+  box-shadow: 0 14px 28px rgba(2, 6, 23, 0.32);
+}
+
+.related-card-chip:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--related-accent, var(--accent)) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.related-card-chip.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.35);
+  pointer-events: none;
 }
 
 .related-card-title {
