@@ -525,7 +525,9 @@ function renderReviewCard(redraw) {
   openBtn.type = 'button';
   openBtn.className = 'btn secondary';
   openBtn.textContent = 'Open review';
-  openBtn.disabled = true;
+
+  openBtn.disabled = false;
+
   openBtn.addEventListener('click', () => {
     setSubtab('Study', 'Review');
     redraw();
@@ -567,15 +569,14 @@ function renderReviewCard(redraw) {
         } else {
           status.textContent = base;
         }
-        openBtn.disabled = false;
+
       } else {
-        status.textContent = 'Add cards to build your review queue.';
-        openBtn.disabled = true;
+        status.textContent = 'Review queue ready — no cards due yet.';
+
       }
     } catch (err) {
       console.warn('Failed to summarize review queue', err);
       status.textContent = 'Unable to load review queue.';
-      openBtn.disabled = false;
     }
   }
 }

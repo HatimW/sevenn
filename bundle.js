@@ -4778,6 +4778,34 @@ var Sevenn = (() => {
     setStudySessions({});
   }
 
+  // js/review/pool.js
+  var DEFAULT_KINDS2 = ["disease", "drug", "concept"];
+  async function loadReviewSourceItems() {
+    const existingCohort = Array.isArray(state.cohort) && state.cohort.length ? state.cohort : null;
+    if (existingCohort) {
+      return existingCohort;
+    }
+    const kinds = Array.isArray(state.builder?.types) && state.builder.types.length ? state.builder.types : DEFAULT_KINDS2;
+    const seenIds = /* @__PURE__ */ new Set();
+    const items = [];
+    for (const kind of kinds) {
+      try {
+        const entries = await listItemsByKind(kind);
+        if (!Array.isArray(entries)) continue;
+        for (const item of entries) {
+          if (!item) continue;
+          const id = item.id || `${kind}::${items.length}`;
+          if (seenIds.has(id)) continue;
+          seenIds.add(id);
+          items.push(item);
+        }
+      } catch (err) {
+        console.warn("Failed to load review items for kind", kind, err);
+      }
+    }
+    return items;
+  }
+
   // js/ui/components/builder.js
   var MODE_KEY = {
     Flashcards: "flashcards",
@@ -5088,10 +5116,6 @@ var Sevenn = (() => {
     resumeBtn.type = "button";
     resumeBtn.className = "btn builder-resume-btn";
     resumeBtn.textContent = "Resume";
-    const reviewBtn = document.createElement("button");
-    reviewBtn.type = "button";
-    reviewBtn.className = "btn secondary builder-review-link";
-    reviewBtn.textContent = "Review";
     const modes = ["Flashcards", "Quiz", "Blocks"];
     const selected = state.study?.selectedMode || "Flashcards";
     const modeColumn = document.createElement("div");
@@ -5106,6 +5130,7 @@ var Sevenn = (() => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "builder-mode-toggle";
+      btn.dataset.mode = mode.toLowerCase();
       const isActive = mode === selected;
       if (isActive) btn.classList.add("is-active");
       btn.dataset.active = isActive ? "true" : "false";
@@ -5130,7 +5155,6 @@ var Sevenn = (() => {
     startBtn.classList.toggle("is-ready", canStart);
     resumeBtn.disabled = !hasSaved;
     resumeBtn.classList.toggle("is-ready", hasSaved);
-    reviewBtn.disabled = !hasCohort;
     if (hasSaved) {
       const count = Array.isArray(savedEntry?.cohort) ? savedEntry.cohort.length : 0;
       status.textContent = `Saved ${labelTitle} session${count ? ` \u2022 ${count} cards` : ""}`;
@@ -5189,13 +5213,8 @@ var Sevenn = (() => {
       setSubtab("Study", "Builder");
       redraw();
     });
-    reviewBtn.addEventListener("click", () => {
-      setSubtab("Study", "Review");
-      redraw();
-    });
     actions.appendChild(startBtn);
     actions.appendChild(resumeBtn);
-    actions.appendChild(reviewBtn);
     controls.appendChild(actions);
     layout.appendChild(modeColumn);
     layout.appendChild(controls);
@@ -5208,11 +5227,9 @@ var Sevenn = (() => {
     const title = document.createElement("h3");
     title.textContent = "Review";
     card.appendChild(title);
-    const cohort = Array.isArray(state.cohort) ? state.cohort : [];
-    const dueCount = cohort.length ? collectReviewCount(cohort) : 0;
     const status = document.createElement("div");
     status.className = "builder-review-status";
-    status.textContent = dueCount ? `${dueCount} card${dueCount === 1 ? "" : "s"} due` : "All caught up!";
+    status.textContent = "Loading review queue\u2026";
     card.appendChild(status);
     const actions = document.createElement("div");
     actions.className = "builder-review-actions";
@@ -5220,7 +5237,7 @@ var Sevenn = (() => {
     openBtn.type = "button";
     openBtn.className = "btn secondary";
     openBtn.textContent = "Open review";
-    openBtn.disabled = !cohort.length;
+    openBtn.disabled = false;
     openBtn.addEventListener("click", () => {
       setSubtab("Study", "Review");
       redraw();
@@ -5243,10 +5260,30 @@ var Sevenn = (() => {
         redraw();
       });
       actions.appendChild(resumeBtn);
-      status.textContent = saved.metadata?.label ? `Saved \u2022 ${saved.metadata.label}` : "Saved review session ready";
     }
     card.appendChild(actions);
+    updateReviewSummary(saved);
     return card;
+    async function updateReviewSummary(savedEntry = null) {
+      try {
+        const items = await loadReviewSourceItems();
+        const dueCount = collectReviewCount(items);
+        if (items.length) {
+          const base = dueCount ? `${dueCount} card${dueCount === 1 ? "" : "s"} due` : "All caught up!";
+          if (savedEntry?.session) {
+            const savedLabel = savedEntry.metadata?.label ? savedEntry.metadata.label : "Saved review session ready";
+            status.textContent = `${base} \u2022 ${savedLabel}`;
+          } else {
+            status.textContent = base;
+          }
+        } else {
+          status.textContent = "Review queue ready \u2014 no cards due yet.";
+        }
+      } catch (err) {
+        console.warn("Failed to summarize review queue", err);
+        status.textContent = "Unable to load review queue.";
+      }
+    }
   }
   async function buildSet(button, countEl, rerender) {
     const original = button.textContent;
@@ -5544,15 +5581,13 @@ var Sevenn = (() => {
     again: "Again",
     hard: "Hard",
     good: "Good",
-    easy: "Easy",
-    [RETIRE_RATING]: "Retire"
+    easy: "Easy"
   };
   var RATING_CLASS = {
     again: "danger",
     hard: "secondary",
     good: "",
-    easy: "",
-    [RETIRE_RATING]: "secondary"
+    easy: ""
   };
   function ratingKey(item, sectionKey) {
     const id = item?.id || "item";
@@ -5657,7 +5692,7 @@ var Sevenn = (() => {
           rateSection(item, key, value, durations, Date.now());
           await upsertItem(item);
           selectRating(value);
-          status.textContent = value === RETIRE_RATING ? "Retired" : "Saved";
+          status.textContent = "Saved";
         } catch (err) {
           console.error("Failed to record rating", err);
           status.textContent = "Save failed";
@@ -5666,7 +5701,7 @@ var Sevenn = (() => {
           ratingRow.classList.remove("is-saving");
         }
       };
-      [...REVIEW_RATINGS, RETIRE_RATING].forEach((value) => {
+      REVIEW_RATINGS.forEach((value) => {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.dataset.value = value;
@@ -5686,7 +5721,7 @@ var Sevenn = (() => {
       });
       if (previousRating) {
         selectRating(previousRating);
-        status.textContent = previousRating === RETIRE_RATING ? "Retired" : "Saved";
+        status.textContent = "Saved";
       }
       ratingRow.appendChild(ratingButtons);
       ratingRow.appendChild(status);
@@ -5744,7 +5779,7 @@ var Sevenn = (() => {
     if (!isReview) {
       const saveExit = document.createElement("button");
       saveExit.className = "btn secondary";
-      saveExit.textContent = "Save & exit";
+      saveExit.textContent = "Save & close";
       saveExit.addEventListener("click", async () => {
         const original = saveExit.textContent;
         saveExit.disabled = true;
@@ -5769,21 +5804,10 @@ var Sevenn = (() => {
         }
       });
       controls.appendChild(saveExit);
-      const exit = document.createElement("button");
-      exit.className = "btn secondary";
-      exit.textContent = "Exit without saving";
-      exit.addEventListener("click", () => {
-        removeStudySession("flashcards").catch((err) => console.warn("Failed to discard flashcard session", err));
-        setFlashSession(null);
-        setStudySelectedMode("Flashcards");
-        setSubtab("Study", "Builder");
-        redraw();
-      });
-      controls.appendChild(exit);
     } else {
       const saveExit = document.createElement("button");
       saveExit.className = "btn secondary";
-      saveExit.textContent = "Save & exit";
+      saveExit.textContent = "Pause & save";
       saveExit.addEventListener("click", async () => {
         const original = saveExit.textContent;
         saveExit.disabled = true;
@@ -5808,16 +5832,6 @@ var Sevenn = (() => {
         }
       });
       controls.appendChild(saveExit);
-      const exitReview = document.createElement("button");
-      exitReview.className = "btn secondary";
-      exitReview.textContent = "Exit without saving";
-      exitReview.addEventListener("click", () => {
-        removeStudySession("review").catch((err) => console.warn("Failed to discard review session", err));
-        setFlashSession(null);
-        setSubtab("Study", "Review");
-        redraw();
-      });
-      controls.appendChild(exitReview);
     }
     card.appendChild(controls);
     root.appendChild(card);
@@ -5955,6 +5969,10 @@ var Sevenn = (() => {
       dueEntries.forEach((entry) => {
         const item = document.createElement("li");
         item.className = "review-entry";
+        item.classList.add("is-clickable");
+        item.tabIndex = 0;
+        item.setAttribute("role", "button");
+        item.setAttribute("aria-label", `Review ${titleOf2(entry.item)} immediately`);
         const title = document.createElement("div");
         title.className = "review-entry-title";
         title.textContent = titleOf2(entry.item);
@@ -5963,6 +5981,16 @@ var Sevenn = (() => {
         meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} \u2022 ${formatOverdue(entry.due, now)}`;
         item.appendChild(title);
         item.appendChild(meta);
+        const launch = () => {
+          start(buildSessionPayload([entry]), { scope: "single", label: `Focused review \u2013 ${titleOf2(entry.item)}` });
+        };
+        item.addEventListener("click", launch);
+        item.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            launch();
+          }
+        });
         list.appendChild(item);
       });
       container.appendChild(list);
@@ -5983,6 +6011,10 @@ var Sevenn = (() => {
       upcomingEntries.forEach((entry) => {
         const item = document.createElement("li");
         item.className = "review-entry is-upcoming";
+        item.classList.add("is-clickable");
+        item.tabIndex = 0;
+        item.setAttribute("role", "button");
+        item.setAttribute("aria-label", `Review ${titleOf2(entry.item)} early`);
         const title = document.createElement("div");
         title.className = "review-entry-title";
         title.textContent = titleOf2(entry.item);
@@ -5991,6 +6023,16 @@ var Sevenn = (() => {
         meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} \u2022 ${formatTimeUntil(entry.due, now)}`;
         item.appendChild(title);
         item.appendChild(meta);
+        const launch = () => {
+          start(buildSessionPayload([entry]), { scope: "single", label: `Focused review \u2013 ${titleOf2(entry.item)}` });
+        };
+        item.addEventListener("click", launch);
+        item.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            launch();
+          }
+        });
         list.appendChild(item);
       });
       upcomingSection.appendChild(list);
@@ -6035,15 +6077,16 @@ var Sevenn = (() => {
   }
   async function renderReview(root, redraw) {
     root.innerHTML = "";
-    const cohort = state.cohort || [];
-    if (!cohort.length) {
+    await hydrateStudySessions().catch((err) => console.error("Failed to load saved sessions", err));
+    const cohort = await loadReviewSourceItems();
+    if (!Array.isArray(cohort) || !cohort.length) {
       const empty = document.createElement("div");
       empty.className = "review-empty";
-      empty.textContent = "Build a study set to generate review cards.";
+      empty.textContent = "Add study cards to start building a review queue.";
       root.appendChild(empty);
       return;
     }
-    await hydrateStudySessions().catch((err) => console.error("Failed to load saved sessions", err));
+    setCohort(cohort);
     const now = Date.now();
     const dueEntries = collectDueSections(cohort, { now });
     const upcomingEntries = collectUpcomingSections(cohort, { now, limit: 50 });
@@ -6145,15 +6188,13 @@ var Sevenn = (() => {
     again: "Again",
     hard: "Hard",
     good: "Good",
-    easy: "Easy",
-    [RETIRE_RATING]: "Retire"
+    easy: "Easy"
   };
   var RATING_CLASS2 = {
     again: "danger",
     hard: "secondary",
     good: "",
-    easy: "",
-    [RETIRE_RATING]: "secondary"
+    easy: ""
   };
   function titleOf3(item) {
     return item?.name || item?.concept || "";
@@ -6322,83 +6363,77 @@ var Sevenn = (() => {
       gradeAnswer();
     });
     const durationsPromise = getReviewDurations().catch(() => ({ ...DEFAULT_REVIEW_STEPS }));
-    const ratedSections = /* @__PURE__ */ new Map();
-    sections.forEach(({ key }) => {
-      const saved = session.ratings[ratingKey2(item, key)];
-      if (saved) ratedSections.set(key, saved);
-    });
     const ratingPanel = document.createElement("div");
     ratingPanel.className = "quiz-rating-panel";
     card.appendChild(ratingPanel);
     const ratingTitle = document.createElement("h3");
-    ratingTitle.textContent = "Rate each section before continuing";
+    ratingTitle.textContent = "How well did you know this card?";
     ratingPanel.appendChild(ratingTitle);
-    const ratingList = document.createElement("div");
-    ratingList.className = "quiz-rating-list";
-    ratingPanel.appendChild(ratingList);
-    const ratingStatuses = /* @__PURE__ */ new Map();
-    sections.forEach(({ key, label }) => {
-      const row = document.createElement("div");
-      row.className = "quiz-rating-row";
-      const sectionLabel = document.createElement("div");
-      sectionLabel.className = "quiz-rating-label";
-      sectionLabel.textContent = label;
-      row.appendChild(sectionLabel);
-      const options = document.createElement("div");
-      options.className = "quiz-rating-options";
-      const status = document.createElement("span");
-      status.className = "quiz-rating-status";
-      ratingStatuses.set(key, status);
-      const applyRating = (value) => {
-        ratedSections.set(key, value);
-        session.ratings[ratingKey2(item, key)] = value;
-        setQuizSession({ ...session });
-        Array.from(options.querySelectorAll("button")).forEach((btn) => {
-          const btnValue = btn.dataset.value;
-          const isSelected = btnValue === value;
-          btn.classList.toggle("is-selected", isSelected);
-          btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
-        });
-        updateNavState();
-      };
-      const handleRating = async (value) => {
-        if (!session.answers[session.idx]) return;
-        status.textContent = "Saving\u2026";
-        status.classList.remove("is-error");
-        try {
-          const durations = await durationsPromise;
-          rateSection(item, key, value, durations, Date.now());
-          await upsertItem(item);
-          applyRating(value);
-          status.textContent = value === RETIRE_RATING ? "Retired" : "Saved";
-        } catch (err) {
-          console.error("Failed to record quiz rating", err);
-          status.textContent = "Save failed";
-          status.classList.add("is-error");
-        }
-      };
-      [...REVIEW_RATINGS, RETIRE_RATING].forEach((value) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.dataset.value = value;
-        btn.className = "btn quiz-rating-btn";
-        const variant = RATING_CLASS2[value];
-        if (variant) btn.classList.add(variant);
-        btn.textContent = RATING_LABELS2[value];
-        btn.disabled = !hasSubmitted;
-        btn.setAttribute("aria-pressed", "false");
-        btn.addEventListener("click", () => handleRating(value));
-        options.appendChild(btn);
+    const ratingRow = document.createElement("div");
+    ratingRow.className = "quiz-rating-row";
+    ratingPanel.appendChild(ratingRow);
+    const ratingLabel = document.createElement("div");
+    ratingLabel.className = "quiz-rating-label";
+    ratingLabel.textContent = "Rate this card";
+    ratingRow.appendChild(ratingLabel);
+    const options = document.createElement("div");
+    options.className = "quiz-rating-options";
+    ratingRow.appendChild(options);
+    const status = document.createElement("span");
+    status.className = "quiz-rating-status";
+    ratingRow.appendChild(status);
+    const ratingId = ratingKey2(item, "__overall__");
+    let selectedRating = session.ratings[ratingId] || null;
+    const updateSelection = (value) => {
+      selectedRating = value;
+      session.ratings[ratingId] = value;
+      setQuizSession({ ...session });
+      Array.from(options.querySelectorAll("button")).forEach((btn) => {
+        const btnValue = btn.dataset.value;
+        const isSelected = btnValue === value;
+        btn.classList.toggle("is-selected", isSelected);
+        btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
       });
-      const previous = ratedSections.get(key);
-      if (previous) {
-        applyRating(previous);
-        status.textContent = previous === RETIRE_RATING ? "Retired" : "Saved";
+      status.classList.remove("is-error");
+      updateNavState();
+    };
+    const handleRating = async (value) => {
+      if (!session.answers[session.idx]) return;
+      status.textContent = "Saving\u2026";
+      status.classList.remove("is-error");
+      try {
+        const durations = await durationsPromise;
+        const timestamp = Date.now();
+        if (sections.length) {
+          sections.forEach(({ key }) => rateSection(item, key, value, durations, timestamp));
+          await upsertItem(item);
+        }
+        session.ratings[ratingId] = value;
+        updateSelection(value);
+        status.textContent = "Saved";
+      } catch (err) {
+        console.error("Failed to record quiz rating", err);
+        status.textContent = "Save failed";
+        status.classList.add("is-error");
       }
-      row.appendChild(options);
-      row.appendChild(status);
-      ratingList.appendChild(row);
+    };
+    REVIEW_RATINGS.forEach((value) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.dataset.value = value;
+      btn.className = "btn quiz-rating-btn";
+      const variant = RATING_CLASS2[value];
+      if (variant) btn.classList.add(variant);
+      btn.textContent = RATING_LABELS2[value];
+      btn.disabled = !hasSubmitted;
+      btn.setAttribute("aria-pressed", "false");
+      btn.addEventListener("click", () => handleRating(value));
+      options.appendChild(btn);
     });
+    if (selectedRating) {
+      updateSelection(selectedRating);
+      status.textContent = "Saved";
+    }
     if (!sections.length) {
       const note = document.createElement("div");
       note.className = "quiz-rating-note";
@@ -6442,7 +6477,7 @@ var Sevenn = (() => {
     const saveExit = document.createElement("button");
     saveExit.type = "button";
     saveExit.className = "btn secondary";
-    saveExit.textContent = "Save & exit";
+    saveExit.textContent = "Save & close";
     saveExit.addEventListener("click", async () => {
       const original = saveExit.textContent;
       saveExit.disabled = true;
@@ -6473,18 +6508,6 @@ var Sevenn = (() => {
       }
     });
     footer.appendChild(saveExit);
-    const exitBtn = document.createElement("button");
-    exitBtn.type = "button";
-    exitBtn.className = "btn secondary";
-    exitBtn.textContent = "Exit without saving";
-    exitBtn.addEventListener("click", () => {
-      removeStudySession("quiz").catch((err) => console.warn("Failed to discard quiz session", err));
-      setQuizSession(null);
-      setStudySelectedMode("Quiz");
-      setSubtab("Study", "Builder");
-      redraw();
-    });
-    footer.appendChild(exitBtn);
     card.appendChild(footer);
     updateNavState();
     function gradeAnswer() {
@@ -6507,17 +6530,15 @@ var Sevenn = (() => {
     function updateNavState() {
       const currentAnswer = session.answers[session.idx];
       const answered = Boolean(currentAnswer && currentAnswer.checked);
-      const allRated = !sections.length || sections.every(({ key }) => ratedSections.get(key));
-      nextBtn.disabled = !(answered && allRated);
+      const hasRating = !sections.length || Boolean(selectedRating);
+      nextBtn.disabled = !(answered && hasRating);
       submitBtn.textContent = answered ? "Resubmit" : "Submit";
-      Array.from(ratingList.querySelectorAll("button")).forEach((btn) => {
-        if (!answered) {
-          btn.disabled = true;
-          btn.setAttribute("aria-pressed", "false");
-          return;
-        }
-        btn.disabled = false;
+      Array.from(options.querySelectorAll("button")).forEach((btn) => {
+        btn.disabled = !answered;
       });
+      if (!answered) {
+        status.textContent = "";
+      }
     }
   }
 
