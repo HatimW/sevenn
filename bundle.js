@@ -1,4 +1,4 @@
-var Sevenn = (() => {
+(() => {
   // js/state.js
   var state = {
     tab: "Diseases",
@@ -2790,9 +2790,12 @@ var Sevenn = (() => {
   var expanded = /* @__PURE__ */ new Set();
   var collapsedBlocks = /* @__PURE__ */ new Set();
   var collapsedWeeks = /* @__PURE__ */ new Set();
-  function createItemCard(item, onChange) {
+  function createItemCard(item, onChange, options = {}) {
+    const variant = options.variant || "default";
+    const overlay = variant === "overlay";
     const card = document.createElement("div");
     card.className = `item-card card--${item.kind}`;
+    if (overlay) card.classList.add("item-card--overlay");
     const color = item.color || kindColors[item.kind] || "var(--gray)";
     card.style.borderTop = `3px solid ${color}`;
     const header = document.createElement("div");
@@ -2800,57 +2803,72 @@ var Sevenn = (() => {
     const mainBtn = document.createElement("button");
     mainBtn.className = "card-title-btn";
     mainBtn.textContent = item.name || item.concept || "Untitled";
-    mainBtn.setAttribute("aria-expanded", expanded.has(item.id));
-    mainBtn.addEventListener("click", () => {
-      if (expanded.has(item.id)) expanded.delete(item.id);
-      else expanded.add(item.id);
-      card.classList.toggle("expanded");
+    if (overlay) {
+      card.classList.add("expanded");
+      mainBtn.setAttribute("aria-expanded", "true");
+      mainBtn.classList.add("card-title-btn-static");
+    } else {
       mainBtn.setAttribute("aria-expanded", expanded.has(item.id));
-    });
+      mainBtn.addEventListener("click", () => {
+        if (expanded.has(item.id)) expanded.delete(item.id);
+        else expanded.add(item.id);
+        card.classList.toggle("expanded");
+        mainBtn.setAttribute("aria-expanded", expanded.has(item.id));
+      });
+    }
     header.appendChild(mainBtn);
     const settings = document.createElement("div");
     settings.className = "card-settings";
     const menu = document.createElement("div");
-    menu.className = "card-menu hidden";
+    menu.className = overlay ? "card-menu card-menu-inline" : "card-menu hidden";
     menu.setAttribute("role", "menu");
-    menu.setAttribute("aria-hidden", "true");
-    const gear = document.createElement("button");
-    gear.type = "button";
-    gear.className = "icon-btn card-settings-toggle";
-    gear.title = "Entry options";
-    gear.setAttribute("aria-haspopup", "true");
-    gear.setAttribute("aria-expanded", "false");
-    gear.innerHTML = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.8" stroke="currentColor" stroke-width="1.6"/></svg>';
-    settings.append(gear, menu);
-    header.appendChild(settings);
-    function closeMenu() {
-      menu.classList.add("hidden");
-      menu.setAttribute("aria-hidden", "true");
-      settings.classList.remove("open");
+    menu.setAttribute("aria-hidden", overlay ? "false" : "true");
+    let closeMenu = () => {
+    };
+    let openMenu = () => {
+    };
+    if (!overlay) {
+      const gear = document.createElement("button");
+      gear.type = "button";
+      gear.className = "icon-btn card-settings-toggle";
+      gear.title = "Entry options";
+      gear.setAttribute("aria-haspopup", "true");
       gear.setAttribute("aria-expanded", "false");
-      document.removeEventListener("mousedown", handleOutside);
+      gear.innerHTML = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.8" stroke="currentColor" stroke-width="1.6"/></svg>';
+      settings.append(gear, menu);
+      const handleOutside = (e) => {
+        if (!settings.contains(e.target)) {
+          closeMenu();
+        }
+      };
+      closeMenu = () => {
+        menu.classList.add("hidden");
+        menu.setAttribute("aria-hidden", "true");
+        settings.classList.remove("open");
+        gear.setAttribute("aria-expanded", "false");
+        document.removeEventListener("mousedown", handleOutside);
+      };
+      openMenu = () => {
+        menu.classList.remove("hidden");
+        menu.setAttribute("aria-hidden", "false");
+        settings.classList.add("open");
+        gear.setAttribute("aria-expanded", "true");
+        document.addEventListener("mousedown", handleOutside);
+      };
+      gear.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (menu.classList.contains("hidden")) openMenu();
+        else closeMenu();
+      });
+      menu.addEventListener("click", (e) => e.stopPropagation());
+    } else {
+      settings.classList.add("card-settings-inline");
+      settings.appendChild(menu);
     }
-    function openMenu() {
-      menu.classList.remove("hidden");
-      menu.setAttribute("aria-hidden", "false");
-      settings.classList.add("open");
-      gear.setAttribute("aria-expanded", "true");
-      document.addEventListener("mousedown", handleOutside);
-    }
-    function handleOutside(e) {
-      if (!settings.contains(e.target)) {
-        closeMenu();
-      }
-    }
-    gear.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (menu.classList.contains("hidden")) openMenu();
-      else closeMenu();
-    });
-    menu.addEventListener("click", (e) => e.stopPropagation());
+    header.appendChild(settings);
     const fav = document.createElement("button");
-    fav.className = "icon-btn";
-    fav.textContent = item.favorite ? "\u2605" : "\u2606";
+    fav.className = overlay ? "icon-btn deck-action-btn" : "icon-btn";
+    fav.innerHTML = `<span aria-hidden="true">${item.favorite ? "\u2605" : "\u2606"}</span><span class="sr-only">Toggle favorite</span>`;
     fav.title = "Toggle Favorite";
     fav.setAttribute("aria-label", "Toggle Favorite");
     fav.addEventListener("click", async (e) => {
@@ -2858,13 +2876,14 @@ var Sevenn = (() => {
       closeMenu();
       item.favorite = !item.favorite;
       await upsertItem(item);
-      fav.textContent = item.favorite ? "\u2605" : "\u2606";
+      const icon = fav.querySelector('span[aria-hidden="true"]');
+      if (icon) icon.textContent = item.favorite ? "\u2605" : "\u2606";
       onChange && onChange();
     });
     menu.appendChild(fav);
     const link = document.createElement("button");
-    link.className = "icon-btn";
-    link.textContent = "\u{1FAA2}";
+    link.className = overlay ? "icon-btn deck-action-btn" : "icon-btn";
+    link.innerHTML = '<span aria-hidden="true">\u{1FAA2}</span><span class="sr-only">Manage links</span>';
     link.title = "Links";
     link.setAttribute("aria-label", "Manage links");
     link.addEventListener("click", (e) => {
@@ -2874,8 +2893,8 @@ var Sevenn = (() => {
     });
     menu.appendChild(link);
     const edit = document.createElement("button");
-    edit.className = "icon-btn";
-    edit.textContent = "\u270F\uFE0F";
+    edit.className = overlay ? "icon-btn deck-action-btn" : "icon-btn";
+    edit.innerHTML = '<span aria-hidden="true">\u270F\uFE0F</span><span class="sr-only">Edit</span>';
     edit.title = "Edit";
     edit.setAttribute("aria-label", "Edit");
     edit.addEventListener("click", (e) => {
@@ -2885,8 +2904,8 @@ var Sevenn = (() => {
     });
     menu.appendChild(edit);
     const copy = document.createElement("button");
-    copy.className = "icon-btn";
-    copy.textContent = "\u{1F4CB}";
+    copy.className = overlay ? "icon-btn deck-action-btn" : "icon-btn";
+    copy.innerHTML = '<span aria-hidden="true">\u{1F4CB}</span><span class="sr-only">Copy title</span>';
     copy.title = "Copy Title";
     copy.setAttribute("aria-label", "Copy Title");
     copy.addEventListener("click", (e) => {
@@ -2896,8 +2915,8 @@ var Sevenn = (() => {
     });
     menu.appendChild(copy);
     const del = document.createElement("button");
-    del.className = "icon-btn danger";
-    del.textContent = "\u{1F5D1}\uFE0F";
+    del.className = overlay ? "icon-btn danger deck-action-btn" : "icon-btn danger";
+    del.innerHTML = '<span aria-hidden="true">\u{1F5D1}\uFE0F</span><span class="sr-only">Delete</span>';
     del.title = "Delete";
     del.setAttribute("aria-label", "Delete");
     del.addEventListener("click", async (e) => {
@@ -3230,162 +3249,453 @@ var Sevenn = (() => {
   }
 
   // js/ui/components/cards.js
-  function renderCards(container, items, onChange) {
+  var KIND_COLORS = { disease: "var(--pink)", drug: "var(--blue)", concept: "var(--green)" };
+  var UNASSIGNED_BLOCK_KEY = "__unassigned__";
+  var MISC_LECTURE_KEY = "__misc__";
+  function formatWeekLabel(value) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return `Week ${value}`;
+    }
+    return "Unscheduled";
+  }
+  function titleFromItem(item) {
+    return item?.name || item?.concept || "Untitled Card";
+  }
+  function deckColorFromCards(cards = []) {
+    for (const card of cards) {
+      if (card?.color) return card.color;
+    }
+    for (const card of cards) {
+      if (card?.kind && KIND_COLORS[card.kind]) return KIND_COLORS[card.kind];
+    }
+    return "var(--accent)";
+  }
+  async function renderCards(container, items, onChange) {
     container.innerHTML = "";
-    const decks = /* @__PURE__ */ new Map();
-    items.forEach((it) => {
-      if (it.lectures && it.lectures.length) {
-        it.lectures.forEach((l) => {
-          const key = l.name || `Lecture ${l.id}`;
-          if (!decks.has(key)) decks.set(key, []);
-          decks.get(key).push(it);
+    container.classList.add("cards-tab");
+    const itemLookup = new Map(items.filter((it) => it && it.id != null).map((it) => [it.id, it]));
+    const overlayCardCache = /* @__PURE__ */ new Map();
+    const blockDefs = await listBlocks();
+    const blockLookup = new Map(blockDefs.map((def) => [def.blockId, def]));
+    const blockOrder = new Map(blockDefs.map((def, idx) => [def.blockId, idx]));
+    const blockBuckets = /* @__PURE__ */ new Map();
+    function ensureBlock(blockId) {
+      const key = blockId || UNASSIGNED_BLOCK_KEY;
+      if (!blockBuckets.has(key)) {
+        const def = blockLookup.get(blockId);
+        const order = typeof blockId === "string" ? blockOrder.get(blockId) ?? 999 : 1200;
+        blockBuckets.set(key, {
+          key,
+          blockId: blockId || null,
+          title: def?.title || (blockId ? blockId : "Unassigned"),
+          accent: def?.color || null,
+          order,
+          weeks: /* @__PURE__ */ new Map()
+        });
+      }
+      return blockBuckets.get(key);
+    }
+    function ensureWeek(blockBucket, weekValue) {
+      const weekKey = weekValue == null ? "none" : String(weekValue);
+      if (!blockBucket.weeks.has(weekKey)) {
+        blockBucket.weeks.set(weekKey, {
+          key: weekKey,
+          value: typeof weekValue === "number" && Number.isFinite(weekValue) ? weekValue : null,
+          label: formatWeekLabel(weekValue),
+          order: typeof weekValue === "number" && Number.isFinite(weekValue) ? weekValue : 999,
+          lectures: /* @__PURE__ */ new Map()
+        });
+      }
+      return blockBucket.weeks.get(weekKey);
+    }
+    function ensureLecture(weekBucket, lectureKey, lectureName) {
+      if (!weekBucket.lectures.has(lectureKey)) {
+        weekBucket.lectures.set(lectureKey, {
+          key: lectureKey,
+          title: lectureName || "Lecture",
+          cards: []
+        });
+      }
+      return weekBucket.lectures.get(lectureKey);
+    }
+    items.forEach((item) => {
+      const lectureRefs = Array.isArray(item.lectures) ? item.lectures : [];
+      if (lectureRefs.length) {
+        lectureRefs.forEach((ref) => {
+          const blockBucket = ensureBlock(ref.blockId);
+          const weekBucket = ensureWeek(blockBucket, ref.week);
+          const lectureKeyParts = [ref.blockId || blockBucket.key];
+          if (ref.id != null) lectureKeyParts.push(`lec-${ref.id}`);
+          if (ref.name) lectureKeyParts.push(ref.name);
+          const lectureKey = lectureKeyParts.join("::") || `${blockBucket.key}-${titleFromItem(item)}`;
+          const lecture = ensureLecture(weekBucket, lectureKey, ref.name || (ref.id != null ? `Lecture ${ref.id}` : "Lecture"));
+          if (!lecture.cards.includes(item)) {
+            lecture.cards.push(item);
+          }
+        });
+      } else if (Array.isArray(item.blocks) && item.blocks.length) {
+        item.blocks.forEach((blockId) => {
+          const blockBucket = ensureBlock(blockId);
+          const weeks = Array.isArray(item.weeks) && item.weeks.length ? item.weeks : [null];
+          weeks.forEach((weekVal) => {
+            const weekBucket = ensureWeek(blockBucket, weekVal);
+            const lecture = ensureLecture(weekBucket, `${blockBucket.key}::${MISC_LECTURE_KEY}`, "Ungrouped Items");
+            lecture.cards.push(item);
+          });
         });
       } else {
-        if (!decks.has("Unassigned")) decks.set("Unassigned", []);
-        decks.get("Unassigned").push(it);
+        const blockBucket = ensureBlock(null);
+        const weekBucket = ensureWeek(blockBucket, null);
+        const lecture = ensureLecture(weekBucket, `${blockBucket.key}::${MISC_LECTURE_KEY}`, "Unassigned Items");
+        lecture.cards.push(item);
       }
     });
-    const list = document.createElement("div");
-    list.className = "deck-list";
-    container.appendChild(list);
+    const blockSections = Array.from(blockBuckets.values()).map((block) => {
+      const weeks = Array.from(block.weeks.values()).map((week) => {
+        const lectures = Array.from(week.lectures.values()).map((lec) => ({
+          ...lec,
+          cards: lec.cards.slice().sort((a, b) => titleFromItem(a).localeCompare(titleFromItem(b)))
+        })).filter((lec) => lec.cards.length > 0).sort((a, b) => a.title.localeCompare(b.title));
+        const totalCards2 = lectures.reduce((sum, lec) => sum + lec.cards.length, 0);
+        return {
+          ...week,
+          lectures,
+          totalCards: totalCards2,
+          lectureCount: lectures.length
+        };
+      }).filter((week) => week.totalCards > 0).sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
+      const totalCards = weeks.reduce((sum, week) => sum + week.totalCards, 0);
+      const lectureCount = weeks.reduce((sum, week) => sum + week.lectureCount, 0);
+      return {
+        ...block,
+        weeks,
+        totalCards,
+        lectureCount
+      };
+    }).filter((block) => block.totalCards > 0).sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
+    const catalog = document.createElement("div");
+    catalog.className = "card-catalog";
+    container.appendChild(catalog);
+    const overlay = document.createElement("div");
+    overlay.className = "deck-overlay";
+    overlay.dataset.active = "false";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
     const viewer = document.createElement("div");
-    viewer.className = "deck-viewer hidden";
-    container.appendChild(viewer);
-    decks.forEach((cards, lecture) => {
-      const deck = document.createElement("div");
-      deck.className = "deck";
-      const title = document.createElement("div");
-      title.className = "deck-title";
-      title.textContent = lecture;
-      const meta = document.createElement("div");
-      meta.className = "deck-meta";
-      const blocks = Array.from(new Set(cards.flatMap((c) => c.blocks || []))).join(", ");
-      const weeks = Array.from(new Set(cards.flatMap((c) => c.weeks || []))).join(", ");
-      meta.textContent = `${blocks}${blocks && weeks ? " \u2022 " : ""}${weeks ? "Week " + weeks : ""}`;
-      deck.appendChild(title);
-      deck.appendChild(meta);
-      deck.addEventListener("click", () => {
-        stopPreview(deck);
-        openDeck(lecture, cards);
-      });
-      let hoverTimer;
-      deck.addEventListener("mouseenter", () => {
-        hoverTimer = setTimeout(() => startPreview(deck, cards), 3e3);
-      });
-      deck.addEventListener("mouseleave", () => {
-        clearTimeout(hoverTimer);
-        stopPreview(deck);
-      });
-      list.appendChild(deck);
-    });
-    function startPreview(deckEl, cards) {
-      if (deckEl._preview) return;
-      deckEl.classList.add("pop");
-      const fan = document.createElement("div");
-      fan.className = "deck-fan";
-      deckEl.appendChild(fan);
-      const show = cards.slice(0, 5);
-      const spread = 20;
-      const offset = (show.length - 1) * spread / 2;
-      show.forEach((c, i) => {
-        const mini = document.createElement("div");
-        mini.className = "fan-card";
-        mini.textContent = c.name || c.concept || "";
-        fan.appendChild(mini);
-        const angle = -offset + i * spread;
-        mini.style.transform = `rotate(${angle}deg) translateY(-80px)`;
-        setTimeout(() => {
-          mini.style.opacity = 1;
-        }, i * 100);
-      });
-      deckEl._preview = { fan };
-    }
-    function stopPreview(deckEl) {
-      const prev = deckEl._preview;
-      if (prev) {
-        prev.fan.remove();
-        deckEl.classList.remove("pop");
-        deckEl._preview = null;
+    viewer.className = "deck-viewer";
+    overlay.appendChild(viewer);
+    container.appendChild(overlay);
+    let activeKeyHandler = null;
+    function closeDeck() {
+      overlay.dataset.active = "false";
+      viewer.innerHTML = "";
+      if (activeKeyHandler) {
+        document.removeEventListener("keydown", activeKeyHandler);
+        activeKeyHandler = null;
       }
     }
-    function openDeck(title, cards) {
-      list.classList.add("hidden");
-      viewer.classList.remove("hidden");
+    overlay.addEventListener("click", (evt) => {
+      if (evt.target === overlay) closeDeck();
+    });
+    function openDeck(context) {
+      const { block, week, lecture } = context;
+      overlay.dataset.active = "true";
       viewer.innerHTML = "";
-      const header = document.createElement("h2");
-      header.textContent = title;
+      const header = document.createElement("div");
+      header.className = "deck-viewer-header";
+      const crumb = document.createElement("div");
+      crumb.className = "deck-viewer-crumb";
+      const crumbPieces = [];
+      if (block.title) crumbPieces.push(block.title);
+      if (week?.label) crumbPieces.push(week.label);
+      crumb.textContent = crumbPieces.join(" \u2022 ");
+      header.appendChild(crumb);
+      const title = document.createElement("h2");
+      title.className = "deck-viewer-title";
+      title.textContent = lecture.title;
+      header.appendChild(title);
+      const counter = document.createElement("div");
+      counter.className = "deck-counter";
+      header.appendChild(counter);
+      const closeBtn = document.createElement("button");
+      closeBtn.type = "button";
+      closeBtn.className = "deck-close";
+      closeBtn.innerHTML = '<span aria-hidden="true">\xD7</span><span class="sr-only">Close deck</span>';
+      closeBtn.addEventListener("click", closeDeck);
+      header.appendChild(closeBtn);
       viewer.appendChild(header);
-      const cardHolder = document.createElement("div");
-      cardHolder.className = "deck-card";
-      viewer.appendChild(cardHolder);
+      const accent = deckColorFromCards(lecture.cards);
+      viewer.style.setProperty("--deck-accent", accent);
+      overlay.style.setProperty("--deck-accent", accent);
+      const stage = document.createElement("div");
+      stage.className = "deck-stage";
       const prev = document.createElement("button");
-      prev.className = "deck-prev";
-      prev.textContent = "\u25C0";
+      prev.type = "button";
+      prev.className = "deck-nav deck-prev";
+      prev.innerHTML = '<span class="sr-only">Previous card</span><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.5 15L7.5 10L12.5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      const cardHolder = document.createElement("div");
+      cardHolder.className = "deck-card-stage";
+      cardHolder.tabIndex = -1;
       const next = document.createElement("button");
-      next.className = "deck-next";
-      next.textContent = "\u25B6";
-      viewer.appendChild(prev);
-      viewer.appendChild(next);
+      next.type = "button";
+      next.className = "deck-nav deck-next";
+      next.innerHTML = '<span class="sr-only">Next card</span><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.5 5L12.5 10L7.5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      stage.appendChild(prev);
+      stage.appendChild(cardHolder);
+      stage.appendChild(next);
+      viewer.appendChild(stage);
+      const toolbar = document.createElement("div");
+      toolbar.className = "deck-toolbar";
       const toggle = document.createElement("button");
-      toggle.className = "deck-related-toggle btn";
-      toggle.textContent = "Show Related";
-      viewer.appendChild(toggle);
+      toggle.type = "button";
+      toggle.className = "deck-related-toggle";
+      toggle.dataset.active = "false";
+      toggle.textContent = "Show related cards";
+      toolbar.appendChild(toggle);
+      viewer.appendChild(toolbar);
+      const filmstrip = document.createElement("div");
+      filmstrip.className = "deck-filmstrip";
+      const chipButtons = lecture.cards.map((cardItem, cardIndex) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "deck-chip";
+        chip.textContent = titleFromItem(cardItem);
+        chip.addEventListener("click", () => {
+          idx = cardIndex;
+          renderCard();
+          try {
+            cardHolder.focus({ preventScroll: true });
+          } catch (err) {
+            cardHolder.focus();
+          }
+        });
+        filmstrip.appendChild(chip);
+        return chip;
+      });
+      if (lecture.cards.length <= 1) {
+        filmstrip.dataset.single = "true";
+      }
+      viewer.appendChild(filmstrip);
       const relatedWrap = document.createElement("div");
-      relatedWrap.className = "deck-related hidden";
+      relatedWrap.className = "deck-related";
+      relatedWrap.dataset.visible = "false";
       viewer.appendChild(relatedWrap);
-      const close = document.createElement("button");
-      close.className = "deck-close btn";
-      close.textContent = "Close";
-      viewer.appendChild(close);
       let idx = 0;
       let showRelated = false;
-      function renderCard() {
-        cardHolder.innerHTML = "";
-        cardHolder.appendChild(createItemCard(cards[idx], onChange));
-        renderRelated();
-      }
       function renderRelated() {
         relatedWrap.innerHTML = "";
-        if (!showRelated) return;
-        const current = cards[idx];
-        (current.links || []).forEach((l) => {
-          const item = items.find((it) => it.id === l.id);
-          if (item) {
-            const el = createItemCard(item, onChange);
-            el.classList.add("related-card");
-            relatedWrap.appendChild(el);
-            requestAnimationFrame(() => el.classList.add("visible"));
+        if (!showRelated) {
+          relatedWrap.dataset.visible = "false";
+          return;
+        }
+        const current = lecture.cards[idx];
+        const seen = /* @__PURE__ */ new Set();
+        (current.links || []).forEach((link) => {
+          const linkId = link?.id;
+          if (linkId == null || seen.has(linkId)) return;
+          const related = itemLookup.get(linkId);
+          if (related) {
+            seen.add(linkId);
+            const card = createItemCard(related, onChange);
+            card.classList.add("related-card");
+            relatedWrap.appendChild(card);
           }
+        });
+        relatedWrap.dataset.visible = relatedWrap.children.length ? "true" : "false";
+      }
+      function renderCard() {
+        cardHolder.innerHTML = "";
+        const item = lecture.cards[idx];
+        const cacheKey = item?.id ?? `${lecture.key || lecture.title}-${idx}`;
+        let card = overlayCardCache.get(cacheKey);
+        if (!card) {
+          card = createItemCard(item, onChange, { variant: "overlay" });
+          overlayCardCache.set(cacheKey, card);
+        }
+        cardHolder.appendChild(card);
+        counter.textContent = `Card ${idx + 1} of ${lecture.cards.length}`;
+        renderRelated();
+        chipButtons.forEach((chip, chipIndex) => {
+          const active = chipIndex === idx;
+          chip.dataset.active = active ? "true" : "false";
+          chip.setAttribute("aria-pressed", active ? "true" : "false");
         });
       }
       prev.addEventListener("click", () => {
-        idx = (idx - 1 + cards.length) % cards.length;
+        idx = (idx - 1 + lecture.cards.length) % lecture.cards.length;
         renderCard();
       });
       next.addEventListener("click", () => {
-        idx = (idx + 1) % cards.length;
+        idx = (idx + 1) % lecture.cards.length;
         renderCard();
       });
       toggle.addEventListener("click", () => {
         showRelated = !showRelated;
-        toggle.textContent = showRelated ? "Hide Related" : "Show Related";
-        relatedWrap.classList.toggle("hidden", !showRelated);
+        toggle.dataset.active = showRelated ? "true" : "false";
+        toggle.textContent = showRelated ? "Hide related cards" : "Show related cards";
         renderRelated();
       });
-      close.addEventListener("click", () => {
-        document.removeEventListener("keydown", keyHandler2);
-        viewer.classList.add("hidden");
-        viewer.innerHTML = "";
-        list.classList.remove("hidden");
-      });
-      function keyHandler2(e) {
-        if (e.key === "ArrowLeft") prev.click();
-        if (e.key === "ArrowRight") next.click();
-        if (e.key === "Escape") close.click();
-      }
+      const keyHandler2 = (event) => {
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          prev.click();
+        } else if (event.key === "ArrowRight") {
+          event.preventDefault();
+          next.click();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          closeDeck();
+        }
+      };
       document.addEventListener("keydown", keyHandler2);
+      activeKeyHandler = keyHandler2;
       renderCard();
+      requestAnimationFrame(() => closeBtn.focus());
     }
+    function createCollapseIcon() {
+      const icon = document.createElement("span");
+      icon.className = "card-collapse-icon";
+      icon.innerHTML = '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 8L10 12L14 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      return icon;
+    }
+    function createDeckTile(block, week, lecture) {
+      const tile = document.createElement("button");
+      tile.type = "button";
+      tile.className = "deck-tile";
+      tile.setAttribute("aria-label", `${lecture.title} (${lecture.cards.length} cards)`);
+      const accent = deckColorFromCards(lecture.cards);
+      tile.style.setProperty("--deck-color", accent);
+      const stack = document.createElement("div");
+      stack.className = "deck-stack";
+      stack.style.setProperty("--deck-color", accent);
+      const preview = lecture.cards.slice(0, 5);
+      stack.style.setProperty("--spread", preview.length > 0 ? (preview.length - 1) / 2 : 0);
+      if (!preview.length) {
+        const placeholder = document.createElement("div");
+        placeholder.className = "stack-card stack-card-empty";
+        placeholder.style.setProperty("--index", "0");
+        placeholder.textContent = "No cards yet";
+        stack.appendChild(placeholder);
+      } else {
+        preview.forEach((card, idx) => {
+          const mini = document.createElement("div");
+          mini.className = "stack-card";
+          mini.style.setProperty("--index", String(idx));
+          mini.textContent = titleFromItem(card);
+          stack.appendChild(mini);
+        });
+      }
+      tile.appendChild(stack);
+      const info = document.createElement("div");
+      info.className = "deck-info";
+      const count = document.createElement("span");
+      count.className = "deck-count-pill";
+      count.textContent = `${lecture.cards.length} card${lecture.cards.length === 1 ? "" : "s"}`;
+      count.style.setProperty("--deck-color", accent);
+      info.appendChild(count);
+      const label = document.createElement("h3");
+      label.className = "deck-title";
+      label.textContent = lecture.title;
+      info.appendChild(label);
+      const meta = document.createElement("div");
+      meta.className = "deck-meta";
+      const pieces = [];
+      if (block.title) pieces.push(block.title);
+      if (week?.label) pieces.push(week.label);
+      meta.textContent = pieces.join(" \u2022 ");
+      info.appendChild(meta);
+      tile.appendChild(info);
+      const open = () => openDeck({ block, week, lecture });
+      tile.addEventListener("click", open);
+      tile.addEventListener("keydown", (evt) => {
+        if (evt.key === "Enter" || evt.key === " ") {
+          evt.preventDefault();
+          open();
+        }
+      });
+      return tile;
+    }
+    if (!blockSections.length) {
+      const empty = document.createElement("div");
+      empty.className = "cards-empty";
+      const heading = document.createElement("h3");
+      heading.textContent = "No cards match your filters yet";
+      empty.appendChild(heading);
+      const body = document.createElement("p");
+      body.textContent = "Assign lectures, blocks, or create new entries to populate this view.";
+      empty.appendChild(body);
+      catalog.appendChild(empty);
+      return;
+    }
+    const blockFragment = document.createDocumentFragment();
+    blockSections.forEach((block) => {
+      const section = document.createElement("section");
+      section.className = "card-block-section";
+      if (block.accent) section.style.setProperty("--block-accent", block.accent);
+      const header = document.createElement("button");
+      header.type = "button";
+      header.className = "card-block-header";
+      header.setAttribute("aria-expanded", "true");
+      const heading = document.createElement("div");
+      heading.className = "card-block-heading";
+      const swatch = document.createElement("span");
+      swatch.className = "card-block-mark";
+      heading.appendChild(swatch);
+      const title = document.createElement("span");
+      title.className = "card-block-title";
+      title.textContent = block.title;
+      heading.appendChild(title);
+      header.appendChild(heading);
+      const stats = document.createElement("span");
+      stats.className = "card-block-stats";
+      stats.textContent = `${block.lectureCount} lecture${block.lectureCount === 1 ? "" : "s"} \u2022 ${block.totalCards} card${block.totalCards === 1 ? "" : "s"}`;
+      header.appendChild(stats);
+      const icon = createCollapseIcon();
+      header.appendChild(icon);
+      section.appendChild(header);
+      const body = document.createElement("div");
+      body.className = "card-block-body";
+      const weekFragment = document.createDocumentFragment();
+      block.weeks.forEach((week) => {
+        const weekSection = document.createElement("div");
+        weekSection.className = "card-week-section";
+        const weekHeader = document.createElement("button");
+        weekHeader.type = "button";
+        weekHeader.className = "card-week-header";
+        weekHeader.setAttribute("aria-expanded", "true");
+        const weekTitle = document.createElement("span");
+        weekTitle.className = "card-week-title";
+        weekTitle.textContent = week.label;
+        weekHeader.appendChild(weekTitle);
+        const weekStats = document.createElement("span");
+        weekStats.className = "card-week-stats";
+        weekStats.textContent = `${week.lectureCount} lecture${week.lectureCount === 1 ? "" : "s"} \u2022 ${week.totalCards} card${week.totalCards === 1 ? "" : "s"}`;
+        weekHeader.appendChild(weekStats);
+        weekHeader.appendChild(createCollapseIcon());
+        const deckGrid = document.createElement("div");
+        deckGrid.className = "deck-grid";
+        const deckFragment = document.createDocumentFragment();
+        week.lectures.forEach((lecture) => {
+          deckFragment.appendChild(createDeckTile(block, week, lecture));
+        });
+        deckGrid.appendChild(deckFragment);
+        weekSection.appendChild(weekHeader);
+        weekSection.appendChild(deckGrid);
+        weekFragment.appendChild(weekSection);
+        weekHeader.addEventListener("click", () => {
+          const collapsed = weekSection.classList.toggle("is-collapsed");
+          weekHeader.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        });
+      });
+      body.appendChild(weekFragment);
+      section.appendChild(body);
+      header.addEventListener("click", () => {
+        const collapsed = section.classList.toggle("is-collapsed");
+        header.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      });
+      blockFragment.appendChild(section);
+    });
+    catalog.appendChild(blockFragment);
   }
 
   // js/ui/components/builder.js
@@ -3522,7 +3832,7 @@ var Sevenn = (() => {
       }
     });
     header.appendChild(weekCollapseBtn);
-    const label = createPill(selected, formatWeekLabel(week), () => {
+    const label = createPill(selected, formatWeekLabel2(week), () => {
       toggleWeek(block, week);
       rerender();
     }, "week");
@@ -3831,7 +4141,7 @@ var Sevenn = (() => {
   function lectureKeyFor(blockId, lectureId) {
     return `${blockId}|${lectureId}`;
   }
-  function formatWeekLabel(week) {
+  function formatWeekLabel2(week) {
     if (week == null || week < 0) return "No week";
     return `Week ${week}`;
   }
@@ -6069,7 +6379,6 @@ var Sevenn = (() => {
     plus: '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>',
     gear: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z" stroke="currentColor" stroke-width="1.6" /><path d="M4.5 12.5l1.8.52c.26.08.46.28.54.54l.52 1.8a.9.9 0 0 0 1.47.41l1.43-1.08a.9.9 0 0 1 .99-.07l1.63.82a.9.9 0 0 0 1.22-.41l.73-1.66a.9.9 0 0 1 .73-.52l1.88-.2a.9.9 0 0 0 .78-1.07l-.39-1.85a.9.9 0 0 1 .25-.83l1.29-1.29a.9.9 0 0 0-.01-1.27l-1.29-1.29a.9.9 0 0 0-.83-.25l-1.85.39a.9.9 0 0 1-1.07-.78l-.2-1.88A.9.9 0 0 0 13.3 2h-2.6a.9.9 0 0 0-.9.78l-.2 1.88a.9.9 0 0 1-1.07.78l-1.85-.39a.9.9 0 0 0-.83.25L4.56 6.59a.9.9 0 0 0-.01 1.27l1.29 1.29c.22.22.31.54.25.83l-.39 1.85a.9.9 0 0 0 .7 1.07z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /></svg>',
     trash: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 7h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><path d="M9 7V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><path d="M18 7v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /><path d="M10 11v6M14 11v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>'
-
   };
   var DEFAULT_LINK_COLOR = "#888888";
   var DEFAULT_LINE_STYLE = "solid";
@@ -6928,7 +7237,6 @@ var Sevenn = (() => {
       toggle.setAttribute("aria-expanded", open ? "true" : "false");
       toggle.setAttribute("aria-pressed", mapState.menuPinned ? "true" : "false");
       toggle.setAttribute("aria-label", open ? "Hide map controls" : "Open map controls");
-
     };
     const openMenu = ({ pinned = false } = {}) => {
       if (pinned) {
@@ -8633,7 +8941,7 @@ var Sevenn = (() => {
       const filter = { ...state.filters, query: state.query };
       const query = findItemsByFilter(filter);
       const items = await query.toArray();
-      renderCards(content, items, render);
+      await renderCards(content, items, render);
     } else if (state.tab === "Study") {
       main.appendChild(createEntryAddControl(render, "disease"));
       const content = document.createElement("div");
