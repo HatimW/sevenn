@@ -6068,7 +6068,8 @@ var Sevenn = (() => {
     close: '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>',
     plus: '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>',
     gear: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z" stroke="currentColor" stroke-width="1.6" /><path d="M4.5 12.5l1.8.52c.26.08.46.28.54.54l.52 1.8a.9.9 0 0 0 1.47.41l1.43-1.08a.9.9 0 0 1 .99-.07l1.63.82a.9.9 0 0 0 1.22-.41l.73-1.66a.9.9 0 0 1 .73-.52l1.88-.2a.9.9 0 0 0 .78-1.07l-.39-1.85a.9.9 0 0 1 .25-.83l1.29-1.29a.9.9 0 0 0-.01-1.27l-1.29-1.29a.9.9 0 0 0-.83-.25l-1.85.39a.9.9 0 0 1-1.07-.78l-.2-1.88A.9.9 0 0 0 13.3 2h-2.6a.9.9 0 0 0-.9.78l-.2 1.88a.9.9 0 0 1-1.07.78l-1.85-.39a.9.9 0 0 0-.83.25L4.56 6.59a.9.9 0 0 0-.01 1.27l1.29 1.29c.22.22.31.54.25.83l-.39 1.85a.9.9 0 0 0 .7 1.07z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /></svg>',
-    trash: '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 6.5h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M8.5 6.5V5.2A1.2 1.2 0 0 1 9.7 4h0.6a1.2 1.2 0 0 1 1.2 1.2v1.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M7.2 9v5.4a1.2 1.2 0 0 0 1.2 1.2h3.2a1.2 1.2 0 0 0 1.2-1.2V9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>'
+    trash: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 7h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><path d="M9 7V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><path d="M18 7v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /><path d="M10 11v6M14 11v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>'
+
   };
   var DEFAULT_LINK_COLOR = "#888888";
   var DEFAULT_LINE_STYLE = "solid";
@@ -6101,6 +6102,7 @@ var Sevenn = (() => {
     pendingLink: null,
     hiddenMenuTab: "nodes",
     panelVisible: true,
+    menuPinned: false,
     listenersAttached: false,
     draggingView: false,
     nodeDrag: null,
@@ -6911,29 +6913,73 @@ var Sevenn = (() => {
     }
     const searchOverlay = createSearchOverlay();
     overlay.appendChild(searchOverlay);
-    function setMenuOpen(open) {
+    let menuHoverOpen = Boolean(mapState.menuPinned);
+    let menuHoverCloseTimer = null;
+    const clearMenuHoverClose = () => {
+      if (menuHoverCloseTimer !== null) {
+        clearTimeout(menuHoverCloseTimer);
+        menuHoverCloseTimer = null;
+      }
+    };
+    const applyMenuState = () => {
+      const open = Boolean(mapState.menuPinned) || menuHoverOpen;
       menu.classList.toggle("open", open);
+      menu.classList.toggle("pinned", Boolean(mapState.menuPinned));
       toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      toggle.setAttribute("aria-pressed", mapState.menuPinned ? "true" : "false");
       toggle.setAttribute("aria-label", open ? "Hide map controls" : "Open map controls");
-    }
-    const openMenu = () => setMenuOpen(true);
-    const closeMenu = () => setMenuOpen(false);
+
+    };
+    const openMenu = ({ pinned = false } = {}) => {
+      if (pinned) {
+        mapState.menuPinned = true;
+      }
+      menuHoverOpen = true;
+      clearMenuHoverClose();
+      applyMenuState();
+    };
+    const closeMenu = ({ unpin = false } = {}) => {
+      if (unpin) {
+        mapState.menuPinned = false;
+      }
+      menuHoverOpen = false;
+      clearMenuHoverClose();
+      applyMenuState();
+    };
+    const scheduleMenuClose = () => {
+      if (mapState.menuPinned) {
+        return;
+      }
+      clearMenuHoverClose();
+      menuHoverCloseTimer = setTimeout(() => {
+        menuHoverCloseTimer = null;
+        closeMenu();
+      }, 140);
+    };
+    applyMenuState();
     toggle.addEventListener("click", (evt) => {
       evt.preventDefault();
-      const next = !menu.classList.contains("open");
-      setMenuOpen(next);
+      if (mapState.menuPinned) {
+        closeMenu({ unpin: true });
+      } else {
+        openMenu({ pinned: true });
+      }
     });
-    toggle.addEventListener("mouseenter", openMenu);
-    panel.addEventListener("mouseenter", openMenu);
-    toggle.addEventListener("focusin", openMenu);
-    panel.addEventListener("focusin", openMenu);
-    menu.addEventListener("mouseleave", closeMenu);
+    const handleHoverOpen = () => openMenu();
+    menu.addEventListener("mouseenter", handleHoverOpen);
+    toggle.addEventListener("mouseenter", handleHoverOpen);
+    panel.addEventListener("mouseenter", handleHoverOpen);
+    toggle.addEventListener("focusin", handleHoverOpen);
+    panel.addEventListener("focusin", handleHoverOpen);
+    menu.addEventListener("mouseleave", scheduleMenuClose);
     menu.addEventListener("focusout", (evt) => {
-      if (!menu.contains(evt.relatedTarget)) {
+      if (!menu.contains(evt.relatedTarget) && !mapState.menuPinned) {
         closeMenu();
       }
     });
-    closeBtn.addEventListener("click", closeMenu);
+    closeBtn.addEventListener("click", () => {
+      closeMenu({ unpin: true });
+    });
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.classList.add("map-svg");
     const defaultView = {
