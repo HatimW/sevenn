@@ -1,6 +1,10 @@
 import { listBlocks } from '../../storage/storage.js';
 import { createItemCard } from './cardlist.js';
 
+
+const KIND_COLORS = { disease: 'var(--pink)', drug: 'var(--blue)', concept: 'var(--green)' };
+
+
 const UNASSIGNED_BLOCK_KEY = '__unassigned__';
 const MISC_LECTURE_KEY = '__misc__';
 
@@ -15,6 +19,18 @@ function titleFromItem(item) {
   return item?.name || item?.concept || 'Untitled Card';
 }
 
+
+function deckColorFromCards(cards = []) {
+  for (const card of cards) {
+    if (card?.color) return card.color;
+  }
+  for (const card of cards) {
+    if (card?.kind && KIND_COLORS[card.kind]) return KIND_COLORS[card.kind];
+  }
+  return 'var(--accent)';
+}
+
+
 /**
  * Render lecture-based decks combining all item types with block/week groupings.
  * @param {HTMLElement} container
@@ -24,6 +40,11 @@ function titleFromItem(item) {
 export async function renderCards(container, items, onChange) {
   container.innerHTML = '';
   container.classList.add('cards-tab');
+
+
+  const itemLookup = new Map(items.filter(it => it && it.id != null).map(it => [it.id, it]));
+  const overlayCardCache = new Map();
+
 
   const blockDefs = await listBlocks();
   const blockLookup = new Map(blockDefs.map(def => [def.blockId, def]));
@@ -203,6 +224,11 @@ export async function renderCards(container, items, onChange) {
 
     viewer.appendChild(header);
 
+    const accent = deckColorFromCards(lecture.cards);
+    viewer.style.setProperty('--deck-accent', accent);
+    overlay.style.setProperty('--deck-accent', accent);
+
+
     const stage = document.createElement('div');
     stage.className = 'deck-stage';
 
@@ -213,6 +239,8 @@ export async function renderCards(container, items, onChange) {
 
     const cardHolder = document.createElement('div');
     cardHolder.className = 'deck-card-stage';
+    cardHolder.tabIndex = -1;
+
 
     const next = document.createElement('button');
     next.type = 'button';
@@ -236,6 +264,32 @@ export async function renderCards(container, items, onChange) {
 
     viewer.appendChild(toolbar);
 
+
+    const filmstrip = document.createElement('div');
+    filmstrip.className = 'deck-filmstrip';
+    const chipButtons = lecture.cards.map((cardItem, cardIndex) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'deck-chip';
+      chip.textContent = titleFromItem(cardItem);
+      chip.addEventListener('click', () => {
+        idx = cardIndex;
+        renderCard();
+        try {
+          cardHolder.focus({ preventScroll: true });
+        } catch (err) {
+          cardHolder.focus();
+        }
+      });
+      filmstrip.appendChild(chip);
+      return chip;
+    });
+    if (lecture.cards.length <= 1) {
+      filmstrip.dataset.single = 'true';
+    }
+    viewer.appendChild(filmstrip);
+
+
     const relatedWrap = document.createElement('div');
     relatedWrap.className = 'deck-related';
     relatedWrap.dataset.visible = 'false';
@@ -251,9 +305,15 @@ export async function renderCards(container, items, onChange) {
         return;
       }
       const current = lecture.cards[idx];
+
+      const seen = new Set();
       (current.links || []).forEach(link => {
-        const related = items.find(it => it.id === link.id);
+        const linkId = link?.id;
+        if (linkId == null || seen.has(linkId)) return;
+        const related = itemLookup.get(linkId);
         if (related) {
+          seen.add(linkId);
+
           const card = createItemCard(related, onChange);
           card.classList.add('related-card');
           relatedWrap.appendChild(card);
@@ -264,10 +324,23 @@ export async function renderCards(container, items, onChange) {
 
     function renderCard() {
       cardHolder.innerHTML = '';
-      const card = createItemCard(lecture.cards[idx], onChange);
+
+      const item = lecture.cards[idx];
+      const cacheKey = item?.id ?? `${lecture.key || lecture.title}-${idx}`;
+      let card = overlayCardCache.get(cacheKey);
+      if (!card) {
+        card = createItemCard(item, onChange, { variant: 'overlay' });
+        overlayCardCache.set(cacheKey, card);
+      }
       cardHolder.appendChild(card);
       counter.textContent = `Card ${idx + 1} of ${lecture.cards.length}`;
       renderRelated();
+      chipButtons.forEach((chip, chipIndex) => {
+        const active = chipIndex === idx;
+        chip.dataset.active = active ? 'true' : 'false';
+        chip.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+
     }
 
     prev.addEventListener('click', () => {
@@ -320,8 +393,14 @@ export async function renderCards(container, items, onChange) {
     tile.className = 'deck-tile';
     tile.setAttribute('aria-label', `${lecture.title} (${lecture.cards.length} cards)`);
 
+
+    const accent = deckColorFromCards(lecture.cards);
+    tile.style.setProperty('--deck-color', accent);
+
     const stack = document.createElement('div');
     stack.className = 'deck-stack';
+    stack.style.setProperty('--deck-color', accent);
+
     const preview = lecture.cards.slice(0, 5);
     stack.style.setProperty('--spread', preview.length > 0 ? (preview.length - 1) / 2 : 0);
     if (!preview.length) {
@@ -347,6 +426,9 @@ export async function renderCards(container, items, onChange) {
     const count = document.createElement('span');
     count.className = 'deck-count-pill';
     count.textContent = `${lecture.cards.length} card${lecture.cards.length === 1 ? '' : 's'}`;
+
+    count.style.setProperty('--deck-color', accent);
+
     info.appendChild(count);
 
     const label = document.createElement('h3');
@@ -389,6 +471,9 @@ export async function renderCards(container, items, onChange) {
     return;
   }
 
+  const blockFragment = document.createDocumentFragment();
+
+
   blockSections.forEach(block => {
     const section = document.createElement('section');
     section.className = 'card-block-section';
@@ -426,6 +511,10 @@ export async function renderCards(container, items, onChange) {
     const body = document.createElement('div');
     body.className = 'card-block-body';
 
+
+    const weekFragment = document.createDocumentFragment();
+
+
     block.weeks.forEach(week => {
       const weekSection = document.createElement('div');
       weekSection.className = 'card-week-section';
@@ -450,20 +539,27 @@ export async function renderCards(container, items, onChange) {
       const deckGrid = document.createElement('div');
       deckGrid.className = 'deck-grid';
 
+
+      const deckFragment = document.createDocumentFragment();
       week.lectures.forEach(lecture => {
-        deckGrid.appendChild(createDeckTile(block, week, lecture));
+        deckFragment.appendChild(createDeckTile(block, week, lecture));
       });
+      deckGrid.appendChild(deckFragment);
+
 
       weekSection.appendChild(weekHeader);
       weekSection.appendChild(deckGrid);
 
-      body.appendChild(weekSection);
+      weekFragment.appendChild(weekSection);
 
       weekHeader.addEventListener('click', () => {
         const collapsed = weekSection.classList.toggle('is-collapsed');
         weekHeader.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       });
     });
+
+    body.appendChild(weekFragment);
+
 
     section.appendChild(body);
 
@@ -472,6 +568,9 @@ export async function renderCards(container, items, onChange) {
       header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     });
 
-    catalog.appendChild(section);
+    blockFragment.appendChild(section);
   });
+
+  catalog.appendChild(blockFragment);
+
 }
