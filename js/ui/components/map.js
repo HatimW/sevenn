@@ -75,6 +75,7 @@ const ICONS = {
     + '<path d="M4.5 12.5l1.8.52c.26.08.46.28.54.54l.52 1.8a.9.9 0 0 0 1.47.41l1.43-1.08a.9.9 0 0 1 .99-.07l1.63.82a.9.9 0 0 0 1.22-.41l.73-1.66a.9.9 0 0 1 .73-.52l1.88-.2a.9.9 0 0 0 .78-1.07l-.39-1.85a.9.9 0 0 1 .25-.83l1.29-1.29a.9.9 0 0 0-.01-1.27l-1.29-1.29a.9.9 0 0 0-.83-.25l-1.85.39a.9.9 0 0 1-1.07-.78l-.2-1.88A.9.9 0 0 0 13.3 2h-2.6a.9.9 0 0 0-.9.78l-.2 1.88a.9.9 0 0 1-1.07.78l-1.85-.39a.9.9 0 0 0-.83.25L4.56 6.59a.9.9 0 0 0-.01 1.27l1.29 1.29c.22.22.31.54.25.83l-.39 1.85a.9.9 0 0 0 .7 1.07z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" />'
     + '</svg>',
   trash:
+
     '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
     + '<path d="M6 7h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />'
     + '<path d="M9 7V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />'
@@ -1072,6 +1073,9 @@ export async function renderMap(root) {
 
   applyMenuState();
 
+  const openMenu = () => setMenuOpen(true);
+  const closeMenu = () => setMenuOpen(false);
+
   toggle.addEventListener('click', evt => {
     evt.preventDefault();
     if (mapState.menuPinned) {
@@ -1080,6 +1084,7 @@ export async function renderMap(root) {
       openMenu({ pinned: true });
     }
   });
+
 
   const handleHoverOpen = () => openMenu();
 
@@ -1092,13 +1097,16 @@ export async function renderMap(root) {
   menu.addEventListener('mouseleave', scheduleMenuClose);
   menu.addEventListener('focusout', evt => {
     if (!menu.contains(evt.relatedTarget) && !mapState.menuPinned) {
+
       closeMenu();
     }
   });
 
+
   closeBtn.addEventListener('click', () => {
     closeMenu({ unpin: true });
   });
+
 
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.classList.add('map-svg');
