@@ -1,17 +1,18 @@
-import { state, setBlockMode } from '../../state.js';
+import { state, setBlockMode, setSubtab, setStudySelectedMode, resetBlockMode } from '../../state.js';
 import { sanitizeHtml } from './rich-text.js';
 import { sectionDefsForKind } from './sections.js';
+import { persistStudySession, removeStudySession } from '../../study/study-sessions.js';
 
-export function renderBlockMode(root) {
+export function renderBlockMode(root, redraw) {
   const shell = document.createElement('section');
   shell.className = 'block-mode-shell';
   root.appendChild(shell);
-  drawBlockMode(shell);
+  drawBlockMode(shell, redraw);
 }
 
-function drawBlockMode(shell) {
+function drawBlockMode(shell, globalRedraw) {
   shell.innerHTML = '';
-  const redraw = () => drawBlockMode(shell);
+  const redraw = () => drawBlockMode(shell, globalRedraw);
   const items = state.cohort || [];
 
   if (!items.length) {
@@ -131,6 +132,97 @@ function drawBlockMode(shell) {
     label: sectionData.label,
     entries: orderedBank
   }));
+
+  shell.appendChild(renderFooter({
+    globalRedraw,
+    sectionLabel: sectionData.label,
+    filledCount,
+    total: results.length
+  }));
+}
+
+function snapshotBlockState() {
+  const source = state.blockMode || {};
+  const clone = (value) => JSON.parse(JSON.stringify(value ?? {}));
+  return {
+    section: source.section || '',
+    assignments: clone(source.assignments),
+    reveal: clone(source.reveal),
+    order: clone(source.order)
+  };
+}
+
+function renderFooter({ globalRedraw, sectionLabel, filledCount, total }) {
+  const card = document.createElement('div');
+  card.className = 'card block-mode-footer';
+
+  const status = document.createElement('div');
+  status.className = 'block-mode-footer-status';
+  if (total > 0) {
+    status.textContent = filledCount ? `Progress saved for ${filledCount}/${total} prompts` : 'No assignments yet';
+  } else {
+    status.textContent = 'No prompts in this section yet.';
+  }
+  card.appendChild(status);
+
+  const actions = document.createElement('div');
+  actions.className = 'block-mode-footer-actions';
+
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'btn';
+  saveBtn.textContent = 'Save & exit';
+  saveBtn.addEventListener('click', async () => {
+    const original = saveBtn.textContent;
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      const snapshot = snapshotBlockState();
+      await persistStudySession('blocks', {
+        session: snapshot,
+        cohort: state.cohort,
+        metadata: {
+          label: sectionLabel ? `Blocks – ${sectionLabel}` : 'Blocks session'
+        }
+      });
+      resetBlockMode();
+      setStudySelectedMode('Blocks');
+      setSubtab('Study', 'Builder');
+      if (typeof globalRedraw === 'function') {
+        globalRedraw();
+      }
+    } catch (err) {
+      console.error('Failed to save blocks progress', err);
+      saveBtn.textContent = 'Save failed';
+      setTimeout(() => { saveBtn.textContent = original; }, 2000);
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+  actions.appendChild(saveBtn);
+
+  const exitBtn = document.createElement('button');
+  exitBtn.type = 'button';
+  exitBtn.className = 'btn secondary';
+  exitBtn.textContent = 'Exit without saving';
+  exitBtn.addEventListener('click', async () => {
+    exitBtn.disabled = true;
+    try {
+      await removeStudySession('blocks').catch(err => console.warn('Failed to discard blocks session', err));
+    } finally {
+      resetBlockMode();
+      setStudySelectedMode('Blocks');
+      setSubtab('Study', 'Builder');
+      if (typeof globalRedraw === 'function') {
+        globalRedraw();
+      }
+    }
+  });
+  actions.appendChild(exitBtn);
+
+  card.appendChild(actions);
+
+  return card;
 }
 
 function renderHeader({ sections, activeKey, filledCount, correctCount, total, bankRemaining, reveal, onSectionChange, onCheck, onReset }) {
