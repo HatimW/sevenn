@@ -63,12 +63,9 @@ const expanded = new Set();
 const collapsedBlocks = new Set();
 const collapsedWeeks = new Set();
 
-export function createItemCard(item, onChange, options = {}){
-  const variant = options.variant || 'default';
-  const overlay = variant === 'overlay';
+export function createItemCard(item, onChange){
   const card = document.createElement('div');
   card.className = `item-card card--${item.kind}`;
-  if (overlay) card.classList.add('item-card--overlay');
   const color = item.color || kindColors[item.kind] || 'var(--gray)';
   card.style.borderTop = `3px solid ${color}`;
 
@@ -78,78 +75,62 @@ export function createItemCard(item, onChange, options = {}){
   const mainBtn = document.createElement('button');
   mainBtn.className = 'card-title-btn';
   mainBtn.textContent = item.name || item.concept || 'Untitled';
-  if (overlay) {
-    card.classList.add('expanded');
-    mainBtn.setAttribute('aria-expanded', 'true');
-    mainBtn.classList.add('card-title-btn-static');
-  } else {
+  mainBtn.setAttribute('aria-expanded', expanded.has(item.id));
+  mainBtn.addEventListener('click', () => {
+    if (expanded.has(item.id)) expanded.delete(item.id); else expanded.add(item.id);
+    card.classList.toggle('expanded');
     mainBtn.setAttribute('aria-expanded', expanded.has(item.id));
-    mainBtn.addEventListener('click', () => {
-      if (expanded.has(item.id)) expanded.delete(item.id); else expanded.add(item.id);
-      card.classList.toggle('expanded');
-      mainBtn.setAttribute('aria-expanded', expanded.has(item.id));
-    });
-  }
+  });
   header.appendChild(mainBtn);
 
   const settings = document.createElement('div');
   settings.className = 'card-settings';
   const menu = document.createElement('div');
-  menu.className = overlay ? 'card-menu card-menu-inline' : 'card-menu hidden';
+  menu.className = 'card-menu hidden';
   menu.setAttribute('role', 'menu');
-  menu.setAttribute('aria-hidden', overlay ? 'false' : 'true');
-
-  let closeMenu = () => {};
-  let openMenu = () => {};
-
-  if (!overlay) {
-    const gear = document.createElement('button');
-    gear.type = 'button';
-    gear.className = 'icon-btn card-settings-toggle';
-    gear.title = 'Entry options';
-    gear.setAttribute('aria-haspopup', 'true');
-    gear.setAttribute('aria-expanded', 'false');
-    gear.innerHTML = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.8" stroke="currentColor" stroke-width="1.6"/></svg>';
-    settings.append(gear, menu);
-
-    const handleOutside = e => {
-      if (!settings.contains(e.target)) {
-        closeMenu();
-      }
-    };
-
-    closeMenu = () => {
-      menu.classList.add('hidden');
-      menu.setAttribute('aria-hidden', 'true');
-      settings.classList.remove('open');
-      gear.setAttribute('aria-expanded', 'false');
-      document.removeEventListener('mousedown', handleOutside);
-    };
-
-    openMenu = () => {
-      menu.classList.remove('hidden');
-      menu.setAttribute('aria-hidden', 'false');
-      settings.classList.add('open');
-      gear.setAttribute('aria-expanded', 'true');
-      document.addEventListener('mousedown', handleOutside);
-    };
-
-    gear.addEventListener('click', e => {
-      e.stopPropagation();
-      if (menu.classList.contains('hidden')) openMenu(); else closeMenu();
-    });
-
-    menu.addEventListener('click', e => e.stopPropagation());
-  } else {
-    settings.classList.add('card-settings-inline');
-    settings.appendChild(menu);
-  }
-
+  menu.setAttribute('aria-hidden', 'true');
+  const gear = document.createElement('button');
+  gear.type = 'button';
+  gear.className = 'icon-btn card-settings-toggle';
+  gear.title = 'Entry options';
+  gear.setAttribute('aria-haspopup', 'true');
+  gear.setAttribute('aria-expanded', 'false');
+  gear.innerHTML = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.8" stroke="currentColor" stroke-width="1.6"/></svg>';
+  settings.append(gear, menu);
   header.appendChild(settings);
 
+  function closeMenu() {
+    menu.classList.add('hidden');
+    menu.setAttribute('aria-hidden', 'true');
+    settings.classList.remove('open');
+    gear.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('mousedown', handleOutside);
+  }
+
+  function openMenu() {
+    menu.classList.remove('hidden');
+    menu.setAttribute('aria-hidden', 'false');
+    settings.classList.add('open');
+    gear.setAttribute('aria-expanded', 'true');
+    document.addEventListener('mousedown', handleOutside);
+  }
+
+  function handleOutside(e) {
+    if (!settings.contains(e.target)) {
+      closeMenu();
+    }
+  }
+
+  gear.addEventListener('click', e => {
+    e.stopPropagation();
+    if (menu.classList.contains('hidden')) openMenu(); else closeMenu();
+  });
+
+  menu.addEventListener('click', e => e.stopPropagation());
+
   const fav = document.createElement('button');
-  fav.className = overlay ? 'icon-btn deck-action-btn' : 'icon-btn';
-  fav.innerHTML = `<span aria-hidden="true">${item.favorite ? '★' : '☆'}</span><span class="sr-only">Toggle favorite</span>`;
+  fav.className = 'icon-btn';
+  fav.textContent = item.favorite ? '★' : '☆';
   fav.title = 'Toggle Favorite';
   fav.setAttribute('aria-label','Toggle Favorite');
   fav.addEventListener('click', async e => {
@@ -157,15 +138,14 @@ export function createItemCard(item, onChange, options = {}){
     closeMenu();
     item.favorite = !item.favorite;
     await upsertItem(item);
-    const icon = fav.querySelector('span[aria-hidden="true"]');
-    if (icon) icon.textContent = item.favorite ? '★' : '☆';
+    fav.textContent = item.favorite ? '★' : '☆';
     onChange && onChange();
   });
   menu.appendChild(fav);
 
   const link = document.createElement('button');
-  link.className = overlay ? 'icon-btn deck-action-btn' : 'icon-btn';
-  link.innerHTML = '<span aria-hidden="true">🪢</span><span class="sr-only">Manage links</span>';
+  link.className = 'icon-btn';
+  link.textContent = '🪢';
   link.title = 'Links';
   link.setAttribute('aria-label','Manage links');
   link.addEventListener('click', e => {
@@ -176,8 +156,8 @@ export function createItemCard(item, onChange, options = {}){
   menu.appendChild(link);
 
   const edit = document.createElement('button');
-  edit.className = overlay ? 'icon-btn deck-action-btn' : 'icon-btn';
-  edit.innerHTML = '<span aria-hidden="true">✏️</span><span class="sr-only">Edit</span>';
+  edit.className = 'icon-btn';
+  edit.textContent = '✏️';
   edit.title = 'Edit';
   edit.setAttribute('aria-label','Edit');
   edit.addEventListener('click', e => {
@@ -188,8 +168,8 @@ export function createItemCard(item, onChange, options = {}){
   menu.appendChild(edit);
 
   const copy = document.createElement('button');
-  copy.className = overlay ? 'icon-btn deck-action-btn' : 'icon-btn';
-  copy.innerHTML = '<span aria-hidden="true">📋</span><span class="sr-only">Copy title</span>';
+  copy.className = 'icon-btn';
+  copy.textContent = '📋';
   copy.title = 'Copy Title';
   copy.setAttribute('aria-label','Copy Title');
   copy.addEventListener('click', e => {
@@ -200,8 +180,8 @@ export function createItemCard(item, onChange, options = {}){
   menu.appendChild(copy);
 
   const del = document.createElement('button');
-  del.className = overlay ? 'icon-btn danger deck-action-btn' : 'icon-btn danger';
-  del.innerHTML = '<span aria-hidden="true">🗑️</span><span class="sr-only">Delete</span>';
+  del.className = 'icon-btn danger';
+  del.textContent = '🗑️';
   del.title = 'Delete';
   del.setAttribute('aria-label','Delete');
   del.addEventListener('click', async e => {

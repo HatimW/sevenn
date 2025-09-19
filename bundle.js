@@ -1,4 +1,4 @@
-(() => {
+var Sevenn = (() => {
   // js/state.js
   var state = {
     tab: "Diseases",
@@ -2790,12 +2790,9 @@
   var expanded = /* @__PURE__ */ new Set();
   var collapsedBlocks = /* @__PURE__ */ new Set();
   var collapsedWeeks = /* @__PURE__ */ new Set();
-  function createItemCard(item, onChange, options = {}) {
-    const variant = options.variant || "default";
-    const overlay = variant === "overlay";
+  function createItemCard(item, onChange) {
     const card = document.createElement("div");
     card.className = `item-card card--${item.kind}`;
-    if (overlay) card.classList.add("item-card--overlay");
     const color = item.color || kindColors[item.kind] || "var(--gray)";
     card.style.borderTop = `3px solid ${color}`;
     const header = document.createElement("div");
@@ -2803,72 +2800,57 @@
     const mainBtn = document.createElement("button");
     mainBtn.className = "card-title-btn";
     mainBtn.textContent = item.name || item.concept || "Untitled";
-    if (overlay) {
-      card.classList.add("expanded");
-      mainBtn.setAttribute("aria-expanded", "true");
-      mainBtn.classList.add("card-title-btn-static");
-    } else {
+    mainBtn.setAttribute("aria-expanded", expanded.has(item.id));
+    mainBtn.addEventListener("click", () => {
+      if (expanded.has(item.id)) expanded.delete(item.id);
+      else expanded.add(item.id);
+      card.classList.toggle("expanded");
       mainBtn.setAttribute("aria-expanded", expanded.has(item.id));
-      mainBtn.addEventListener("click", () => {
-        if (expanded.has(item.id)) expanded.delete(item.id);
-        else expanded.add(item.id);
-        card.classList.toggle("expanded");
-        mainBtn.setAttribute("aria-expanded", expanded.has(item.id));
-      });
-    }
+    });
     header.appendChild(mainBtn);
     const settings = document.createElement("div");
     settings.className = "card-settings";
     const menu = document.createElement("div");
-    menu.className = overlay ? "card-menu card-menu-inline" : "card-menu hidden";
+    menu.className = "card-menu hidden";
     menu.setAttribute("role", "menu");
-    menu.setAttribute("aria-hidden", overlay ? "false" : "true");
-    let closeMenu = () => {
-    };
-    let openMenu = () => {
-    };
-    if (!overlay) {
-      const gear = document.createElement("button");
-      gear.type = "button";
-      gear.className = "icon-btn card-settings-toggle";
-      gear.title = "Entry options";
-      gear.setAttribute("aria-haspopup", "true");
-      gear.setAttribute("aria-expanded", "false");
-      gear.innerHTML = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.8" stroke="currentColor" stroke-width="1.6"/></svg>';
-      settings.append(gear, menu);
-      const handleOutside = (e) => {
-        if (!settings.contains(e.target)) {
-          closeMenu();
-        }
-      };
-      closeMenu = () => {
-        menu.classList.add("hidden");
-        menu.setAttribute("aria-hidden", "true");
-        settings.classList.remove("open");
-        gear.setAttribute("aria-expanded", "false");
-        document.removeEventListener("mousedown", handleOutside);
-      };
-      openMenu = () => {
-        menu.classList.remove("hidden");
-        menu.setAttribute("aria-hidden", "false");
-        settings.classList.add("open");
-        gear.setAttribute("aria-expanded", "true");
-        document.addEventListener("mousedown", handleOutside);
-      };
-      gear.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (menu.classList.contains("hidden")) openMenu();
-        else closeMenu();
-      });
-      menu.addEventListener("click", (e) => e.stopPropagation());
-    } else {
-      settings.classList.add("card-settings-inline");
-      settings.appendChild(menu);
-    }
+    menu.setAttribute("aria-hidden", "true");
+    const gear = document.createElement("button");
+    gear.type = "button";
+    gear.className = "icon-btn card-settings-toggle";
+    gear.title = "Entry options";
+    gear.setAttribute("aria-haspopup", "true");
+    gear.setAttribute("aria-expanded", "false");
+    gear.innerHTML = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.8" stroke="currentColor" stroke-width="1.6"/></svg>';
+    settings.append(gear, menu);
     header.appendChild(settings);
+    function closeMenu() {
+      menu.classList.add("hidden");
+      menu.setAttribute("aria-hidden", "true");
+      settings.classList.remove("open");
+      gear.setAttribute("aria-expanded", "false");
+      document.removeEventListener("mousedown", handleOutside);
+    }
+    function openMenu() {
+      menu.classList.remove("hidden");
+      menu.setAttribute("aria-hidden", "false");
+      settings.classList.add("open");
+      gear.setAttribute("aria-expanded", "true");
+      document.addEventListener("mousedown", handleOutside);
+    }
+    function handleOutside(e) {
+      if (!settings.contains(e.target)) {
+        closeMenu();
+      }
+    }
+    gear.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (menu.classList.contains("hidden")) openMenu();
+      else closeMenu();
+    });
+    menu.addEventListener("click", (e) => e.stopPropagation());
     const fav = document.createElement("button");
-    fav.className = overlay ? "icon-btn deck-action-btn" : "icon-btn";
-    fav.innerHTML = `<span aria-hidden="true">${item.favorite ? "\u2605" : "\u2606"}</span><span class="sr-only">Toggle favorite</span>`;
+    fav.className = "icon-btn";
+    fav.textContent = item.favorite ? "\u2605" : "\u2606";
     fav.title = "Toggle Favorite";
     fav.setAttribute("aria-label", "Toggle Favorite");
     fav.addEventListener("click", async (e) => {
@@ -2876,14 +2858,13 @@
       closeMenu();
       item.favorite = !item.favorite;
       await upsertItem(item);
-      const icon = fav.querySelector('span[aria-hidden="true"]');
-      if (icon) icon.textContent = item.favorite ? "\u2605" : "\u2606";
+      fav.textContent = item.favorite ? "\u2605" : "\u2606";
       onChange && onChange();
     });
     menu.appendChild(fav);
     const link = document.createElement("button");
-    link.className = overlay ? "icon-btn deck-action-btn" : "icon-btn";
-    link.innerHTML = '<span aria-hidden="true">\u{1FAA2}</span><span class="sr-only">Manage links</span>';
+    link.className = "icon-btn";
+    link.textContent = "\u{1FAA2}";
     link.title = "Links";
     link.setAttribute("aria-label", "Manage links");
     link.addEventListener("click", (e) => {
@@ -2893,8 +2874,8 @@
     });
     menu.appendChild(link);
     const edit = document.createElement("button");
-    edit.className = overlay ? "icon-btn deck-action-btn" : "icon-btn";
-    edit.innerHTML = '<span aria-hidden="true">\u270F\uFE0F</span><span class="sr-only">Edit</span>';
+    edit.className = "icon-btn";
+    edit.textContent = "\u270F\uFE0F";
     edit.title = "Edit";
     edit.setAttribute("aria-label", "Edit");
     edit.addEventListener("click", (e) => {
@@ -2904,8 +2885,8 @@
     });
     menu.appendChild(edit);
     const copy = document.createElement("button");
-    copy.className = overlay ? "icon-btn deck-action-btn" : "icon-btn";
-    copy.innerHTML = '<span aria-hidden="true">\u{1F4CB}</span><span class="sr-only">Copy title</span>';
+    copy.className = "icon-btn";
+    copy.textContent = "\u{1F4CB}";
     copy.title = "Copy Title";
     copy.setAttribute("aria-label", "Copy Title");
     copy.addEventListener("click", (e) => {
@@ -2915,8 +2896,8 @@
     });
     menu.appendChild(copy);
     const del = document.createElement("button");
-    del.className = overlay ? "icon-btn danger deck-action-btn" : "icon-btn danger";
-    del.innerHTML = '<span aria-hidden="true">\u{1F5D1}\uFE0F</span><span class="sr-only">Delete</span>';
+    del.className = "icon-btn danger";
+    del.textContent = "\u{1F5D1}\uFE0F";
     del.title = "Delete";
     del.setAttribute("aria-label", "Delete");
     del.addEventListener("click", async (e) => {
@@ -3249,9 +3230,6 @@
   }
 
   // js/ui/components/cards.js
-
-  var KIND_COLORS = { disease: "var(--pink)", drug: "var(--blue)", concept: "var(--green)" };
-
   var UNASSIGNED_BLOCK_KEY = "__unassigned__";
   var MISC_LECTURE_KEY = "__misc__";
   function formatWeekLabel(value) {
@@ -3263,22 +3241,9 @@
   function titleFromItem(item) {
     return item?.name || item?.concept || "Untitled Card";
   }
-
-  function deckColorFromCards(cards = []) {
-    for (const card of cards) {
-      if (card?.color) return card.color;
-    }
-    for (const card of cards) {
-      if (card?.kind && KIND_COLORS[card.kind]) return KIND_COLORS[card.kind];
-    }
-    return "var(--accent)";
-  }
   async function renderCards(container, items, onChange) {
     container.innerHTML = "";
     container.classList.add("cards-tab");
-    const itemLookup = new Map(items.filter((it) => it && it.id != null).map((it) => [it.id, it]));
-    const overlayCardCache = /* @__PURE__ */ new Map();
-
     const blockDefs = await listBlocks();
     const blockLookup = new Map(blockDefs.map((def) => [def.blockId, def]));
     const blockOrder = new Map(blockDefs.map((def, idx) => [def.blockId, idx]));
@@ -3428,11 +3393,6 @@
       closeBtn.addEventListener("click", closeDeck);
       header.appendChild(closeBtn);
       viewer.appendChild(header);
-
-      const accent = deckColorFromCards(lecture.cards);
-      viewer.style.setProperty("--deck-accent", accent);
-      overlay.style.setProperty("--deck-accent", accent);
-
       const stage = document.createElement("div");
       stage.className = "deck-stage";
       const prev = document.createElement("button");
@@ -3441,8 +3401,6 @@
       prev.innerHTML = '<span class="sr-only">Previous card</span><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.5 15L7.5 10L12.5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       const cardHolder = document.createElement("div");
       cardHolder.className = "deck-card-stage";
-      cardHolder.tabIndex = -1;
-
       const next = document.createElement("button");
       next.type = "button";
       next.className = "deck-nav deck-next";
@@ -3460,31 +3418,6 @@
       toggle.textContent = "Show related cards";
       toolbar.appendChild(toggle);
       viewer.appendChild(toolbar);
-
-      const filmstrip = document.createElement("div");
-      filmstrip.className = "deck-filmstrip";
-      const chipButtons = lecture.cards.map((cardItem, cardIndex) => {
-        const chip = document.createElement("button");
-        chip.type = "button";
-        chip.className = "deck-chip";
-        chip.textContent = titleFromItem(cardItem);
-        chip.addEventListener("click", () => {
-          idx = cardIndex;
-          renderCard();
-          try {
-            cardHolder.focus({ preventScroll: true });
-          } catch (err) {
-            cardHolder.focus();
-          }
-        });
-        filmstrip.appendChild(chip);
-        return chip;
-      });
-      if (lecture.cards.length <= 1) {
-        filmstrip.dataset.single = "true";
-      }
-      viewer.appendChild(filmstrip);
-
       const relatedWrap = document.createElement("div");
       relatedWrap.className = "deck-related";
       relatedWrap.dataset.visible = "false";
@@ -3498,14 +3431,9 @@
           return;
         }
         const current = lecture.cards[idx];
-
-        const seen = /* @__PURE__ */ new Set();
         (current.links || []).forEach((link) => {
-          const linkId = link?.id;
-          if (linkId == null || seen.has(linkId)) return;
-          const related = itemLookup.get(linkId);
+          const related = items.find((it) => it.id === link.id);
           if (related) {
-            seen.add(linkId);
             const card = createItemCard(related, onChange);
             card.classList.add("related-card");
             relatedWrap.appendChild(card);
@@ -3515,23 +3443,10 @@
       }
       function renderCard() {
         cardHolder.innerHTML = "";
-
-        const item = lecture.cards[idx];
-        const cacheKey = item?.id ?? `${lecture.key || lecture.title}-${idx}`;
-        let card = overlayCardCache.get(cacheKey);
-        if (!card) {
-          card = createItemCard(item, onChange, { variant: "overlay" });
-          overlayCardCache.set(cacheKey, card);
-        }
+        const card = createItemCard(lecture.cards[idx], onChange);
         cardHolder.appendChild(card);
         counter.textContent = `Card ${idx + 1} of ${lecture.cards.length}`;
         renderRelated();
-        chipButtons.forEach((chip, chipIndex) => {
-          const active = chipIndex === idx;
-          chip.dataset.active = active ? "true" : "false";
-          chip.setAttribute("aria-pressed", active ? "true" : "false");
-        });
-
       }
       prev.addEventListener("click", () => {
         idx = (idx - 1 + lecture.cards.length) % lecture.cards.length;
@@ -3575,12 +3490,8 @@
       tile.type = "button";
       tile.className = "deck-tile";
       tile.setAttribute("aria-label", `${lecture.title} (${lecture.cards.length} cards)`);
-      const accent = deckColorFromCards(lecture.cards);
-      tile.style.setProperty("--deck-color", accent);
       const stack = document.createElement("div");
       stack.className = "deck-stack";
-      stack.style.setProperty("--deck-color", accent);
-
       const preview = lecture.cards.slice(0, 5);
       stack.style.setProperty("--spread", preview.length > 0 ? (preview.length - 1) / 2 : 0);
       if (!preview.length) {
@@ -3604,7 +3515,6 @@
       const count = document.createElement("span");
       count.className = "deck-count-pill";
       count.textContent = `${lecture.cards.length} card${lecture.cards.length === 1 ? "" : "s"}`;
-      count.style.setProperty("--deck-color", accent);
       info.appendChild(count);
       const label = document.createElement("h3");
       label.className = "deck-title";
@@ -3627,7 +3537,6 @@
         }
       });
       return tile;
-
     }
     if (!blockSections.length) {
       const empty = document.createElement("div");
@@ -3641,8 +3550,6 @@
       catalog.appendChild(empty);
       return;
     }
-    const blockFragment = document.createDocumentFragment();
-
     blockSections.forEach((block) => {
       const section = document.createElement("section");
       section.className = "card-block-section";
@@ -3670,9 +3577,6 @@
       section.appendChild(header);
       const body = document.createElement("div");
       body.className = "card-block-body";
-
-      const weekFragment = document.createDocumentFragment();
-
       block.weeks.forEach((week) => {
         const weekSection = document.createElement("div");
         weekSection.className = "card-week-section";
@@ -3691,34 +3595,24 @@
         weekHeader.appendChild(createCollapseIcon());
         const deckGrid = document.createElement("div");
         deckGrid.className = "deck-grid";
-
-        const deckFragment = document.createDocumentFragment();
         week.lectures.forEach((lecture) => {
-          deckFragment.appendChild(createDeckTile(block, week, lecture));
+          deckGrid.appendChild(createDeckTile(block, week, lecture));
         });
-        deckGrid.appendChild(deckFragment);
         weekSection.appendChild(weekHeader);
         weekSection.appendChild(deckGrid);
-        weekFragment.appendChild(weekSection);
-
+        body.appendChild(weekSection);
         weekHeader.addEventListener("click", () => {
           const collapsed = weekSection.classList.toggle("is-collapsed");
           weekHeader.setAttribute("aria-expanded", collapsed ? "false" : "true");
         });
       });
-
-      body.appendChild(weekFragment);
-
       section.appendChild(body);
       header.addEventListener("click", () => {
         const collapsed = section.classList.toggle("is-collapsed");
         header.setAttribute("aria-expanded", collapsed ? "false" : "true");
       });
-
-      blockFragment.appendChild(section);
+      catalog.appendChild(section);
     });
-    catalog.appendChild(blockFragment);
-
   }
 
   // js/ui/components/builder.js
