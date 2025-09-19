@@ -11,6 +11,7 @@ const MAP_CONFIG_KEY = 'map-config';
 const MAP_CONFIG_BACKUP_KEY = 'sevenn-map-config-backup';
 const DATA_BACKUP_KEY = 'sevenn-backup-snapshot';
 const DATA_BACKUP_STORES = ['items', 'blocks', 'exams', 'settings', 'exam_sessions', 'study_sessions'];
+
 const DEFAULT_APP_SETTINGS = { id: 'app', dailyCount: 20, theme: 'dark', reviewSteps: { ...DEFAULT_REVIEW_STEPS } };
 
 let backupTimer = null;

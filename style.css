@@ -858,6 +858,17 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):hover {
   align-items: flex-start;
 }
 
+.quiz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pad-sm);
+  margin-top: var(--pad);
+}
+
+.quiz-controls .btn {
+  min-width: 0;
+}
+
 .input {
   background: rgba(15, 23, 42, 0.45);
   color: var(--text);
@@ -5276,6 +5287,7 @@ body.map-toolbox-dragging {
   flex-direction: column;
   gap: var(--pad-sm);
 }
+
 
 .review-back-row {
   display: flex;

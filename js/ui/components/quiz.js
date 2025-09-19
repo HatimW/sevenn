@@ -6,6 +6,7 @@ import { REVIEW_RATINGS, RETIRE_RATING, DEFAULT_REVIEW_STEPS } from '../../revie
 import { getReviewDurations, rateSection } from '../../review/scheduler.js';
 import { upsertItem } from '../../storage/storage.js';
 
+
 const RATING_LABELS = {
   again: 'Again',
   hard: 'Hard',
@@ -97,8 +98,10 @@ export function renderQuiz(root, redraw) {
     return;
   }
 
+
   if (session.idx >= pool.length) {
     renderCompletion(root, session, redraw);
+
     return;
   }
 
@@ -335,6 +338,7 @@ export function renderQuiz(root, redraw) {
   });
   controls.appendChild(backBtn);
 
+
   const submitBtn = document.createElement('button');
   submitBtn.type = 'submit';
   submitBtn.className = 'btn';
@@ -361,6 +365,7 @@ export function renderQuiz(root, redraw) {
   const footer = document.createElement('div');
   footer.className = 'quiz-footer';
 
+
   const saveExit = document.createElement('button');
   saveExit.type = 'button';
   saveExit.className = 'btn secondary';
@@ -371,6 +376,7 @@ export function renderQuiz(root, redraw) {
     saveExit.textContent = 'Saving…';
     try {
       await persistStudySession('quiz', {
+
         session: {
           ...session,
           idx: session.idx,
@@ -379,6 +385,7 @@ export function renderQuiz(root, redraw) {
           ratings: session.ratings
         },
         cohort: pool
+
       });
       setQuizSession(null);
       setStudySelectedMode('Quiz');
@@ -392,7 +399,9 @@ export function renderQuiz(root, redraw) {
       saveExit.disabled = false;
     }
   });
+
   footer.appendChild(saveExit);
+
 
   const exitBtn = document.createElement('button');
   exitBtn.type = 'button';

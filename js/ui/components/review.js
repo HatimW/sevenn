@@ -1,8 +1,10 @@
+
 import { state, setFlashSession, setSubtab, setCohort } from '../../state.js';
 import { collectDueSections } from '../../review/scheduler.js';
 import { listBlocks } from '../../storage/storage.js';
 import { getSectionLabel } from './section-utils.js';
 import { hydrateStudySessions, getStudySessionEntry, removeStudySession } from '../../study/study-sessions.js';
+
 
 const REVIEW_SCOPES = ['all', 'blocks', 'lectures'];
 let activeScope = 'all';
@@ -14,6 +16,7 @@ function ensureBlockTitleMap(blocks) {
   blocks.forEach(block => {
     if (!block || !block.blockId) return;
     map.set(block.blockId, block.title || block.blockId);
+
   });
   blockTitleCache = map;
   return map;
@@ -91,7 +94,9 @@ function renderAllView(container, entries, now, start) {
   startBtn.disabled = entries.length === 0;
   startBtn.addEventListener('click', () => {
     if (!entries.length) return;
+
     start(buildSessionPayload(entries), { scope: 'all', label: 'All due cards' });
+
   });
   actionRow.appendChild(startBtn);
   container.appendChild(actionRow);
@@ -119,7 +124,9 @@ function renderAllView(container, entries, now, start) {
   container.appendChild(list);
 }
 
+
 function renderGroupView(container, groups, label, start, metaBuilder = null) {
+
   if (!groups.length) {
     renderEmptyState(container);
     return;
@@ -141,6 +148,7 @@ function renderGroupView(container, groups, label, start, metaBuilder = null) {
     heading.appendChild(count);
     card.appendChild(heading);
 
+
     const actions = document.createElement('div');
     actions.className = 'review-group-actions';
     const startBtn = document.createElement('button');
@@ -154,6 +162,7 @@ function renderGroupView(container, groups, label, start, metaBuilder = null) {
     card.appendChild(actions);
 
     list.appendChild(card);
+
   });
   container.appendChild(list);
 }
@@ -169,13 +178,16 @@ export async function renderReview(root, redraw) {
     return;
   }
 
+
   await hydrateStudySessions().catch(err => console.error('Failed to load saved sessions', err));
 
   const now = Date.now();
   const dueEntries = collectDueSections(cohort, { now });
   const blocks = await listBlocks();
   const blockTitles = ensureBlockTitleMap(blocks);
+
   const savedEntry = getStudySessionEntry('review');
+
 
   const wrapper = document.createElement('section');
   wrapper.className = 'card review-panel';
@@ -189,6 +201,7 @@ export async function renderReview(root, redraw) {
   backBtn.addEventListener('click', () => {
     setSubtab('Study', 'Builder');
     redraw();
+
   });
   backRow.appendChild(backBtn);
   wrapper.appendChild(backRow);
@@ -242,16 +255,19 @@ export async function renderReview(root, redraw) {
     });
     tabs.appendChild(btn);
   });
+
   wrapper.appendChild(tabs);
 
   const body = document.createElement('div');
   body.className = 'review-body';
   wrapper.appendChild(body);
 
+
   const startSession = async (pool, metadata = {}) => {
     if (!pool.length) return;
     await removeStudySession('review').catch(err => console.warn('Failed to discard existing review save', err));
     setFlashSession({ idx: 0, pool, ratings: {}, mode: 'review', metadata });
+
     redraw();
   };
 
@@ -259,6 +275,7 @@ export async function renderReview(root, redraw) {
     renderAllView(body, dueEntries, now, startSession);
   } else if (activeScope === 'blocks') {
     const groups = groupByBlock(dueEntries, blockTitles);
+
     renderGroupView(body, groups, 'block review', startSession, (group) => ({
       scope: 'block',
       label: `Block – ${group.title}`,
@@ -271,6 +288,7 @@ export async function renderReview(root, redraw) {
       label: `Lecture – ${group.title}`,
       lectureId: group.id
     }));
+
   }
 
   root.appendChild(wrapper);

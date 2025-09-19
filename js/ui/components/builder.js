@@ -2,12 +2,15 @@ import { state, setBuilder, setCohort, resetBlockMode, setSubtab, setFlashSessio
 import { listBlocks, listItemsByKind } from '../../storage/storage.js';
 import { setToggleState } from '../../utils.js';
 import { hydrateStudySessions, getStudySessionEntry, removeAllStudySessions, removeStudySession } from '../../study/study-sessions.js';
+
 import { collectDueSections } from '../../review/scheduler.js';
+
 
 const MODE_KEY = {
   Flashcards: 'flashcards',
   Quiz: 'quiz'
 };
+
 
 function collectReviewCount(items) {
   try {
@@ -17,6 +20,7 @@ function collectReviewCount(items) {
     return 0;
   }
 }
+
 
 function notifyBuilderChanged() {
   removeAllStudySessions().catch(err => console.warn('Failed to clear saved sessions', err));
@@ -247,6 +251,7 @@ function renderControls(rerender, redraw) {
   aside.appendChild(renderSummaryCard(rerender, redraw));
   aside.appendChild(renderModeCard(rerender, redraw));
   aside.appendChild(renderReviewCard(redraw));
+
   return aside;
 }
 
@@ -386,8 +391,10 @@ function renderModeCard(rerender, redraw) {
   const labelTitle = selected.toLowerCase();
   startBtn.textContent = `${hasSaved ? 'Resume' : 'Start'} ${selected}`;
   startBtn.disabled = !buttonEnabled;
+
   startBtn.classList.toggle('is-ready', buttonEnabled && !hasSaved);
   startBtn.classList.toggle('is-resume', hasSaved);
+
 
   if (hasSaved) {
     const count = Array.isArray(savedEntry?.cohort) ? savedEntry.cohort.length : 0;
@@ -443,6 +450,7 @@ function renderModeCard(rerender, redraw) {
   return card;
 }
 
+
 function renderReviewCard(redraw) {
   const card = document.createElement('div');
   card.className = 'card builder-review-card';
@@ -496,6 +504,7 @@ function renderReviewCard(redraw) {
   card.appendChild(actions);
   return card;
 }
+
 
 async function buildSet(button, countEl, rerender) {
   const original = button.textContent;
