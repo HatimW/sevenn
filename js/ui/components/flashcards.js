@@ -32,10 +32,51 @@ function sessionEntryAt(session, idx) {
   return pool[idx] || null;
 }
 
+function normalizeFlashSession(session, fallbackPool, defaultMode = 'study') {
+  const source = session && typeof session === 'object' ? session : {};
+  const next = { ...source };
+  let changed = !session || typeof session !== 'object';
+  const fallback = Array.isArray(fallbackPool) ? fallbackPool : [];
+  const pool = Array.isArray(source.pool) && source.pool.length ? source.pool : fallback;
+  if (source.pool !== pool) {
+    next.pool = pool;
+    changed = true;
+  }
+  const ratings = source.ratings && typeof source.ratings === 'object' ? source.ratings : {};
+  if (source.ratings !== ratings) {
+    next.ratings = ratings;
+    changed = true;
+  }
+  let idx = typeof source.idx === 'number' && Number.isFinite(source.idx) ? Math.floor(source.idx) : 0;
+  if (idx < 0) idx = 0;
+  const maxIdx = pool.length ? pool.length - 1 : 0;
+  if (idx > maxIdx) idx = maxIdx;
+  if (idx !== source.idx) {
+    next.idx = idx;
+    changed = true;
+  }
+  const mode = source.mode === 'review' ? 'review' : defaultMode;
+  if (source.mode !== mode) {
+    next.mode = mode;
+    changed = true;
+  }
+  return changed ? next : session;
+}
+
 export function renderFlashcards(root, redraw) {
-  const active = state.flashSession || { idx: 0, pool: state.cohort, ratings: {}, mode: 'study' };
+  const fallbackPool = Array.isArray(state.cohort) ? state.cohort : [];
+  let active = state.flashSession;
+  if (active) {
+    const normalized = normalizeFlashSession(active, fallbackPool, active.mode === 'review' ? 'review' : 'study');
+    if (normalized !== active) {
+      setFlashSession(normalized);
+      active = normalized;
+    }
+  } else {
+    active = normalizeFlashSession({ idx: 0, pool: fallbackPool, ratings: {}, mode: 'study' }, fallbackPool, 'study');
+  }
   active.ratings = active.ratings || {};
-  const items = Array.isArray(active.pool) && active.pool.length ? active.pool : state.cohort;
+  const items = Array.isArray(active.pool) && active.pool.length ? active.pool : fallbackPool;
 
   const isReview = active.mode === 'review';
 
@@ -218,7 +259,8 @@ export function renderFlashcards(root, redraw) {
   prev.disabled = active.idx === 0;
   prev.addEventListener('click', () => {
     if (active.idx > 0) {
-      setFlashSession({ ...active, idx: active.idx - 1, pool: items });
+      const pool = Array.isArray(active.pool) ? active.pool : items;
+      setFlashSession({ ...active, idx: active.idx - 1, pool });
 
       redraw();
     }
@@ -232,11 +274,12 @@ export function renderFlashcards(root, redraw) {
   next.textContent = isLast ? (isReview ? 'Finish review' : 'Finish') : 'Next';
   next.disabled = sectionBlocks.length > 0;
   next.addEventListener('click', () => {
+    const pool = Array.isArray(active.pool) ? active.pool : items;
     const idx = active.idx + 1;
     if (idx >= items.length) {
       setFlashSession(null);
     } else {
-      setFlashSession({ ...active, idx, pool: items });
+      setFlashSession({ ...active, idx, pool });
     }
     redraw();
   });
@@ -251,11 +294,10 @@ export function renderFlashcards(root, redraw) {
       saveExit.disabled = true;
       saveExit.textContent = 'Saving…';
       try {
+        const pool = Array.isArray(active.pool) && active.pool.length ? active.pool : items;
         await persistStudySession('flashcards', {
-
-          session: { ...active, idx: active.idx, pool: items, ratings: active.ratings },
-
-          cohort: items
+          session: { ...active, idx: active.idx, pool, ratings: active.ratings || {} },
+          cohort: pool
         });
         setFlashSession(null);
         setStudySelectedMode('Flashcards');
@@ -280,8 +322,9 @@ export function renderFlashcards(root, redraw) {
       saveExit.disabled = true;
       saveExit.textContent = 'Saving…';
       try {
+        const pool = Array.isArray(active.pool) && active.pool.length ? active.pool : items;
         await persistStudySession('review', {
-          session: { ...active, idx: active.idx, pool: items, ratings: active.ratings },
+          session: { ...active, idx: active.idx, pool, ratings: active.ratings || {} },
           cohort: state.cohort,
           metadata: active.metadata || { label: 'Review session' }
         });
