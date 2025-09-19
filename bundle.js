@@ -3232,6 +3232,7 @@ var Sevenn = (() => {
   // js/ui/components/cards.js
   var UNASSIGNED_BLOCK_KEY = "__unassigned__";
   var MISC_LECTURE_KEY = "__misc__";
+
   var KIND_COLORS = {
     disease: "var(--pink)",
     drug: "var(--blue)",
@@ -3265,6 +3266,7 @@ var Sevenn = (() => {
       ["mnemonic", "Mnemonic", "\u{1F9E0}"]
     ]
   };
+
   function formatWeekLabel(value) {
     if (typeof value === "number" && Number.isFinite(value)) {
       return `Week ${value}`;
@@ -3274,6 +3276,7 @@ var Sevenn = (() => {
   function titleFromItem(item) {
     return item?.name || item?.concept || "Untitled Card";
   }
+
   function escapeHtml5(str = "") {
     return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
@@ -3303,13 +3306,16 @@ var Sevenn = (() => {
     if (kindMatch?.kind) return KIND_COLORS[kindMatch.kind];
     return "var(--accent)";
   }
+
   async function renderCards(container, items, onChange) {
     container.innerHTML = "";
     container.classList.add("cards-tab");
     const blockDefs = await listBlocks();
     const blockLookup = new Map(blockDefs.map((def) => [def.blockId, def]));
     const blockOrder = new Map(blockDefs.map((def, idx) => [def.blockId, idx]));
+
     const itemLookup = new Map(items.map((item) => [item.id, item]));
+
     const blockBuckets = /* @__PURE__ */ new Map();
     function ensureBlock(blockId) {
       const key = blockId || UNASSIGNED_BLOCK_KEY;
@@ -3449,12 +3455,14 @@ var Sevenn = (() => {
       const counter = document.createElement("div");
       counter.className = "deck-counter";
       header.appendChild(counter);
+
       const progress = document.createElement("div");
       progress.className = "deck-progress";
       const progressFill = document.createElement("span");
       progressFill.className = "deck-progress-fill";
       progress.appendChild(progressFill);
       header.appendChild(progress);
+
       const closeBtn = document.createElement("button");
       closeBtn.type = "button";
       closeBtn.className = "deck-close";
@@ -3468,31 +3476,38 @@ var Sevenn = (() => {
       prev.type = "button";
       prev.className = "deck-nav deck-prev";
       prev.innerHTML = '<span class="sr-only">Previous card</span><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.5 15L7.5 10L12.5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
       const slideHolder = document.createElement("div");
       slideHolder.className = "deck-card-stage";
+
       const next = document.createElement("button");
       next.type = "button";
       next.className = "deck-nav deck-next";
       next.innerHTML = '<span class="sr-only">Next card</span><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.5 5L12.5 10L7.5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       stage.appendChild(prev);
+
       stage.appendChild(slideHolder);
       stage.appendChild(next);
       viewer.appendChild(stage);
       const footer = document.createElement("div");
       footer.className = "deck-footer";
+
       const toggle = document.createElement("button");
       toggle.type = "button";
       toggle.className = "deck-related-toggle";
       toggle.dataset.active = "false";
       toggle.textContent = "Show related cards";
+
       footer.appendChild(toggle);
       viewer.appendChild(footer);
+
       const relatedWrap = document.createElement("div");
       relatedWrap.className = "deck-related";
       relatedWrap.dataset.visible = "false";
       viewer.appendChild(relatedWrap);
       let idx = 0;
       let showRelated = false;
+
       function updateToggle(current) {
         const linkCount = Array.isArray(current?.links) ? current.links.length : 0;
         toggle.disabled = linkCount === 0;
@@ -3500,21 +3515,25 @@ var Sevenn = (() => {
         toggle.textContent = linkCount ? `${showRelated ? "Hide" : "Show"} related (${linkCount})` : "No related cards";
       }
       function renderRelated(current) {
+
         relatedWrap.innerHTML = "";
         if (!showRelated) {
           relatedWrap.dataset.visible = "false";
           return;
         }
+
         const links = Array.isArray(current?.links) ? current.links : [];
         links.forEach((link) => {
           const related = itemLookup.get(link.id);
           if (related) {
             relatedWrap.appendChild(createRelatedCard(related));
+
           }
         });
         relatedWrap.dataset.visible = relatedWrap.children.length ? "true" : "false";
       }
       function renderCard() {
+
         const current = lecture.cards[idx];
         slideHolder.innerHTML = "";
         slideHolder.appendChild(createDeckSlide(current, { block, week, lecture }));
@@ -3525,6 +3544,7 @@ var Sevenn = (() => {
         progressFill.style.width = `${progressValue}%`;
         updateToggle(current);
         renderRelated(current);
+
       }
       prev.addEventListener("click", () => {
         idx = (idx - 1 + lecture.cards.length) % lecture.cards.length;
@@ -3537,8 +3557,10 @@ var Sevenn = (() => {
       toggle.addEventListener("click", () => {
         if (toggle.disabled) return;
         showRelated = !showRelated;
+
         updateToggle(lecture.cards[idx]);
         renderRelated(lecture.cards[idx]);
+
       });
       const keyHandler2 = (event) => {
         if (event.key === "ArrowLeft") {
@@ -3568,12 +3590,14 @@ var Sevenn = (() => {
       tile.type = "button";
       tile.className = "deck-tile";
       tile.setAttribute("aria-label", `${lecture.title} (${lecture.cards.length} cards)`);
+
       const accent = getLectureAccent(lecture.cards);
       tile.style.setProperty("--deck-accent", accent);
       const stack = document.createElement("div");
       stack.className = "deck-stack";
       stack.style.setProperty("--deck-accent", accent);
       const preview = lecture.cards.slice(0, 4);
+
       stack.style.setProperty("--spread", preview.length > 0 ? (preview.length - 1) / 2 : 0);
       if (!preview.length) {
         const placeholder = document.createElement("div");
@@ -3596,7 +3620,9 @@ var Sevenn = (() => {
       const count = document.createElement("span");
       count.className = "deck-count-pill";
       count.textContent = `${lecture.cards.length} card${lecture.cards.length === 1 ? "" : "s"}`;
+
       count.style.setProperty("--deck-accent", accent);
+
       info.appendChild(count);
       const label = document.createElement("h3");
       label.className = "deck-title";
@@ -3620,6 +3646,7 @@ var Sevenn = (() => {
       });
       return tile;
     }
+
     function createMetaChip(text, icon) {
       const chip = document.createElement("span");
       chip.className = "deck-chip";
@@ -3750,6 +3777,7 @@ var Sevenn = (() => {
       const firstLecture = block.weeks.find((week) => week.lectures.length)?.lectures.find((lec) => lec.cards.length);
       const blockAccent = block.accent || getLectureAccent(firstLecture?.cards || []);
       if (blockAccent) section.style.setProperty("--block-accent", blockAccent);
+
       const header = document.createElement("button");
       header.type = "button";
       header.className = "card-block-header";
@@ -3776,8 +3804,10 @@ var Sevenn = (() => {
       block.weeks.forEach((week) => {
         const weekSection = document.createElement("div");
         weekSection.className = "card-week-section";
+
         const weekAccent = getLectureAccent(week.lectures.find((lec) => lec.cards.length)?.cards || []);
         if (weekAccent) weekSection.style.setProperty("--week-accent", weekAccent);
+
         const weekHeader = document.createElement("button");
         weekHeader.type = "button";
         weekHeader.className = "card-week-header";
@@ -3809,6 +3839,7 @@ var Sevenn = (() => {
         const collapsed = section.classList.toggle("is-collapsed");
         header.setAttribute("aria-expanded", collapsed ? "false" : "true");
       });
+
       return section;
     }
     if (!blockSections.length) {
@@ -3835,6 +3866,7 @@ var Sevenn = (() => {
       }
     }
     pump();
+
   }
 
   // js/ui/components/builder.js

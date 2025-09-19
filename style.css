@@ -2341,16 +2341,19 @@ input[type="checkbox"]:checked::after {
 }
 
 .card-week-section {
+
   --week-accent: rgba(96, 165, 250, 0.6);
   position: relative;
   background: linear-gradient(150deg, rgba(15, 23, 42, 0.74), rgba(15, 23, 42, 0.52));
   border: 1px solid rgba(148, 163, 184, 0.18);
+
   border-radius: var(--radius);
   padding: var(--pad);
   display: flex;
   flex-direction: column;
   gap: var(--pad);
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.35);
+
   overflow: hidden;
 }
 
@@ -2366,6 +2369,7 @@ input[type="checkbox"]:checked::after {
 .card-week-section > * {
   position: relative;
   z-index: 1;
+
 }
 
 .card-week-header {
@@ -2406,22 +2410,27 @@ input[type="checkbox"]:checked::after {
 
 .deck-grid {
   display: grid;
+
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: clamp(18px, 2vw, 30px);
   align-items: stretch;
+
 }
 
 .deck-tile {
   position: relative;
   border-radius: var(--radius-lg);
+
   padding: clamp(22px, 3vw, 34px);
   background: linear-gradient(160deg, rgba(10, 16, 32, 0.95), rgba(10, 16, 32, 0.78));
   border: 1px solid rgba(148, 163, 184, 0.22);
+
   color: inherit;
   text-align: left;
   display: flex;
   flex-direction: column;
   gap: clamp(18px, 2vw, 26px);
+
   box-shadow: 0 24px 54px rgba(2, 6, 23, 0.36);
   cursor: pointer;
   overflow: hidden;
@@ -2452,12 +2461,15 @@ input[type="checkbox"]:checked::after {
 
 .deck-tile:hover::before {
   opacity: 0.85;
+
 }
 
 .deck-stack {
   position: relative;
   width: 100%;
+
   height: clamp(140px, 20vw, 190px);
+
   perspective: 1100px;
   transform-style: preserve-3d;
 }
@@ -2469,12 +2481,14 @@ input[type="checkbox"]:checked::after {
   padding: clamp(16px, 2vw, 22px);
   border-radius: 22px;
   background: linear-gradient(150deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.65));
+
   border: 1px solid rgba(148, 163, 184, 0.18);
   display: flex;
   align-items: flex-end;
   font-size: 0.78rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+
   color: rgba(248, 250, 252, 0.86);
   backdrop-filter: blur(6px);
   transform-origin: center 125%;
@@ -2492,6 +2506,7 @@ input[type="checkbox"]:checked::after {
   background: linear-gradient(135deg, var(--deck-accent, var(--accent)) 0%, rgba(15, 23, 42, 0) 75%);
   opacity: 0.65;
   pointer-events: none;
+
 }
 
 .stack-card-empty {
@@ -2503,20 +2518,26 @@ input[type="checkbox"]:checked::after {
 }
 
 .deck-tile:hover .stack-card {
+
   transform: rotate(calc((var(--index) - var(--spread, 0)) * 6deg)) translateX(calc((var(--index) - var(--spread, 0)) * 24px)) translateY(calc(var(--index) * -6px)) translateZ(calc(var(--index) * 32px));
   box-shadow: 0 28px 56px rgba(2, 6, 23, 0.5);
   filter: saturate(1.12) brightness(1.06);
+
 }
 
 .deck-info {
   display: flex;
   flex-direction: column;
+
   gap: 12px;
+
 }
 
 .deck-count-pill {
   align-self: flex-start;
+
   padding: 6px 14px;
+
   border-radius: 999px;
   font-size: 0.78rem;
   letter-spacing: 0.08em;
@@ -2661,8 +2682,10 @@ input[type="checkbox"]:checked::after {
   position: absolute;
   top: clamp(18px, 2vw, 26px);
   right: clamp(18px, 2vw, 26px);
+
   width: 42px;
   height: 42px;
+
   border-radius: 50%;
   border: 1px solid rgba(148, 163, 184, 0.28);
   background: rgba(2, 6, 23, 0.65);
@@ -2673,7 +2696,9 @@ input[type="checkbox"]:checked::after {
   align-items: center;
   justify-content: center;
   transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
+
   z-index: 2;
+
 }
 
 .deck-close:hover {
@@ -2686,6 +2711,7 @@ input[type="checkbox"]:checked::after {
 .deck-stage {
   display: grid;
   grid-template-columns: auto 1fr auto;
+
   gap: clamp(18px, 2vw, 30px);
   align-items: stretch;
   position: relative;
@@ -2695,6 +2721,7 @@ input[type="checkbox"]:checked::after {
 .deck-nav {
   width: 48px;
   height: 48px;
+
   border-radius: 50%;
   border: 1px solid rgba(148, 163, 184, 0.22);
   background: rgba(148, 163, 184, 0.14);
@@ -2715,6 +2742,7 @@ input[type="checkbox"]:checked::after {
   background: rgba(56, 189, 248, 0.18);
   border-color: rgba(56, 189, 248, 0.38);
   color: var(--viewer-accent);
+
 }
 
 .deck-card-stage {
@@ -2865,6 +2893,7 @@ input[type="checkbox"]:checked::after {
 
 .deck-related-toggle {
   padding: 8px 18px;
+
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.24);
   background: rgba(148, 163, 184, 0.12);
@@ -2872,6 +2901,7 @@ input[type="checkbox"]:checked::after {
   font-size: 0.9rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+
   transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease, transform 0.3s ease;
 }
 
@@ -2886,26 +2916,32 @@ input[type="checkbox"]:checked::after {
 .deck-related-toggle:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+
 }
 
 .deck-related {
   display: grid;
+
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: var(--pad);
   max-height: 240px;
+
   overflow-y: auto;
   padding-right: 6px;
   opacity: 0;
   transform: translateY(12px);
   transition: opacity 0.3s ease, transform 0.3s ease;
+
   position: relative;
   z-index: 1;
+
 }
 
 .deck-related[data-visible="true"] {
   opacity: 1;
   transform: translateY(0);
 }
+
 
 .related-card-chip {
   border-radius: var(--radius);
@@ -2937,6 +2973,7 @@ input[type="checkbox"]:checked::after {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: rgba(248, 250, 252, 0.55);
+
 }
 .hidden { display:none !important; }
 
