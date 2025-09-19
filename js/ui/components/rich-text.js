@@ -31,6 +31,10 @@ const allowedStyles = new Set([
   'text-align'
 ]);
 
+const RICH_TEXT_CACHE_LIMIT = 400;
+const richTextCache = new Map();
+const richTextCacheKeys = [];
+
 function escapeHtml(str = ''){
   return str
     .replace(/&/g, '&amp;')
@@ -624,8 +628,28 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   };
 }
 
-export function renderRichText(target, value){
+function normalizedFromCache(value){
+  if (!value) return '';
+  const key = typeof value === 'string' ? value : null;
+  if (key !== null && richTextCache.has(key)) {
+    return richTextCache.get(key);
+  }
   const normalized = normalizeInput(value);
+  if (key !== null && key.length <= 20000) {
+    if (!richTextCache.has(key)) {
+      richTextCacheKeys.push(key);
+      if (richTextCacheKeys.length > RICH_TEXT_CACHE_LIMIT) {
+        const oldest = richTextCacheKeys.shift();
+        if (oldest != null) richTextCache.delete(oldest);
+      }
+    }
+    richTextCache.set(key, normalized);
+  }
+  return normalized;
+}
+
+export function renderRichText(target, value){
+  const normalized = normalizedFromCache(value);
   if (!normalized) {
     target.textContent = '';
     target.classList.remove('rich-content');

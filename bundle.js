@@ -28,7 +28,8 @@
     },
     cards: {
       collapsedBlocks: [],
-      collapsedWeeks: []
+      collapsedWeeks: [],
+      initialized: false
     },
     cohort: [],
     review: { count: 20, format: "flashcards" },
@@ -54,7 +55,7 @@
   function setCardsState(patch) {
     if (!patch) return;
     if (!state.cards) {
-      state.cards = { collapsedBlocks: [], collapsedWeeks: [] };
+      state.cards = { collapsedBlocks: [], collapsedWeeks: [], initialized: false };
     }
     const { collapsedBlocks: collapsedBlocks2, collapsedWeeks: collapsedWeeks2 } = patch;
     if (Array.isArray(collapsedBlocks2)) {
@@ -65,6 +66,7 @@
       const unique = Array.from(new Set(collapsedWeeks2.filter(Boolean)));
       state.cards.collapsedWeeks = unique;
     }
+    state.cards.initialized = true;
   }
   function setCohort(items) {
     state.cohort = items;
@@ -1694,6 +1696,9 @@
     "text-decoration-style",
     "text-align"
   ]);
+  var RICH_TEXT_CACHE_LIMIT = 400;
+  var richTextCache = /* @__PURE__ */ new Map();
+  var richTextCacheKeys = [];
   function escapeHtml2(str = "") {
     return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
@@ -2219,8 +2224,27 @@
       }
     };
   }
-  function renderRichText(target, value) {
+  function normalizedFromCache(value) {
+    if (!value) return "";
+    const key = typeof value === "string" ? value : null;
+    if (key !== null && richTextCache.has(key)) {
+      return richTextCache.get(key);
+    }
     const normalized2 = normalizeInput(value);
+    if (key !== null && key.length <= 2e4) {
+      if (!richTextCache.has(key)) {
+        richTextCacheKeys.push(key);
+        if (richTextCacheKeys.length > RICH_TEXT_CACHE_LIMIT) {
+          const oldest = richTextCacheKeys.shift();
+          if (oldest != null) richTextCache.delete(oldest);
+        }
+      }
+      richTextCache.set(key, normalized2);
+    }
+    return normalized2;
+  }
+  function renderRichText(target, value) {
+    const normalized2 = normalizedFromCache(value);
     if (!normalized2) {
       target.textContent = "";
       target.classList.remove("rich-content");
@@ -3290,7 +3314,16 @@
     }
     return "Unscheduled";
   }
+  var TITLE_CACHE = /* @__PURE__ */ new WeakMap();
   function titleFromItem(item) {
+    if (item && typeof item === "object") {
+      if (TITLE_CACHE.has(item)) {
+        return TITLE_CACHE.get(item);
+      }
+      const title = item?.name || item?.concept || "Untitled Card";
+      TITLE_CACHE.set(item, title);
+      return title;
+    }
     return item?.name || item?.concept || "Untitled Card";
   }
   function escapeHtml5(str = "") {
@@ -3320,13 +3353,14 @@
     }
     const seen = /* @__PURE__ */ new Set();
     const colors = [];
-    cards.forEach((card) => {
+    for (const card of cards) {
       const accent = getItemAccent(card);
       if (!seen.has(accent)) {
         seen.add(accent);
         colors.push(accent);
+        if (colors.length >= limit) break;
       }
-    });
+    }
     if (!colors.length) colors.push("var(--accent)");
     return colors.slice(0, Math.max(1, limit));
   }
@@ -3362,8 +3396,11 @@
     const itemLookup = new Map(items.map((item) => [item.id, item]));
     const deckContextLookup = /* @__PURE__ */ new Map();
     const cardsState = state.cards || {};
-    const collapsedBlockSet = new Set(Array.isArray(cardsState.collapsedBlocks) ? cardsState.collapsedBlocks : []);
-    const collapsedWeekSet = new Set(Array.isArray(cardsState.collapsedWeeks) ? cardsState.collapsedWeeks : []);
+    const stateInitialized = cardsState?.initialized === true;
+    const hasCollapsedBlockState = stateInitialized && Array.isArray(cardsState.collapsedBlocks);
+    const hasCollapsedWeekState = stateInitialized && Array.isArray(cardsState.collapsedWeeks);
+    const collapsedBlockSet = new Set(hasCollapsedBlockState ? cardsState.collapsedBlocks : []);
+    const collapsedWeekSet = new Set(hasCollapsedWeekState ? cardsState.collapsedWeeks : []);
     const scheduleFrame = typeof requestAnimationFrame === "function" ? ((cb) => requestAnimationFrame(cb)) : ((cb) => setTimeout(cb, 16));
     let persistHandle = 0;
     function schedulePersist() {
@@ -3472,10 +3509,14 @@
     });
     const blockSections = Array.from(blockBuckets.values()).map((block) => {
       const weeks = Array.from(block.weeks.values()).map((week) => {
-        const lectures = Array.from(week.lectures.values()).map((lec) => ({
-          ...lec,
-          cards: lec.cards.slice().sort((a, b) => titleFromItem(a).localeCompare(titleFromItem(b)))
-        })).filter((lec) => lec.cards.length > 0).sort((a, b) => a.title.localeCompare(b.title));
+        const lectures = Array.from(week.lectures.values()).map((lec) => {
+          const cards = lec.cards.slice().sort((a, b) => titleFromItem(a).localeCompare(titleFromItem(b)));
+          return {
+            ...lec,
+            cards,
+            palette: getLecturePalette(cards)
+          };
+        }).filter((lec) => lec.cards.length > 0).sort((a, b) => a.title.localeCompare(b.title));
         const totalCards2 = lectures.reduce((sum, lec) => sum + lec.cards.length, 0);
         return {
           ...week,
@@ -3505,6 +3546,21 @@
         });
       });
     });
+    if (!hasCollapsedBlockState) {
+      blockSections.forEach((block) => {
+        if (block?.key) collapsedBlockSet.add(block.key);
+      });
+      schedulePersist();
+    }
+    if (!hasCollapsedWeekState) {
+      blockSections.forEach((block) => {
+        block.weeks.forEach((week) => {
+          const key = `${block.key}::${week.key}`;
+          collapsedWeekSet.add(key);
+        });
+      });
+      schedulePersist();
+    }
     const gridPayload = /* @__PURE__ */ new WeakMap();
     const activeGrids = /* @__PURE__ */ new Set();
     let gridPumpHandle = 0;
@@ -3652,6 +3708,15 @@
         activeKeyHandler = null;
       }
       const baseContext = { block, week, lecture };
+      const slideCache = /* @__PURE__ */ new WeakMap();
+      function acquireSlide(item) {
+        if (!slideCache.has(item)) {
+          slideCache.set(item, createDeckSlide(item, baseContext));
+        }
+        const slide = slideCache.get(item).cloneNode(true);
+        slide.classList.add("deck-slide-full");
+        return slide;
+      }
       viewer.className = "deck-viewer deck-viewer-card";
       const closeBtn = document.createElement("button");
       closeBtn.type = "button";
@@ -3752,8 +3817,7 @@
       function renderCard() {
         const current = lecture.cards[idx];
         slideHolder.innerHTML = "";
-        const slide = createDeckSlide(current, baseContext);
-        slide.classList.add("deck-slide-full");
+        const slide = acquireSlide(current);
         slideHolder.appendChild(slide);
         const accent = getItemAccent(current);
         viewer.style.setProperty("--deck-current-accent", accent);
@@ -3807,7 +3871,8 @@
       tile.type = "button";
       tile.className = "deck-tile";
       tile.setAttribute("aria-label", `${lecture.title} (${lecture.cards.length} cards)`);
-      const palette = getLecturePalette(lecture.cards);
+      const palette = lecture.palette || getLecturePalette(lecture.cards);
+      lecture.palette = palette;
       const accent = palette.accent;
       const stack = document.createElement("div");
       stack.className = "deck-stack";
@@ -4039,62 +4104,78 @@
       section.appendChild(header);
       const body = document.createElement("div");
       body.className = "card-block-body";
+      section.appendChild(body);
       if (blockInitiallyCollapsed) {
         section.classList.add("is-collapsed");
       }
-      const blockWeekGrids = [];
-      block.weeks.forEach((week) => {
-        const weekSection = document.createElement("div");
-        weekSection.className = "card-week-section";
-        const weekAccent = getLectureAccent(week.lectures.find((lec) => lec.cards.length)?.cards || []);
-        if (weekAccent) weekSection.style.setProperty("--week-accent", weekAccent);
-        const weekHeader = document.createElement("button");
-        weekHeader.type = "button";
-        weekHeader.className = "card-week-header";
-        const weekStateKey = `${blockKey}::${week.key}`;
-        const weekInitiallyCollapsed = collapsedWeekSet.has(weekStateKey);
-        weekHeader.setAttribute("aria-expanded", weekInitiallyCollapsed ? "false" : "true");
-        const weekTitle = document.createElement("span");
-        weekTitle.className = "card-week-title";
-        weekTitle.textContent = week.label;
-        weekHeader.appendChild(weekTitle);
-        const weekStats = document.createElement("span");
-        weekStats.className = "card-week-stats";
-        weekStats.textContent = `${week.lectureCount} lecture${week.lectureCount === 1 ? "" : "s"} \u2022 ${week.totalCards} card${week.totalCards === 1 ? "" : "s"}`;
-        weekHeader.appendChild(weekStats);
-        weekHeader.appendChild(createCollapseIcon());
-        const deckGrid = document.createElement("div");
-        deckGrid.className = "deck-grid";
-        registerGrid(deckGrid, week.lectures.map((lecture) => ({ block, week, lecture })), {
-          deferInitialRender: weekInitiallyCollapsed || blockInitiallyCollapsed
+      let blockWeekGrids = [];
+      function populateBody() {
+        if (body.dataset.populated === "true") return;
+        body.dataset.populated = "true";
+        const frag = document.createDocumentFragment();
+        const grids = [];
+        block.weeks.forEach((week) => {
+          const weekSection = document.createElement("div");
+          weekSection.className = "card-week-section";
+          const weekAccent = getLectureAccent(week.lectures.find((lec) => lec.cards.length)?.cards || []);
+          if (weekAccent) weekSection.style.setProperty("--week-accent", weekAccent);
+          const weekHeader = document.createElement("button");
+          weekHeader.type = "button";
+          weekHeader.className = "card-week-header";
+          const weekStateKey = `${blockKey}::${week.key}`;
+          const weekInitiallyCollapsed = collapsedWeekSet.has(weekStateKey) && hasCollapsedWeekState;
+          weekHeader.setAttribute("aria-expanded", weekInitiallyCollapsed ? "false" : "true");
+          const weekTitle = document.createElement("span");
+          weekTitle.className = "card-week-title";
+          weekTitle.textContent = week.label;
+          weekHeader.appendChild(weekTitle);
+          const weekStats = document.createElement("span");
+          weekStats.className = "card-week-stats";
+          weekStats.textContent = `${week.lectureCount} lecture${week.lectureCount === 1 ? "" : "s"} \u2022 ${week.totalCards} card${week.totalCards === 1 ? "" : "s"}`;
+          weekHeader.appendChild(weekStats);
+          weekHeader.appendChild(createCollapseIcon());
+          const deckGrid = document.createElement("div");
+          deckGrid.className = "deck-grid";
+          registerGrid(deckGrid, week.lectures.map((lecture) => ({ block, week, lecture })), {
+            deferInitialRender: weekInitiallyCollapsed
+          });
+          if (weekInitiallyCollapsed) {
+            weekSection.classList.add("is-collapsed");
+          }
+          grids.push({ grid: deckGrid, section: weekSection });
+          weekSection.appendChild(weekHeader);
+          weekSection.appendChild(deckGrid);
+          frag.appendChild(weekSection);
+          weekHeader.addEventListener("click", () => {
+            const collapsed = weekSection.classList.toggle("is-collapsed");
+            weekHeader.setAttribute("aria-expanded", collapsed ? "false" : "true");
+            setWeekCollapsedState(weekStateKey, collapsed);
+            if (!collapsed) {
+              ensureGridRendered(deckGrid);
+            }
+          });
         });
-        if (weekInitiallyCollapsed) {
-          weekSection.classList.add("is-collapsed");
-        }
-        blockWeekGrids.push({ grid: deckGrid, key: weekStateKey });
-        weekSection.appendChild(weekHeader);
-        weekSection.appendChild(deckGrid);
-        body.appendChild(weekSection);
-        weekHeader.addEventListener("click", () => {
-          const collapsed = weekSection.classList.toggle("is-collapsed");
-          weekHeader.setAttribute("aria-expanded", collapsed ? "false" : "true");
-          setWeekCollapsedState(weekStateKey, collapsed);
-          if (!collapsed) {
-            ensureGridRendered(deckGrid);
+        blockWeekGrids = grids;
+        body.appendChild(frag);
+      }
+      function ensureVisibleWeekGrids() {
+        blockWeekGrids.forEach(({ grid, section: weekSection }) => {
+          if (!weekSection.classList.contains("is-collapsed")) {
+            ensureGridRendered(grid);
           }
         });
-      });
-      section.appendChild(body);
+      }
+      if (!blockInitiallyCollapsed) {
+        populateBody();
+        requestAnimationFrame(ensureVisibleWeekGrids);
+      }
       header.addEventListener("click", () => {
         const collapsed = section.classList.toggle("is-collapsed");
         header.setAttribute("aria-expanded", collapsed ? "false" : "true");
         setBlockCollapsedState(blockKey, collapsed);
         if (!collapsed) {
-          blockWeekGrids.forEach(({ grid, key }) => {
-            if (!collapsedWeekSet.has(key)) {
-              ensureGridRendered(grid);
-            }
-          });
+          populateBody();
+          ensureVisibleWeekGrids();
         }
       });
       return section;

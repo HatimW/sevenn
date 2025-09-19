@@ -155,8 +155,9 @@ export async function renderCards(container, items, onChange) {
   const deckContextLookup = new Map();
 
   const cardsState = state.cards || {};
-  const hasCollapsedBlockState = Array.isArray(cardsState.collapsedBlocks);
-  const hasCollapsedWeekState = Array.isArray(cardsState.collapsedWeeks);
+  const stateInitialized = cardsState?.initialized === true;
+  const hasCollapsedBlockState = stateInitialized && Array.isArray(cardsState.collapsedBlocks);
+  const hasCollapsedWeekState = stateInitialized && Array.isArray(cardsState.collapsedWeeks);
   const collapsedBlockSet = new Set(hasCollapsedBlockState ? cardsState.collapsedBlocks : []);
   const collapsedWeekSet = new Set(hasCollapsedWeekState ? cardsState.collapsedWeeks : []);
   const scheduleFrame = typeof requestAnimationFrame === 'function'
@@ -335,6 +336,16 @@ export async function renderCards(container, items, onChange) {
     schedulePersist();
   }
 
+  if (!hasCollapsedWeekState) {
+    blockSections.forEach(block => {
+      block.weeks.forEach(week => {
+        const key = `${block.key}::${week.key}`;
+        collapsedWeekSet.add(key);
+      });
+    });
+    schedulePersist();
+  }
+
   const gridPayload = new WeakMap();
   const activeGrids = new Set();
   let gridPumpHandle = 0;
@@ -502,6 +513,16 @@ export async function renderCards(container, items, onChange) {
     }
 
     const baseContext = { block, week, lecture };
+    const slideCache = new WeakMap();
+
+    function acquireSlide(item) {
+      if (!slideCache.has(item)) {
+        slideCache.set(item, createDeckSlide(item, baseContext));
+      }
+      const slide = slideCache.get(item).cloneNode(true);
+      slide.classList.add('deck-slide-full');
+      return slide;
+    }
 
     viewer.className = 'deck-viewer deck-viewer-card';
 
@@ -625,8 +646,7 @@ export async function renderCards(container, items, onChange) {
 
       const current = lecture.cards[idx];
       slideHolder.innerHTML = '';
-      const slide = createDeckSlide(current, baseContext);
-      slide.classList.add('deck-slide-full');
+      const slide = acquireSlide(current);
       slideHolder.appendChild(slide);
       const accent = getItemAccent(current);
       viewer.style.setProperty('--deck-current-accent', accent);

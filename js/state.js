@@ -25,7 +25,8 @@ export const state = {
   },
   cards: {
     collapsedBlocks: [],
-    collapsedWeeks: []
+    collapsedWeeks: [],
+    initialized: false
   },
   cohort: [],
   review: { count:20, format:"flashcards" },
@@ -45,7 +46,7 @@ export function setBuilder(patch){ Object.assign(state.builder, patch); }
 export function setCardsState(patch){
   if (!patch) return;
   if (!state.cards) {
-    state.cards = { collapsedBlocks: [], collapsedWeeks: [] };
+    state.cards = { collapsedBlocks: [], collapsedWeeks: [], initialized: false };
   }
   const { collapsedBlocks, collapsedWeeks } = patch;
   if (Array.isArray(collapsedBlocks)) {
@@ -56,6 +57,7 @@ export function setCardsState(patch){
     const unique = Array.from(new Set(collapsedWeeks.filter(Boolean)));
     state.cards.collapsedWeeks = unique;
   }
+  state.cards.initialized = true;
 }
 export function setCohort(items){ state.cohort = items; }
 export function resetTransientSessions(){ state.quizSession = null; state.flashSession = null; state.examSession = null; }
