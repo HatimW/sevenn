@@ -2503,9 +2503,10 @@ input[type="checkbox"]:checked::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, var(--card-accent, var(--deck-accent, var(--accent))) 0%, rgba(15, 23, 42, 0) 75%);
+  background: linear-gradient(135deg, var(--deck-accent, var(--accent)) 0%, rgba(15, 23, 42, 0) 75%);
   opacity: 0.65;
   pointer-events: none;
+
 }
 
 .stack-card-empty {
@@ -2700,13 +2701,6 @@ input[type="checkbox"]:checked::after {
 
 }
 
-.deck-viewer-compact .deck-close {
-  top: 12px;
-  right: 12px;
-  background: rgba(15, 23, 42, 0.72);
-  border-color: rgba(148, 163, 184, 0.32);
-}
-
 .deck-close:hover {
   background: rgba(56, 189, 248, 0.18);
   color: var(--text);
@@ -2747,7 +2741,7 @@ input[type="checkbox"]:checked::after {
   transform: translateY(-2px);
   background: rgba(56, 189, 248, 0.18);
   border-color: rgba(56, 189, 248, 0.38);
-  color: var(--accent);
+  color: var(--viewer-accent);
 
 }
 
@@ -2757,97 +2751,6 @@ input[type="checkbox"]:checked::after {
   justify-content: center;
   max-height: min(62vh, 540px);
   overflow: hidden;
-}
-
-.deck-viewer-compact {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  padding: 0;
-  gap: 16px;
-  align-items: center;
-}
-
-.deck-viewer-compact::before {
-  display: none;
-}
-
-.deck-viewer-header--compact {
-  width: 100%;
-  max-width: min(560px, 72vw);
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: center;
-  text-align: center;
-  position: relative;
-  padding-top: 36px;
-}
-
-.deck-viewer-header--compact .deck-viewer-crumb {
-  font-size: 0.82rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: rgba(248, 250, 252, 0.55);
-}
-
-.deck-viewer-header--compact .deck-viewer-title {
-  margin: 0;
-  font-size: clamp(1.35rem, 1vw + 1.1rem, 2rem);
-}
-
-.deck-counter--compact {
-  font-size: 0.9rem;
-  color: rgba(248, 250, 252, 0.65);
-}
-
-.deck-stage-fan {
-  width: 100%;
-  max-width: min(560px, 72vw);
-  margin: 0 auto;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 12px;
-  align-items: center;
-}
-
-.deck-card-stage-fan {
-  position: relative;
-  width: 100%;
-  height: min(62vh, 520px);
-  max-height: min(62vh, 520px);
-}
-
-.deck-fan-card {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  transform: translateX(calc(var(--fan-offset, 0) * 32px)) translateY(calc(var(--fan-offset, 0) * -6px)) rotate(calc(var(--fan-offset, 0) * 4deg));
-  z-index: calc(20 - var(--fan-depth, 0));
-  opacity: calc(1 - (var(--fan-depth, 0) * 0.22));
-  transition: transform 0.35s ease, opacity 0.35s ease;
-}
-
-.deck-fan-card.is-active {
-  pointer-events: auto;
-  transform: translateX(0) translateY(0) rotate(0deg) scale(1);
-  opacity: 1;
-  z-index: 40;
-}
-
-.deck-footer--compact {
-  width: 100%;
-  max-width: min(560px, 72vw);
-  margin: 0 auto;
-  justify-content: flex-end;
-}
-
-.deck-viewer-compact .deck-related,
-.deck-viewer-compact .deck-footer {
-  width: 100%;
-  max-width: min(560px, 72vw);
-  margin: 0 auto;
 }
 
 .deck-slide {
@@ -3041,7 +2944,6 @@ input[type="checkbox"]:checked::after {
 
 
 .related-card-chip {
-  appearance: none;
   border-radius: var(--radius);
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(11, 18, 32, 0.85);
@@ -3050,10 +2952,6 @@ input[type="checkbox"]:checked::after {
   flex-direction: column;
   gap: 6px;
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.35);
-  cursor: pointer;
-  text-align: left;
-  color: var(--text);
-  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
 }
 
 .related-card-chip::before {
@@ -3063,17 +2961,6 @@ input[type="checkbox"]:checked::after {
   height: 2px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--related-accent, var(--accent)) 80%, transparent);
-}
-
-.related-card-chip:hover {
-  transform: translateY(-2px);
-  border-color: rgba(148, 163, 184, 0.35);
-  box-shadow: 0 18px 32px rgba(2, 6, 23, 0.35);
-}
-
-.related-card-chip:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--related-accent, var(--accent)) 65%, transparent);
-  outline-offset: 3px;
 }
 
 .related-card-title {
