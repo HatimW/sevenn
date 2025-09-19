@@ -1,4 +1,4 @@
-(() => {
+var Sevenn = (() => {
   // js/state.js
   var state = {
     tab: "Diseases",
@@ -4427,11 +4427,12 @@
       return (a.name || "").localeCompare(b.name || "");
     });
     const weeks = groupByWeek(lectures);
-    const hasSelections = hasBlockSelection(blockId);
+    const hasLectureSelection = hasAnyLectureSelected(blockId, lectures);
+    const blockFullySelected = isBlockFullySelected(block, lectures);
     const blockCollapsed = isBlockCollapsed(blockId);
     const card = document.createElement("div");
     card.className = "card builder-block-card";
-    if (hasSelections) card.classList.add("active");
+    if (blockFullySelected) card.classList.add("active");
     if (blockCollapsed) card.classList.add("is-collapsed");
     const header = document.createElement("div");
     header.className = "builder-block-header";
@@ -4470,7 +4471,7 @@
       }
       actions.appendChild(allBtn);
     }
-    if (hasSelections) {
+    if (hasLectureSelection || blockFullySelected) {
       const clearBtn = createAction("Clear block", () => {
         clearBlock(blockId);
         rerender();
@@ -4507,6 +4508,7 @@
     const weekCollapsed = isWeekCollapsed(blockId, week);
     const row = document.createElement("div");
     row.className = "builder-week-card";
+    if (hasAnyLectureSelected(blockId, lectures)) row.classList.add("is-active");
     if (weekCollapsed) row.classList.add("is-collapsed");
     const header = document.createElement("div");
     header.className = "builder-week-header";
@@ -4610,9 +4612,11 @@
     card.appendChild(title);
     const selectionMeta = document.createElement("div");
     selectionMeta.className = "builder-selection-meta";
+    const blockCount = countSelectedBlocks();
+    const lectureCount = state.builder.lectures.length;
     selectionMeta.innerHTML = `
-    <span>Blocks: ${state.builder.blocks.length}</span>
-    <span>Lectures: ${state.builder.lectures.length}</span>
+    <span>Blocks: ${blockCount}</span>
+    <span>Lectures: ${lectureCount}</span>
   `;
     card.appendChild(selectionMeta);
     const count = document.createElement("div");
@@ -4691,7 +4695,7 @@
       (block.lectures || []).forEach((lecture) => {
         lectureSet.add(lectureKeyFor(blockId, lecture.id));
       });
-      syncBlockWithLectureSelection(blockSet, lectureSet, blockId);
+      syncBlockWithLectureSelection(blockSet, lectureSet, block);
     } else {
       blockSet.add(blockId);
     }
@@ -4723,7 +4727,7 @@
         lectureSet.add(lectureKeyFor(blockId, lecture.id));
       }
     });
-    syncBlockWithLectureSelection(blockSet, lectureSet, blockId);
+    syncBlockWithLectureSelection(blockSet, lectureSet, block);
     setBuilder({
       lectures: Array.from(lectureSet),
       blocks: Array.from(blockSet),
@@ -4739,7 +4743,7 @@
         lectureSet.delete(lectureKeyFor(blockId, lecture.id));
       }
     });
-    syncBlockWithLectureSelection(blockSet, lectureSet, blockId);
+    syncBlockWithLectureSelection(blockSet, lectureSet, block);
     setBuilder({
       lectures: Array.from(lectureSet),
       blocks: Array.from(blockSet),
@@ -4755,7 +4759,7 @@
     } else {
       lectureSet.add(key);
     }
-    syncBlockWithLectureSelection(blockSet, lectureSet, block.blockId);
+    syncBlockWithLectureSelection(blockSet, lectureSet, block);
     setBuilder({
       lectures: Array.from(lectureSet),
       blocks: Array.from(blockSet),
@@ -4793,11 +4797,23 @@
     }
     setBuilder({ collapsedWeeks: Array.from(collapsed) });
   }
-  function hasBlockSelection(blockId) {
-    return state.builder.blocks.includes(blockId) || state.builder.lectures.some((key) => key.startsWith(`${blockId}|`));
+  function isBlockFullySelected(block, lectures) {
+    if (!block) return false;
+    const blockId = block.blockId;
+    if (!state.builder.blocks.includes(blockId)) return false;
+    if (!lectures?.length) return true;
+    return areAllLecturesSelected(blockId, lectures);
   }
   function hasAnySelection() {
     return state.builder.blocks.length || state.builder.lectures.length;
+  }
+  function countSelectedBlocks() {
+    const blockSet = new Set(state.builder.blocks);
+    for (const key of state.builder.lectures) {
+      const [blockId] = key.split("|");
+      if (blockId) blockSet.add(blockId);
+    }
+    return blockSet.size;
   }
   function groupByWeek(lectures) {
     const map = /* @__PURE__ */ new Map();
@@ -4828,7 +4844,9 @@
     const lectureSet = new Set(state.builder.lectures);
     return lectures.every((lecture) => lectureSet.has(lectureKeyFor(blockId, lecture.id)));
   }
-  function syncBlockWithLectureSelection(blockSet, lectureSet, blockId) {
+  function syncBlockWithLectureSelection(blockSet, lectureSet, block) {
+    if (!block) return;
+    const blockId = block.blockId;
     const prefix = `${blockId}|`;
     let hasLecture = false;
     for (const key of lectureSet) {
@@ -4837,7 +4855,17 @@
         break;
       }
     }
-    if (hasLecture) {
+    if (!hasLecture) {
+      blockSet.delete(blockId);
+      return;
+    }
+    const blockLectures = Array.isArray(block.lectures) ? block.lectures : [];
+    if (!blockLectures.length) {
+      blockSet.add(blockId);
+      return;
+    }
+    const allSelected = blockLectures.every((lecture) => lectureSet.has(lectureKeyFor(blockId, lecture.id)));
+    if (allSelected) {
       blockSet.add(blockId);
     } else {
       blockSet.delete(blockId);
