@@ -1,9 +1,10 @@
 
-import { state, setFlashSession, setSubtab } from '../../state.js';
-
+import { state, setFlashSession, setSubtab, setCohort } from '../../state.js';
 import { collectDueSections } from '../../review/scheduler.js';
 import { listBlocks } from '../../storage/storage.js';
 import { getSectionLabel } from './section-utils.js';
+import { hydrateStudySessions, getStudySessionEntry, removeStudySession } from '../../study/study-sessions.js';
+
 
 const REVIEW_SCOPES = ['all', 'blocks', 'lectures'];
 let activeScope = 'all';
@@ -15,6 +16,7 @@ function ensureBlockTitleMap(blocks) {
   blocks.forEach(block => {
     if (!block || !block.blockId) return;
     map.set(block.blockId, block.title || block.blockId);
+
   });
   blockTitleCache = map;
   return map;
@@ -92,7 +94,9 @@ function renderAllView(container, entries, now, start) {
   startBtn.disabled = entries.length === 0;
   startBtn.addEventListener('click', () => {
     if (!entries.length) return;
-    start(buildSessionPayload(entries));
+
+    start(buildSessionPayload(entries), { scope: 'all', label: 'All due cards' });
+
   });
   actionRow.appendChild(startBtn);
   container.appendChild(actionRow);
@@ -120,7 +124,9 @@ function renderAllView(container, entries, now, start) {
   container.appendChild(list);
 }
 
-function renderGroupView(container, groups, label, start) {
+
+function renderGroupView(container, groups, label, start, metaBuilder = null) {
+
   if (!groups.length) {
     renderEmptyState(container);
     return;
@@ -142,13 +148,15 @@ function renderGroupView(container, groups, label, start) {
     heading.appendChild(count);
     card.appendChild(heading);
 
+
     const actions = document.createElement('div');
     actions.className = 'review-group-actions';
     const startBtn = document.createElement('button');
     startBtn.className = 'btn';
     startBtn.textContent = `Start ${label}`;
     startBtn.addEventListener('click', () => {
-      start(buildSessionPayload(group.entries));
+      const metadata = typeof metaBuilder === 'function' ? metaBuilder(group) : { label };
+      start(buildSessionPayload(group.entries), metadata);
     });
     actions.appendChild(startBtn);
     card.appendChild(actions);
@@ -170,10 +178,16 @@ export async function renderReview(root, redraw) {
     return;
   }
 
+
+  await hydrateStudySessions().catch(err => console.error('Failed to load saved sessions', err));
+
   const now = Date.now();
   const dueEntries = collectDueSections(cohort, { now });
   const blocks = await listBlocks();
   const blockTitles = ensureBlockTitleMap(blocks);
+
+  const savedEntry = getStudySessionEntry('review');
+
 
   const wrapper = document.createElement('section');
   wrapper.className = 'card review-panel';
@@ -187,10 +201,10 @@ export async function renderReview(root, redraw) {
   backBtn.addEventListener('click', () => {
     setSubtab('Study', 'Builder');
     redraw();
+
   });
   backRow.appendChild(backBtn);
   wrapper.appendChild(backRow);
-
 
   const heading = document.createElement('h2');
   heading.textContent = 'Review queue';
@@ -200,6 +214,30 @@ export async function renderReview(root, redraw) {
   summary.className = 'review-summary';
   summary.textContent = `Cards due: ${dueEntries.length}`;
   wrapper.appendChild(summary);
+
+  if (savedEntry?.session) {
+    const resumeRow = document.createElement('div');
+    resumeRow.className = 'review-resume-row';
+    const resumeLabel = document.createElement('div');
+    resumeLabel.className = 'review-resume-label';
+    resumeLabel.textContent = savedEntry.metadata?.label || 'Saved review session available';
+    resumeRow.appendChild(resumeLabel);
+    const resumeBtn = document.createElement('button');
+    resumeBtn.type = 'button';
+    resumeBtn.className = 'btn';
+    resumeBtn.textContent = 'Resume';
+    resumeBtn.addEventListener('click', async () => {
+      await removeStudySession('review').catch(err => console.warn('Failed to clear saved review entry', err));
+      const restored = Array.isArray(savedEntry.cohort) ? savedEntry.cohort : null;
+      if (restored) {
+        setCohort(restored);
+      }
+      setFlashSession(savedEntry.session);
+      redraw();
+    });
+    resumeRow.appendChild(resumeBtn);
+    wrapper.appendChild(resumeRow);
+  }
 
   const tabs = document.createElement('div');
   tabs.className = 'review-tabs';
@@ -217,15 +255,19 @@ export async function renderReview(root, redraw) {
     });
     tabs.appendChild(btn);
   });
+
   wrapper.appendChild(tabs);
 
   const body = document.createElement('div');
   body.className = 'review-body';
   wrapper.appendChild(body);
 
-  const startSession = (pool) => {
+
+  const startSession = async (pool, metadata = {}) => {
     if (!pool.length) return;
-    setFlashSession({ idx: 0, pool, ratings: {}, mode: 'review' });
+    await removeStudySession('review').catch(err => console.warn('Failed to discard existing review save', err));
+    setFlashSession({ idx: 0, pool, ratings: {}, mode: 'review', metadata });
+
     redraw();
   };
 
@@ -233,10 +275,20 @@ export async function renderReview(root, redraw) {
     renderAllView(body, dueEntries, now, startSession);
   } else if (activeScope === 'blocks') {
     const groups = groupByBlock(dueEntries, blockTitles);
-    renderGroupView(body, groups, 'block review', startSession);
+
+    renderGroupView(body, groups, 'block review', startSession, (group) => ({
+      scope: 'block',
+      label: `Block – ${group.title}`,
+      blockId: group.id
+    }));
   } else {
     const groups = groupByLecture(dueEntries, blockTitles);
-    renderGroupView(body, groups, 'lecture review', startSession);
+    renderGroupView(body, groups, 'lecture review', startSession, (group) => ({
+      scope: 'lecture',
+      label: `Lecture – ${group.title}`,
+      lectureId: group.id
+    }));
+
   }
 
   root.appendChild(wrapper);

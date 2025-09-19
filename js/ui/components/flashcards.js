@@ -5,7 +5,6 @@ import { sectionsForItem } from './section-utils.js';
 import { REVIEW_RATINGS, RETIRE_RATING, DEFAULT_REVIEW_STEPS } from '../../review/constants.js';
 import { getReviewDurations, rateSection } from '../../review/scheduler.js';
 import { upsertItem } from '../../storage/storage.js';
-
 import { persistStudySession, removeStudySession } from '../../study/study-sessions.js';
 
 
@@ -52,14 +51,15 @@ export function renderFlashcards(root, redraw) {
   }
 
   if (active.idx >= items.length) {
-    setFlashSession(null);
 
+    setFlashSession(null);
     setStudySelectedMode('Flashcards');
     setSubtab('Study', isReview ? 'Review' : 'Builder');
-    if (!isReview) {
+    if (isReview) {
+      removeStudySession('review').catch(err => console.warn('Failed to clear review session', err));
+    } else {
       removeStudySession('flashcards').catch(err => console.warn('Failed to clear flashcard session', err));
     }
-
     redraw();
     return;
   }
@@ -220,7 +220,8 @@ export function renderFlashcards(root, redraw) {
   prev.disabled = active.idx === 0;
   prev.addEventListener('click', () => {
     if (active.idx > 0) {
-      setFlashSession({ idx: active.idx - 1, pool: items, ratings: active.ratings, mode: active.mode });
+      setFlashSession({ ...active, idx: active.idx - 1, pool: items });
+
       redraw();
     }
   });
@@ -237,7 +238,7 @@ export function renderFlashcards(root, redraw) {
     if (idx >= items.length) {
       setFlashSession(null);
     } else {
-      setFlashSession({ idx, pool: items, ratings: active.ratings, mode: active.mode });
+      setFlashSession({ ...active, idx, pool: items });
     }
     redraw();
   });
@@ -253,7 +254,9 @@ export function renderFlashcards(root, redraw) {
       saveExit.textContent = 'Saving…';
       try {
         await persistStudySession('flashcards', {
-          session: { idx: active.idx, pool: items, ratings: active.ratings, mode: active.mode },
+
+          session: { ...active, idx: active.idx, pool: items, ratings: active.ratings },
+
           cohort: items
         });
         setFlashSession(null);
@@ -282,10 +285,39 @@ export function renderFlashcards(root, redraw) {
     });
     controls.appendChild(exit);
   } else {
+
+    const saveExit = document.createElement('button');
+    saveExit.className = 'btn secondary';
+    saveExit.textContent = 'Save & exit';
+    saveExit.addEventListener('click', async () => {
+      const original = saveExit.textContent;
+      saveExit.disabled = true;
+      saveExit.textContent = 'Saving…';
+      try {
+        await persistStudySession('review', {
+          session: { ...active, idx: active.idx, pool: items, ratings: active.ratings },
+          cohort: state.cohort,
+          metadata: active.metadata || { label: 'Review session' }
+        });
+        setFlashSession(null);
+        setSubtab('Study', 'Review');
+        redraw();
+      } catch (err) {
+        console.error('Failed to save review session', err);
+        saveExit.textContent = 'Save failed';
+        setTimeout(() => { saveExit.textContent = original; }, 2000);
+      } finally {
+        saveExit.disabled = false;
+      }
+    });
+    controls.appendChild(saveExit);
+
     const exitReview = document.createElement('button');
     exitReview.className = 'btn secondary';
-    exitReview.textContent = 'Back to review';
+    exitReview.textContent = 'Exit without saving';
     exitReview.addEventListener('click', () => {
+      removeStudySession('review').catch(err => console.warn('Failed to discard review session', err));
+
       setFlashSession(null);
       setSubtab('Study', 'Review');
       redraw();

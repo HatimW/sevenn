@@ -3,10 +3,24 @@ import { listBlocks, listItemsByKind } from '../../storage/storage.js';
 import { setToggleState } from '../../utils.js';
 import { hydrateStudySessions, getStudySessionEntry, removeAllStudySessions, removeStudySession } from '../../study/study-sessions.js';
 
+import { collectDueSections } from '../../review/scheduler.js';
+
+
 const MODE_KEY = {
   Flashcards: 'flashcards',
   Quiz: 'quiz'
 };
+
+
+function collectReviewCount(items) {
+  try {
+    return collectDueSections(items, { now: Date.now() }).length;
+  } catch (err) {
+    console.warn('Failed to calculate review queue size', err);
+    return 0;
+  }
+}
+
 
 function notifyBuilderChanged() {
   removeAllStudySessions().catch(err => console.warn('Failed to clear saved sessions', err));
@@ -236,6 +250,8 @@ function renderControls(rerender, redraw) {
   aside.appendChild(renderFilterCard(rerender));
   aside.appendChild(renderSummaryCard(rerender, redraw));
   aside.appendChild(renderModeCard(rerender, redraw));
+  aside.appendChild(renderReviewCard(redraw));
+
   return aside;
 }
 
@@ -376,6 +392,10 @@ function renderModeCard(rerender, redraw) {
   startBtn.textContent = `${hasSaved ? 'Resume' : 'Start'} ${selected}`;
   startBtn.disabled = !buttonEnabled;
 
+  startBtn.classList.toggle('is-ready', buttonEnabled && !hasSaved);
+  startBtn.classList.toggle('is-resume', hasSaved);
+
+
   if (hasSaved) {
     const count = Array.isArray(savedEntry?.cohort) ? savedEntry.cohort.length : 0;
     status.textContent = `Saved ${labelTitle} session${count ? ` • ${count} cards` : ''}`;
@@ -429,6 +449,62 @@ function renderModeCard(rerender, redraw) {
   card.appendChild(startBtn);
   return card;
 }
+
+
+function renderReviewCard(redraw) {
+  const card = document.createElement('div');
+  card.className = 'card builder-review-card';
+
+  const title = document.createElement('h3');
+  title.textContent = 'Review';
+  card.appendChild(title);
+
+  const cohort = Array.isArray(state.cohort) ? state.cohort : [];
+  const dueCount = cohort.length ? collectReviewCount(cohort) : 0;
+
+  const status = document.createElement('div');
+  status.className = 'builder-review-status';
+  status.textContent = dueCount ? `${dueCount} card${dueCount === 1 ? '' : 's'} due` : 'All caught up!';
+  card.appendChild(status);
+
+  const actions = document.createElement('div');
+  actions.className = 'builder-review-actions';
+
+  const openBtn = document.createElement('button');
+  openBtn.type = 'button';
+  openBtn.className = 'btn secondary';
+  openBtn.textContent = 'Open review';
+  openBtn.disabled = !cohort.length;
+  openBtn.addEventListener('click', () => {
+    setSubtab('Study', 'Review');
+    redraw();
+  });
+  actions.appendChild(openBtn);
+
+  const saved = getStudySessionEntry('review');
+  if (saved?.session) {
+    const resumeBtn = document.createElement('button');
+    resumeBtn.type = 'button';
+    resumeBtn.className = 'btn builder-review-resume';
+    resumeBtn.textContent = 'Resume review';
+    resumeBtn.addEventListener('click', async () => {
+      await removeStudySession('review').catch(err => console.warn('Failed to clear review session stub', err));
+      const restored = Array.isArray(saved.cohort) ? saved.cohort : null;
+      if (restored) {
+        setCohort(restored);
+      }
+      setFlashSession(saved.session);
+      setSubtab('Study', 'Review');
+      redraw();
+    });
+    actions.appendChild(resumeBtn);
+    status.textContent = saved.metadata?.label ? `Saved • ${saved.metadata.label}` : 'Saved review session ready';
+  }
+
+  card.appendChild(actions);
+  return card;
+}
+
 
 async function buildSet(button, countEl, rerender) {
   const original = button.textContent;
