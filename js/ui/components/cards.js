@@ -386,6 +386,7 @@ export async function renderCards(container, items, onChange) {
   function closeDeck() {
     overlay.dataset.active = 'false';
     viewer.innerHTML = '';
+    viewer.className = 'deck-viewer';
     if (activeKeyHandler) {
       document.removeEventListener('keydown', activeKeyHandler);
       activeKeyHandler = null;
@@ -408,86 +409,75 @@ export async function renderCards(container, items, onChange) {
 
     const baseContext = { block, week, lecture };
 
-    const header = document.createElement('div');
-    header.className = 'deck-viewer-header';
-
-    const crumb = document.createElement('div');
-    crumb.className = 'deck-viewer-crumb';
-    const crumbPieces = [];
-    if (block.title) crumbPieces.push(block.title);
-    if (week?.label) crumbPieces.push(week.label);
-    crumb.textContent = crumbPieces.join(' • ');
-    header.appendChild(crumb);
-
-    const title = document.createElement('h2');
-    title.className = 'deck-viewer-title';
-    title.textContent = lecture.title;
-    header.appendChild(title);
-
-    const counter = document.createElement('div');
-    counter.className = 'deck-counter';
-    header.appendChild(counter);
-
-
-    const progress = document.createElement('div');
-    progress.className = 'deck-progress';
-    const progressFill = document.createElement('span');
-    progressFill.className = 'deck-progress-fill';
-    progress.appendChild(progressFill);
-    header.appendChild(progress);
+    viewer.className = 'deck-viewer deck-viewer-card';
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
     closeBtn.className = 'deck-close';
     closeBtn.innerHTML = '<span aria-hidden="true">×</span><span class="sr-only">Close deck</span>';
     closeBtn.addEventListener('click', closeDeck);
-    header.appendChild(closeBtn);
+    viewer.appendChild(closeBtn);
 
-    viewer.appendChild(header);
+    const summary = document.createElement('div');
+    summary.className = 'deck-card-summary';
+    const crumb = document.createElement('span');
+    crumb.className = 'deck-card-summary-crumb';
+    const crumbPieces = [];
+    if (block.title) crumbPieces.push(block.title);
+    if (week?.label) crumbPieces.push(week.label);
+    crumb.textContent = crumbPieces.join(' • ');
+    summary.appendChild(crumb);
+    const title = document.createElement('h2');
+    title.className = 'deck-card-summary-title';
+    title.textContent = lecture.title;
+    summary.appendChild(title);
+    const counter = document.createElement('span');
+    counter.className = 'deck-card-summary-counter';
+    counter.textContent = `Card 1 of ${lecture.cards.length}`;
+    summary.appendChild(counter);
+    viewer.appendChild(summary);
 
     const stage = document.createElement('div');
-    stage.className = 'deck-stage';
+    stage.className = 'deck-card-stage-full';
 
     const prev = document.createElement('button');
     prev.type = 'button';
-    prev.className = 'deck-nav deck-prev';
-    prev.innerHTML = '<span class="sr-only">Previous card</span><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.5 15L7.5 10L12.5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
+    prev.className = 'deck-card-nav deck-card-nav-prev';
+    prev.innerHTML = '<span class="sr-only">Previous card</span><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14 18L8 12L14 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
     const slideHolder = document.createElement('div');
-    slideHolder.className = 'deck-card-stage';
-
+    slideHolder.className = 'deck-card-holder';
 
     const next = document.createElement('button');
     next.type = 'button';
-    next.className = 'deck-nav deck-next';
-    next.innerHTML = '<span class="sr-only">Next card</span><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.5 5L12.5 10L7.5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    next.className = 'deck-card-nav deck-card-nav-next';
+    next.innerHTML = '<span class="sr-only">Next card</span><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 6L16 12L10 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
     stage.appendChild(prev);
-
     stage.appendChild(slideHolder);
     stage.appendChild(next);
     viewer.appendChild(stage);
 
-    const footer = document.createElement('div');
-    footer.className = 'deck-footer';
-
+    const relatedPanel = document.createElement('div');
+    relatedPanel.className = 'deck-related-panel';
 
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'deck-related-toggle';
     toggle.dataset.active = 'false';
     toggle.textContent = 'Show related cards';
+    toggle.setAttribute('aria-expanded', 'false');
+    relatedPanel.appendChild(toggle);
 
-    footer.appendChild(toggle);
-
-    viewer.appendChild(footer);
-
-
+    const relatedWrapId = `deck-related-${Math.random().toString(36).slice(2)}`;
     const relatedWrap = document.createElement('div');
     relatedWrap.className = 'deck-related';
     relatedWrap.dataset.visible = 'false';
-    viewer.appendChild(relatedWrap);
+    relatedWrap.id = relatedWrapId;
+    relatedWrap.setAttribute('aria-hidden', 'true');
+    toggle.setAttribute('aria-controls', relatedWrapId);
+    relatedPanel.appendChild(relatedWrap);
+    viewer.appendChild(relatedPanel);
 
     let idx = 0;
     if (targetCardId != null) {
@@ -501,9 +491,11 @@ export async function renderCards(container, items, onChange) {
 
     function updateToggle(current) {
       const linkCount = Array.isArray(current?.links) ? current.links.length : 0;
-      toggle.disabled = linkCount === 0;
-      toggle.dataset.active = showRelated && linkCount ? 'true' : 'false';
-      toggle.textContent = linkCount
+      const hasLinks = linkCount > 0;
+      toggle.disabled = !hasLinks;
+      toggle.dataset.active = showRelated && hasLinks ? 'true' : 'false';
+      toggle.setAttribute('aria-expanded', showRelated && hasLinks ? 'true' : 'false');
+      toggle.textContent = hasLinks
         ? `${showRelated ? 'Hide' : 'Show'} related (${linkCount})`
         : 'No related cards';
     }
@@ -513,6 +505,9 @@ export async function renderCards(container, items, onChange) {
       relatedWrap.innerHTML = '';
       if (!showRelated) {
         relatedWrap.dataset.visible = 'false';
+        relatedWrap.setAttribute('aria-hidden', 'true');
+        toggle.dataset.active = 'false';
+        toggle.setAttribute('aria-expanded', 'false');
         return;
       }
 
@@ -523,19 +518,28 @@ export async function renderCards(container, items, onChange) {
           relatedWrap.appendChild(createRelatedCard(related, baseContext));
         }
       });
-      relatedWrap.dataset.visible = relatedWrap.children.length ? 'true' : 'false';
+      const visible = relatedWrap.children.length > 0;
+      relatedWrap.dataset.visible = visible ? 'true' : 'false';
+      relatedWrap.setAttribute('aria-hidden', visible ? 'false' : 'true');
+      if (!visible) {
+        toggle.dataset.active = 'false';
+        toggle.setAttribute('aria-expanded', 'false');
+      }
     }
 
     function renderCard() {
 
       const current = lecture.cards[idx];
       slideHolder.innerHTML = '';
-      slideHolder.appendChild(createDeckSlide(current, baseContext));
+      const slide = createDeckSlide(current, baseContext);
+      slide.classList.add('deck-slide-full');
+      slideHolder.appendChild(slide);
       const accent = getItemAccent(current);
       viewer.style.setProperty('--deck-current-accent', accent);
       counter.textContent = `Card ${idx + 1} of ${lecture.cards.length}`;
-      const progressValue = ((idx + 1) / lecture.cards.length) * 100;
-      progressFill.style.width = `${progressValue}%`;
+      const multiple = lecture.cards.length > 1;
+      prev.disabled = !multiple;
+      next.disabled = !multiple;
       updateToggle(current);
       renderRelated(current);
 
@@ -589,7 +593,7 @@ export async function renderCards(container, items, onChange) {
     return icon;
   }
 
-  const FAN_DELAY_MS = 900;
+  const FAN_DELAY_MS = 1000;
 
   function enableDelayedFan(tile) {
     let fanTimer = 0;
@@ -610,6 +614,11 @@ export async function renderCards(container, items, onChange) {
     tile.addEventListener('pointerenter', arm);
     tile.addEventListener('pointerleave', cancel);
     tile.addEventListener('pointercancel', cancel);
+    tile.addEventListener('mouseenter', arm);
+    tile.addEventListener('mouseleave', cancel);
+    tile.addEventListener('touchstart', arm, { passive: true });
+    tile.addEventListener('touchend', cancel);
+    tile.addEventListener('touchcancel', cancel);
     tile.addEventListener('focus', arm);
     tile.addEventListener('blur', cancel);
   }
