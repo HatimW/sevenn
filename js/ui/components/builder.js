@@ -104,7 +104,7 @@ function renderBlockPanel(block, rerender) {
     const clearBtn = createAction('Clear block', () => {
       clearBlock(blockId);
       rerender();
-    });
+    }, 'danger');
     actions.appendChild(clearBtn);
   }
 
@@ -176,7 +176,7 @@ function renderWeek(block, week, lectures, rerender) {
   const clearBtn = createAction('Clear', () => {
     clearWeek(block, week);
     rerender();
-  });
+  }, 'danger');
 
   if (areAllLecturesSelected(blockId, lectures)) {
     allBtn.disabled = true;
@@ -294,7 +294,7 @@ function renderSummaryCard(rerender) {
 
   const clearBtn = document.createElement('button');
   clearBtn.type = 'button';
-  clearBtn.className = 'btn secondary';
+  clearBtn.className = 'btn secondary builder-clear-btn';
   clearBtn.textContent = 'Clear selection';
   clearBtn.disabled = !hasAnySelection();
   clearBtn.addEventListener('click', () => {
@@ -571,10 +571,14 @@ function createPill(active, label, onClick, variant = '') {
   return btn;
 }
 
-function createAction(label, onClick) {
+function createAction(label, onClick, variant = '') {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'builder-action';
+  if (variant) {
+    const variants = Array.isArray(variant) ? variant : variant.split(' ');
+    variants.filter(Boolean).forEach(name => btn.classList.add(`builder-action-${name}`));
+  }
   btn.textContent = label;
   btn.addEventListener('click', onClick);
   return btn;
