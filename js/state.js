@@ -23,6 +23,10 @@ export const state = {
     collapsedBlocks:[],
     collapsedWeeks:[]
   },
+  cards: {
+    collapsedBlocks: [],
+    collapsedWeeks: []
+  },
   cohort: [],
   review: { count:20, format:"flashcards" },
   quizSession: null,
@@ -38,6 +42,21 @@ export function setSubtab(tab, sub){ state.subtab[tab] = sub; }
 export function setQuery(q){ state.query = q; }
 export function setFilters(patch){ Object.assign(state.filters, patch); }
 export function setBuilder(patch){ Object.assign(state.builder, patch); }
+export function setCardsState(patch){
+  if (!patch) return;
+  if (!state.cards) {
+    state.cards = { collapsedBlocks: [], collapsedWeeks: [] };
+  }
+  const { collapsedBlocks, collapsedWeeks } = patch;
+  if (Array.isArray(collapsedBlocks)) {
+    const unique = Array.from(new Set(collapsedBlocks.filter(Boolean)));
+    state.cards.collapsedBlocks = unique;
+  }
+  if (Array.isArray(collapsedWeeks)) {
+    const unique = Array.from(new Set(collapsedWeeks.filter(Boolean)));
+    state.cards.collapsedWeeks = unique;
+  }
+}
 export function setCohort(items){ state.cohort = items; }
 export function resetTransientSessions(){ state.quizSession = null; state.flashSession = null; state.examSession = null; }
 export function setFlashSession(sess){ state.flashSession = sess; }

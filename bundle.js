@@ -26,6 +26,10 @@
       collapsedBlocks: [],
       collapsedWeeks: []
     },
+    cards: {
+      collapsedBlocks: [],
+      collapsedWeeks: []
+    },
     cohort: [],
     review: { count: 20, format: "flashcards" },
     quizSession: null,
@@ -46,6 +50,21 @@
   }
   function setBuilder(patch) {
     Object.assign(state.builder, patch);
+  }
+  function setCardsState(patch) {
+    if (!patch) return;
+    if (!state.cards) {
+      state.cards = { collapsedBlocks: [], collapsedWeeks: [] };
+    }
+    const { collapsedBlocks: collapsedBlocks2, collapsedWeeks: collapsedWeeks2 } = patch;
+    if (Array.isArray(collapsedBlocks2)) {
+      const unique = Array.from(new Set(collapsedBlocks2.filter(Boolean)));
+      state.cards.collapsedBlocks = unique;
+    }
+    if (Array.isArray(collapsedWeeks2)) {
+      const unique = Array.from(new Set(collapsedWeeks2.filter(Boolean)));
+      state.cards.collapsedWeeks = unique;
+    }
   }
   function setCohort(items) {
     state.cohort = items;
@@ -3342,6 +3361,43 @@
     const blockOrder = new Map(blockDefs.map((def, idx) => [def.blockId, idx]));
     const itemLookup = new Map(items.map((item) => [item.id, item]));
     const deckContextLookup = /* @__PURE__ */ new Map();
+    const cardsState = state.cards || {};
+    const collapsedBlockSet = new Set(Array.isArray(cardsState.collapsedBlocks) ? cardsState.collapsedBlocks : []);
+    const collapsedWeekSet = new Set(Array.isArray(cardsState.collapsedWeeks) ? cardsState.collapsedWeeks : []);
+    const scheduleFrame = typeof requestAnimationFrame === "function" ? ((cb) => requestAnimationFrame(cb)) : ((cb) => setTimeout(cb, 16));
+    let persistHandle = 0;
+    function schedulePersist() {
+      if (persistHandle) return;
+      persistHandle = scheduleFrame(() => {
+        persistHandle = 0;
+        setCardsState({
+          collapsedBlocks: Array.from(collapsedBlockSet),
+          collapsedWeeks: Array.from(collapsedWeekSet)
+        });
+      });
+    }
+    function setBlockCollapsedState(key, collapsed) {
+      if (!key) return;
+      if (collapsed) {
+        if (!collapsedBlockSet.has(key)) {
+          collapsedBlockSet.add(key);
+          schedulePersist();
+        }
+      } else if (collapsedBlockSet.delete(key)) {
+        schedulePersist();
+      }
+    }
+    function setWeekCollapsedState(key, collapsed) {
+      if (!key) return;
+      if (collapsed) {
+        if (!collapsedWeekSet.has(key)) {
+          collapsedWeekSet.add(key);
+          schedulePersist();
+        }
+      } else if (collapsedWeekSet.delete(key)) {
+        schedulePersist();
+      }
+    }
     const blockBuckets = /* @__PURE__ */ new Map();
     function ensureBlock(blockId) {
       const key = blockId || UNASSIGNED_BLOCK_KEY;
@@ -3453,6 +3509,26 @@
     const activeGrids = /* @__PURE__ */ new Set();
     let gridPumpHandle = 0;
     const getTime = typeof performance === "object" && typeof performance.now === "function" ? () => performance.now() : () => Date.now();
+    const eagerGridQueue = [];
+    const eagerGridSet = /* @__PURE__ */ new Set();
+    let eagerGridFlushHandle = 0;
+    function requestEagerGrid(grid) {
+      if (!grid || eagerGridSet.has(grid)) return;
+      if (eagerGridQueue.length >= 6) return;
+      eagerGridQueue.push(grid);
+      eagerGridSet.add(grid);
+      if (eagerGridFlushHandle) return;
+      eagerGridFlushHandle = scheduleFrame(() => {
+        eagerGridFlushHandle = 0;
+        while (eagerGridQueue.length) {
+          const nextGrid = eagerGridQueue.shift();
+          eagerGridSet.delete(nextGrid);
+          if (!nextGrid || nextGrid.dataset.rendered === "true") continue;
+          if (!nextGrid.isConnected) continue;
+          ensureGridRendered(nextGrid);
+        }
+      });
+    }
     const deckTileObserver = typeof IntersectionObserver === "function" ? new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
         if (entry.isIntersecting) {
@@ -3516,16 +3592,20 @@
         scheduleGridPump();
       }
     }
-    function registerGrid(grid, entries) {
+    function registerGrid(grid, entries, options = {}) {
       grid.dataset.rendered = "false";
       grid.classList.add("is-loading");
       gridPayload.set(grid, { entries, index: 0 });
+      const deferInitialRender = Boolean(options?.deferInitialRender);
+      if (!deferInitialRender) {
+        requestEagerGrid(grid);
+      }
       if (deckTileObserver) {
         requestAnimationFrame(() => {
           if (grid.dataset.rendered === "true") return;
           deckTileObserver.observe(grid);
         });
-      } else {
+      } else if (!deferInitialRender) {
         startGridRender(grid);
       }
     }
@@ -3960,13 +4040,15 @@
     function buildBlockSection(block) {
       const section = document.createElement("section");
       section.className = "card-block-section";
+      const blockKey = block.key;
       const firstLecture = block.weeks.find((week) => week.lectures.length)?.lectures.find((lec) => lec.cards.length);
       const blockAccent = block.accent || getLectureAccent(firstLecture?.cards || []);
       if (blockAccent) section.style.setProperty("--block-accent", blockAccent);
       const header = document.createElement("button");
       header.type = "button";
       header.className = "card-block-header";
-      header.setAttribute("aria-expanded", "true");
+      const blockInitiallyCollapsed = collapsedBlockSet.has(blockKey);
+      header.setAttribute("aria-expanded", blockInitiallyCollapsed ? "false" : "true");
       const heading = document.createElement("div");
       heading.className = "card-block-heading";
       const swatch = document.createElement("span");
@@ -3986,6 +4068,10 @@
       section.appendChild(header);
       const body = document.createElement("div");
       body.className = "card-block-body";
+      if (blockInitiallyCollapsed) {
+        section.classList.add("is-collapsed");
+      }
+      const blockWeekGrids = [];
       block.weeks.forEach((week) => {
         const weekSection = document.createElement("div");
         weekSection.className = "card-week-section";
@@ -3994,7 +4080,9 @@
         const weekHeader = document.createElement("button");
         weekHeader.type = "button";
         weekHeader.className = "card-week-header";
-        weekHeader.setAttribute("aria-expanded", "true");
+        const weekStateKey = `${blockKey}::${week.key}`;
+        const weekInitiallyCollapsed = collapsedWeekSet.has(weekStateKey);
+        weekHeader.setAttribute("aria-expanded", weekInitiallyCollapsed ? "false" : "true");
         const weekTitle = document.createElement("span");
         weekTitle.className = "card-week-title";
         weekTitle.textContent = week.label;
@@ -4006,13 +4094,20 @@
         weekHeader.appendChild(createCollapseIcon());
         const deckGrid = document.createElement("div");
         deckGrid.className = "deck-grid";
-        registerGrid(deckGrid, week.lectures.map((lecture) => ({ block, week, lecture })));
+        registerGrid(deckGrid, week.lectures.map((lecture) => ({ block, week, lecture })), {
+          deferInitialRender: weekInitiallyCollapsed || blockInitiallyCollapsed
+        });
+        if (weekInitiallyCollapsed) {
+          weekSection.classList.add("is-collapsed");
+        }
+        blockWeekGrids.push({ grid: deckGrid, key: weekStateKey });
         weekSection.appendChild(weekHeader);
         weekSection.appendChild(deckGrid);
         body.appendChild(weekSection);
         weekHeader.addEventListener("click", () => {
           const collapsed = weekSection.classList.toggle("is-collapsed");
           weekHeader.setAttribute("aria-expanded", collapsed ? "false" : "true");
+          setWeekCollapsedState(weekStateKey, collapsed);
           if (!collapsed) {
             ensureGridRendered(deckGrid);
           }
@@ -4022,6 +4117,14 @@
       header.addEventListener("click", () => {
         const collapsed = section.classList.toggle("is-collapsed");
         header.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        setBlockCollapsedState(blockKey, collapsed);
+        if (!collapsed) {
+          blockWeekGrids.forEach(({ grid, key }) => {
+            if (!collapsedWeekSet.has(key)) {
+              ensureGridRendered(grid);
+            }
+          });
+        }
       });
       return section;
     }
@@ -4040,8 +4143,16 @@
     const renderQueue = blockSections.slice();
     function pump() {
       const start = getTime();
-      while (renderQueue.length && getTime() - start < 12) {
-        catalog.appendChild(buildBlockSection(renderQueue.shift()));
+      const frag = document.createDocumentFragment();
+      let appended = 0;
+      let elapsed = 0;
+      while (renderQueue.length && elapsed < 12) {
+        frag.appendChild(buildBlockSection(renderQueue.shift()));
+        appended += 1;
+        elapsed = getTime() - start;
+      }
+      if (appended) {
+        catalog.appendChild(frag);
       }
       if (renderQueue.length) {
         requestAnimationFrame(pump);
