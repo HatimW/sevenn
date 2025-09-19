@@ -1,9 +1,10 @@
 
-import { state, setFlashSession, setSubtab, setCohort } from '../../state.js';
+import { setFlashSession, setSubtab, setCohort } from '../../state.js';
 import { collectDueSections, collectUpcomingSections } from '../../review/scheduler.js';
 import { listBlocks } from '../../storage/storage.js';
 import { getSectionLabel } from './section-utils.js';
 import { hydrateStudySessions, getStudySessionEntry, removeStudySession } from '../../study/study-sessions.js';
+import { loadReviewSourceItems } from '../../review/pool.js';
 
 
 const REVIEW_SCOPES = ['all', 'blocks', 'lectures'];
@@ -137,6 +138,10 @@ function renderAllView(container, dueEntries, upcomingEntries, now, start) {
     dueEntries.forEach(entry => {
       const item = document.createElement('li');
       item.className = 'review-entry';
+      item.classList.add('is-clickable');
+      item.tabIndex = 0;
+      item.setAttribute('role', 'button');
+      item.setAttribute('aria-label', `Review ${titleOf(entry.item)} immediately`);
       const title = document.createElement('div');
       title.className = 'review-entry-title';
       title.textContent = titleOf(entry.item);
@@ -145,6 +150,16 @@ function renderAllView(container, dueEntries, upcomingEntries, now, start) {
       meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} • ${formatOverdue(entry.due, now)}`;
       item.appendChild(title);
       item.appendChild(meta);
+      const launch = () => {
+        start(buildSessionPayload([entry]), { scope: 'single', label: `Focused review – ${titleOf(entry.item)}` });
+      };
+      item.addEventListener('click', launch);
+      item.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          launch();
+        }
+      });
       list.appendChild(item);
     });
     container.appendChild(list);
@@ -169,6 +184,10 @@ function renderAllView(container, dueEntries, upcomingEntries, now, start) {
     upcomingEntries.forEach(entry => {
       const item = document.createElement('li');
       item.className = 'review-entry is-upcoming';
+      item.classList.add('is-clickable');
+      item.tabIndex = 0;
+      item.setAttribute('role', 'button');
+      item.setAttribute('aria-label', `Review ${titleOf(entry.item)} early`);
       const title = document.createElement('div');
       title.className = 'review-entry-title';
       title.textContent = titleOf(entry.item);
@@ -177,6 +196,16 @@ function renderAllView(container, dueEntries, upcomingEntries, now, start) {
       meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} • ${formatTimeUntil(entry.due, now)}`;
       item.appendChild(title);
       item.appendChild(meta);
+      const launch = () => {
+        start(buildSessionPayload([entry]), { scope: 'single', label: `Focused review – ${titleOf(entry.item)}` });
+      };
+      item.addEventListener('click', launch);
+      item.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          launch();
+        }
+      });
       list.appendChild(item);
     });
     upcomingSection.appendChild(list);
@@ -229,17 +258,17 @@ function renderGroupView(container, groups, label, start, metaBuilder = null) {
 
 export async function renderReview(root, redraw) {
   root.innerHTML = '';
-  const cohort = state.cohort || [];
-  if (!cohort.length) {
+  await hydrateStudySessions().catch(err => console.error('Failed to load saved sessions', err));
+
+  const cohort = await loadReviewSourceItems();
+  if (!Array.isArray(cohort) || !cohort.length) {
     const empty = document.createElement('div');
     empty.className = 'review-empty';
-    empty.textContent = 'Build a study set to generate review cards.';
+    empty.textContent = 'Add study cards to start building a review queue.';
     root.appendChild(empty);
     return;
   }
-
-
-  await hydrateStudySessions().catch(err => console.error('Failed to load saved sessions', err));
+  setCohort(cohort);
 
   const now = Date.now();
   const dueEntries = collectDueSections(cohort, { now });
