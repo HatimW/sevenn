@@ -3,7 +3,7 @@ import { setToggleState } from '../../utils.js';
 import { renderRichText } from './rich-text.js';
 import { sectionsForItem } from './section-utils.js';
 import { REVIEW_RATINGS, DEFAULT_REVIEW_STEPS } from '../../review/constants.js';
-import { getReviewDurations, rateSection } from '../../review/scheduler.js';
+import { getReviewDurations, rateSection, getSectionStateSnapshot } from '../../review/scheduler.js';
 import { upsertItem } from '../../storage/storage.js';
 import { persistStudySession, removeStudySession } from '../../study/study-sessions.js';
 
@@ -21,6 +21,15 @@ const RATING_CLASS = {
   good: '',
   easy: ''
 };
+
+function queueStatusLabel(snapshot) {
+  if (!snapshot || snapshot.retired) return 'Already in review queue';
+  const rating = snapshot.lastRating;
+  if (rating && RATING_LABELS[rating]) {
+    return `In review (${RATING_LABELS[rating]})`;
+  }
+  return 'Already in review queue';
+}
 
 function ratingKey(item, sectionKey) {
   const id = item?.id || 'item';
@@ -78,6 +87,20 @@ export function renderFlashcards(root, redraw) {
   active.ratings = active.ratings || {};
   const items = Array.isArray(active.pool) && active.pool.length ? active.pool : fallbackPool;
 
+
+  const resolvePool = () => (Array.isArray(active.pool) && active.pool.length ? active.pool : items);
+  const commitSession = (patch = {}) => {
+    const pool = resolvePool();
+    const next = { ...active, pool, ...patch };
+    if (patch.ratings) {
+      next.ratings = { ...patch.ratings };
+    } else {
+      next.ratings = { ...active.ratings };
+    }
+    active = next;
+    setFlashSession(next);
+  };
+
   const isReview = active.mode === 'review';
 
   root.innerHTML = '';
@@ -126,6 +149,7 @@ export function renderFlashcards(root, redraw) {
   const ratedSections = new Map();
 
   const sectionBlocks = sections.length ? sections : [];
+  const sectionRequirements = new Map();
   if (!sectionBlocks.length) {
     const empty = document.createElement('div');
     empty.className = 'flash-empty';
@@ -138,6 +162,15 @@ export function renderFlashcards(root, redraw) {
     const previousRating = active.ratings[ratingId] || null;
     if (previousRating) {
       ratedSections.set(key, previousRating);
+    }
+
+    const snapshot = getSectionStateSnapshot(item, key);
+    const alreadyQueued = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
+    const requiresRating = isReview || !alreadyQueued;
+    sectionRequirements.set(key, requiresRating);
+    if (!requiresRating && !ratedSections.has(key)) {
+      const recorded = snapshot?.lastRating || 'queued';
+      ratedSections.set(key, recorded);
     }
 
     const sec = document.createElement('div');
@@ -169,16 +202,15 @@ export function renderFlashcards(root, redraw) {
         const btnValue = btn.dataset.value;
         const isSelected = btnValue === value;
         btn.classList.toggle('is-selected', isSelected);
-        if (isSelected) {
-          btn.setAttribute('aria-pressed', 'true');
-        } else {
-          btn.setAttribute('aria-pressed', 'false');
-        }
+        btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
       });
+      status.classList.remove('is-error');
+      commitSession({ ratings: { ...active.ratings } });
       updateNextState();
     };
 
     const handleRating = async (value) => {
+      if (!requiresRating) return;
       const durations = await durationsPromise;
       setToggleState(sec, true, 'revealed');
       ratingRow.classList.add('is-saving');
@@ -189,6 +221,7 @@ export function renderFlashcards(root, redraw) {
         await upsertItem(item);
         selectRating(value);
         status.textContent = 'Saved';
+        status.classList.remove('is-error');
       } catch (err) {
         console.error('Failed to record rating', err);
         status.textContent = 'Save failed';
@@ -198,28 +231,34 @@ export function renderFlashcards(root, redraw) {
       }
     };
 
-    REVIEW_RATINGS.forEach(value => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.dataset.value = value;
-      btn.className = 'btn flash-rating-btn';
-      const variant = RATING_CLASS[value];
-      if (variant) btn.classList.add(variant);
-      btn.textContent = RATING_LABELS[value];
-      btn.setAttribute('aria-pressed', 'false');
-      btn.addEventListener('click', (event) => {
-        event.stopPropagation();
-        handleRating(value);
+    if (requiresRating) {
+      REVIEW_RATINGS.forEach(value => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.value = value;
+        btn.className = 'btn flash-rating-btn';
+        const variant = RATING_CLASS[value];
+        if (variant) btn.classList.add(variant);
+        btn.textContent = RATING_LABELS[value];
+        btn.setAttribute('aria-pressed', 'false');
+        btn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          handleRating(value);
+        });
+        btn.addEventListener('keydown', (event) => {
+          event.stopPropagation();
+        });
+        ratingButtons.appendChild(btn);
       });
-      btn.addEventListener('keydown', (event) => {
-        event.stopPropagation();
-      });
-      ratingButtons.appendChild(btn);
-    });
 
-    if (previousRating) {
-      selectRating(previousRating);
-      status.textContent = 'Saved';
+      if (previousRating) {
+        selectRating(previousRating);
+        status.textContent = 'Saved';
+      }
+    } else {
+      ratingRow.classList.add('is-locked');
+      ratingButtons.hidden = true;
+      status.textContent = queueStatusLabel(snapshot);
     }
 
     ratingRow.appendChild(ratingButtons);
@@ -259,8 +298,8 @@ export function renderFlashcards(root, redraw) {
   prev.disabled = active.idx === 0;
   prev.addEventListener('click', () => {
     if (active.idx > 0) {
-      const pool = Array.isArray(active.pool) ? active.pool : items;
-      setFlashSession({ ...active, idx: active.idx - 1, pool });
+
+      commitSession({ idx: active.idx - 1 });
 
       redraw();
     }
@@ -272,14 +311,17 @@ export function renderFlashcards(root, redraw) {
   const isLast = active.idx >= items.length - 1;
 
   next.textContent = isLast ? (isReview ? 'Finish review' : 'Finish') : 'Next';
-  next.disabled = sectionBlocks.length > 0;
+  const hasRatingRequirement = sectionBlocks.some(sec => sectionRequirements.get(sec.key));
+  next.disabled = hasRatingRequirement;
   next.addEventListener('click', () => {
     const pool = Array.isArray(active.pool) ? active.pool : items;
     const idx = active.idx + 1;
     if (idx >= items.length) {
       setFlashSession(null);
     } else {
-      setFlashSession({ ...active, idx, pool });
+
+      commitSession({ idx });
+
     }
     redraw();
   });
@@ -294,9 +336,11 @@ export function renderFlashcards(root, redraw) {
       saveExit.disabled = true;
       saveExit.textContent = 'Saving…';
       try {
-        const pool = Array.isArray(active.pool) && active.pool.length ? active.pool : items;
+
+        const pool = resolvePool();
         await persistStudySession('flashcards', {
-          session: { ...active, idx: active.idx, pool, ratings: active.ratings || {} },
+          session: { ...active, idx: active.idx, pool, ratings: { ...(active.ratings || {}) } },
+
           cohort: pool
         });
         setFlashSession(null);
@@ -322,9 +366,11 @@ export function renderFlashcards(root, redraw) {
       saveExit.disabled = true;
       saveExit.textContent = 'Saving…';
       try {
-        const pool = Array.isArray(active.pool) && active.pool.length ? active.pool : items;
+
+        const pool = resolvePool();
         await persistStudySession('review', {
-          session: { ...active, idx: active.idx, pool, ratings: active.ratings || {} },
+          session: { ...active, idx: active.idx, pool, ratings: { ...(active.ratings || {}) } },
+
           cohort: state.cohort,
           metadata: active.metadata || { label: 'Review session' }
         });
@@ -362,7 +408,15 @@ export function renderFlashcards(root, redraw) {
       next.disabled = false;
       return;
     }
-    const allRated = sectionBlocks.every(sec => ratedSections.get(sec.key));
-    next.disabled = !allRated;
+    const needsRating = sectionBlocks.some(sec => sectionRequirements.get(sec.key));
+    if (!needsRating) {
+      next.disabled = false;
+      return;
+    }
+    const ready = sectionBlocks.every(sec => {
+      if (!sectionRequirements.get(sec.key)) return true;
+      return Boolean(ratedSections.get(sec.key));
+    });
+    next.disabled = !ready;
   }
 }
