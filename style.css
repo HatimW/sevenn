@@ -2341,14 +2341,35 @@ input[type="checkbox"]:checked::after {
 }
 
 .card-week-section {
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(148, 163, 184, 0.2);
+
+  --week-accent: rgba(96, 165, 250, 0.6);
+  position: relative;
+  background: linear-gradient(150deg, rgba(15, 23, 42, 0.74), rgba(15, 23, 42, 0.52));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+
   border-radius: var(--radius);
   padding: var(--pad);
   display: flex;
   flex-direction: column;
   gap: var(--pad);
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.35);
+
+  overflow: hidden;
+}
+
+.card-week-section::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(140deg, color-mix(in srgb, var(--week-accent) 35%, transparent), transparent 65%);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.card-week-section > * {
+  position: relative;
+  z-index: 1;
+
 }
 
 .card-week-header {
@@ -2389,37 +2410,66 @@ input[type="checkbox"]:checked::after {
 
 .deck-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: clamp(16px, 2vw, 28px);
+
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: clamp(18px, 2vw, 30px);
+  align-items: stretch;
+
 }
 
 .deck-tile {
   position: relative;
   border-radius: var(--radius-lg);
-  padding: clamp(20px, 3vw, 32px);
-  background: radial-gradient(circle at top, rgba(148, 163, 184, 0.08), transparent 65%), rgba(10, 16, 32, 0.92);
-  border: 1px solid rgba(148, 163, 184, 0.2);
+
+  padding: clamp(22px, 3vw, 34px);
+  background: linear-gradient(160deg, rgba(10, 16, 32, 0.95), rgba(10, 16, 32, 0.78));
+  border: 1px solid rgba(148, 163, 184, 0.22);
+
   color: inherit;
   text-align: left;
   display: flex;
   flex-direction: column;
   gap: clamp(18px, 2vw, 26px);
-  box-shadow: 0 22px 48px rgba(2, 6, 23, 0.38);
-  transition: transform 0.4s cubic-bezier(0.19, 1, 0.22, 1), box-shadow 0.4s ease, border-color 0.4s ease, background 0.4s ease;
+
+  box-shadow: 0 24px 54px rgba(2, 6, 23, 0.36);
   cursor: pointer;
+  overflow: hidden;
+  min-height: clamp(280px, 32vw, 340px);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.35s ease, border-color 0.35s ease;
+}
+
+.deck-tile::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--deck-accent, var(--accent)) 0%, rgba(10, 16, 32, 0.05) 65%);
+  opacity: 0.55;
+  mix-blend-mode: screen;
+  transition: opacity 0.35s ease;
+}
+
+.deck-tile > * {
+  position: relative;
+  z-index: 1;
 }
 
 .deck-tile:hover {
-  transform: translateY(-6px) scale(1.015);
-  border-color: rgba(56, 189, 248, 0.45);
-  background: radial-gradient(circle at top, rgba(56, 189, 248, 0.16), transparent 68%), rgba(10, 16, 32, 0.96);
-  box-shadow: 0 32px 70px rgba(2, 6, 23, 0.5);
+  transform: translateY(-8px) scale(1.02);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 36px 80px rgba(2, 6, 23, 0.52);
+}
+
+.deck-tile:hover::before {
+  opacity: 0.85;
+
 }
 
 .deck-stack {
   position: relative;
   width: 100%;
-  height: clamp(120px, 18vw, 180px);
+
+  height: clamp(140px, 20vw, 190px);
+
   perspective: 1100px;
   transform-style: preserve-3d;
 }
@@ -2429,26 +2479,34 @@ input[type="checkbox"]:checked::after {
   position: absolute;
   inset: 0;
   padding: clamp(16px, 2vw, 22px);
-  border-radius: 20px;
-  background: linear-gradient(140deg, rgba(30, 58, 138, 0.9), rgba(56, 189, 248, 0.18));
+  border-radius: 22px;
+  background: linear-gradient(150deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.65));
+
   border: 1px solid rgba(148, 163, 184, 0.18);
   display: flex;
   align-items: flex-end;
   font-size: 0.78rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: rgba(248, 250, 252, 0.9);
-  backdrop-filter: blur(4px);
-  transform-origin: center 120%;
-  transform: rotate(calc((var(--index) - var(--spread, 0)) * 1deg)) translateY(calc(var(--index) * -10px)) translateZ(calc(var(--index) * -10px));
-  box-shadow: 0 18px 34px rgba(2, 6, 23, 0.32);
-  opacity: calc(1 - (var(--index) * 0.1));
-  transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.45s ease, filter 0.45s ease, opacity 0.45s ease;
+
+  color: rgba(248, 250, 252, 0.86);
+  backdrop-filter: blur(6px);
+  transform-origin: center 125%;
+  transform: rotate(calc((var(--index) - var(--spread, 0)) * 1deg)) translateY(calc(var(--index) * -10px)) translateZ(calc(var(--index) * -12px));
+  box-shadow: 0 20px 38px rgba(2, 6, 23, 0.32);
+  opacity: calc(1 - (var(--index) * 0.12));
+  transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.45s ease, opacity 0.45s ease, filter 0.45s ease;
   overflow: hidden;
 }
 
-.stack-card:nth-child(odd) {
-  background: linear-gradient(140deg, rgba(124, 58, 237, 0.85), rgba(56, 189, 248, 0.2));
+.stack-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--deck-accent, var(--accent)) 0%, rgba(15, 23, 42, 0) 75%);
+  opacity: 0.65;
+  pointer-events: none;
+
 }
 
 .stack-card-empty {
@@ -2460,27 +2518,45 @@ input[type="checkbox"]:checked::after {
 }
 
 .deck-tile:hover .stack-card {
-  transform: rotate(calc((var(--index) - var(--spread, 0)) * 7deg)) translateX(calc((var(--index) - var(--spread, 0)) * 26px)) translateY(calc(var(--index) * -4px)) translateZ(calc(var(--index) * 36px));
-  box-shadow: 0 26px 52px rgba(2, 6, 23, 0.45);
-  filter: brightness(1.05) saturate(1.1);
+
+  transform: rotate(calc((var(--index) - var(--spread, 0)) * 6deg)) translateX(calc((var(--index) - var(--spread, 0)) * 24px)) translateY(calc(var(--index) * -6px)) translateZ(calc(var(--index) * 32px));
+  box-shadow: 0 28px 56px rgba(2, 6, 23, 0.5);
+  filter: saturate(1.12) brightness(1.06);
+
 }
 
 .deck-info {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+
+  gap: 12px;
+
 }
 
 .deck-count-pill {
   align-self: flex-start;
-  padding: 6px 12px;
+
+  padding: 6px 14px;
+
   border-radius: 999px;
   font-size: 0.78rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  background: rgba(56, 189, 248, 0.15);
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  color: rgba(244, 244, 255, 0.85);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.85), rgba(15, 23, 42, 0.6));
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  color: rgba(244, 244, 255, 0.88);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.28);
+  position: relative;
+  overflow: hidden;
+}
+
+.deck-count-pill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--deck-accent, var(--accent)) 0%, rgba(15, 23, 42, 0) 80%);
+  opacity: 0.65;
+  pointer-events: none;
 }
 
 .deck-title {
@@ -2490,8 +2566,8 @@ input[type="checkbox"]:checked::after {
 }
 
 .deck-meta {
-  font-size: 0.9rem;
-  color: var(--text-muted);
+  font-size: 0.92rem;
+  color: rgba(248, 250, 252, 0.65);
 }
 
 .card-block-section.is-collapsed > .card-block-body {
@@ -2516,8 +2592,8 @@ input[type="checkbox"]:checked::after {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: clamp(16px, 4vw, 48px);
-  background: color-mix(in srgb, rgba(3, 7, 18, 0.9) 82%, transparent);
+  padding: clamp(18px, 4vw, 48px);
+  background: rgba(3, 7, 18, 0.82);
   backdrop-filter: blur(24px);
   z-index: 2000;
   opacity: 0;
@@ -2531,31 +2607,45 @@ input[type="checkbox"]:checked::after {
 }
 
 .deck-viewer {
-  width: min(900px, 90vw);
+  --viewer-accent: var(--accent);
+  width: min(960px, 92vw);
   max-height: 90vh;
-  background: linear-gradient(150deg, rgba(9, 13, 24, 0.95), rgba(18, 29, 48, 0.92));
+  background: linear-gradient(155deg, rgba(7, 12, 24, 0.96), rgba(12, 18, 34, 0.9));
   border-radius: 28px;
   border: 1px solid rgba(148, 163, 184, 0.25);
   box-shadow: 0 36px 80px rgba(2, 6, 23, 0.55);
-  padding: clamp(28px, 4vw, 48px);
+  padding: clamp(28px, 4vw, 44px);
   display: flex;
   flex-direction: column;
   gap: clamp(18px, 3vw, 32px);
   position: relative;
+  overflow: hidden;
+}
+
+.deck-viewer::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top right, color-mix(in srgb, var(--viewer-accent) 30%, transparent), transparent 70%);
+  opacity: 0.9;
+  pointer-events: none;
 }
 
 .deck-viewer-header {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: start;
+  position: relative;
+  z-index: 1;
 }
 
 .deck-viewer-crumb {
-  font-size: 0.85rem;
+  grid-column: 1 / -1;
+  font-size: 0.82rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: rgba(248, 250, 252, 0.6);
 }
 
 .deck-viewer-title {
@@ -2564,17 +2654,38 @@ input[type="checkbox"]:checked::after {
 }
 
 .deck-counter {
-  margin-left: auto;
   font-size: 0.95rem;
-  color: var(--text-muted);
+  color: rgba(248, 250, 252, 0.65);
+  align-self: center;
+}
+
+.deck-progress {
+  grid-column: 1 / -1;
+  height: 6px;
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+
+.deck-progress-fill {
+  position: absolute;
+  inset: 0;
+  width: 0%;
+  background: var(--viewer-accent);
+  border-radius: inherit;
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--viewer-accent) 35%, transparent);
+  transition: width 0.35s ease;
 }
 
 .deck-close {
   position: absolute;
   top: clamp(18px, 2vw, 26px);
   right: clamp(18px, 2vw, 26px);
-  width: 40px;
-  height: 40px;
+
+  width: 42px;
+  height: 42px;
+
   border-radius: 50%;
   border: 1px solid rgba(148, 163, 184, 0.28);
   background: rgba(2, 6, 23, 0.65);
@@ -2585,6 +2696,9 @@ input[type="checkbox"]:checked::after {
   align-items: center;
   justify-content: center;
   transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
+
+  z-index: 2;
+
 }
 
 .deck-close:hover {
@@ -2597,13 +2711,17 @@ input[type="checkbox"]:checked::after {
 .deck-stage {
   display: grid;
   grid-template-columns: auto 1fr auto;
-  gap: clamp(16px, 2vw, 28px);
-  align-items: center;
+
+  gap: clamp(18px, 2vw, 30px);
+  align-items: stretch;
+  position: relative;
+  z-index: 1;
 }
 
 .deck-nav {
-  width: 46px;
-  height: 46px;
+  width: 48px;
+  height: 48px;
+
   border-radius: 50%;
   border: 1px solid rgba(148, 163, 184, 0.22);
   background: rgba(148, 163, 184, 0.14);
@@ -2623,41 +2741,159 @@ input[type="checkbox"]:checked::after {
   transform: translateY(-2px);
   background: rgba(56, 189, 248, 0.18);
   border-color: rgba(56, 189, 248, 0.38);
-  color: var(--accent);
+  color: var(--viewer-accent);
+
 }
 
 .deck-card-stage {
   display: flex;
   align-items: stretch;
   justify-content: center;
-  max-height: min(65vh, 560px);
+  max-height: min(62vh, 540px);
   overflow: hidden;
 }
 
-.deck-card-stage .item-card {
-  width: min(560px, 70vw);
-  max-height: min(65vh, 560px);
+.deck-slide {
+  width: min(560px, 68vw);
+  max-height: min(62vh, 540px);
+  background: linear-gradient(160deg, rgba(11, 17, 32, 0.85), rgba(8, 13, 28, 0.92));
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 22px;
+  padding: clamp(22px, 3vw, 32px);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-}
-
-.deck-card-stage .item-card .card-body {
-  display: block;
+  gap: 18px;
   overflow-y: auto;
+  position: relative;
 }
 
-.deck-card-stage .item-card .section-content {
-  overflow-y: auto;
+.deck-slide::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border-left: 3px solid color-mix(in srgb, var(--slide-accent) 70%, transparent);
+  opacity: 0.9;
+  pointer-events: none;
 }
 
-.deck-toolbar {
+.deck-slide-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  z-index: 1;
+}
+
+.deck-slide-crumb {
+  font-size: 0.8rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(248, 250, 252, 0.55);
+}
+
+.deck-slide-title {
+  margin: 0;
+  font-size: clamp(1.2rem, 0.8vw + 1.1rem, 1.8rem);
+}
+
+.deck-slide-kind {
+  font-size: 0.78rem;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: rgba(248, 250, 252, 0.55);
+}
+
+.deck-slide-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  position: relative;
+  z-index: 1;
+}
+
+.deck-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(248, 250, 252, 0.72);
+}
+
+.deck-chip-icon {
+  font-size: 0.78rem;
+}
+
+.deck-chip-label {
+  white-space: nowrap;
+}
+
+.deck-slide-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  position: relative;
+  z-index: 1;
+}
+
+.deck-section {
+  background: rgba(10, 17, 32, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: var(--radius);
+  padding: clamp(16px, 2vw, 22px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.4);
+}
+
+.deck-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgba(248, 250, 252, 0.75);
+  margin: 0;
+}
+
+.deck-section-icon {
+  font-size: 1rem;
+}
+
+.deck-section-content {
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.deck-section-extra {
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
+.deck-section-empty {
+  margin: 0;
+  font-size: 0.95rem;
+  color: rgba(248, 250, 252, 0.6);
+}
+
+.deck-footer {
   display: flex;
   justify-content: flex-end;
+  position: relative;
+  z-index: 1;
 }
 
 .deck-related-toggle {
-  padding: 8px 16px;
+  padding: 8px 18px;
+
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.24);
   background: rgba(148, 163, 184, 0.12);
@@ -2665,26 +2901,40 @@ input[type="checkbox"]:checked::after {
   font-size: 0.9rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+
+  transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease, transform 0.3s ease;
 }
 
 .deck-related-toggle[data-active="true"] {
-  background: rgba(56, 189, 248, 0.2);
-  border-color: rgba(56, 189, 248, 0.45);
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(56, 189, 248, 0.42);
   color: var(--text);
-  box-shadow: 0 10px 24px rgba(56, 189, 248, 0.25);
+  box-shadow: 0 10px 24px rgba(56, 189, 248, 0.2);
+  transform: translateY(-1px);
+}
+
+.deck-related-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+
 }
 
 .deck-related {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: var(--pad);
-  max-height: 260px;
+  max-height: 240px;
+
   overflow-y: auto;
   padding-right: 6px;
   opacity: 0;
   transform: translateY(12px);
   transition: opacity 0.3s ease, transform 0.3s ease;
+
+  position: relative;
+  z-index: 1;
+
 }
 
 .deck-related[data-visible="true"] {
@@ -2692,9 +2942,38 @@ input[type="checkbox"]:checked::after {
   transform: translateY(0);
 }
 
-.deck-related .item-card {
-  width: 100%;
-  max-height: 240px;
+
+.related-card-chip {
+  border-radius: var(--radius);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(11, 18, 32, 0.85);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.35);
+}
+
+.related-card-chip::before {
+  content: '';
+  display: block;
+  width: 30px;
+  height: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--related-accent, var(--accent)) 80%, transparent);
+}
+
+.related-card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.related-card-kind {
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(248, 250, 252, 0.55);
+
 }
 .hidden { display:none !important; }
 
