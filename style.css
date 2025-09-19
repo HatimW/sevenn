@@ -2463,8 +2463,10 @@ input[type="checkbox"]:checked::after {
   content: '';
   position: absolute;
   inset: 0;
+
   background: var(--deck-gradient, linear-gradient(135deg, rgba(148, 163, 184, 0.26) 0%, rgba(10, 16, 32, 0.08) 68%));
   opacity: 0.7;
+
   mix-blend-mode: screen;
   transition: opacity 0.3s ease, transform 0.3s ease;
 }
@@ -2576,8 +2578,10 @@ input[type="checkbox"]:checked::after {
   content: '';
   position: absolute;
   inset: 0;
+
   background: var(--deck-gradient, linear-gradient(135deg, rgba(148, 163, 184, 0.25) 0%, rgba(15, 23, 42, 0) 80%));
   opacity: 0.65;
+
   pointer-events: none;
 }
 
@@ -2630,7 +2634,9 @@ input[type="checkbox"]:checked::after {
 
 .deck-viewer {
   --deck-current-accent: var(--accent);
+
   width: min(920px, 92vw);
+
   max-height: 90vh;
   background: linear-gradient(165deg, rgba(8, 13, 25, 0.96), rgba(5, 9, 20, 0.88));
   border-radius: 26px;
@@ -2642,6 +2648,7 @@ input[type="checkbox"]:checked::after {
   gap: clamp(16px, 2.5vw, 28px);
   position: relative;
   overflow: visible;
+
 }
 
 .deck-viewer-header {
@@ -2738,8 +2745,10 @@ input[type="checkbox"]:checked::after {
   height: 46px;
 
   border-radius: 50%;
+
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: rgba(148, 163, 184, 0.12);
+
   color: var(--deck-current-accent, var(--accent));
   display: inline-flex;
   align-items: center;

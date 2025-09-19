@@ -123,6 +123,7 @@ function getLectureAccent(cards) {
 }
 
 
+
 /**
  * Render lecture-based decks combining all item types with block/week groupings.
  * @param {HTMLElement} container
@@ -493,7 +494,9 @@ export async function renderCards(container, items, onChange) {
       const initialIdx = lecture.cards.findIndex(card => card.id === targetCardId);
       if (initialIdx >= 0) idx = initialIdx;
     }
+
     let showRelated = persistRelatedVisibility;
+
 
 
     function updateToggle(current) {
@@ -617,8 +620,10 @@ export async function renderCards(container, items, onChange) {
     tile.className = 'deck-tile';
     tile.setAttribute('aria-label', `${lecture.title} (${lecture.cards.length} cards)`);
 
+
     const palette = getLecturePalette(lecture.cards);
     const accent = palette.accent;
+
 
     const stack = document.createElement('div');
     stack.className = 'deck-stack';
