@@ -186,12 +186,12 @@ async function render() {
           startBtn.className = 'btn';
           startBtn.textContent = 'Start Flashcards';
           startBtn.addEventListener('click', () => {
-            setFlashSession({ idx: 0, pool: state.cohort });
+            setFlashSession({ idx: 0, pool: state.cohort, ratings: {}, mode: 'study' });
             render();
           });
           content.appendChild(startBtn);
         } else if (state.subtab.Study === 'Review') {
-          renderReview(content, render);
+          await renderReview(content, render);
         } else if (state.subtab.Study === 'Quiz') {
           const startBtn = document.createElement('button');
           startBtn.className = 'btn';
