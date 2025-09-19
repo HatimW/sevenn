@@ -2457,6 +2457,9 @@ input[type="checkbox"]:checked::after {
   overflow: hidden;
   min-height: clamp(260px, 30vw, 330px);
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+  content-visibility: auto;
+  contain: layout paint style;
+  contain-intrinsic-size: auto 320px;
 }
 
 .deck-tile::before {
@@ -2520,6 +2523,7 @@ input[type="checkbox"]:checked::after {
   box-shadow: 0 16px 32px rgba(2, 6, 23, 0.28);
   opacity: calc(1 - (var(--index) * 0.12));
   transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s ease, opacity 0.4s ease, filter 0.4s ease;
+  transition-delay: 0s, 0s, 0s, 0s;
   overflow: hidden;
 }
 
@@ -2541,12 +2545,13 @@ input[type="checkbox"]:checked::after {
   color: var(--text-muted);
 }
 
-.deck-tile.is-fanned .stack-card {
+.deck-tile:is(:hover, :focus-visible) .stack-card {
 
   transform: rotate(calc((var(--index) - var(--spread, 0)) * 6deg)) translateX(calc((var(--index) - var(--spread, 0)) * 24px)) translateY(calc(var(--index) * -6px)) translateZ(calc(var(--index) * 32px));
   box-shadow: 0 26px 52px rgba(2, 6, 23, 0.46);
   filter: saturate(1.1) brightness(1.05);
 
+  transition-delay: 1s, 1s, 1s, 1s;
 }
 
 .deck-info {

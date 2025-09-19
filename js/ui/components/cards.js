@@ -663,36 +663,6 @@ export async function renderCards(container, items, onChange) {
     return icon;
   }
 
-  const FAN_DELAY_MS = 1000;
-
-  function enableDelayedFan(tile) {
-    let fanTimer = 0;
-    const cancel = () => {
-      if (fanTimer) {
-        clearTimeout(fanTimer);
-        fanTimer = 0;
-      }
-      tile.classList.remove('is-fanned');
-    };
-    const arm = () => {
-      if (fanTimer) return;
-      fanTimer = setTimeout(() => {
-        tile.classList.add('is-fanned');
-        fanTimer = 0;
-      }, FAN_DELAY_MS);
-    };
-    tile.addEventListener('pointerenter', arm);
-    tile.addEventListener('pointerleave', cancel);
-    tile.addEventListener('pointercancel', cancel);
-    tile.addEventListener('mouseenter', arm);
-    tile.addEventListener('mouseleave', cancel);
-    tile.addEventListener('touchstart', arm, { passive: true });
-    tile.addEventListener('touchend', cancel);
-    tile.addEventListener('touchcancel', cancel);
-    tile.addEventListener('focus', arm);
-    tile.addEventListener('blur', cancel);
-  }
-
   function createDeckTile(block, week, lecture) {
     const tile = document.createElement('button');
     tile.type = 'button';
@@ -762,8 +732,6 @@ export async function renderCards(container, items, onChange) {
         open();
       }
     });
-
-    enableDelayedFan(tile);
 
     return tile;
   }
