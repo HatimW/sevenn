@@ -161,42 +161,15 @@ async function render() {
     } else if (state.quizSession) {
       renderQuiz(content, render);
     } else {
-      const wrap = document.createElement('div');
-      await renderBuilder(wrap, render);
-      content.appendChild(wrap);
-
-      const subnav = document.createElement('div');
-      subnav.className = 'tabs row subtabs';
-      const buttons = [
-        { key: 'Builder', label: 'Study home' },
-        { key: 'Review', label: 'Review' }
-      ];
-      const activeKey = state.subtab.Study === 'Blocks' ? 'Builder' : state.subtab.Study;
-      buttons.forEach(({ key, label }) => {
-        const sb = document.createElement('button');
-        sb.className = 'tab';
-        const isActive = activeKey === key;
-        if (isActive) sb.classList.add('active');
-        sb.dataset.toggle = 'true';
-        sb.dataset.active = isActive ? 'true' : 'false';
-        sb.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-        sb.textContent = label;
-        sb.addEventListener('click', () => {
-          setSubtab('Study', key);
-          render();
-        });
-        subnav.appendChild(sb);
-      });
-      content.appendChild(subnav);
-
-      if (state.flashSession) {
-        renderFlashcards(content, render);
-      } else if (state.quizSession) {
-        renderQuiz(content, render);
-      } else if (state.subtab.Study === 'Blocks') {
-        renderBlockMode(content, render);
-      } else if (state.subtab.Study === 'Review') {
+      const activeStudy = state.subtab.Study === 'Blocks' ? 'Blocks' : (state.subtab.Study || 'Builder');
+      if (activeStudy === 'Review') {
         await renderReview(content, render);
+      } else if (activeStudy === 'Blocks') {
+        renderBlockMode(content, render);
+      } else {
+        const wrap = document.createElement('div');
+        await renderBuilder(wrap, render);
+        content.appendChild(wrap);
       }
     }
   } else if (state.tab === 'Exams') {

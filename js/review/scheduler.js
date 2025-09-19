@@ -107,7 +107,7 @@ export function hasContentForSection(item, key) {
   return text.length > 0;
 }
 
-export function collectDueSections(items, { now = Date.now() } = {}) {
+function collectReviewEntries(items, { now = Date.now(), predicate } = {}) {
   const results = [];
   if (!Array.isArray(items) || !items.length) return results;
   const defsMap = allSectionDefs();
@@ -117,7 +117,7 @@ export function collectDueSections(items, { now = Date.now() } = {}) {
       if (!hasContentForSection(item, def.key)) continue;
       const snapshot = getSectionStateSnapshot(item, def.key);
       if (!snapshot || snapshot.retired) continue;
-      if (!snapshot.last || snapshot.due > now) continue;
+      if (typeof predicate === 'function' && !predicate(snapshot, now, item, def)) continue;
       results.push({
         item,
         itemId: item.id,
@@ -129,4 +129,28 @@ export function collectDueSections(items, { now = Date.now() } = {}) {
   }
   results.sort((a, b) => a.due - b.due);
   return results;
+}
+
+export function collectDueSections(items, { now = Date.now() } = {}) {
+  return collectReviewEntries(items, {
+    now,
+    predicate: (snapshot, currentNow) => Boolean(snapshot.last) && snapshot.due <= currentNow
+  });
+}
+
+export function collectUpcomingSections(items, { now = Date.now(), limit = 50 } = {}) {
+  const entries = collectReviewEntries(items, {
+    now,
+    predicate: (snapshot, currentNow) => {
+      if (!snapshot.last) return false;
+      const due = snapshot.due;
+      if (!Number.isFinite(due)) return false;
+      if (due === Number.MAX_SAFE_INTEGER) return false;
+      return due > currentNow;
+    }
+  });
+  if (Number.isFinite(limit) && limit > 0) {
+    return entries.slice(0, limit);
+  }
+  return entries;
 }
