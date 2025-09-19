@@ -5589,6 +5589,14 @@ var Sevenn = (() => {
     good: "",
     easy: ""
   };
+  function queueStatusLabel(snapshot) {
+    if (!snapshot || snapshot.retired) return "Already in review queue";
+    const rating = snapshot.lastRating;
+    if (rating && RATING_LABELS[rating]) {
+      return `In review (${RATING_LABELS[rating]})`;
+    }
+    return "Already in review queue";
+  }
   function ratingKey(item, sectionKey) {
     const id = item?.id || "item";
     return `${id}::${sectionKey}`;
@@ -5597,10 +5605,62 @@ var Sevenn = (() => {
     const pool = Array.isArray(session.pool) ? session.pool : [];
     return pool[idx] || null;
   }
+  function normalizeFlashSession(session, fallbackPool, defaultMode = "study") {
+    const source = session && typeof session === "object" ? session : {};
+    const next = { ...source };
+    let changed = !session || typeof session !== "object";
+    const fallback = Array.isArray(fallbackPool) ? fallbackPool : [];
+    const pool = Array.isArray(source.pool) && source.pool.length ? source.pool : fallback;
+    if (source.pool !== pool) {
+      next.pool = pool;
+      changed = true;
+    }
+    const ratings = source.ratings && typeof source.ratings === "object" ? source.ratings : {};
+    if (source.ratings !== ratings) {
+      next.ratings = ratings;
+      changed = true;
+    }
+    let idx = typeof source.idx === "number" && Number.isFinite(source.idx) ? Math.floor(source.idx) : 0;
+    if (idx < 0) idx = 0;
+    const maxIdx = pool.length ? pool.length - 1 : 0;
+    if (idx > maxIdx) idx = maxIdx;
+    if (idx !== source.idx) {
+      next.idx = idx;
+      changed = true;
+    }
+    const mode = source.mode === "review" ? "review" : defaultMode;
+    if (source.mode !== mode) {
+      next.mode = mode;
+      changed = true;
+    }
+    return changed ? next : session;
+  }
   function renderFlashcards(root, redraw) {
-    const active = state.flashSession || { idx: 0, pool: state.cohort, ratings: {}, mode: "study" };
+    const fallbackPool = Array.isArray(state.cohort) ? state.cohort : [];
+    let active = state.flashSession;
+    if (active) {
+      const normalized2 = normalizeFlashSession(active, fallbackPool, active.mode === "review" ? "review" : "study");
+      if (normalized2 !== active) {
+        setFlashSession(normalized2);
+        active = normalized2;
+      }
+    } else {
+      active = normalizeFlashSession({ idx: 0, pool: fallbackPool, ratings: {}, mode: "study" }, fallbackPool, "study");
+    }
     active.ratings = active.ratings || {};
-    const items = Array.isArray(active.pool) && active.pool.length ? active.pool : state.cohort;
+    const items = Array.isArray(active.pool) && active.pool.length ? active.pool : fallbackPool;
+    const resolvePool = () => Array.isArray(active.pool) && active.pool.length ? active.pool : items;
+    const commitSession = (patch = {}) => {
+      const pool = resolvePool();
+      const next2 = { ...active, pool, ...patch };
+      if (patch.ratings) {
+        next2.ratings = { ...patch.ratings };
+      } else {
+        next2.ratings = { ...active.ratings };
+      }
+      active = next2;
+      setFlashSession(next2);
+    };
     const isReview = active.mode === "review";
     root.innerHTML = "";
     if (!items.length) {
@@ -5639,6 +5699,7 @@ var Sevenn = (() => {
     const durationsPromise = getReviewDurations().catch(() => ({ ...DEFAULT_REVIEW_STEPS }));
     const ratedSections = /* @__PURE__ */ new Map();
     const sectionBlocks = sections.length ? sections : [];
+    const sectionRequirements = /* @__PURE__ */ new Map();
     if (!sectionBlocks.length) {
       const empty = document.createElement("div");
       empty.className = "flash-empty";
@@ -5650,6 +5711,14 @@ var Sevenn = (() => {
       const previousRating = active.ratings[ratingId] || null;
       if (previousRating) {
         ratedSections.set(key, previousRating);
+      }
+      const snapshot = getSectionStateSnapshot(item, key);
+      const alreadyQueued = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
+      const requiresRating = isReview || !alreadyQueued;
+      sectionRequirements.set(key, requiresRating);
+      if (!requiresRating && !ratedSections.has(key)) {
+        const recorded = snapshot?.lastRating || "queued";
+        ratedSections.set(key, recorded);
       }
       const sec = document.createElement("div");
       sec.className = "flash-section";
@@ -5674,15 +5743,14 @@ var Sevenn = (() => {
           const btnValue = btn.dataset.value;
           const isSelected = btnValue === value;
           btn.classList.toggle("is-selected", isSelected);
-          if (isSelected) {
-            btn.setAttribute("aria-pressed", "true");
-          } else {
-            btn.setAttribute("aria-pressed", "false");
-          }
+          btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
         });
+        status.classList.remove("is-error");
+        commitSession({ ratings: { ...active.ratings } });
         updateNextState();
       };
       const handleRating = async (value) => {
+        if (!requiresRating) return;
         const durations = await durationsPromise;
         setToggleState(sec, true, "revealed");
         ratingRow.classList.add("is-saving");
@@ -5693,6 +5761,7 @@ var Sevenn = (() => {
           await upsertItem(item);
           selectRating(value);
           status.textContent = "Saved";
+          status.classList.remove("is-error");
         } catch (err) {
           console.error("Failed to record rating", err);
           status.textContent = "Save failed";
@@ -5701,27 +5770,33 @@ var Sevenn = (() => {
           ratingRow.classList.remove("is-saving");
         }
       };
-      REVIEW_RATINGS.forEach((value) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.dataset.value = value;
-        btn.className = "btn flash-rating-btn";
-        const variant = RATING_CLASS[value];
-        if (variant) btn.classList.add(variant);
-        btn.textContent = RATING_LABELS[value];
-        btn.setAttribute("aria-pressed", "false");
-        btn.addEventListener("click", (event) => {
-          event.stopPropagation();
-          handleRating(value);
+      if (requiresRating) {
+        REVIEW_RATINGS.forEach((value) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.dataset.value = value;
+          btn.className = "btn flash-rating-btn";
+          const variant = RATING_CLASS[value];
+          if (variant) btn.classList.add(variant);
+          btn.textContent = RATING_LABELS[value];
+          btn.setAttribute("aria-pressed", "false");
+          btn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            handleRating(value);
+          });
+          btn.addEventListener("keydown", (event) => {
+            event.stopPropagation();
+          });
+          ratingButtons.appendChild(btn);
         });
-        btn.addEventListener("keydown", (event) => {
-          event.stopPropagation();
-        });
-        ratingButtons.appendChild(btn);
-      });
-      if (previousRating) {
-        selectRating(previousRating);
-        status.textContent = "Saved";
+        if (previousRating) {
+          selectRating(previousRating);
+          status.textContent = "Saved";
+        }
+      } else {
+        ratingRow.classList.add("is-locked");
+        ratingButtons.hidden = true;
+        status.textContent = queueStatusLabel(snapshot);
       }
       ratingRow.appendChild(ratingButtons);
       ratingRow.appendChild(status);
@@ -5756,7 +5831,7 @@ var Sevenn = (() => {
     prev.disabled = active.idx === 0;
     prev.addEventListener("click", () => {
       if (active.idx > 0) {
-        setFlashSession({ ...active, idx: active.idx - 1, pool: items });
+        commitSession({ idx: active.idx - 1 });
         redraw();
       }
     });
@@ -5765,13 +5840,14 @@ var Sevenn = (() => {
     next.className = "btn";
     const isLast = active.idx >= items.length - 1;
     next.textContent = isLast ? isReview ? "Finish review" : "Finish" : "Next";
-    next.disabled = sectionBlocks.length > 0;
+    const hasRatingRequirement = sectionBlocks.some((sec) => sectionRequirements.get(sec.key));
+    next.disabled = hasRatingRequirement;
     next.addEventListener("click", () => {
       const idx = active.idx + 1;
       if (idx >= items.length) {
         setFlashSession(null);
       } else {
-        setFlashSession({ ...active, idx, pool: items });
+        commitSession({ idx });
       }
       redraw();
     });
@@ -5785,9 +5861,10 @@ var Sevenn = (() => {
         saveExit.disabled = true;
         saveExit.textContent = "Saving\u2026";
         try {
+          const pool = resolvePool();
           await persistStudySession("flashcards", {
-            session: { ...active, idx: active.idx, pool: items, ratings: active.ratings },
-            cohort: items
+            session: { ...active, idx: active.idx, pool, ratings: { ...active.ratings || {} } },
+            cohort: pool
           });
           setFlashSession(null);
           setStudySelectedMode("Flashcards");
@@ -5813,8 +5890,9 @@ var Sevenn = (() => {
         saveExit.disabled = true;
         saveExit.textContent = "Saving\u2026";
         try {
+          const pool = resolvePool();
           await persistStudySession("review", {
-            session: { ...active, idx: active.idx, pool: items, ratings: active.ratings },
+            session: { ...active, idx: active.idx, pool, ratings: { ...active.ratings || {} } },
             cohort: state.cohort,
             metadata: active.metadata || { label: "Review session" }
           });
@@ -5849,8 +5927,16 @@ var Sevenn = (() => {
         next.disabled = false;
         return;
       }
-      const allRated = sectionBlocks.every((sec) => ratedSections.get(sec.key));
-      next.disabled = !allRated;
+      const needsRating = sectionBlocks.some((sec) => sectionRequirements.get(sec.key));
+      if (!needsRating) {
+        next.disabled = false;
+        return;
+      }
+      const ready = sectionBlocks.every((sec) => {
+        if (!sectionRequirements.get(sec.key)) return true;
+        return Boolean(ratedSections.get(sec.key));
+      });
+      next.disabled = !ready;
     }
   }
 
@@ -6206,18 +6292,23 @@ var Sevenn = (() => {
   function ensureSessionDefaults(session) {
     if (!session) return;
     if (!Array.isArray(session.pool)) session.pool = [];
-    if (!session.dict) {
-      session.dict = session.pool.map((it) => ({
-        id: it.id,
-        title: titleOf3(it),
-        lower: titleOf3(it).toLowerCase()
-      }));
-    }
+    session.dict = session.pool.map((it) => ({
+      id: it.id,
+      title: titleOf3(it),
+      lower: titleOf3(it).toLowerCase()
+    }));
     if (!session.answers || typeof session.answers !== "object") {
       session.answers = {};
     }
     if (!session.ratings || typeof session.ratings !== "object") {
       session.ratings = {};
+    }
+    if (typeof session.idx !== "number" || Number.isNaN(session.idx)) {
+      session.idx = 0;
+    }
+    session.idx = Math.max(0, Math.min(Math.floor(session.idx), session.pool.length ? session.pool.length - 1 : 0));
+    if (typeof session.score !== "number" || Number.isNaN(session.score)) {
+      session.score = computeScore(session.answers);
     }
   }
   function computeScore(answers) {
@@ -6268,9 +6359,11 @@ var Sevenn = (() => {
       renderCompletion(root, session, redraw);
       return;
     }
-    const answer = session.answers[session.idx] || { value: "", isCorrect: false, checked: false };
-    const hasSubmitted = Boolean(answer.checked);
-    const wasCorrect = hasSubmitted && answer.isCorrect;
+    const answer = session.answers[session.idx] || { value: "", isCorrect: false, checked: false, revealed: false };
+    const hasResult = Boolean(answer.checked);
+    const wasCorrect = hasResult && answer.isCorrect;
+    const wasRevealed = hasResult && answer.revealed;
+    const isSolved = wasCorrect || wasRevealed;
     const card = document.createElement("section");
     card.className = "card quiz-card";
     root.appendChild(card);
@@ -6324,23 +6417,50 @@ var Sevenn = (() => {
     const suggestions = document.createElement("ul");
     suggestions.className = "quiz-suggestions";
     form.appendChild(suggestions);
+    const actions = document.createElement("div");
+    actions.className = "quiz-answer-actions";
+    const checkBtn = document.createElement("button");
+    checkBtn.type = "button";
+    checkBtn.className = "btn quiz-check-btn";
+    checkBtn.textContent = "Check";
+    checkBtn.disabled = !input.value.trim();
+    checkBtn.addEventListener("click", () => gradeAnswer());
+    actions.appendChild(checkBtn);
+    const revealBtn = document.createElement("button");
+    revealBtn.type = "button";
+    revealBtn.className = "btn secondary quiz-reveal-btn";
+    revealBtn.textContent = "Show answer";
+    revealBtn.hidden = !(hasResult && !wasCorrect && !wasRevealed);
+    actions.appendChild(revealBtn);
+    form.appendChild(actions);
     const feedback = document.createElement("div");
     feedback.className = "quiz-feedback";
-    if (hasSubmitted) {
-      feedback.textContent = wasCorrect ? "Correct!" : `Incorrect \u2022 Answer: ${titleOf3(item)}`;
-      feedback.classList.add(wasCorrect ? "is-correct" : "is-incorrect");
+    if (wasCorrect) {
+      feedback.textContent = "Correct!";
+      feedback.classList.add("is-correct");
+    } else if (wasRevealed) {
+      feedback.textContent = `Answer: ${titleOf3(item)}`;
+      feedback.classList.add("is-incorrect");
+    } else if (hasResult) {
+      feedback.textContent = "Incorrect. Try again or reveal the answer.";
+      feedback.classList.add("is-incorrect");
     }
     form.appendChild(feedback);
     card.appendChild(form);
     input.addEventListener("input", () => {
+      checkBtn.disabled = !input.value.trim();
       const v = input.value.toLowerCase();
       const existing = session.answers[session.idx];
       if (existing && existing.checked) {
-        delete session.answers[session.idx];
-        session.score = computeScore(session.answers);
+        const answers = { ...session.answers };
+        delete answers[session.idx];
+        session.answers = answers;
+        session.score = computeScore(answers);
         setQuizSession({ ...session });
         feedback.textContent = "";
         feedback.classList.remove("is-correct", "is-incorrect");
+        revealBtn.hidden = true;
+        revealBtn.disabled = false;
         tally.textContent = `Score: ${session.score}`;
         updateNavState();
       }
@@ -6358,6 +6478,21 @@ var Sevenn = (() => {
         suggestions.appendChild(li);
       });
     });
+    revealBtn.addEventListener("click", () => {
+      const revealValue = titleOf3(item);
+      const answers = { ...session.answers, [session.idx]: { value: revealValue, isCorrect: false, checked: true, revealed: true } };
+      session.answers = answers;
+      session.score = computeScore(answers);
+      setQuizSession({ ...session });
+      input.value = revealValue;
+      feedback.textContent = `Answer: ${titleOf3(item)}`;
+      feedback.classList.remove("is-correct");
+      feedback.classList.add("is-incorrect");
+      revealBtn.hidden = true;
+      suggestions.innerHTML = "";
+      tally.textContent = `Score: ${session.score}`;
+      updateNavState();
+    });
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       gradeAnswer();
@@ -6366,16 +6501,9 @@ var Sevenn = (() => {
     const ratingPanel = document.createElement("div");
     ratingPanel.className = "quiz-rating-panel";
     card.appendChild(ratingPanel);
-    const ratingTitle = document.createElement("h3");
-    ratingTitle.textContent = "How well did you know this card?";
-    ratingPanel.appendChild(ratingTitle);
     const ratingRow = document.createElement("div");
     ratingRow.className = "quiz-rating-row";
     ratingPanel.appendChild(ratingRow);
-    const ratingLabel = document.createElement("div");
-    ratingLabel.className = "quiz-rating-label";
-    ratingLabel.textContent = "Rate this card";
-    ratingRow.appendChild(ratingLabel);
     const options = document.createElement("div");
     options.className = "quiz-rating-options";
     ratingRow.appendChild(options);
@@ -6398,7 +6526,8 @@ var Sevenn = (() => {
       updateNavState();
     };
     const handleRating = async (value) => {
-      if (!session.answers[session.idx]) return;
+      const current = session.answers[session.idx];
+      if (!(current && current.checked && (current.isCorrect || current.revealed))) return;
       status.textContent = "Saving\u2026";
       status.classList.remove("is-error");
       try {
@@ -6425,7 +6554,7 @@ var Sevenn = (() => {
       const variant = RATING_CLASS2[value];
       if (variant) btn.classList.add(variant);
       btn.textContent = RATING_LABELS2[value];
-      btn.disabled = !hasSubmitted;
+      btn.disabled = !isSolved;
       btn.setAttribute("aria-pressed", "false");
       btn.addEventListener("click", () => handleRating(value));
       options.appendChild(btn);
@@ -6452,15 +6581,6 @@ var Sevenn = (() => {
       redraw();
     });
     controls.appendChild(backBtn);
-    const submitBtn = document.createElement("button");
-    submitBtn.type = "submit";
-    submitBtn.className = "btn";
-    submitBtn.textContent = hasSubmitted ? "Resubmit" : "Submit";
-    submitBtn.disabled = !input.value.trim();
-    form.addEventListener("input", () => {
-      submitBtn.disabled = !input.value.trim();
-    });
-    controls.appendChild(submitBtn);
     const nextBtn = document.createElement("button");
     nextBtn.type = "button";
     nextBtn.className = "btn";
@@ -6516,28 +6636,38 @@ var Sevenn = (() => {
       const normalized2 = guess.toLowerCase();
       const correct = titleOf3(item).toLowerCase();
       const isCorrect = normalized2 === correct;
-      const answers = { ...session.answers, [session.idx]: { value: guess, isCorrect, checked: true } };
+      const answers = {
+        ...session.answers,
+        [session.idx]: { value: guess, isCorrect, checked: true, revealed: false }
+      };
       const nextScore = computeScore(answers);
       session.answers = answers;
       session.score = nextScore;
       setQuizSession({ ...session });
       tally.textContent = `Score: ${session.score}`;
-      feedback.textContent = isCorrect ? "Correct!" : `Incorrect \u2022 Answer: ${titleOf3(item)}`;
+      feedback.textContent = isCorrect ? "Correct!" : "Incorrect. Try again or reveal the answer.";
       feedback.classList.remove("is-correct", "is-incorrect");
       feedback.classList.add(isCorrect ? "is-correct" : "is-incorrect");
+      suggestions.innerHTML = "";
+      revealBtn.hidden = isCorrect;
+      if (!isCorrect) {
+        revealBtn.disabled = false;
+        revealBtn.focus();
+      }
       updateNavState();
     }
     function updateNavState() {
       const currentAnswer = session.answers[session.idx];
-      const answered = Boolean(currentAnswer && currentAnswer.checked);
+      const solved = Boolean(currentAnswer && currentAnswer.checked && (currentAnswer.isCorrect || currentAnswer.revealed));
       const hasRating = !sections.length || Boolean(selectedRating);
-      nextBtn.disabled = !(answered && hasRating);
-      submitBtn.textContent = answered ? "Resubmit" : "Submit";
+      nextBtn.disabled = !(solved && hasRating);
       Array.from(options.querySelectorAll("button")).forEach((btn) => {
-        btn.disabled = !answered;
+        btn.disabled = !solved;
       });
-      if (!answered) {
+      if (!solved) {
         status.textContent = "";
+      } else {
+        revealBtn.hidden = true;
       }
     }
   }
