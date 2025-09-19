@@ -1,4 +1,4 @@
-var Sevenn = (() => {
+(() => {
   // js/state.js
   var state = {
     tab: "Diseases",
@@ -3232,7 +3232,6 @@ var Sevenn = (() => {
   // js/ui/components/cards.js
   var UNASSIGNED_BLOCK_KEY = "__unassigned__";
   var MISC_LECTURE_KEY = "__misc__";
-
   var KIND_COLORS = {
     disease: "var(--pink)",
     drug: "var(--blue)",
@@ -3266,7 +3265,6 @@ var Sevenn = (() => {
       ["mnemonic", "Mnemonic", "\u{1F9E0}"]
     ]
   };
-
   function formatWeekLabel(value) {
     if (typeof value === "number" && Number.isFinite(value)) {
       return `Week ${value}`;
@@ -3276,7 +3274,6 @@ var Sevenn = (() => {
   function titleFromItem(item) {
     return item?.name || item?.concept || "Untitled Card";
   }
-
   function escapeHtml5(str = "") {
     return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
@@ -3298,24 +3295,12 @@ var Sevenn = (() => {
     if (item?.kind && KIND_COLORS[item.kind]) return KIND_COLORS[item.kind];
     return "var(--accent)";
   }
-  function getLectureAccent(cards) {
-    if (!Array.isArray(cards) || !cards.length) return "var(--accent)";
-    const colored = cards.find((card) => card?.color);
-    if (colored?.color) return colored.color;
-    const kindMatch = cards.find((card) => card?.kind && KIND_COLORS[card.kind]);
-    if (kindMatch?.kind) return KIND_COLORS[kindMatch.kind];
-    return "var(--accent)";
-  }
-
   async function renderCards(container, items, onChange) {
     container.innerHTML = "";
     container.classList.add("cards-tab");
     const blockDefs = await listBlocks();
     const blockLookup = new Map(blockDefs.map((def) => [def.blockId, def]));
     const blockOrder = new Map(blockDefs.map((def, idx) => [def.blockId, idx]));
-
-    const itemLookup = new Map(items.map((item) => [item.id, item]));
-
     const blockBuckets = /* @__PURE__ */ new Map();
     function ensureBlock(blockId) {
       const key = blockId || UNASSIGNED_BLOCK_KEY;
@@ -3414,216 +3399,26 @@ var Sevenn = (() => {
     const catalog = document.createElement("div");
     catalog.className = "card-catalog";
     container.appendChild(catalog);
-    const overlay = document.createElement("div");
-    overlay.className = "deck-overlay";
-    overlay.dataset.active = "false";
-    overlay.setAttribute("role", "dialog");
-    overlay.setAttribute("aria-modal", "true");
-    const viewer = document.createElement("div");
-    viewer.className = "deck-viewer";
-    overlay.appendChild(viewer);
-    container.appendChild(overlay);
-    let activeKeyHandler = null;
-    function closeDeck() {
-      overlay.dataset.active = "false";
-      viewer.innerHTML = "";
-      if (activeKeyHandler) {
-        document.removeEventListener("keydown", activeKeyHandler);
-        activeKeyHandler = null;
-      }
-    }
-    overlay.addEventListener("click", (evt) => {
-      if (evt.target === overlay) closeDeck();
-    });
-    function openDeck(context) {
-      const { block, week, lecture } = context;
-      overlay.dataset.active = "true";
-      viewer.innerHTML = "";
-      const header = document.createElement("div");
-      header.className = "deck-viewer-header";
-      const crumb = document.createElement("div");
-      crumb.className = "deck-viewer-crumb";
-      const crumbPieces = [];
-      if (block.title) crumbPieces.push(block.title);
-      if (week?.label) crumbPieces.push(week.label);
-      crumb.textContent = crumbPieces.join(" \u2022 ");
-      header.appendChild(crumb);
-      const title = document.createElement("h2");
-      title.className = "deck-viewer-title";
-      title.textContent = lecture.title;
-      header.appendChild(title);
-      const counter = document.createElement("div");
-      counter.className = "deck-counter";
-      header.appendChild(counter);
-
-      const progress = document.createElement("div");
-      progress.className = "deck-progress";
-      const progressFill = document.createElement("span");
-      progressFill.className = "deck-progress-fill";
-      progress.appendChild(progressFill);
-      header.appendChild(progress);
-
-      const closeBtn = document.createElement("button");
-      closeBtn.type = "button";
-      closeBtn.className = "deck-close";
-      closeBtn.innerHTML = '<span aria-hidden="true">\xD7</span><span class="sr-only">Close deck</span>';
-      closeBtn.addEventListener("click", closeDeck);
-      header.appendChild(closeBtn);
-      viewer.appendChild(header);
-      const stage = document.createElement("div");
-      stage.className = "deck-stage";
-      const prev = document.createElement("button");
-      prev.type = "button";
-      prev.className = "deck-nav deck-prev";
-      prev.innerHTML = '<span class="sr-only">Previous card</span><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.5 15L7.5 10L12.5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
-      const slideHolder = document.createElement("div");
-      slideHolder.className = "deck-card-stage";
-
-      const next = document.createElement("button");
-      next.type = "button";
-      next.className = "deck-nav deck-next";
-      next.innerHTML = '<span class="sr-only">Next card</span><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.5 5L12.5 10L7.5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-      stage.appendChild(prev);
-
-      stage.appendChild(slideHolder);
-      stage.appendChild(next);
-      viewer.appendChild(stage);
-      const footer = document.createElement("div");
-      footer.className = "deck-footer";
-
-      const toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "deck-related-toggle";
-      toggle.dataset.active = "false";
-      toggle.textContent = "Show related cards";
-
-      footer.appendChild(toggle);
-      viewer.appendChild(footer);
-
-      const relatedWrap = document.createElement("div");
-      relatedWrap.className = "deck-related";
-      relatedWrap.dataset.visible = "false";
-      viewer.appendChild(relatedWrap);
-      let idx = 0;
-      let showRelated = false;
-
-      function updateToggle(current) {
-        const linkCount = Array.isArray(current?.links) ? current.links.length : 0;
-        toggle.disabled = linkCount === 0;
-        toggle.dataset.active = showRelated && linkCount ? "true" : "false";
-        toggle.textContent = linkCount ? `${showRelated ? "Hide" : "Show"} related (${linkCount})` : "No related cards";
-      }
-      function renderRelated(current) {
-
-        relatedWrap.innerHTML = "";
-        if (!showRelated) {
-          relatedWrap.dataset.visible = "false";
-          return;
-        }
-
-        const links = Array.isArray(current?.links) ? current.links : [];
-        links.forEach((link) => {
-          const related = itemLookup.get(link.id);
-          if (related) {
-            relatedWrap.appendChild(createRelatedCard(related));
-
-          }
-        });
-        relatedWrap.dataset.visible = relatedWrap.children.length ? "true" : "false";
-      }
-      function renderCard() {
-
-        const current = lecture.cards[idx];
-        slideHolder.innerHTML = "";
-        slideHolder.appendChild(createDeckSlide(current, { block, week, lecture }));
-        const accent = getItemAccent(current);
-        viewer.style.setProperty("--viewer-accent", accent);
-        counter.textContent = `Card ${idx + 1} of ${lecture.cards.length}`;
-        const progressValue = (idx + 1) / lecture.cards.length * 100;
-        progressFill.style.width = `${progressValue}%`;
-        updateToggle(current);
-        renderRelated(current);
-
-      }
-      prev.addEventListener("click", () => {
-        idx = (idx - 1 + lecture.cards.length) % lecture.cards.length;
-        renderCard();
-      });
-      next.addEventListener("click", () => {
-        idx = (idx + 1) % lecture.cards.length;
-        renderCard();
-      });
-      toggle.addEventListener("click", () => {
-        if (toggle.disabled) return;
-        showRelated = !showRelated;
-
-        updateToggle(lecture.cards[idx]);
-        renderRelated(lecture.cards[idx]);
-
-      });
-      const keyHandler2 = (event) => {
-        if (event.key === "ArrowLeft") {
-          event.preventDefault();
-          prev.click();
-        } else if (event.key === "ArrowRight") {
-          event.preventDefault();
-          next.click();
-        } else if (event.key === "Escape") {
-          event.preventDefault();
-          closeDeck();
-        }
-      };
-      document.addEventListener("keydown", keyHandler2);
-      activeKeyHandler = keyHandler2;
-      renderCard();
-      requestAnimationFrame(() => closeBtn.focus());
-    }
+    const expandedDecks = /* @__PURE__ */ new Set();
     function createCollapseIcon() {
       const icon = document.createElement("span");
       icon.className = "card-collapse-icon";
       icon.innerHTML = '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 8L10 12L14 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       return icon;
     }
+    let deckIdCounter = 0;
     function createDeckTile(block, week, lecture) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "deck-entry";
+      wrapper.dataset.expanded = "false";
+      const deckId = `deck-${deckIdCounter++}`;
       const tile = document.createElement("button");
       tile.type = "button";
       tile.className = "deck-tile";
-      tile.setAttribute("aria-label", `${lecture.title} (${lecture.cards.length} cards)`);
-
-      const accent = getLectureAccent(lecture.cards);
-      tile.style.setProperty("--deck-accent", accent);
-      const stack = document.createElement("div");
-      stack.className = "deck-stack";
-      stack.style.setProperty("--deck-accent", accent);
-      const preview = lecture.cards.slice(0, 4);
-
-      stack.style.setProperty("--spread", preview.length > 0 ? (preview.length - 1) / 2 : 0);
-      if (!preview.length) {
-        const placeholder = document.createElement("div");
-        placeholder.className = "stack-card stack-card-empty";
-        placeholder.style.setProperty("--index", "0");
-        placeholder.textContent = "No cards yet";
-        stack.appendChild(placeholder);
-      } else {
-        preview.forEach((card, idx) => {
-          const mini = document.createElement("div");
-          mini.className = "stack-card";
-          mini.style.setProperty("--index", String(idx));
-          mini.textContent = titleFromItem(card);
-          stack.appendChild(mini);
-        });
-      }
-      tile.appendChild(stack);
+      tile.setAttribute("aria-controls", deckId);
+      tile.setAttribute("aria-expanded", "false");
       const info = document.createElement("div");
       info.className = "deck-info";
-      const count = document.createElement("span");
-      count.className = "deck-count-pill";
-      count.textContent = `${lecture.cards.length} card${lecture.cards.length === 1 ? "" : "s"}`;
-
-      count.style.setProperty("--deck-accent", accent);
-
-      info.appendChild(count);
       const label = document.createElement("h3");
       label.className = "deck-title";
       label.textContent = lecture.title;
@@ -3635,18 +3430,59 @@ var Sevenn = (() => {
       if (week?.label) pieces.push(week.label);
       meta.textContent = pieces.join(" \u2022 ");
       info.appendChild(meta);
+      const count = document.createElement("span");
+      count.className = "deck-count-pill";
+      count.textContent = `${lecture.cards.length} card${lecture.cards.length === 1 ? "" : "s"}`;
+      info.appendChild(count);
       tile.appendChild(info);
-      const open = () => openDeck({ block, week, lecture });
-      tile.addEventListener("click", open);
-      tile.addEventListener("keydown", (evt) => {
-        if (evt.key === "Enter" || evt.key === " ") {
-          evt.preventDefault();
+      const icon = createCollapseIcon();
+      tile.appendChild(icon);
+      const cardList = document.createElement("div");
+      cardList.className = "deck-card-list";
+      cardList.id = deckId;
+      cardList.hidden = true;
+      let rendered = false;
+      const close = () => {
+        if (wrapper.dataset.expanded !== "true") return;
+        wrapper.dataset.expanded = "false";
+        tile.setAttribute("aria-expanded", "false");
+        cardList.hidden = true;
+        expandedDecks.delete(close);
+      };
+      const open = () => {
+        if (wrapper.dataset.expanded === "true") return;
+        expandedDecks.forEach((fn) => fn());
+        expandedDecks.clear();
+        if (!rendered) {
+          const fragment = document.createDocumentFragment();
+          lecture.cards.forEach((card) => {
+            fragment.appendChild(createDeckCard(card, { block, week, lecture }));
+          });
+          cardList.appendChild(fragment);
+          rendered = true;
+        }
+        wrapper.dataset.expanded = "true";
+        tile.setAttribute("aria-expanded", "true");
+        cardList.hidden = false;
+        expandedDecks.add(close);
+      };
+      tile.addEventListener("click", () => {
+        if (wrapper.dataset.expanded === "true") {
+          close();
+        } else {
           open();
         }
       });
-      return tile;
+      tile.addEventListener("keydown", (evt) => {
+        if (evt.key === "Enter" || evt.key === " ") {
+          evt.preventDefault();
+          tile.click();
+        }
+      });
+      wrapper.appendChild(tile);
+      wrapper.appendChild(cardList);
+      return wrapper;
     }
-
     function createMetaChip(text, icon) {
       const chip = document.createElement("span");
       chip.className = "deck-chip";
@@ -3662,31 +3498,26 @@ var Sevenn = (() => {
       chip.appendChild(label);
       return chip;
     }
-    function createDeckSlide(item, context) {
-      const slide = document.createElement("article");
-      slide.className = "deck-slide";
+    function createDeckCard(item, context) {
+      const card = document.createElement("article");
+      card.className = "deck-card";
       const accent = getItemAccent(item);
-      slide.style.setProperty("--slide-accent", accent);
-      const heading = document.createElement("header");
-      heading.className = "deck-slide-header";
-      const crumb = document.createElement("div");
-      crumb.className = "deck-slide-crumb";
-      const crumbPieces = [];
-      if (context.block?.title) crumbPieces.push(context.block.title);
-      if (context.week?.label) crumbPieces.push(context.week.label);
-      crumb.textContent = crumbPieces.join(" \u2022 ");
-      heading.appendChild(crumb);
-      const title = document.createElement("h3");
-      title.className = "deck-slide-title";
+      card.style.setProperty("--card-accent", accent);
+      const header = document.createElement("header");
+      header.className = "deck-card-header";
+      const title = document.createElement("h4");
+      title.className = "deck-card-title";
       title.textContent = titleFromItem(item);
-      heading.appendChild(title);
-      const kind = document.createElement("span");
-      kind.className = "deck-slide-kind";
-      kind.textContent = item.kind ? item.kind.toUpperCase() : "CARD";
-      heading.appendChild(kind);
-      slide.appendChild(heading);
+      header.appendChild(title);
+      if (item.kind) {
+        const kind = document.createElement("span");
+        kind.className = "deck-card-kind";
+        kind.textContent = item.kind.toUpperCase();
+        header.appendChild(kind);
+      }
+      card.appendChild(header);
       const meta = document.createElement("div");
-      meta.className = "deck-slide-meta";
+      meta.className = "deck-card-meta";
       const seen = /* @__PURE__ */ new Set();
       const addMeta = (text, icon) => {
         if (!text || seen.has(text)) return;
@@ -3701,21 +3532,23 @@ var Sevenn = (() => {
       });
       (item.weeks || []).forEach((weekValue) => addMeta(`Week ${weekValue}`, "\u{1F4C5}"));
       (item.lectures || []).forEach((lec) => addMeta(lec.name || (lec.id != null ? `Lecture ${lec.id}` : ""), "\u{1F4DA}"));
-      if (meta.children.length) slide.appendChild(meta);
+      if (meta.children.length) {
+        card.appendChild(meta);
+      }
       const sections = document.createElement("div");
-      sections.className = "deck-slide-sections";
+      sections.className = "deck-card-sections";
       const defs = KIND_FIELDS[item.kind] || [];
       defs.forEach(([field, label, icon]) => {
         const value = item[field];
         if (!value) return;
         const section = document.createElement("section");
-        section.className = "deck-section";
+        section.className = "deck-card-section";
         section.style.setProperty("--section-accent", accent);
-        const sectionTitle = document.createElement("h4");
-        sectionTitle.className = "deck-section-title";
+        const sectionTitle = document.createElement("h5");
+        sectionTitle.className = "deck-card-section-title";
         if (icon) {
           const iconEl = document.createElement("span");
-          iconEl.className = "deck-section-icon";
+          iconEl.className = "deck-card-section-icon";
           iconEl.textContent = icon;
           sectionTitle.appendChild(iconEl);
         }
@@ -3724,7 +3557,7 @@ var Sevenn = (() => {
         sectionTitle.appendChild(labelNode);
         section.appendChild(sectionTitle);
         const content = document.createElement("div");
-        content.className = "deck-section-content";
+        content.className = "deck-card-section-content";
         renderRichText(content, value);
         section.appendChild(content);
         sections.appendChild(section);
@@ -3732,52 +3565,32 @@ var Sevenn = (() => {
       ensureExtras2(item).forEach((extra) => {
         if (!extra?.body) return;
         const section = document.createElement("section");
-        section.className = "deck-section deck-section-extra";
+        section.className = "deck-card-section deck-card-section-extra";
         section.style.setProperty("--section-accent", accent);
-        const sectionTitle = document.createElement("h4");
-        sectionTitle.className = "deck-section-title";
+        const sectionTitle = document.createElement("h5");
+        sectionTitle.className = "deck-card-section-title";
         const labelNode = document.createElement("span");
         labelNode.textContent = extra.title || "Additional Notes";
         sectionTitle.appendChild(labelNode);
         section.appendChild(sectionTitle);
         const content = document.createElement("div");
-        content.className = "deck-section-content";
+        content.className = "deck-card-section-content";
         renderRichText(content, extra.body);
         section.appendChild(content);
         sections.appendChild(section);
       });
       if (!sections.children.length) {
         const empty = document.createElement("p");
-        empty.className = "deck-section-empty";
+        empty.className = "deck-card-empty";
         empty.textContent = "No detailed content yet for this card.";
         sections.appendChild(empty);
       }
-      slide.appendChild(sections);
-      return slide;
-    }
-    function createRelatedCard(item) {
-      const entry = document.createElement("div");
-      entry.className = "related-card-chip";
-      const accent = getItemAccent(item);
-      entry.style.setProperty("--related-accent", accent);
-      entry.title = titleFromItem(item);
-      const heading = document.createElement("strong");
-      heading.className = "related-card-title";
-      heading.textContent = titleFromItem(item);
-      entry.appendChild(heading);
-      const kind = document.createElement("span");
-      kind.className = "related-card-kind";
-      kind.textContent = item.kind ? item.kind.toUpperCase() : "";
-      entry.appendChild(kind);
-      return entry;
+      card.appendChild(sections);
+      return card;
     }
     function buildBlockSection(block) {
       const section = document.createElement("section");
       section.className = "card-block-section";
-      const firstLecture = block.weeks.find((week) => week.lectures.length)?.lectures.find((lec) => lec.cards.length);
-      const blockAccent = block.accent || getLectureAccent(firstLecture?.cards || []);
-      if (blockAccent) section.style.setProperty("--block-accent", blockAccent);
-
       const header = document.createElement("button");
       header.type = "button";
       header.className = "card-block-header";
@@ -3804,10 +3617,6 @@ var Sevenn = (() => {
       block.weeks.forEach((week) => {
         const weekSection = document.createElement("div");
         weekSection.className = "card-week-section";
-
-        const weekAccent = getLectureAccent(week.lectures.find((lec) => lec.cards.length)?.cards || []);
-        if (weekAccent) weekSection.style.setProperty("--week-accent", weekAccent);
-
         const weekHeader = document.createElement("button");
         weekHeader.type = "button";
         weekHeader.className = "card-week-header";
@@ -3832,14 +3641,21 @@ var Sevenn = (() => {
         weekHeader.addEventListener("click", () => {
           const collapsed = weekSection.classList.toggle("is-collapsed");
           weekHeader.setAttribute("aria-expanded", collapsed ? "false" : "true");
+          if (collapsed) {
+            expandedDecks.forEach((fn) => fn());
+            expandedDecks.clear();
+          }
         });
       });
       section.appendChild(body);
       header.addEventListener("click", () => {
         const collapsed = section.classList.toggle("is-collapsed");
         header.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        if (collapsed) {
+          expandedDecks.forEach((fn) => fn());
+          expandedDecks.clear();
+        }
       });
-
       return section;
     }
     if (!blockSections.length) {
@@ -3866,7 +3682,6 @@ var Sevenn = (() => {
       }
     }
     pump();
-
   }
 
   // js/ui/components/builder.js
