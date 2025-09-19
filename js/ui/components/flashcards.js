@@ -5,7 +5,9 @@ import { sectionsForItem } from './section-utils.js';
 import { REVIEW_RATINGS, RETIRE_RATING, DEFAULT_REVIEW_STEPS } from '../../review/constants.js';
 import { getReviewDurations, rateSection } from '../../review/scheduler.js';
 import { upsertItem } from '../../storage/storage.js';
+
 import { persistStudySession, removeStudySession } from '../../study/study-sessions.js';
+
 
 const RATING_LABELS = {
   again: 'Again',
@@ -37,7 +39,9 @@ export function renderFlashcards(root, redraw) {
   const active = state.flashSession || { idx: 0, pool: state.cohort, ratings: {}, mode: 'study' };
   active.ratings = active.ratings || {};
   const items = Array.isArray(active.pool) && active.pool.length ? active.pool : state.cohort;
+
   const isReview = active.mode === 'review';
+
   root.innerHTML = '';
 
   if (!items.length) {
@@ -49,11 +53,13 @@ export function renderFlashcards(root, redraw) {
 
   if (active.idx >= items.length) {
     setFlashSession(null);
+
     setStudySelectedMode('Flashcards');
     setSubtab('Study', isReview ? 'Review' : 'Builder');
     if (!isReview) {
       removeStudySession('flashcards').catch(err => console.warn('Failed to clear flashcard session', err));
     }
+
     redraw();
     return;
   }
@@ -223,6 +229,7 @@ export function renderFlashcards(root, redraw) {
   const next = document.createElement('button');
   next.className = 'btn';
   const isLast = active.idx >= items.length - 1;
+
   next.textContent = isLast ? (isReview ? 'Finish review' : 'Finish') : 'Next';
   next.disabled = sectionBlocks.length > 0;
   next.addEventListener('click', () => {
@@ -285,6 +292,7 @@ export function renderFlashcards(root, redraw) {
     });
     controls.appendChild(exitReview);
   }
+
 
   card.appendChild(controls);
   root.appendChild(card);

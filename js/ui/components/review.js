@@ -1,4 +1,6 @@
+
 import { state, setFlashSession, setSubtab } from '../../state.js';
+
 import { collectDueSections } from '../../review/scheduler.js';
 import { listBlocks } from '../../storage/storage.js';
 import { getSectionLabel } from './section-utils.js';
@@ -152,6 +154,7 @@ function renderGroupView(container, groups, label, start) {
     card.appendChild(actions);
 
     list.appendChild(card);
+
   });
   container.appendChild(list);
 }
@@ -187,6 +190,7 @@ export async function renderReview(root, redraw) {
   });
   backRow.appendChild(backBtn);
   wrapper.appendChild(backRow);
+
 
   const heading = document.createElement('h2');
   heading.textContent = 'Review queue';
