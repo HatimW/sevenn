@@ -469,6 +469,7 @@ function renderModeCard(rerender, redraw) {
     redraw();
   });
 
+
   resumeBtn.addEventListener('click', async () => {
     if (!hasSaved || !storageKey || !savedEntry) return;
     setStudySelectedMode(selected);
@@ -485,6 +486,7 @@ function renderModeCard(rerender, redraw) {
       return;
     }
 
+
     if (selected === 'Flashcards') {
       setFlashSession(savedEntry.session);
     } else if (selected === 'Quiz') {
@@ -493,6 +495,7 @@ function renderModeCard(rerender, redraw) {
     setSubtab('Study', 'Builder');
     redraw();
   });
+
 
   reviewBtn.addEventListener('click', () => {
     setSubtab('Study', 'Review');
