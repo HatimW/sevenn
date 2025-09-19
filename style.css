@@ -2417,13 +2417,34 @@ input[type="checkbox"]:checked::after {
 
 }
 
+.deck-grid.is-loading {
+  position: relative;
+  min-height: clamp(180px, 28vw, 240px);
+}
+
+.deck-grid.is-loading::after {
+  content: 'Loading decks…';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  border-radius: var(--radius-lg);
+  border: 1px dashed rgba(148, 163, 184, 0.24);
+  color: rgba(226, 232, 240, 0.55);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  background: rgba(10, 16, 32, 0.6);
+  pointer-events: none;
+}
+
 .deck-tile {
   position: relative;
   border-radius: var(--radius-lg);
 
-  padding: clamp(22px, 3vw, 34px);
-  background: linear-gradient(160deg, rgba(10, 16, 32, 0.95), rgba(10, 16, 32, 0.78));
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  padding: clamp(22px, 3vw, 32px);
+  background: linear-gradient(170deg, rgba(8, 13, 24, 0.94), rgba(6, 11, 22, 0.74));
+  border: 1px solid rgba(148, 163, 184, 0.2);
 
   color: inherit;
   text-align: left;
@@ -2431,21 +2452,21 @@ input[type="checkbox"]:checked::after {
   flex-direction: column;
   gap: clamp(18px, 2vw, 26px);
 
-  box-shadow: 0 24px 54px rgba(2, 6, 23, 0.36);
+  box-shadow: 0 22px 48px rgba(2, 6, 23, 0.32);
   cursor: pointer;
   overflow: hidden;
-  min-height: clamp(280px, 32vw, 340px);
-  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.35s ease, border-color 0.35s ease;
+  min-height: clamp(260px, 30vw, 330px);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease, border-color 0.3s ease;
 }
 
 .deck-tile::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, var(--deck-accent, var(--accent)) 0%, rgba(10, 16, 32, 0.05) 65%);
-  opacity: 0.55;
+  background: var(--deck-gradient, linear-gradient(135deg, rgba(148, 163, 184, 0.26) 0%, rgba(10, 16, 32, 0.08) 68%));
+  opacity: 0.7;
   mix-blend-mode: screen;
-  transition: opacity 0.35s ease;
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
 .deck-tile > * {
@@ -2453,15 +2474,17 @@ input[type="checkbox"]:checked::after {
   z-index: 1;
 }
 
-.deck-tile:hover {
-  transform: translateY(-8px) scale(1.02);
-  border-color: rgba(255, 255, 255, 0.16);
-  box-shadow: 0 36px 80px rgba(2, 6, 23, 0.52);
+.deck-tile:hover,
+.deck-tile:focus-visible {
+  transform: translateY(-6px) scale(1.015);
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 32px 70px rgba(2, 6, 23, 0.48);
 }
 
-.deck-tile:hover::before {
-  opacity: 0.85;
-
+.deck-tile:hover::before,
+.deck-tile:focus-visible::before {
+  opacity: 0.9;
+  transform: translate3d(0, -2px, 0);
 }
 
 .deck-stack {
@@ -2480,9 +2503,9 @@ input[type="checkbox"]:checked::after {
   inset: 0;
   padding: clamp(16px, 2vw, 22px);
   border-radius: 22px;
-  background: linear-gradient(150deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.65));
+  background: linear-gradient(150deg, rgba(13, 20, 36, 0.92), rgba(13, 20, 36, 0.62));
 
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.16);
   display: flex;
   align-items: flex-end;
   font-size: 0.78rem;
@@ -2490,12 +2513,11 @@ input[type="checkbox"]:checked::after {
   text-transform: uppercase;
 
   color: rgba(248, 250, 252, 0.86);
-  backdrop-filter: blur(6px);
   transform-origin: center 125%;
   transform: rotate(calc((var(--index) - var(--spread, 0)) * 1deg)) translateY(calc(var(--index) * -10px)) translateZ(calc(var(--index) * -12px));
-  box-shadow: 0 20px 38px rgba(2, 6, 23, 0.32);
+  box-shadow: 0 16px 32px rgba(2, 6, 23, 0.28);
   opacity: calc(1 - (var(--index) * 0.12));
-  transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.45s ease, opacity 0.45s ease, filter 0.45s ease;
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s ease, opacity 0.4s ease, filter 0.4s ease;
   overflow: hidden;
 }
 
@@ -2503,8 +2525,8 @@ input[type="checkbox"]:checked::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, var(--deck-accent, var(--accent)) 0%, rgba(15, 23, 42, 0) 75%);
-  opacity: 0.65;
+  background: var(--deck-gradient, linear-gradient(135deg, color-mix(in srgb, var(--deck-accent, var(--accent)) 65%, transparent) 0%, rgba(15, 23, 42, 0) 85%));
+  opacity: 0.7;
   pointer-events: none;
 
 }
@@ -2517,11 +2539,11 @@ input[type="checkbox"]:checked::after {
   color: var(--text-muted);
 }
 
-.deck-tile:hover .stack-card {
+.deck-tile.is-fanned .stack-card {
 
   transform: rotate(calc((var(--index) - var(--spread, 0)) * 6deg)) translateX(calc((var(--index) - var(--spread, 0)) * 24px)) translateY(calc(var(--index) * -6px)) translateZ(calc(var(--index) * 32px));
-  box-shadow: 0 28px 56px rgba(2, 6, 23, 0.5);
-  filter: saturate(1.12) brightness(1.06);
+  box-shadow: 0 26px 52px rgba(2, 6, 23, 0.46);
+  filter: saturate(1.1) brightness(1.05);
 
 }
 
@@ -2554,7 +2576,7 @@ input[type="checkbox"]:checked::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, var(--deck-accent, var(--accent)) 0%, rgba(15, 23, 42, 0) 80%);
+  background: var(--deck-gradient, linear-gradient(135deg, rgba(148, 163, 184, 0.25) 0%, rgba(15, 23, 42, 0) 80%));
   opacity: 0.65;
   pointer-events: none;
 }
@@ -2593,12 +2615,12 @@ input[type="checkbox"]:checked::after {
   align-items: center;
   justify-content: center;
   padding: clamp(18px, 4vw, 48px);
-  background: rgba(3, 7, 18, 0.82);
-  backdrop-filter: blur(24px);
+  background: rgba(2, 6, 18, 0.78);
+  backdrop-filter: blur(18px);
   z-index: 2000;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.35s ease;
+  transition: opacity 0.3s ease;
 }
 
 .deck-overlay[data-active="true"] {
@@ -2607,28 +2629,19 @@ input[type="checkbox"]:checked::after {
 }
 
 .deck-viewer {
-  --viewer-accent: var(--accent);
-  width: min(960px, 92vw);
+  --deck-current-accent: var(--accent);
+  width: min(920px, 92vw);
   max-height: 90vh;
-  background: linear-gradient(155deg, rgba(7, 12, 24, 0.96), rgba(12, 18, 34, 0.9));
-  border-radius: 28px;
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  box-shadow: 0 36px 80px rgba(2, 6, 23, 0.55);
-  padding: clamp(28px, 4vw, 44px);
+  background: linear-gradient(165deg, rgba(8, 13, 25, 0.96), rgba(5, 9, 20, 0.88));
+  border-radius: 26px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 0 32px 68px rgba(2, 6, 23, 0.5);
+  padding: clamp(24px, 3.5vw, 40px);
   display: flex;
   flex-direction: column;
-  gap: clamp(18px, 3vw, 32px);
+  gap: clamp(16px, 2.5vw, 28px);
   position: relative;
-  overflow: hidden;
-}
-
-.deck-viewer::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at top right, color-mix(in srgb, var(--viewer-accent) 30%, transparent), transparent 70%);
-  opacity: 0.9;
-  pointer-events: none;
+  overflow: visible;
 }
 
 .deck-viewer-header {
@@ -2672,9 +2685,9 @@ input[type="checkbox"]:checked::after {
   position: absolute;
   inset: 0;
   width: 0%;
-  background: var(--viewer-accent);
+  background: var(--deck-current-accent, var(--accent));
   border-radius: inherit;
-  box-shadow: 0 10px 24px color-mix(in srgb, var(--viewer-accent) 35%, transparent);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--deck-current-accent, var(--accent)) 35%, transparent);
   transition: width 0.35s ease;
 }
 
@@ -2708,28 +2721,30 @@ input[type="checkbox"]:checked::after {
   transform: translateY(-1px);
 }
 
+
 .deck-stage {
   display: grid;
   grid-template-columns: auto 1fr auto;
 
-  gap: clamp(18px, 2vw, 30px);
+  gap: clamp(16px, 2vw, 28px);
   align-items: stretch;
   position: relative;
   z-index: 1;
 }
 
+
 .deck-nav {
-  width: 48px;
-  height: 48px;
+  width: 46px;
+  height: 46px;
 
   border-radius: 50%;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(148, 163, 184, 0.14);
-  color: inherit;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--deck-current-accent, var(--accent));
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.3s ease, background 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+  transition: transform 0.25s ease, background 0.25s ease, border-color 0.25s ease, color 0.25s ease;
 }
 
 .deck-nav svg {
@@ -2739,42 +2754,36 @@ input[type="checkbox"]:checked::after {
 
 .deck-nav:hover {
   transform: translateY(-2px);
-  background: rgba(56, 189, 248, 0.18);
+  background: rgba(56, 189, 248, 0.2);
   border-color: rgba(56, 189, 248, 0.38);
-  color: var(--viewer-accent);
+  color: var(--deck-current-accent, var(--accent));
 
 }
+
 
 .deck-card-stage {
   display: flex;
   align-items: stretch;
   justify-content: center;
-  max-height: min(62vh, 540px);
-  overflow: hidden;
+  padding: clamp(12px, 2vw, 18px);
+  max-height: none;
+  overflow: visible;
 }
 
 .deck-slide {
-  width: min(560px, 68vw);
-  max-height: min(62vh, 540px);
-  background: linear-gradient(160deg, rgba(11, 17, 32, 0.85), rgba(8, 13, 28, 0.92));
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  width: min(640px, 82vw);
+  max-height: min(72vh, 640px);
+  background: linear-gradient(175deg, rgba(11, 18, 32, 0.95), rgba(7, 12, 24, 0.9));
+  border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 22px;
-  padding: clamp(22px, 3vw, 32px);
+  padding: clamp(22px, 3vw, 34px);
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
   overflow-y: auto;
   position: relative;
-}
-
-.deck-slide::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  border-left: 3px solid color-mix(in srgb, var(--slide-accent) 70%, transparent);
-  opacity: 0.9;
-  pointer-events: none;
+  box-shadow: 0 28px 60px rgba(2, 6, 23, 0.35), inset 4px 0 0 color-mix(in srgb, var(--slide-accent, var(--accent)) 55%, transparent);
+  scrollbar-gutter: stable both-edges;
 }
 
 .deck-slide-header {
@@ -2798,16 +2807,21 @@ input[type="checkbox"]:checked::after {
 }
 
 .deck-slide-kind {
+  align-self: flex-start;
   font-size: 0.78rem;
-  letter-spacing: 0.26em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: rgba(248, 250, 252, 0.55);
+  color: rgba(248, 250, 252, 0.6);
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.55);
 }
 
 .deck-slide-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   position: relative;
   z-index: 1;
 }
@@ -2818,12 +2832,12 @@ input[type="checkbox"]:checked::after {
   gap: 6px;
   padding: 6px 12px;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.7);
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.62);
+  border: 1px solid rgba(148, 163, 184, 0.22);
   font-size: 0.78rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: rgba(248, 250, 252, 0.72);
+  color: rgba(248, 250, 252, 0.75);
 }
 
 .deck-chip-icon {
@@ -2843,14 +2857,14 @@ input[type="checkbox"]:checked::after {
 }
 
 .deck-section {
-  background: rgba(10, 17, 32, 0.85);
+  background: linear-gradient(160deg, rgba(14, 22, 40, 0.82), rgba(14, 22, 40, 0.65));
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: var(--radius);
   padding: clamp(16px, 2vw, 22px);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.4);
+  gap: 12px;
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--section-accent, var(--accent)) 55%, transparent), inset 0 0 0 1px rgba(15, 23, 42, 0.32);
 }
 
 .deck-section-title {
@@ -2858,9 +2872,9 @@ input[type="checkbox"]:checked::after {
   align-items: center;
   gap: 10px;
   font-size: 0.95rem;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(248, 250, 252, 0.75);
+  color: rgba(248, 250, 252, 0.78);
   margin: 0;
 }
 
@@ -2870,8 +2884,8 @@ input[type="checkbox"]:checked::after {
 
 .deck-section-content {
   color: var(--text);
-  font-size: 0.95rem;
-  line-height: 1.6;
+  font-size: 0.97rem;
+  line-height: 1.65;
 }
 
 .deck-section-extra {
@@ -2952,6 +2966,12 @@ input[type="checkbox"]:checked::after {
   flex-direction: column;
   gap: 6px;
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.35);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  appearance: none;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease, background 0.25s ease;
 }
 
 .related-card-chip::before {
@@ -2961,6 +2981,26 @@ input[type="checkbox"]:checked::after {
   height: 2px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--related-accent, var(--accent)) 80%, transparent);
+}
+
+.related-card-chip:hover {
+  transform: translateY(-2px);
+  border-color: rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.88);
+  box-shadow: 0 14px 28px rgba(2, 6, 23, 0.32);
+}
+
+.related-card-chip:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--related-accent, var(--accent)) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.related-card-chip.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.35);
+  pointer-events: none;
 }
 
 .related-card-title {

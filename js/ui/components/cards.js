@@ -79,29 +79,49 @@ function getItemAccent(item) {
   return 'var(--accent)';
 }
 
-function getLectureAccent(cards) {
-  if (!Array.isArray(cards) || !cards.length) return 'var(--accent)';
-  const colored = cards.find(card => card?.color);
-  if (colored?.color) return colored.color;
-  const kindMatch = cards.find(card => card?.kind && KIND_COLORS[card.kind]);
-  if (kindMatch?.kind) return KIND_COLORS[kindMatch.kind];
-  return 'var(--accent)';
-}
-
-
-const UNASSIGNED_BLOCK_KEY = '__unassigned__';
-const MISC_LECTURE_KEY = '__misc__';
-
-function formatWeekLabel(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return `Week ${value}`;
+function collectLectureColors(cards, limit = 5) {
+  if (!Array.isArray(cards) || !cards.length) {
+    return ['var(--accent)'];
   }
-  return 'Unscheduled';
+  const seen = new Set();
+  const colors = [];
+  cards.forEach(card => {
+    const accent = getItemAccent(card);
+    if (!seen.has(accent)) {
+      seen.add(accent);
+      colors.push(accent);
+    }
+  });
+  if (!colors.length) colors.push('var(--accent)');
+  return colors.slice(0, Math.max(1, limit));
 }
 
-function titleFromItem(item) {
-  return item?.name || item?.concept || 'Untitled Card';
+function buildGradient(colors) {
+  const palette = colors && colors.length ? colors : ['var(--accent)'];
+  if (palette.length === 1) {
+    const single = palette[0];
+    return `linear-gradient(135deg, ${single} 0%, color-mix(in srgb, ${single} 38%, transparent) 100%)`;
+  }
+  const stops = palette.map((color, idx) => {
+    const pct = palette.length === 1 ? 0 : Math.round((idx / (palette.length - 1)) * 100);
+    return `${color} ${pct}%`;
+  });
+  return `linear-gradient(135deg, ${stops.join(', ')})`;
 }
+
+function getLecturePalette(cards) {
+  const colors = collectLectureColors(cards);
+  return {
+    accent: colors[0] || 'var(--accent)',
+    colors,
+    gradient: buildGradient(colors)
+  };
+}
+
+function getLectureAccent(cards) {
+  return getLecturePalette(cards).accent;
+}
+
 
 /**
  * Render lecture-based decks combining all item types with block/week groupings.
@@ -118,6 +138,8 @@ export async function renderCards(container, items, onChange) {
   const blockOrder = new Map(blockDefs.map((def, idx) => [def.blockId, idx]));
 
   const itemLookup = new Map(items.map(item => [item.id, item]));
+  /** @type {Map<string, Array<{ block: any, week: any, lecture: any }>>} */
+  const deckContextLookup = new Map();
 
 
   /** @type {Map<string, { key:string, blockId:string|null, title:string, accent?:string|null, order:number, weeks:Map<string, any> }>} */
@@ -231,6 +253,118 @@ export async function renderCards(container, items, onChange) {
     .filter(block => block.totalCards > 0)
     .sort((a, b) => (a.order - b.order) || a.title.localeCompare(b.title));
 
+  blockSections.forEach(block => {
+    block.weeks.forEach(week => {
+      week.lectures.forEach(lecture => {
+        lecture.cards.forEach(card => {
+          if (!deckContextLookup.has(card.id)) {
+            deckContextLookup.set(card.id, []);
+          }
+          deckContextLookup.get(card.id).push({ block, week, lecture });
+        });
+      });
+    });
+  });
+
+  const gridPayload = new WeakMap();
+  const activeGrids = new Set();
+  let gridPumpHandle = 0;
+  const getTime = typeof performance === 'object' && typeof performance.now === 'function'
+    ? () => performance.now()
+    : () => Date.now();
+
+  const deckTileObserver = typeof IntersectionObserver === 'function'
+    ? new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          deckTileObserver.unobserve(entry.target);
+          startGridRender(entry.target);
+        }
+      });
+    }, { rootMargin: '200px 0px' })
+    : null;
+
+  function scheduleGridPump() {
+    if (gridPumpHandle) return;
+    gridPumpHandle = requestAnimationFrame(() => {
+      gridPumpHandle = 0;
+      pumpGridRenders();
+    });
+  }
+
+  function startGridRender(grid) {
+    if (!grid || grid.dataset.rendered === 'true') return;
+    activeGrids.add(grid);
+    scheduleGridPump();
+  }
+
+  function renderGridChunk(grid) {
+    const payload = gridPayload.get(grid);
+    if (!payload) {
+      grid.dataset.rendered = 'true';
+      grid.classList.remove('is-loading');
+      return;
+    }
+    const { entries } = payload;
+    let { index = 0 } = payload;
+    const frag = document.createDocumentFragment();
+    const chunkStart = getTime();
+    let elapsed = 0;
+    while (index < entries.length && elapsed < 6) {
+      const { block, week, lecture } = entries[index++];
+      frag.appendChild(createDeckTile(block, week, lecture));
+      elapsed = getTime() - chunkStart;
+    }
+    payload.index = index;
+    grid.appendChild(frag);
+    if (index > 0) {
+      grid.classList.remove('is-loading');
+    }
+    if (index >= entries.length) {
+      grid.dataset.rendered = 'true';
+      grid.classList.remove('is-loading');
+      gridPayload.delete(grid);
+    }
+  }
+
+  function pumpGridRenders() {
+    if (!activeGrids.size) return;
+    const iterator = Array.from(activeGrids);
+    const frameStart = getTime();
+    for (const grid of iterator) {
+      renderGridChunk(grid);
+      if (grid.dataset.rendered === 'true') {
+        activeGrids.delete(grid);
+      }
+      if (getTime() - frameStart > 14) break;
+    }
+    if (activeGrids.size) {
+      scheduleGridPump();
+    }
+  }
+
+  function registerGrid(grid, entries) {
+    grid.dataset.rendered = 'false';
+    grid.classList.add('is-loading');
+    gridPayload.set(grid, { entries, index: 0 });
+    if (deckTileObserver) {
+      requestAnimationFrame(() => {
+        if (grid.dataset.rendered === 'true') return;
+        deckTileObserver.observe(grid);
+      });
+    } else {
+      startGridRender(grid);
+    }
+  }
+
+  function ensureGridRendered(grid) {
+    if (!grid || grid.dataset.rendered === 'true') return;
+    if (deckTileObserver) {
+      deckTileObserver.unobserve(grid);
+    }
+    startGridRender(grid);
+  }
+
   const catalog = document.createElement('div');
   catalog.className = 'card-catalog';
   container.appendChild(catalog);
@@ -246,6 +380,7 @@ export async function renderCards(container, items, onChange) {
   container.appendChild(overlay);
 
   let activeKeyHandler = null;
+  let persistRelatedVisibility = false;
 
   function closeDeck() {
     overlay.dataset.active = 'false';
@@ -254,16 +389,23 @@ export async function renderCards(container, items, onChange) {
       document.removeEventListener('keydown', activeKeyHandler);
       activeKeyHandler = null;
     }
+    persistRelatedVisibility = false;
   }
 
   overlay.addEventListener('click', evt => {
     if (evt.target === overlay) closeDeck();
   });
 
-  function openDeck(context) {
+  function openDeck(context, targetCardId = null) {
     const { block, week, lecture } = context;
     overlay.dataset.active = 'true';
     viewer.innerHTML = '';
+    if (activeKeyHandler) {
+      document.removeEventListener('keydown', activeKeyHandler);
+      activeKeyHandler = null;
+    }
+
+    const baseContext = { block, week, lecture };
 
     const header = document.createElement('div');
     header.className = 'deck-viewer-header';
@@ -347,7 +489,11 @@ export async function renderCards(container, items, onChange) {
     viewer.appendChild(relatedWrap);
 
     let idx = 0;
-    let showRelated = false;
+    if (targetCardId != null) {
+      const initialIdx = lecture.cards.findIndex(card => card.id === targetCardId);
+      if (initialIdx >= 0) idx = initialIdx;
+    }
+    let showRelated = persistRelatedVisibility;
 
 
     function updateToggle(current) {
@@ -371,8 +517,7 @@ export async function renderCards(container, items, onChange) {
       links.forEach(link => {
         const related = itemLookup.get(link.id);
         if (related) {
-          relatedWrap.appendChild(createRelatedCard(related));
-
+          relatedWrap.appendChild(createRelatedCard(related, baseContext));
         }
       });
       relatedWrap.dataset.visible = relatedWrap.children.length ? 'true' : 'false';
@@ -382,9 +527,9 @@ export async function renderCards(container, items, onChange) {
 
       const current = lecture.cards[idx];
       slideHolder.innerHTML = '';
-      slideHolder.appendChild(createDeckSlide(current, { block, week, lecture }));
+      slideHolder.appendChild(createDeckSlide(current, baseContext));
       const accent = getItemAccent(current);
-      viewer.style.setProperty('--viewer-accent', accent);
+      viewer.style.setProperty('--deck-current-accent', accent);
       counter.textContent = `Card ${idx + 1} of ${lecture.cards.length}`;
       const progressValue = ((idx + 1) / lecture.cards.length) * 100;
       progressFill.style.width = `${progressValue}%`;
@@ -406,6 +551,7 @@ export async function renderCards(container, items, onChange) {
     toggle.addEventListener('click', () => {
       if (toggle.disabled) return;
       showRelated = !showRelated;
+      persistRelatedVisibility = showRelated;
 
       updateToggle(lecture.cards[idx]);
       renderRelated(lecture.cards[idx]);
@@ -440,18 +586,44 @@ export async function renderCards(container, items, onChange) {
     return icon;
   }
 
+  const FAN_DELAY_MS = 900;
+
+  function enableDelayedFan(tile) {
+    let fanTimer = 0;
+    const cancel = () => {
+      if (fanTimer) {
+        clearTimeout(fanTimer);
+        fanTimer = 0;
+      }
+      tile.classList.remove('is-fanned');
+    };
+    const arm = () => {
+      if (fanTimer) return;
+      fanTimer = setTimeout(() => {
+        tile.classList.add('is-fanned');
+        fanTimer = 0;
+      }, FAN_DELAY_MS);
+    };
+    tile.addEventListener('pointerenter', arm);
+    tile.addEventListener('pointerleave', cancel);
+    tile.addEventListener('pointercancel', cancel);
+    tile.addEventListener('focus', arm);
+    tile.addEventListener('blur', cancel);
+  }
+
   function createDeckTile(block, week, lecture) {
     const tile = document.createElement('button');
     tile.type = 'button';
     tile.className = 'deck-tile';
     tile.setAttribute('aria-label', `${lecture.title} (${lecture.cards.length} cards)`);
 
-    const accent = getLectureAccent(lecture.cards);
-    tile.style.setProperty('--deck-accent', accent);
+    const palette = getLecturePalette(lecture.cards);
+    const accent = palette.accent;
 
     const stack = document.createElement('div');
     stack.className = 'deck-stack';
     stack.style.setProperty('--deck-accent', accent);
+    stack.style.setProperty('--deck-gradient', palette.gradient);
     const preview = lecture.cards.slice(0, 4);
 
     stack.style.setProperty('--spread', preview.length > 0 ? (preview.length - 1) / 2 : 0);
@@ -470,6 +642,8 @@ export async function renderCards(container, items, onChange) {
         stack.appendChild(mini);
       });
     }
+    tile.style.setProperty('--deck-accent', accent);
+    tile.style.setProperty('--deck-gradient', palette.gradient);
     tile.appendChild(stack);
 
     const info = document.createElement('div');
@@ -478,8 +652,6 @@ export async function renderCards(container, items, onChange) {
     const count = document.createElement('span');
     count.className = 'deck-count-pill';
     count.textContent = `${lecture.cards.length} card${lecture.cards.length === 1 ? '' : 's'}`;
-
-    count.style.setProperty('--deck-accent', accent);
 
     info.appendChild(count);
 
@@ -506,6 +678,8 @@ export async function renderCards(container, items, onChange) {
         open();
       }
     });
+
+    enableDelayedFan(tile);
 
     return tile;
   }
@@ -631,8 +805,23 @@ export async function renderCards(container, items, onChange) {
     return slide;
   }
 
-  function createRelatedCard(item) {
-    const entry = document.createElement('div');
+  function resolveDeckContext(item, origin) {
+    const contexts = deckContextLookup.get(item.id);
+    if (!contexts || !contexts.length) return null;
+    if (origin?.lecture?.key) {
+      const lectureMatch = contexts.find(ctx => ctx.lecture.key === origin.lecture.key);
+      if (lectureMatch) return lectureMatch;
+    }
+    if (origin?.block?.key) {
+      const blockMatch = contexts.find(ctx => ctx.block.key === origin.block.key);
+      if (blockMatch) return blockMatch;
+    }
+    return contexts[0];
+  }
+
+  function createRelatedCard(item, originContext) {
+    const entry = document.createElement('button');
+    entry.type = 'button';
     entry.className = 'related-card-chip';
     const accent = getItemAccent(item);
     entry.style.setProperty('--related-accent', accent);
@@ -647,6 +836,16 @@ export async function renderCards(container, items, onChange) {
     kind.className = 'related-card-kind';
     kind.textContent = item.kind ? item.kind.toUpperCase() : '';
     entry.appendChild(kind);
+
+    const target = resolveDeckContext(item, originContext);
+    if (!target) {
+      entry.disabled = true;
+      entry.classList.add('is-disabled');
+    } else {
+      entry.addEventListener('click', () => {
+        openDeck(target, item.id);
+      });
+    }
 
     return entry;
   }
@@ -718,10 +917,7 @@ export async function renderCards(container, items, onChange) {
 
       const deckGrid = document.createElement('div');
       deckGrid.className = 'deck-grid';
-
-      week.lectures.forEach(lecture => {
-        deckGrid.appendChild(createDeckTile(block, week, lecture));
-      });
+      registerGrid(deckGrid, week.lectures.map(lecture => ({ block, week, lecture })));
 
       weekSection.appendChild(weekHeader);
       weekSection.appendChild(deckGrid);
@@ -731,6 +927,9 @@ export async function renderCards(container, items, onChange) {
       weekHeader.addEventListener('click', () => {
         const collapsed = weekSection.classList.toggle('is-collapsed');
         weekHeader.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        if (!collapsed) {
+          ensureGridRendered(deckGrid);
+        }
       });
     });
 
@@ -758,9 +957,6 @@ export async function renderCards(container, items, onChange) {
   }
 
   const renderQueue = blockSections.slice();
-  const getTime = typeof performance === 'object' && typeof performance.now === 'function'
-    ? () => performance.now()
-    : () => Date.now();
 
   function pump() {
     const start = getTime();
