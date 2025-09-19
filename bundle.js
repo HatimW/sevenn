@@ -1,4 +1,4 @@
-(() => {
+var Sevenn = (() => {
   // js/state.js
   var state = {
     tab: "Diseases",
@@ -668,6 +668,8 @@
         includeLinked: true,
         manualMode: false,
         manualIds: [],
+        layout: {},
+        layoutSeeded: true,
         filter: { blockId: "", week: "", lectureKey: "" }
       }
     ]
@@ -6061,6 +6063,13 @@
       23
     )
   };
+  var ICONS = {
+    sliders: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 7h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M6 12h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M6 17h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><circle cx="16" cy="7" r="2.5" stroke="currentColor" stroke-width="1.6" /><circle cx="11" cy="12" r="2.5" stroke="currentColor" stroke-width="1.6" /><circle cx="19" cy="17" r="2.5" stroke="currentColor" stroke-width="1.6" /></svg>',
+    close: '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>',
+    plus: '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>',
+    gear: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z" stroke="currentColor" stroke-width="1.6" /><path d="M4.5 12.5l1.8.52c.26.08.46.28.54.54l.52 1.8a.9.9 0 0 0 1.47.41l1.43-1.08a.9.9 0 0 1 .99-.07l1.63.82a.9.9 0 0 0 1.22-.41l.73-1.66a.9.9 0 0 1 .73-.52l1.88-.2a.9.9 0 0 0 .78-1.07l-.39-1.85a.9.9 0 0 1 .25-.83l1.29-1.29a.9.9 0 0 0-.01-1.27l-1.29-1.29a.9.9 0 0 0-.83-.25l-1.85.39a.9.9 0 0 1-1.07-.78l-.2-1.88A.9.9 0 0 0 13.3 2h-2.6a.9.9 0 0 0-.9.78l-.2 1.88a.9.9 0 0 1-1.07.78l-1.85-.39a.9.9 0 0 0-.83.25L4.56 6.59a.9.9 0 0 0-.01 1.27l1.29 1.29c.22.22.31.54.25.83l-.39 1.85a.9.9 0 0 0 .7 1.07z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 7h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><path d="M9 7V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><path d="M18 7v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /><path d="M10 11v6M14 11v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>'
+  };
   var DEFAULT_LINK_COLOR = "#888888";
   var DEFAULT_LINE_STYLE = "solid";
   var DEFAULT_LINE_THICKNESS = "regular";
@@ -6092,6 +6101,7 @@
     pendingLink: null,
     hiddenMenuTab: "nodes",
     panelVisible: true,
+    menuPinned: false,
     listenersAttached: false,
     draggingView: false,
     nodeDrag: null,
@@ -6140,12 +6150,24 @@
   };
   function normalizeMapTab(tab = {}) {
     const filter = tab.filter && typeof tab.filter === "object" ? tab.filter : {};
+    const layout = {};
+    if (tab.layout && typeof tab.layout === "object") {
+      Object.entries(tab.layout).forEach(([id, pos]) => {
+        if (!id || !pos || typeof pos !== "object") return;
+        const x = Number(pos.x);
+        const y = Number(pos.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        layout[id] = { x, y };
+      });
+    }
     const normalized2 = {
       id: tab.id || uid(),
       name: tab.name || "Untitled map",
       includeLinked: tab.includeLinked !== false,
       manualMode: Boolean(tab.manualMode),
       manualIds: Array.isArray(tab.manualIds) ? Array.from(new Set(tab.manualIds.filter(Boolean))) : [],
+      layout,
+      layoutSeeded: tab.layoutSeeded === true,
       filter: {
         blockId: filter.blockId || "",
         week: Number.isFinite(filter.week) ? filter.week : typeof filter.week === "string" && filter.week.trim() ? Number(filter.week) : "",
@@ -6159,7 +6181,7 @@
   }
   function normalizeMapConfig(config = null) {
     const base = config && typeof config === "object" ? { ...config } : {};
-    const tabs2 = Array.isArray(base.tabs) ? base.tabs.map(normalizeMapTab) : [normalizeMapTab({ id: "default", name: "All concepts", includeLinked: true })];
+    const tabs2 = Array.isArray(base.tabs) ? base.tabs.map(normalizeMapTab) : [normalizeMapTab({ id: "default", name: "All concepts", includeLinked: true, layoutSeeded: true })];
     const ids = /* @__PURE__ */ new Set();
     const deduped = [];
     tabs2.forEach((tab) => {
@@ -6177,6 +6199,13 @@
       activeTabId: active.id,
       tabs: deduped
     };
+  }
+  function ensureTabLayout(tab) {
+    if (!tab) return {};
+    if (!tab.layout || typeof tab.layout !== "object") {
+      tab.layout = {};
+    }
+    return tab.layout;
   }
   async function ensureMapConfig() {
     if (mapState.mapConfigLoaded && mapState.mapConfig) {
@@ -6225,6 +6254,7 @@
       includeLinked: true,
       manualMode: false,
       manualIds: [],
+      layoutSeeded: true,
       filter: { blockId: "", week: "", lectureKey: "" }
     });
     config.tabs.push(tab);
@@ -6305,17 +6335,18 @@
     actions.className = "map-tab-actions";
     const addBtn = document.createElement("button");
     addBtn.type = "button";
-    addBtn.className = "map-tab-add";
+    addBtn.className = "map-icon-btn map-tab-add";
     addBtn.setAttribute("aria-label", "Create new map tab");
-    addBtn.textContent = "+";
+    addBtn.innerHTML = `${ICONS.plus}`;
     addBtn.addEventListener("click", () => {
       createMapTab();
     });
     actions.appendChild(addBtn);
     const settingsBtn = document.createElement("button");
     settingsBtn.type = "button";
-    settingsBtn.className = "map-tab-settings";
-    settingsBtn.textContent = "Settings";
+    settingsBtn.className = "map-icon-btn map-tab-settings";
+    settingsBtn.setAttribute("aria-label", "Open settings");
+    settingsBtn.innerHTML = `${ICONS.gear}`;
     settingsBtn.addEventListener("click", () => {
       const headerSettings = document.querySelector(".header-settings-btn");
       if (headerSettings) {
@@ -6387,8 +6418,9 @@
     titleRow.appendChild(nameLabel);
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
-    deleteBtn.className = "btn danger map-delete-tab";
-    deleteBtn.textContent = "Delete map";
+    deleteBtn.className = "map-icon-btn danger map-delete-tab";
+    deleteBtn.setAttribute("aria-label", "Delete map");
+    deleteBtn.innerHTML = `${ICONS.trash}<span class="sr-only">Delete map</span>`;
     if ((mapState.mapConfig?.tabs || []).length <= 1) {
       deleteBtn.disabled = true;
     }
@@ -6856,16 +6888,17 @@
     toggle.setAttribute("aria-haspopup", "true");
     toggle.setAttribute("aria-expanded", "false");
     toggle.setAttribute("aria-label", "Open map controls");
-    toggle.innerHTML = '<span class="map-menu-icon">\u2630</span>';
+    toggle.innerHTML = `<span class="map-menu-icon" aria-hidden="true">${ICONS.sliders}</span><span class="sr-only">Open map controls</span>`;
     menu.appendChild(toggle);
     const panel = document.createElement("div");
     panel.className = "map-menu-panel";
+    panel.setAttribute("aria-label", "Map controls");
     menu.appendChild(panel);
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "map-menu-close";
-    closeBtn.textContent = "Close menu";
     closeBtn.setAttribute("aria-label", "Hide map controls");
+    closeBtn.innerHTML = `<span class="sr-only">Hide map controls</span>${ICONS.close}`;
     panel.appendChild(closeBtn);
     const tabsPanel = createMapTabsPanel(activeTab);
     panel.appendChild(tabsPanel);
@@ -6879,32 +6912,71 @@
     }
     const searchOverlay = createSearchOverlay();
     overlay.appendChild(searchOverlay);
-    function setMenuOpen(open) {
+    let menuHoverOpen = Boolean(mapState.menuPinned);
+    let menuHoverCloseTimer = null;
+    const clearMenuHoverClose = () => {
+      if (menuHoverCloseTimer !== null) {
+        clearTimeout(menuHoverCloseTimer);
+        menuHoverCloseTimer = null;
+      }
+    };
+    const applyMenuState = () => {
+      const open = Boolean(mapState.menuPinned) || menuHoverOpen;
       menu.classList.toggle("open", open);
+      menu.classList.toggle("pinned", Boolean(mapState.menuPinned));
       toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      toggle.setAttribute("aria-pressed", mapState.menuPinned ? "true" : "false");
       toggle.setAttribute("aria-label", open ? "Hide map controls" : "Open map controls");
-    }
+    };
+    const openMenu = ({ pinned = false } = {}) => {
+      if (pinned) {
+        mapState.menuPinned = true;
+      }
+      menuHoverOpen = true;
+      clearMenuHoverClose();
+      applyMenuState();
+    };
+    const closeMenu = ({ unpin = false } = {}) => {
+      if (unpin) {
+        mapState.menuPinned = false;
+      }
+      menuHoverOpen = false;
+      clearMenuHoverClose();
+      applyMenuState();
+    };
+    const scheduleMenuClose = () => {
+      if (mapState.menuPinned) {
+        return;
+      }
+      clearMenuHoverClose();
+      menuHoverCloseTimer = setTimeout(() => {
+        menuHoverCloseTimer = null;
+        closeMenu();
+      }, 140);
+    };
+    applyMenuState();
     toggle.addEventListener("click", (evt) => {
       evt.preventDefault();
-      const next = !menu.classList.contains("open");
-      setMenuOpen(next);
+      if (mapState.menuPinned) {
+        closeMenu({ unpin: true });
+      } else {
+        openMenu({ pinned: true });
+      }
     });
-    menu.addEventListener("mouseenter", () => {
-      setMenuOpen(true);
-    });
-    menu.addEventListener("mouseleave", () => {
-      setMenuOpen(false);
-    });
-    menu.addEventListener("focusin", () => {
-      setMenuOpen(true);
-    });
+    const handleHoverOpen = () => openMenu();
+    menu.addEventListener("mouseenter", handleHoverOpen);
+    toggle.addEventListener("mouseenter", handleHoverOpen);
+    panel.addEventListener("mouseenter", handleHoverOpen);
+    toggle.addEventListener("focusin", handleHoverOpen);
+    panel.addEventListener("focusin", handleHoverOpen);
+    menu.addEventListener("mouseleave", scheduleMenuClose);
     menu.addEventListener("focusout", (evt) => {
-      if (!menu.contains(evt.relatedTarget)) {
-        setMenuOpen(false);
+      if (!menu.contains(evt.relatedTarget) && !mapState.menuPinned) {
+        closeMenu();
       }
     });
     closeBtn.addEventListener("click", () => {
-      setMenuOpen(false);
+      closeMenu({ unpin: true });
     });
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.classList.add("map-svg");
@@ -6967,9 +7039,28 @@
     const maxRadius = 60;
     const center = size / 2;
     const newItems = [];
+    const layout = activeTab ? ensureTabLayout(activeTab) : null;
+    const allowLegacyPositions = Boolean(activeTab && activeTab.layoutSeeded !== true);
+    let layoutDirty = false;
+    let legacyImported = false;
     visibleItems.forEach((it) => {
-      if (it.mapPos) positions[it.id] = { ...it.mapPos };
-      else newItems.push(it);
+      if (layout && layout[it.id]) {
+        positions[it.id] = { ...layout[it.id] };
+        return;
+      }
+      const legacy = it.mapPos;
+      if (allowLegacyPositions && legacy && typeof legacy === "object" && Number.isFinite(Number(legacy.x)) && Number.isFinite(Number(legacy.y))) {
+        const x = Number(legacy.x);
+        const y = Number(legacy.y);
+        positions[it.id] = { x, y };
+        if (layout) {
+          layout[it.id] = { x, y };
+          layoutDirty = true;
+          legacyImported = true;
+        }
+        return;
+      }
+      newItems.push(it);
     });
     newItems.sort((a, b) => (linkCounts[b.id] || 0) - (linkCounts[a.id] || 0));
     const step = 2 * Math.PI / Math.max(newItems.length, 1);
@@ -6980,9 +7071,18 @@
       const x = center + dist * Math.cos(angle);
       const y = center + dist * Math.sin(angle);
       positions[it.id] = { x, y };
-      it.mapPos = positions[it.id];
+      if (layout) {
+        layout[it.id] = { x, y };
+        layoutDirty = true;
+      }
     });
-    for (const it of newItems) await upsertItem(it);
+    if (activeTab && legacyImported && activeTab.layoutSeeded !== true) {
+      activeTab.layoutSeeded = true;
+      layoutDirty = true;
+    }
+    if (layoutDirty) {
+      await persistMapConfig();
+    }
     mapState.selectionIds = mapState.selectionIds.filter((id) => positions[id]);
     const hiddenLinks = gatherHiddenLinks(items, itemMap);
     buildToolbox(container, hiddenNodes.length, hiddenLinks.length);
@@ -7328,7 +7428,10 @@
       mapState.areaDrag = null;
       cursorNeedsRefresh = true;
       if (moved) {
-        await Promise.all(ids.map((id) => persistNodePosition(id)));
+        for (const id of ids) {
+          await persistNodePosition(id, { persist: false });
+        }
+        await persistMapConfig();
         mapState.suppressNextClick = true;
       } else {
         mapState.suppressNextClick = false;
@@ -7730,25 +7833,42 @@
     const item = await getItem(drag.id);
     if (!item) return;
     if (drag.source === "palette") {
-      const tab = getActiveTab();
-      if (!tab || !tab.manualMode) return;
-      if (drag.tabId && tab.id !== drag.tabId) return;
-      if (!Array.isArray(tab.manualIds)) {
-        tab.manualIds = [];
+      const tab2 = getActiveTab();
+      if (!tab2 || !tab2.manualMode) return;
+      if (drag.tabId && tab2.id !== drag.tabId) return;
+      if (!Array.isArray(tab2.manualIds)) {
+        tab2.manualIds = [];
       }
-      if (!tab.manualIds.includes(item.id)) {
-        tab.manualIds.push(item.id);
-        await persistMapConfig();
+      let shouldPersist = false;
+      if (!tab2.manualIds.includes(item.id)) {
+        tab2.manualIds.push(item.id);
+        shouldPersist = true;
       }
       item.mapHidden = false;
-      item.mapPos = { x, y };
       await upsertItem(item);
+      const layout = ensureTabLayout(tab2);
+      const prev = layout[item.id];
+      layout[item.id] = { x, y };
+      if (!prev || prev.x !== x || prev.y !== y) {
+        shouldPersist = true;
+      }
+      if (shouldPersist) {
+        await persistMapConfig();
+      }
       await renderMap(mapState.root);
       return;
     }
     item.mapHidden = false;
-    item.mapPos = { x, y };
     await upsertItem(item);
+    const tab = getActiveTab();
+    if (tab) {
+      const layout = ensureTabLayout(tab);
+      const prev = layout[item.id];
+      layout[item.id] = { x, y };
+      if (!prev || prev.x !== x || prev.y !== y) {
+        await persistMapConfig();
+      }
+    }
     await renderMap(mapState.root);
   }
   function updateMenuDragPosition(clientX, clientY) {
@@ -7862,12 +7982,16 @@
     mapState.cursorOverride = null;
     refreshCursor();
   }
-  async function persistNodePosition(id) {
-    const item = mapState.itemMap[id];
-    if (!item) return;
-    const next = { ...item, mapPos: { ...mapState.positions[id] } };
-    mapState.itemMap[id] = next;
-    await upsertItem(next);
+  async function persistNodePosition(id, options = {}) {
+    const tab = getActiveTab();
+    if (!tab) return;
+    const pos = mapState.positions[id];
+    if (!pos) return;
+    const layout = ensureTabLayout(tab);
+    layout[id] = { x: pos.x, y: pos.y };
+    if (options.persist !== false) {
+      await persistMapConfig();
+    }
   }
   function gatherHiddenLinks(items, itemMap) {
     const hidden = [];
