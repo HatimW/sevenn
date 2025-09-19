@@ -1,5 +1,5 @@
 const DB_NAME = 'sevenn-db';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const MEMORY_STORAGE_KEY = 'sevenn-memory-db';
 
 const STORE_KEY_PATHS = {
@@ -7,7 +7,8 @@ const STORE_KEY_PATHS = {
   blocks: 'blockId',
   exams: 'id',
   settings: 'id',
-  exam_sessions: 'examId'
+  exam_sessions: 'examId',
+  study_sessions: 'mode'
 };
 
 const enqueue = typeof queueMicrotask === 'function'
@@ -363,6 +364,11 @@ export function openDB() {
 
       if (!db.objectStoreNames.contains('exam_sessions')) {
         const sessions = db.createObjectStore('exam_sessions', { keyPath: 'examId' });
+        sessions.createIndex('by_updatedAt', 'updatedAt');
+      }
+
+      if (!db.objectStoreNames.contains('study_sessions')) {
+        const sessions = db.createObjectStore('study_sessions', { keyPath: 'mode' });
         sessions.createIndex('by_updatedAt', 'updatedAt');
       }
     };

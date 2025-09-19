@@ -1,14 +1,30 @@
-import { state, setBuilder, setCohort, resetBlockMode } from '../../state.js';
+import { state, setBuilder, setCohort, resetBlockMode, setSubtab, setFlashSession, setQuizSession, setStudySelectedMode } from '../../state.js';
 import { listBlocks, listItemsByKind } from '../../storage/storage.js';
 import { setToggleState } from '../../utils.js';
+import { hydrateStudySessions, getStudySessionEntry, removeAllStudySessions, removeStudySession } from '../../study/study-sessions.js';
 
-export async function renderBuilder(root) {
-  const blocks = await loadBlocks();
+const MODE_KEY = {
+  Flashcards: 'flashcards',
+  Quiz: 'quiz'
+};
+
+function notifyBuilderChanged() {
+  removeAllStudySessions().catch(err => console.warn('Failed to clear saved sessions', err));
+}
+
+export async function renderBuilder(root, redraw) {
+  const [blocks] = await Promise.all([
+    loadBlocks(),
+    hydrateStudySessions().catch(err => {
+      console.error('Unable to load study sessions', err);
+      return null;
+    })
+  ]);
   root.innerHTML = '';
   const wrap = document.createElement('div');
   wrap.className = 'builder';
   root.appendChild(wrap);
-  drawBuilder(wrap, blocks);
+  drawBuilder(wrap, blocks, redraw);
 }
 
 async function loadBlocks() {
@@ -17,12 +33,12 @@ async function loadBlocks() {
   return blocks;
 }
 
-function drawBuilder(container, blocks) {
+function drawBuilder(container, blocks, redraw) {
   container.innerHTML = '';
   if (state.builder.weeks.length) {
     setBuilder({ weeks: [] });
   }
-  const rerender = () => drawBuilder(container, blocks);
+  const rerender = () => drawBuilder(container, blocks, redraw);
 
   const layout = document.createElement('div');
   layout.className = 'builder-layout';
@@ -35,7 +51,7 @@ function drawBuilder(container, blocks) {
     blockColumn.appendChild(renderBlockPanel(block, rerender));
   });
 
-  const controls = renderControls(rerender);
+  const controls = renderControls(rerender, redraw);
   layout.appendChild(controls);
 }
 
@@ -213,12 +229,13 @@ function renderLecture(block, lecture, rerender) {
   return pill;
 }
 
-function renderControls(rerender) {
+function renderControls(rerender, redraw) {
   const aside = document.createElement('aside');
   aside.className = 'builder-controls';
 
   aside.appendChild(renderFilterCard(rerender));
-  aside.appendChild(renderSummaryCard(rerender));
+  aside.appendChild(renderSummaryCard(rerender, redraw));
+  aside.appendChild(renderModeCard(rerender, redraw));
   return aside;
 }
 
@@ -250,6 +267,7 @@ function renderFilterCard(rerender) {
 
   const favToggle = createPill(state.builder.onlyFav, 'Only favorites', () => {
     setBuilder({ onlyFav: !state.builder.onlyFav });
+    notifyBuilderChanged();
     rerender();
   }, 'small outline');
   card.appendChild(favToggle);
@@ -257,7 +275,7 @@ function renderFilterCard(rerender) {
   return card;
 }
 
-function renderSummaryCard(rerender) {
+function renderSummaryCard(rerender, redraw) {
   const card = document.createElement('div');
   card.className = 'card builder-summary-card';
 
@@ -289,6 +307,8 @@ function renderSummaryCard(rerender) {
   buildBtn.textContent = 'Build set';
   buildBtn.addEventListener('click', async () => {
     await buildSet(buildBtn, count, rerender);
+    await removeAllStudySessions().catch(err => console.warn('Failed to clear saved sessions', err));
+    redraw();
   });
   actions.appendChild(buildBtn);
 
@@ -299,11 +319,114 @@ function renderSummaryCard(rerender) {
   clearBtn.disabled = !hasAnySelection();
   clearBtn.addEventListener('click', () => {
     setBuilder({ blocks: [], weeks: [], lectures: [] });
+    notifyBuilderChanged();
     rerender();
   });
   actions.appendChild(clearBtn);
 
   card.appendChild(actions);
+  return card;
+}
+
+function renderModeCard(rerender, redraw) {
+  const card = document.createElement('div');
+  card.className = 'card builder-mode-card';
+
+  const title = document.createElement('h3');
+  title.textContent = 'Modes';
+  card.appendChild(title);
+
+  const modeRow = document.createElement('div');
+  modeRow.className = 'builder-mode-options';
+  const modes = ['Flashcards', 'Quiz', 'Blocks'];
+  const selected = state.study?.selectedMode || 'Flashcards';
+  modes.forEach(mode => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'builder-mode-toggle';
+    const isActive = mode === selected;
+    if (isActive) btn.classList.add('is-active');
+    btn.dataset.active = isActive ? 'true' : 'false';
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    btn.textContent = mode;
+    btn.addEventListener('click', () => {
+      setStudySelectedMode(mode);
+      rerender();
+    });
+    modeRow.appendChild(btn);
+  });
+  card.appendChild(modeRow);
+
+  const status = document.createElement('div');
+  status.className = 'builder-mode-status';
+  card.appendChild(status);
+
+  const startBtn = document.createElement('button');
+  startBtn.type = 'button';
+  startBtn.className = 'btn builder-start-btn';
+
+  const storageKey = MODE_KEY[selected] || null;
+  const savedEntry = storageKey ? getStudySessionEntry(storageKey) : null;
+  const hasSaved = !!(savedEntry && savedEntry.session);
+  const cohort = Array.isArray(state.cohort) ? state.cohort : [];
+  const hasCohort = cohort.length > 0;
+  const canStartFresh = selected === 'Blocks' ? hasCohort : hasCohort;
+  const buttonEnabled = hasSaved || canStartFresh;
+  const labelTitle = selected.toLowerCase();
+  startBtn.textContent = `${hasSaved ? 'Resume' : 'Start'} ${selected}`;
+  startBtn.disabled = !buttonEnabled;
+
+  if (hasSaved) {
+    const count = Array.isArray(savedEntry?.cohort) ? savedEntry.cohort.length : 0;
+    status.textContent = `Saved ${labelTitle} session${count ? ` • ${count} cards` : ''}`;
+  } else if (!hasCohort && selected !== 'Blocks') {
+    status.textContent = 'Build a study set to enable this mode.';
+  } else if (selected === 'Blocks' && !hasCohort) {
+    status.textContent = 'Assemble a study set to open Blocks mode.';
+  } else {
+    status.textContent = `Ready to start ${labelTitle}.`;
+  }
+
+  startBtn.addEventListener('click', async () => {
+    if (!buttonEnabled) return;
+    setStudySelectedMode(selected);
+    if (selected === 'Blocks') {
+      setSubtab('Study', 'Blocks');
+      redraw();
+      return;
+    }
+
+    const key = MODE_KEY[selected];
+    if (!key) return;
+
+    const handleError = (err) => console.warn('Failed to update study session state', err);
+
+    if (hasSaved && savedEntry) {
+      await removeStudySession(key).catch(handleError);
+      const restoredCohort = Array.isArray(savedEntry.cohort) ? savedEntry.cohort : [];
+      setCohort(restoredCohort);
+      if (selected === 'Flashcards') {
+        setFlashSession(savedEntry.session);
+      } else if (selected === 'Quiz') {
+        setQuizSession(savedEntry.session);
+      }
+      setSubtab('Study', 'Builder');
+      redraw();
+      return;
+    }
+
+    if (!cohort.length) return;
+    await removeStudySession(key).catch(handleError);
+    if (selected === 'Flashcards') {
+      setFlashSession({ idx: 0, pool: cohort, ratings: {}, mode: 'study' });
+    } else if (selected === 'Quiz') {
+      setQuizSession({ idx: 0, score: 0, pool: cohort });
+    }
+    setSubtab('Study', 'Builder');
+    redraw();
+  });
+
+  card.appendChild(startBtn);
   return card;
 }
 
@@ -364,6 +487,7 @@ function selectEntireBlock(block) {
     blockSet.add(blockId);
   }
 
+  notifyBuilderChanged();
   setBuilder({
     blocks: Array.from(blockSet),
     lectures: Array.from(lectureSet),
@@ -378,6 +502,7 @@ function clearBlock(blockId) {
     if (key.startsWith(`${blockId}|`)) lectureSet.delete(key);
   }
   blockSet.delete(blockId);
+  notifyBuilderChanged();
   setBuilder({
     blocks: Array.from(blockSet),
     lectures: Array.from(lectureSet),
@@ -395,6 +520,7 @@ function selectWeek(block, week) {
     }
   });
   syncBlockWithLectureSelection(blockSet, lectureSet, block);
+  notifyBuilderChanged();
   setBuilder({
     lectures: Array.from(lectureSet),
     blocks: Array.from(blockSet),
@@ -412,6 +538,7 @@ function clearWeek(block, week) {
     }
   });
   syncBlockWithLectureSelection(blockSet, lectureSet, block);
+  notifyBuilderChanged();
   setBuilder({
     lectures: Array.from(lectureSet),
     blocks: Array.from(blockSet),
@@ -429,6 +556,7 @@ function toggleLecture(block, lecture) {
     lectureSet.add(key);
   }
   syncBlockWithLectureSelection(blockSet, lectureSet, block);
+  notifyBuilderChanged();
   setBuilder({
     lectures: Array.from(lectureSet),
     blocks: Array.from(blockSet),
@@ -439,6 +567,7 @@ function toggleLecture(block, lecture) {
 function toggleType(type) {
   const types = new Set(state.builder.types);
   if (types.has(type)) types.delete(type); else types.add(type);
+  notifyBuilderChanged();
   setBuilder({ types: Array.from(types) });
 }
 

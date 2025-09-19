@@ -1,3 +1,5 @@
+import { normalizeSrRecord } from './review/sr-data.js';
+
 const randomId = () => (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2));
 
 function escapeHtml(str = '') {
@@ -47,6 +49,6 @@ export function cleanItem(item) {
     lectures: item.lectures || [],
     mapPos: item.mapPos || null,
     mapHidden: !!item.mapHidden,
-    sr: item.sr || { box:0, last:0, due:0, ease:2.5 }
+    sr: normalizeSrRecord(item.sr)
   };
 }

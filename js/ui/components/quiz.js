@@ -1,5 +1,6 @@
-import { state, setQuizSession } from '../../state.js';
+import { state, setQuizSession, setSubtab, setStudySelectedMode } from '../../state.js';
 import { renderRichText } from './rich-text.js';
+import { persistStudySession, removeStudySession } from '../../study/study-sessions.js';
 
 function titleOf(item){
   return item.name || item.concept || '';
@@ -15,12 +16,18 @@ export function renderQuiz(root, redraw){
 
   const item = sess.pool[sess.idx];
   if (!item){
+    removeStudySession('quiz').catch(err => console.warn('Failed to clear quiz session', err));
     const done = document.createElement('div');
     done.textContent = `Score ${sess.score}/${sess.pool.length}`;
     const btn = document.createElement('button');
     btn.className = 'btn';
     btn.textContent = 'Done';
-    btn.addEventListener('click', () => { setQuizSession(null); redraw(); });
+    btn.addEventListener('click', () => {
+      setQuizSession(null);
+      setStudySelectedMode('Quiz');
+      setSubtab('Study', 'Builder');
+      redraw();
+    });
     done.appendChild(document.createElement('br'));
     done.appendChild(btn);
     root.appendChild(done);
@@ -81,6 +88,51 @@ export function renderQuiz(root, redraw){
   });
 
   root.appendChild(form);
+
+  const controls = document.createElement('div');
+  controls.className = 'quiz-controls';
+
+  const saveExit = document.createElement('button');
+  saveExit.type = 'button';
+  saveExit.className = 'btn secondary';
+  saveExit.textContent = 'Save & exit';
+  saveExit.addEventListener('click', async () => {
+    const original = saveExit.textContent;
+    saveExit.disabled = true;
+    saveExit.textContent = 'Saving…';
+    try {
+      await persistStudySession('quiz', {
+        session: { idx: sess.idx, score: sess.score, pool: sess.pool },
+        cohort: sess.pool
+      });
+      setQuizSession(null);
+      setStudySelectedMode('Quiz');
+      setSubtab('Study', 'Builder');
+      redraw();
+    } catch (err) {
+      console.error('Failed to save quiz progress', err);
+      saveExit.textContent = 'Save failed';
+      setTimeout(() => { saveExit.textContent = original; }, 2000);
+    } finally {
+      saveExit.disabled = false;
+    }
+  });
+  controls.appendChild(saveExit);
+
+  const exitBtn = document.createElement('button');
+  exitBtn.type = 'button';
+  exitBtn.className = 'btn secondary';
+  exitBtn.textContent = 'Exit without saving';
+  exitBtn.addEventListener('click', () => {
+    removeStudySession('quiz').catch(err => console.warn('Failed to discard quiz session', err));
+    setQuizSession(null);
+    setStudySelectedMode('Quiz');
+    setSubtab('Study', 'Builder');
+    redraw();
+  });
+  controls.appendChild(exitBtn);
+
+  root.appendChild(controls);
 }
 
 function sectionsFor(item){
