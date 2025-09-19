@@ -1,4 +1,6 @@
 import { getSettings, saveSettings, listBlocks, upsertBlock, deleteBlock, deleteLecture, updateLecture, exportJSON, importJSON, exportAnkiCSV } from '../storage/storage.js';
+import { REVIEW_RATINGS } from '../review/constants.js';
+import { invalidateReviewDurationsCache } from '../review/scheduler.js';
 import { confirmModal } from './components/confirm.js';
 
 const collapsedLectureBlocks = new Set();
@@ -38,6 +40,39 @@ export async function renderSettings(root) {
   });
   dailyLabel.appendChild(dailyInput);
   settingsCard.appendChild(dailyLabel);
+
+  const timingHeader = document.createElement('h3');
+  timingHeader.className = 'settings-subheading';
+  timingHeader.textContent = 'Review timing (minutes)';
+  settingsCard.appendChild(timingHeader);
+
+  const timingGrid = document.createElement('div');
+  timingGrid.className = 'settings-review-grid';
+  const ratingLabels = { again: 'Again', hard: 'Hard', good: 'Good', easy: 'Easy' };
+  const stepValues = settings.reviewSteps || {};
+  REVIEW_RATINGS.forEach(key => {
+    const row = document.createElement('label');
+    row.className = 'settings-review-row';
+    row.textContent = `${ratingLabels[key]}:`;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'input settings-review-input';
+    input.min = '1';
+    input.step = '1';
+    input.value = stepValues[key] ?? '';
+    input.addEventListener('change', async () => {
+      const value = Number(input.value);
+      if (!Number.isFinite(value) || value <= 0) {
+        input.value = stepValues[key] ?? '';
+        return;
+      }
+      await saveSettings({ reviewSteps: { [key]: value } });
+      invalidateReviewDurationsCache();
+    });
+    row.appendChild(input);
+    timingGrid.appendChild(row);
+  });
+  settingsCard.appendChild(timingGrid);
 
   root.appendChild(settingsCard);
 

@@ -1,0 +1,132 @@
+import { getSettings } from '../storage/storage.js';
+import { sectionDefsForKind, allSectionDefs } from '../ui/components/sections.js';
+import { DEFAULT_REVIEW_STEPS, REVIEW_RATINGS, RETIRE_RATING } from './constants.js';
+import { normalizeReviewSteps } from './settings.js';
+import { SR_VERSION, defaultSectionState, normalizeSectionRecord, normalizeSrRecord } from './sr-data.js';
+
+let cachedDurations = null;
+
+export async function getReviewDurations() {
+  if (cachedDurations) return cachedDurations;
+  try {
+    const settings = await getSettings();
+    cachedDurations = normalizeReviewSteps(settings?.reviewSteps);
+  } catch (err) {
+    console.warn('Failed to load review settings, using defaults', err);
+    cachedDurations = { ...DEFAULT_REVIEW_STEPS };
+  }
+  return cachedDurations;
+}
+
+export function invalidateReviewDurationsCache() {
+  cachedDurations = null;
+}
+
+export function ensureItemSr(item) {
+  if (!item || typeof item !== 'object') return { version: SR_VERSION, sections: {} };
+  const sr = item.sr && typeof item.sr === 'object' ? item.sr : { version: SR_VERSION, sections: {} };
+  if (sr.version !== SR_VERSION || typeof sr.sections !== 'object' || !sr.sections) {
+    item.sr = normalizeSrRecord(sr);
+    return item.sr;
+  }
+  item.sr.sections = item.sr.sections || {};
+  return item.sr;
+}
+
+export function ensureSectionState(item, key) {
+  const sr = ensureItemSr(item);
+  if (!sr.sections[key] || typeof sr.sections[key] !== 'object') {
+    sr.sections[key] = defaultSectionState();
+  } else {
+    sr.sections[key] = normalizeSectionRecord(sr.sections[key]);
+  }
+  return sr.sections[key];
+}
+
+export function getSectionStateSnapshot(item, key) {
+  const sr = item?.sr;
+  if (!sr || typeof sr !== 'object') return null;
+  const entry = sr.sections && typeof sr.sections === 'object' ? sr.sections[key] : null;
+  if (!entry || typeof entry !== 'object') return null;
+  return normalizeSectionRecord(entry);
+}
+
+export function rateSection(item, key, rating, durations, now = Date.now()) {
+  if (!item || !key) return null;
+  const steps = normalizeReviewSteps(durations);
+  if (rating === RETIRE_RATING) {
+    const section = ensureSectionState(item, key);
+    section.streak = 0;
+    section.lastRating = RETIRE_RATING;
+    section.last = now;
+    section.due = Number.MAX_SAFE_INTEGER;
+    section.retired = true;
+    return section;
+  }
+  const normalizedRating = REVIEW_RATINGS.includes(rating) ? rating : 'good';
+  const section = ensureSectionState(item, key);
+  let streak = Number.isFinite(section.streak) ? section.streak : 0;
+  switch (normalizedRating) {
+    case 'again':
+      streak = 0;
+      break;
+    case 'hard':
+      streak = Math.max(1, streak || 0);
+      break;
+    case 'good':
+      streak = (streak || 0) + 1;
+      break;
+    case 'easy':
+      streak = (streak || 0) + 2;
+      break;
+    default:
+      streak = (streak || 0) + 1;
+      break;
+  }
+  const baseMinutes = steps[normalizedRating] ?? DEFAULT_REVIEW_STEPS[normalizedRating];
+  const multiplier = normalizedRating === 'again' ? 1 : Math.max(1, streak || 1);
+  const intervalMinutes = baseMinutes * multiplier;
+  section.streak = streak;
+  section.lastRating = normalizedRating;
+  section.last = now;
+  section.retired = false;
+  section.due = now + Math.round(intervalMinutes * 60 * 1000);
+  return section;
+}
+
+export function hasContentForSection(item, key) {
+  if (!item || !key) return false;
+  const defs = sectionDefsForKind(item.kind);
+  if (!defs.find(def => def.key === key)) return false;
+  const raw = item[key];
+  if (raw === null || raw === undefined) return false;
+  const text = String(raw)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .trim();
+  return text.length > 0;
+}
+
+export function collectDueSections(items, { now = Date.now() } = {}) {
+  const results = [];
+  if (!Array.isArray(items) || !items.length) return results;
+  const defsMap = allSectionDefs();
+  for (const item of items) {
+    const defs = defsMap[item?.kind] || [];
+    for (const def of defs) {
+      if (!hasContentForSection(item, def.key)) continue;
+      const snapshot = getSectionStateSnapshot(item, def.key);
+      if (!snapshot || snapshot.retired) continue;
+      if (!snapshot.last || snapshot.due > now) continue;
+      results.push({
+        item,
+        itemId: item.id,
+        sectionKey: def.key,
+        sectionLabel: def.label,
+        due: snapshot.due
+      });
+    }
+  }
+  results.sort((a, b) => a.due - b.due);
+  return results;
+}

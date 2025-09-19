@@ -1,7 +1,8 @@
 /** @typedef {"disease"|"drug"|"concept"} Kind */
 /** @typedef {"assoc"|"treats"|"causes"|"mech"|"contra"} LinkType */
 
-/** @typedef {{ box:number, last:number, due:number, ease:number }} SR */
+/** @typedef {{ streak:number, lastRating:string|null, last:number, due:number, retired:boolean }} SectionSR */
+/** @typedef {{ version:number, sections:Record<string, SectionSR> }} SR */
 
 /** @typedef {{ blockId:string, id:number, name:string, week:number }} LectureRef */
 

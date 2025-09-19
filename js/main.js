@@ -1,4 +1,4 @@
-import { state, setTab, setSubtab, setFlashSession, setQuizSession, setQuery } from './state.js';
+import { state, setTab, setSubtab, setQuery } from './state.js';
 import { initDB, findItemsByFilter } from './storage/storage.js';
 import { renderSettings } from './ui/settings.js';
 import { renderCardList } from './ui/components/cardlist.js';
@@ -158,52 +158,41 @@ async function render() {
       renderQuiz(content, render);
     } else {
       const wrap = document.createElement('div');
-      await renderBuilder(wrap);
+      await renderBuilder(wrap, render);
       content.appendChild(wrap);
 
       const subnav = document.createElement('div');
       subnav.className = 'tabs row subtabs';
-      ['Flashcards','Review','Quiz','Blocks'].forEach(st => {
+      const buttons = [
+        { key: 'Builder', label: 'Study home' },
+        { key: 'Review', label: 'Review' }
+      ];
+      const activeKey = state.subtab.Study === 'Blocks' ? 'Builder' : state.subtab.Study;
+      buttons.forEach(({ key, label }) => {
         const sb = document.createElement('button');
         sb.className = 'tab';
-        const isActive = state.subtab.Study === st;
+        const isActive = activeKey === key;
         if (isActive) sb.classList.add('active');
         sb.dataset.toggle = 'true';
         sb.dataset.active = isActive ? 'true' : 'false';
         sb.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-        sb.textContent = st;
+        sb.textContent = label;
         sb.addEventListener('click', () => {
-          setSubtab('Study', st);
+          setSubtab('Study', key);
           render();
         });
         subnav.appendChild(sb);
       });
       content.appendChild(subnav);
 
-      if (state.cohort.length) {
-        if (state.subtab.Study === 'Flashcards') {
-          const startBtn = document.createElement('button');
-          startBtn.className = 'btn';
-          startBtn.textContent = 'Start Flashcards';
-          startBtn.addEventListener('click', () => {
-            setFlashSession({ idx: 0, pool: state.cohort });
-            render();
-          });
-          content.appendChild(startBtn);
-        } else if (state.subtab.Study === 'Review') {
-          renderReview(content, render);
-        } else if (state.subtab.Study === 'Quiz') {
-          const startBtn = document.createElement('button');
-          startBtn.className = 'btn';
-          startBtn.textContent = 'Start Quiz';
-          startBtn.addEventListener('click', () => {
-            setQuizSession({ idx:0, score:0, pool: state.cohort });
-            render();
-          });
-          content.appendChild(startBtn);
-        } else if (state.subtab.Study === 'Blocks') {
-          renderBlockMode(content);
-        }
+      if (state.flashSession) {
+        renderFlashcards(content, render);
+      } else if (state.quizSession) {
+        renderQuiz(content, render);
+      } else if (state.subtab.Study === 'Blocks') {
+        renderBlockMode(content);
+      } else if (state.subtab.Study === 'Review') {
+        await renderReview(content, render);
       }
     }
   } else if (state.tab === 'Exams') {
