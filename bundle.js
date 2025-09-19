@@ -680,6 +680,10 @@
   var DEFAULT_KINDS = ["disease", "drug", "concept"];
   var RESULT_BATCH_SIZE = 50;
   var MAP_CONFIG_KEY = "map-config";
+  var MAP_CONFIG_BACKUP_KEY = "sevenn-map-config-backup";
+  var DATA_BACKUP_KEY = "sevenn-backup-snapshot";
+  var DATA_BACKUP_STORES = ["items", "blocks", "exams", "settings", "exam_sessions"];
+  var backupTimer = null;
   var DEFAULT_MAP_CONFIG = {
     activeTabId: "default",
     tabs: [
@@ -705,13 +709,116 @@
     const db = await dbPromise;
     return db.transaction(name, mode).objectStore(name);
   }
+  function canUseStorage() {
+    return typeof localStorage !== "undefined";
+  }
+  function readMapConfigBackup() {
+    if (!canUseStorage()) return null;
+    try {
+      const raw = localStorage.getItem(MAP_CONFIG_BACKUP_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
+    } catch (err) {
+      console.warn("Failed to read map backup", err);
+    }
+    return null;
+  }
+  function writeMapConfigBackup(config) {
+    if (!canUseStorage()) return;
+    try {
+      localStorage.setItem(MAP_CONFIG_BACKUP_KEY, JSON.stringify(config));
+    } catch (err) {
+      console.warn("Failed to persist map backup", err);
+    }
+  }
+  async function writeDataBackup() {
+    if (!canUseStorage()) return;
+    try {
+      const db = await dbPromise;
+      if (!db || typeof db.transaction !== "function") return;
+      const snapshot = {};
+      for (const name of DATA_BACKUP_STORES) {
+        try {
+          const tx = db.transaction(name, "readonly");
+          const s = tx.objectStore(name);
+          const all = await prom2(s.getAll());
+          snapshot[name] = Array.isArray(all) ? all : [];
+        } catch (err) {
+          console.warn(`Failed to snapshot store ${name}`, err);
+          snapshot[name] = [];
+        }
+      }
+      snapshot.__timestamp = Date.now();
+      localStorage.setItem(DATA_BACKUP_KEY, JSON.stringify(snapshot));
+    } catch (err) {
+      console.warn("Failed to persist data backup", err);
+    }
+  }
+  function scheduleBackup() {
+    if (!canUseStorage()) return;
+    if (backupTimer) clearTimeout(backupTimer);
+    backupTimer = setTimeout(() => {
+      backupTimer = null;
+      writeDataBackup().catch((err) => console.warn("Backup write failed", err));
+    }, 1e3);
+  }
+  async function maybeRestoreFromBackup() {
+    if (!canUseStorage()) return;
+    let parsed;
+    try {
+      const raw = localStorage.getItem(DATA_BACKUP_KEY);
+      if (!raw) return;
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      console.warn("Failed to parse saved backup", err);
+      return;
+    }
+    if (!parsed || typeof parsed !== "object") return;
+    try {
+      const db = await dbPromise;
+      if (!db || typeof db.transaction !== "function") return;
+      const emptyChecks = await Promise.all(DATA_BACKUP_STORES.map(async (name) => {
+        try {
+          const tx = db.transaction(name, "readonly");
+          const s = tx.objectStore(name);
+          const existing = await prom2(s.getAll());
+          return !existing || existing.length === 0;
+        } catch (err) {
+          console.warn(`Failed to inspect store ${name}`, err);
+          return false;
+        }
+      }));
+      if (!emptyChecks.every(Boolean)) return;
+      for (const name of DATA_BACKUP_STORES) {
+        const list = Array.isArray(parsed[name]) ? parsed[name] : [];
+        if (!list.length) continue;
+        try {
+          const tx = db.transaction(name, "readwrite");
+          const s = tx.objectStore(name);
+          for (const entry of list) {
+            await prom2(s.put(entry));
+          }
+        } catch (err) {
+          console.warn(`Failed to restore store ${name}`, err);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to restore data from backup", err);
+    }
+  }
   async function initDB() {
     if (!dbPromise) dbPromise = openDB();
+    await maybeRestoreFromBackup();
     const s = await store("settings", "readwrite");
     const existing = await prom2(s.get("app"));
     if (!existing) {
-      await prom2(s.put({ id: "app", dailyCount: 20, theme: "dark" }));
+      const defaults = { id: "app", dailyCount: 20, theme: "dark" };
+      await prom2(s.put(defaults));
     }
+    scheduleBackup();
   }
   async function getSettings() {
     const s = await store("settings");
@@ -723,6 +830,7 @@
     const current = await prom2(s.get("app")) || { id: "app", dailyCount: 20, theme: "dark" };
     const next = { ...current, ...patch, id: "app" };
     await prom2(s.put(next));
+    scheduleBackup();
   }
   function cloneConfig(config) {
     return JSON.parse(JSON.stringify(config));
@@ -732,13 +840,29 @@
       const s = await store("settings", "readwrite");
       const existing = await prom2(s.get(MAP_CONFIG_KEY));
       if (existing && existing.config) {
-        return cloneConfig(existing.config);
+        const config = cloneConfig(existing.config);
+        writeMapConfigBackup(config);
+        return config;
+      }
+      const backup = readMapConfigBackup();
+      if (backup) {
+        const payload = cloneConfig(backup);
+        await prom2(s.put({ id: MAP_CONFIG_KEY, config: payload }));
+        writeMapConfigBackup(payload);
+        scheduleBackup();
+        return payload;
       }
       const fallback = cloneConfig(DEFAULT_MAP_CONFIG);
       await prom2(s.put({ id: MAP_CONFIG_KEY, config: fallback }));
+      writeMapConfigBackup(fallback);
+      scheduleBackup();
       return fallback;
     } catch (err) {
       console.warn("getMapConfig failed", err);
+      const backup = readMapConfigBackup();
+      if (backup) {
+        return cloneConfig(backup);
+      }
       return cloneConfig(DEFAULT_MAP_CONFIG);
     }
   }
@@ -746,6 +870,8 @@
     const payload = config ? cloneConfig(config) : cloneConfig(DEFAULT_MAP_CONFIG);
     const s = await store("settings", "readwrite");
     await prom2(s.put({ id: MAP_CONFIG_KEY, config: payload }));
+    writeMapConfigBackup(payload);
+    scheduleBackup();
   }
   async function listBlocks() {
     try {
@@ -799,6 +925,7 @@
       updatedAt: now
     };
     await prom2(b.put(next));
+    scheduleBackup();
   }
   async function deleteBlock(blockId) {
     const b = await store("blocks", "readwrite");
@@ -822,6 +949,7 @@
         }
       }
     }
+    scheduleBackup();
   }
   async function deleteLecture(blockId, lectureId) {
     const b = await store("blocks", "readwrite");
@@ -846,6 +974,7 @@
         }
       }
     }
+    scheduleBackup();
   }
   async function updateLecture(blockId, lecture) {
     const b = await store("blocks", "readwrite");
@@ -875,6 +1004,7 @@
         await prom2(i.put(it));
       }
     }
+    scheduleBackup();
   }
   async function listItemsByKind(kind) {
     const i = await store("items");
@@ -1022,6 +1152,7 @@
       }
     }
     await prom2(i.put(next));
+    scheduleBackup();
   }
   async function deleteItem(id) {
     const i = await store("items", "readwrite");
@@ -1035,6 +1166,7 @@
       }
     }
     await prom2(i.delete(id));
+    scheduleBackup();
   }
   async function listExams() {
     const e = await store("exams");
@@ -1051,10 +1183,12 @@
       results: exam.results || existing?.results || []
     };
     await prom2(e.put(next));
+    scheduleBackup();
   }
   async function deleteExam(id) {
     const e = await store("exams", "readwrite");
     await prom2(e.delete(id));
+    scheduleBackup();
   }
   async function listExamSessions() {
     const s = await store("exam_sessions");
@@ -1068,10 +1202,12 @@
     const s = await store("exam_sessions", "readwrite");
     const now = Date.now();
     await prom2(s.put({ ...progress, updatedAt: now }));
+    scheduleBackup();
   }
   async function deleteExamSessionProgress(examId) {
     const s = await store("exam_sessions", "readwrite");
     await prom2(s.delete(examId));
+    scheduleBackup();
   }
 
   // js/ui/components/confirm.js
@@ -2290,16 +2426,26 @@
   async function openEditor(kind, onSave, existing = null) {
     let isDirty = false;
     let status;
+    let autoSaveTimer = null;
+    const AUTOSAVE_DELAY = 2e3;
     const win = createFloatingWindow({
       title: `${existing ? "Edit" : "Add"} ${titleMap[kind] || kind}`,
       width: 660,
       onBeforeClose: async (reason) => {
         if (reason === "saved") return true;
+        if (autoSaveTimer) {
+          clearTimeout(autoSaveTimer);
+          autoSaveTimer = null;
+        }
         if (!isDirty) return true;
         if (reason !== "close") return true;
         const shouldSave = await confirmModal("Save changes before closing?");
         if (shouldSave) {
-          await persist(true);
+          try {
+            await persist({ closeAfter: true });
+          } catch (err) {
+            console.error(err);
+          }
           return false;
         }
         return true;
@@ -2315,9 +2461,28 @@
     nameInput.value = existing ? existing.name || existing.concept || "" : "";
     nameLabel.appendChild(nameInput);
     form.appendChild(nameLabel);
+    const cancelAutoSave = () => {
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+      }
+    };
+    const queueAutoSave = () => {
+      cancelAutoSave();
+      if (!isDirty) return;
+      if (!nameInput.value.trim()) return;
+      autoSaveTimer = setTimeout(() => {
+        autoSaveTimer = null;
+        if (!isDirty) return;
+        persist({ silent: true }).catch((err) => {
+          console.error("Autosave failed", err);
+        });
+      }, AUTOSAVE_DELAY);
+    };
     const markDirty = () => {
       isDirty = true;
       if (status) status.textContent = "";
+      queueAutoSave();
     };
     nameInput.addEventListener("input", markDirty);
     const fieldInputs = {};
@@ -2597,14 +2762,21 @@
     actionBar.className = "editor-actions";
     status = document.createElement("span");
     status.className = "editor-status";
-    async function persist(closeAfter) {
+    async function persist(options = {}) {
+      const opts = typeof options === "boolean" ? { closeAfter: options } : options;
+      const { closeAfter = false, silent = false } = opts;
+      cancelAutoSave();
       const titleKey = kind === "concept" ? "concept" : "name";
       const trimmed = nameInput.value.trim();
       if (!trimmed) {
-        status.textContent = "Name is required.";
-        return;
+        if (!silent) {
+          status.textContent = "Name is required.";
+        }
+        return false;
       }
-      status.textContent = "Saving\u2026";
+      if (!silent) {
+        status.textContent = "Saving\u2026";
+      }
       const item = existing || { id: uid(), kind };
       item[titleKey] = trimmed;
       fieldMap[kind].forEach(([field]) => {
@@ -2635,7 +2807,7 @@
         await upsertItem(item);
       } catch (err) {
         console.error(err);
-        status.textContent = "Failed to save.";
+        status.textContent = silent ? "Autosave failed" : "Failed to save.";
         throw err;
       }
       existing = item;
@@ -2645,15 +2817,16 @@
       if (closeAfter) {
         win.close("saved");
       } else {
-        status.textContent = "Saved";
+        status.textContent = silent ? "Autosaved" : "Saved";
       }
+      return true;
     }
     const saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.className = "btn";
     saveBtn.textContent = "Save";
     saveBtn.addEventListener("click", () => {
-      persist(true).catch(() => {
+      persist({ closeAfter: true }).catch(() => {
       });
     });
     actionBar.appendChild(saveBtn);
@@ -2661,7 +2834,7 @@
     form.appendChild(actionBar);
     form.addEventListener("submit", (e) => {
       e.preventDefault();
-      persist(true).catch(() => {
+      persist({ closeAfter: true }).catch(() => {
       });
     });
     win.setContent(form);
@@ -4229,6 +4402,9 @@
   }
   function drawBuilder(container, blocks) {
     container.innerHTML = "";
+    if (state.builder.weeks.length) {
+      setBuilder({ weeks: [] });
+    }
     const rerender = () => drawBuilder(container, blocks);
     const layout = document.createElement("div");
     layout.className = "builder-layout";
@@ -4283,17 +4459,15 @@
     header.appendChild(meta);
     const actions = document.createElement("div");
     actions.className = "builder-block-actions";
-    const blockSelected = state.builder.blocks.includes(blockId);
-    const toggleBlockBtn = createPill(blockSelected, blockSelected ? "Block added" : "Add block", () => {
-      toggleBlock(block);
-      rerender();
-    });
-    actions.appendChild(toggleBlockBtn);
-    if (lectures.length) {
-      const allBtn = createAction("Select all lectures", () => {
+    if (lectures.length || blockId === "__unlabeled") {
+      const label = blockId === "__unlabeled" ? "Include unlabeled cards" : "Select all lectures";
+      const allBtn = createAction(label, () => {
         selectEntireBlock(block);
         rerender();
       });
+      if (lectures.length && areAllLecturesSelected(blockId, lectures)) {
+        allBtn.disabled = true;
+      }
       actions.appendChild(allBtn);
     }
     if (hasSelections) {
@@ -4330,8 +4504,6 @@
   }
   function renderWeek(block, week, lectures, rerender) {
     const blockId = block.blockId;
-    const weekKey = weekKeyFor(blockId, week);
-    const selected = state.builder.weeks.includes(weekKey);
     const weekCollapsed = isWeekCollapsed(blockId, week);
     const row = document.createElement("div");
     row.className = "builder-week-card";
@@ -4347,10 +4519,9 @@
       }
     });
     header.appendChild(weekCollapseBtn);
-    const label = createPill(selected, formatWeekLabel2(week), () => {
-      toggleWeek(block, week);
-      rerender();
-    }, "week");
+    const label = document.createElement("span");
+    label.className = "builder-week-title";
+    label.textContent = formatWeekLabel2(week);
     header.appendChild(label);
     const meta = document.createElement("span");
     meta.className = "builder-week-meta";
@@ -4362,7 +4533,18 @@
       selectWeek(block, week);
       rerender();
     });
+    const clearBtn = createAction("Clear", () => {
+      clearWeek(block, week);
+      rerender();
+    });
+    if (areAllLecturesSelected(blockId, lectures)) {
+      allBtn.disabled = true;
+    }
+    if (!hasAnyLectureSelected(blockId, lectures)) {
+      clearBtn.disabled = true;
+    }
     actions.appendChild(allBtn);
+    actions.appendChild(clearBtn);
     header.appendChild(actions);
     row.appendChild(header);
     const lectureList = document.createElement("div");
@@ -4430,7 +4612,6 @@
     selectionMeta.className = "builder-selection-meta";
     selectionMeta.innerHTML = `
     <span>Blocks: ${state.builder.blocks.length}</span>
-    <span>Weeks: ${state.builder.weeks.length}</span>
     <span>Lectures: ${state.builder.lectures.length}</span>
   `;
     card.appendChild(selectionMeta);
@@ -4492,14 +4673,6 @@
           if (!(wantUnlabeled && isUnlabeled)) return false;
         }
       }
-      if (state.builder.weeks.length) {
-        const ok = state.builder.weeks.some((pair) => {
-          const [blockId, weekStr] = pair.split("|");
-          const weekNum = Number(weekStr);
-          return item.blocks?.includes(blockId) && item.weeks?.includes(weekNum);
-        });
-        if (!ok) return false;
-      }
       if (state.builder.lectures.length) {
         const ok = item.lectures?.some((lecture) => {
           const key = lectureKeyFor(lecture.blockId, lecture.id);
@@ -4510,98 +4683,83 @@
       return true;
     });
   }
-  function toggleBlock(block) {
-    const blockId = block.blockId;
-    const set = new Set(state.builder.blocks);
-    const isActive = set.has(blockId);
-    if (isActive) {
-      set.delete(blockId);
-      const weeks = state.builder.weeks.filter((key) => !key.startsWith(`${blockId}|`));
-      const lectures = state.builder.lectures.filter((key) => !key.startsWith(`${blockId}|`));
-      setBuilder({ blocks: Array.from(set), weeks, lectures });
-    } else {
-      set.add(blockId);
-      setBuilder({ blocks: Array.from(set) });
-    }
-  }
   function selectEntireBlock(block) {
     const blockId = block.blockId;
     const blockSet = new Set(state.builder.blocks);
-    const weekSet = new Set(state.builder.weeks);
     const lectureSet = new Set(state.builder.lectures);
-    blockSet.add(blockId);
-    (block.lectures || []).forEach((lecture) => {
-      if (lecture.week != null) weekSet.add(weekKeyFor(blockId, lecture.week));
-      lectureSet.add(lectureKeyFor(blockId, lecture.id));
-    });
+    if (block.lectures?.length) {
+      (block.lectures || []).forEach((lecture) => {
+        lectureSet.add(lectureKeyFor(blockId, lecture.id));
+      });
+      syncBlockWithLectureSelection(blockSet, lectureSet, blockId);
+    } else {
+      blockSet.add(blockId);
+    }
     setBuilder({
       blocks: Array.from(blockSet),
-      weeks: Array.from(weekSet),
-      lectures: Array.from(lectureSet)
+      lectures: Array.from(lectureSet),
+      weeks: []
     });
   }
   function clearBlock(blockId) {
-    const blocks = state.builder.blocks.filter((id) => id !== blockId);
-    const weeks = state.builder.weeks.filter((key) => !key.startsWith(`${blockId}|`));
-    const lectures = state.builder.lectures.filter((key) => !key.startsWith(`${blockId}|`));
-    setBuilder({ blocks, weeks, lectures });
-  }
-  function toggleWeek(block, week) {
-    const weekKey = weekKeyFor(block.blockId, week);
-    const weekSet = new Set(state.builder.weeks);
     const lectureSet = new Set(state.builder.lectures);
     const blockSet = new Set(state.builder.blocks);
-    if (weekSet.has(weekKey)) {
-      weekSet.delete(weekKey);
-      (block.lectures || []).forEach((lecture) => {
-        if (lecture.week === week) {
-          lectureSet.delete(lectureKeyFor(block.blockId, lecture.id));
-        }
-      });
-    } else {
-      weekSet.add(weekKey);
-      blockSet.add(block.blockId);
+    for (const key of Array.from(lectureSet)) {
+      if (key.startsWith(`${blockId}|`)) lectureSet.delete(key);
     }
+    blockSet.delete(blockId);
     setBuilder({
-      weeks: Array.from(weekSet),
+      blocks: Array.from(blockSet),
       lectures: Array.from(lectureSet),
-      blocks: Array.from(blockSet)
+      weeks: []
     });
   }
   function selectWeek(block, week) {
-    const weekKey = weekKeyFor(block.blockId, week);
-    const weekSet = new Set(state.builder.weeks);
+    const blockId = block.blockId;
     const lectureSet = new Set(state.builder.lectures);
     const blockSet = new Set(state.builder.blocks);
-    weekSet.add(weekKey);
-    blockSet.add(block.blockId);
     (block.lectures || []).forEach((lecture) => {
       if (lecture.week === week) {
-        lectureSet.add(lectureKeyFor(block.blockId, lecture.id));
+        lectureSet.add(lectureKeyFor(blockId, lecture.id));
       }
     });
+    syncBlockWithLectureSelection(blockSet, lectureSet, blockId);
     setBuilder({
-      weeks: Array.from(weekSet),
       lectures: Array.from(lectureSet),
-      blocks: Array.from(blockSet)
+      blocks: Array.from(blockSet),
+      weeks: []
+    });
+  }
+  function clearWeek(block, week) {
+    const blockId = block.blockId;
+    const lectureSet = new Set(state.builder.lectures);
+    const blockSet = new Set(state.builder.blocks);
+    (block.lectures || []).forEach((lecture) => {
+      if (lecture.week === week) {
+        lectureSet.delete(lectureKeyFor(blockId, lecture.id));
+      }
+    });
+    syncBlockWithLectureSelection(blockSet, lectureSet, blockId);
+    setBuilder({
+      lectures: Array.from(lectureSet),
+      blocks: Array.from(blockSet),
+      weeks: []
     });
   }
   function toggleLecture(block, lecture) {
     const key = lectureKeyFor(block.blockId, lecture.id);
     const lectureSet = new Set(state.builder.lectures);
     const blockSet = new Set(state.builder.blocks);
-    const weekSet = new Set(state.builder.weeks);
     if (lectureSet.has(key)) {
       lectureSet.delete(key);
     } else {
       lectureSet.add(key);
-      blockSet.add(block.blockId);
-      if (lecture.week != null) weekSet.add(weekKeyFor(block.blockId, lecture.week));
     }
+    syncBlockWithLectureSelection(blockSet, lectureSet, block.blockId);
     setBuilder({
       lectures: Array.from(lectureSet),
       blocks: Array.from(blockSet),
-      weeks: Array.from(weekSet)
+      weeks: []
     });
   }
   function toggleType(type) {
@@ -4636,10 +4794,10 @@
     setBuilder({ collapsedWeeks: Array.from(collapsed) });
   }
   function hasBlockSelection(blockId) {
-    return state.builder.blocks.includes(blockId) || state.builder.weeks.some((key) => key.startsWith(`${blockId}|`)) || state.builder.lectures.some((key) => key.startsWith(`${blockId}|`));
+    return state.builder.blocks.includes(blockId) || state.builder.lectures.some((key) => key.startsWith(`${blockId}|`));
   }
   function hasAnySelection() {
-    return state.builder.blocks.length || state.builder.weeks.length || state.builder.lectures.length;
+    return state.builder.blocks.length || state.builder.lectures.length;
   }
   function groupByWeek(lectures) {
     const map = /* @__PURE__ */ new Map();
@@ -4659,6 +4817,31 @@
   function formatWeekLabel2(week) {
     if (week == null || week < 0) return "No week";
     return `Week ${week}`;
+  }
+  function hasAnyLectureSelected(blockId, lectures) {
+    if (!lectures?.length) return false;
+    const lectureSet = new Set(state.builder.lectures);
+    return lectures.some((lecture) => lectureSet.has(lectureKeyFor(blockId, lecture.id)));
+  }
+  function areAllLecturesSelected(blockId, lectures) {
+    if (!lectures?.length) return false;
+    const lectureSet = new Set(state.builder.lectures);
+    return lectures.every((lecture) => lectureSet.has(lectureKeyFor(blockId, lecture.id)));
+  }
+  function syncBlockWithLectureSelection(blockSet, lectureSet, blockId) {
+    const prefix = `${blockId}|`;
+    let hasLecture = false;
+    for (const key of lectureSet) {
+      if (key.startsWith(prefix)) {
+        hasLecture = true;
+        break;
+      }
+    }
+    if (hasLecture) {
+      blockSet.add(blockId);
+    } else {
+      blockSet.delete(blockId);
+    }
   }
   function createPill(active, label, onClick, variant = "") {
     const btn = document.createElement("button");

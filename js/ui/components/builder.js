@@ -19,6 +19,9 @@ async function loadBlocks() {
 
 function drawBuilder(container, blocks) {
   container.innerHTML = '';
+  if (state.builder.weeks.length) {
+    setBuilder({ weeks: [] });
+  }
   const rerender = () => drawBuilder(container, blocks);
 
   const layout = document.createElement('div');
@@ -83,18 +86,16 @@ function renderBlockPanel(block, rerender) {
 
   const actions = document.createElement('div');
   actions.className = 'builder-block-actions';
-  const blockSelected = state.builder.blocks.includes(blockId);
-  const toggleBlockBtn = createPill(blockSelected, blockSelected ? 'Block added' : 'Add block', () => {
-    toggleBlock(block);
-    rerender();
-  });
-  actions.appendChild(toggleBlockBtn);
 
-  if (lectures.length) {
-    const allBtn = createAction('Select all lectures', () => {
+  if (lectures.length || blockId === '__unlabeled') {
+    const label = blockId === '__unlabeled' ? 'Include unlabeled cards' : 'Select all lectures';
+    const allBtn = createAction(label, () => {
       selectEntireBlock(block);
       rerender();
     });
+    if (lectures.length && areAllLecturesSelected(blockId, lectures)) {
+      allBtn.disabled = true;
+    }
     actions.appendChild(allBtn);
   }
 
@@ -136,8 +137,6 @@ function renderBlockPanel(block, rerender) {
 
 function renderWeek(block, week, lectures, rerender) {
   const blockId = block.blockId;
-  const weekKey = weekKeyFor(blockId, week);
-  const selected = state.builder.weeks.includes(weekKey);
   const weekCollapsed = isWeekCollapsed(blockId, week);
   const row = document.createElement('div');
   row.className = 'builder-week-card';
@@ -156,10 +155,9 @@ function renderWeek(block, week, lectures, rerender) {
   });
   header.appendChild(weekCollapseBtn);
 
-  const label = createPill(selected, formatWeekLabel(week), () => {
-    toggleWeek(block, week);
-    rerender();
-  }, 'week');
+  const label = document.createElement('span');
+  label.className = 'builder-week-title';
+  label.textContent = formatWeekLabel(week);
   header.appendChild(label);
 
   const meta = document.createElement('span');
@@ -173,7 +171,20 @@ function renderWeek(block, week, lectures, rerender) {
     selectWeek(block, week);
     rerender();
   });
+  const clearBtn = createAction('Clear', () => {
+    clearWeek(block, week);
+    rerender();
+  });
+
+  if (areAllLecturesSelected(blockId, lectures)) {
+    allBtn.disabled = true;
+  }
+  if (!hasAnyLectureSelected(blockId, lectures)) {
+    clearBtn.disabled = true;
+  }
+
   actions.appendChild(allBtn);
+  actions.appendChild(clearBtn);
   header.appendChild(actions);
 
   row.appendChild(header);
@@ -256,7 +267,6 @@ function renderSummaryCard(rerender) {
   selectionMeta.className = 'builder-selection-meta';
   selectionMeta.innerHTML = `
     <span>Blocks: ${state.builder.blocks.length}</span>
-    <span>Weeks: ${state.builder.weeks.length}</span>
     <span>Lectures: ${state.builder.lectures.length}</span>
   `;
   card.appendChild(selectionMeta);
@@ -325,14 +335,6 @@ async function gatherItems() {
         if (!(wantUnlabeled && isUnlabeled)) return false;
       }
     }
-    if (state.builder.weeks.length) {
-      const ok = state.builder.weeks.some(pair => {
-        const [blockId, weekStr] = pair.split('|');
-        const weekNum = Number(weekStr);
-        return item.blocks?.includes(blockId) && item.weeks?.includes(weekNum);
-      });
-      if (!ok) return false;
-    }
     if (state.builder.lectures.length) {
       const ok = item.lectures?.some(lecture => {
         const key = lectureKeyFor(lecture.blockId, lecture.id);
@@ -344,84 +346,72 @@ async function gatherItems() {
   });
 }
 
-function toggleBlock(block) {
-  const blockId = block.blockId;
-  const set = new Set(state.builder.blocks);
-  const isActive = set.has(blockId);
-  if (isActive) {
-    set.delete(blockId);
-    const weeks = state.builder.weeks.filter(key => !key.startsWith(`${blockId}|`));
-    const lectures = state.builder.lectures.filter(key => !key.startsWith(`${blockId}|`));
-    setBuilder({ blocks: Array.from(set), weeks, lectures });
-  } else {
-    set.add(blockId);
-    setBuilder({ blocks: Array.from(set) });
-  }
-}
-
 function selectEntireBlock(block) {
   const blockId = block.blockId;
   const blockSet = new Set(state.builder.blocks);
-  const weekSet = new Set(state.builder.weeks);
   const lectureSet = new Set(state.builder.lectures);
-  blockSet.add(blockId);
-  (block.lectures || []).forEach(lecture => {
-    if (lecture.week != null) weekSet.add(weekKeyFor(blockId, lecture.week));
-    lectureSet.add(lectureKeyFor(blockId, lecture.id));
-  });
+
+  if (block.lectures?.length) {
+    (block.lectures || []).forEach(lecture => {
+      lectureSet.add(lectureKeyFor(blockId, lecture.id));
+    });
+    syncBlockWithLectureSelection(blockSet, lectureSet, blockId);
+  } else {
+    blockSet.add(blockId);
+  }
+
   setBuilder({
     blocks: Array.from(blockSet),
-    weeks: Array.from(weekSet),
-    lectures: Array.from(lectureSet)
+    lectures: Array.from(lectureSet),
+    weeks: []
   });
 }
 
 function clearBlock(blockId) {
-  const blocks = state.builder.blocks.filter(id => id !== blockId);
-  const weeks = state.builder.weeks.filter(key => !key.startsWith(`${blockId}|`));
-  const lectures = state.builder.lectures.filter(key => !key.startsWith(`${blockId}|`));
-  setBuilder({ blocks, weeks, lectures });
-}
-
-function toggleWeek(block, week) {
-  const weekKey = weekKeyFor(block.blockId, week);
-  const weekSet = new Set(state.builder.weeks);
   const lectureSet = new Set(state.builder.lectures);
   const blockSet = new Set(state.builder.blocks);
-  if (weekSet.has(weekKey)) {
-    weekSet.delete(weekKey);
-    (block.lectures || []).forEach(lecture => {
-      if (lecture.week === week) {
-        lectureSet.delete(lectureKeyFor(block.blockId, lecture.id));
-      }
-    });
-  } else {
-    weekSet.add(weekKey);
-    blockSet.add(block.blockId);
+  for (const key of Array.from(lectureSet)) {
+    if (key.startsWith(`${blockId}|`)) lectureSet.delete(key);
   }
+  blockSet.delete(blockId);
   setBuilder({
-    weeks: Array.from(weekSet),
+    blocks: Array.from(blockSet),
     lectures: Array.from(lectureSet),
-    blocks: Array.from(blockSet)
+    weeks: []
   });
 }
 
 function selectWeek(block, week) {
-  const weekKey = weekKeyFor(block.blockId, week);
-  const weekSet = new Set(state.builder.weeks);
+  const blockId = block.blockId;
   const lectureSet = new Set(state.builder.lectures);
   const blockSet = new Set(state.builder.blocks);
-  weekSet.add(weekKey);
-  blockSet.add(block.blockId);
   (block.lectures || []).forEach(lecture => {
     if (lecture.week === week) {
-      lectureSet.add(lectureKeyFor(block.blockId, lecture.id));
+      lectureSet.add(lectureKeyFor(blockId, lecture.id));
     }
   });
+  syncBlockWithLectureSelection(blockSet, lectureSet, blockId);
   setBuilder({
-    weeks: Array.from(weekSet),
     lectures: Array.from(lectureSet),
-    blocks: Array.from(blockSet)
+    blocks: Array.from(blockSet),
+    weeks: []
+  });
+}
+
+function clearWeek(block, week) {
+  const blockId = block.blockId;
+  const lectureSet = new Set(state.builder.lectures);
+  const blockSet = new Set(state.builder.blocks);
+  (block.lectures || []).forEach(lecture => {
+    if (lecture.week === week) {
+      lectureSet.delete(lectureKeyFor(blockId, lecture.id));
+    }
+  });
+  syncBlockWithLectureSelection(blockSet, lectureSet, blockId);
+  setBuilder({
+    lectures: Array.from(lectureSet),
+    blocks: Array.from(blockSet),
+    weeks: []
   });
 }
 
@@ -429,18 +419,16 @@ function toggleLecture(block, lecture) {
   const key = lectureKeyFor(block.blockId, lecture.id);
   const lectureSet = new Set(state.builder.lectures);
   const blockSet = new Set(state.builder.blocks);
-  const weekSet = new Set(state.builder.weeks);
   if (lectureSet.has(key)) {
     lectureSet.delete(key);
   } else {
     lectureSet.add(key);
-    blockSet.add(block.blockId);
-    if (lecture.week != null) weekSet.add(weekKeyFor(block.blockId, lecture.week));
   }
+  syncBlockWithLectureSelection(blockSet, lectureSet, block.blockId);
   setBuilder({
     lectures: Array.from(lectureSet),
     blocks: Array.from(blockSet),
-    weeks: Array.from(weekSet)
+    weeks: []
   });
 }
 
@@ -481,12 +469,11 @@ function toggleWeekCollapsed(blockId, week) {
 
 function hasBlockSelection(blockId) {
   return state.builder.blocks.includes(blockId)
-    || state.builder.weeks.some(key => key.startsWith(`${blockId}|`))
     || state.builder.lectures.some(key => key.startsWith(`${blockId}|`));
 }
 
 function hasAnySelection() {
-  return state.builder.blocks.length || state.builder.weeks.length || state.builder.lectures.length;
+  return state.builder.blocks.length || state.builder.lectures.length;
 }
 
 function groupByWeek(lectures) {
@@ -512,6 +499,34 @@ function lectureKeyFor(blockId, lectureId) {
 function formatWeekLabel(week) {
   if (week == null || week < 0) return 'No week';
   return `Week ${week}`;
+}
+
+function hasAnyLectureSelected(blockId, lectures) {
+  if (!lectures?.length) return false;
+  const lectureSet = new Set(state.builder.lectures);
+  return lectures.some(lecture => lectureSet.has(lectureKeyFor(blockId, lecture.id)));
+}
+
+function areAllLecturesSelected(blockId, lectures) {
+  if (!lectures?.length) return false;
+  const lectureSet = new Set(state.builder.lectures);
+  return lectures.every(lecture => lectureSet.has(lectureKeyFor(blockId, lecture.id)));
+}
+
+function syncBlockWithLectureSelection(blockSet, lectureSet, blockId) {
+  const prefix = `${blockId}|`;
+  let hasLecture = false;
+  for (const key of lectureSet) {
+    if (key.startsWith(prefix)) {
+      hasLecture = true;
+      break;
+    }
+  }
+  if (hasLecture) {
+    blockSet.add(blockId);
+  } else {
+    blockSet.delete(blockId);
+  }
 }
 
 function createPill(active, label, onClick, variant = '') {
