@@ -87,6 +87,7 @@ export function renderFlashcards(root, redraw) {
   active.ratings = active.ratings || {};
   const items = Array.isArray(active.pool) && active.pool.length ? active.pool : fallbackPool;
 
+
   const resolvePool = () => (Array.isArray(active.pool) && active.pool.length ? active.pool : items);
   const commitSession = (patch = {}) => {
     const pool = resolvePool();
@@ -297,7 +298,9 @@ export function renderFlashcards(root, redraw) {
   prev.disabled = active.idx === 0;
   prev.addEventListener('click', () => {
     if (active.idx > 0) {
+
       commitSession({ idx: active.idx - 1 });
+
       redraw();
     }
   });
@@ -311,11 +314,14 @@ export function renderFlashcards(root, redraw) {
   const hasRatingRequirement = sectionBlocks.some(sec => sectionRequirements.get(sec.key));
   next.disabled = hasRatingRequirement;
   next.addEventListener('click', () => {
+    const pool = Array.isArray(active.pool) ? active.pool : items;
     const idx = active.idx + 1;
     if (idx >= items.length) {
       setFlashSession(null);
     } else {
+
       commitSession({ idx });
+
     }
     redraw();
   });
@@ -330,9 +336,11 @@ export function renderFlashcards(root, redraw) {
       saveExit.disabled = true;
       saveExit.textContent = 'Saving…';
       try {
+
         const pool = resolvePool();
         await persistStudySession('flashcards', {
           session: { ...active, idx: active.idx, pool, ratings: { ...(active.ratings || {}) } },
+
           cohort: pool
         });
         setFlashSession(null);
@@ -358,9 +366,11 @@ export function renderFlashcards(root, redraw) {
       saveExit.disabled = true;
       saveExit.textContent = 'Saving…';
       try {
+
         const pool = resolvePool();
         await persistStudySession('review', {
           session: { ...active, idx: active.idx, pool, ratings: { ...(active.ratings || {}) } },
+
           cohort: state.cohort,
           metadata: active.metadata || { label: 'Review session' }
         });
