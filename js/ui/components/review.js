@@ -1,4 +1,6 @@
-import { state, setFlashSession } from '../../state.js';
+
+import { state, setFlashSession, setSubtab } from '../../state.js';
+
 import { collectDueSections } from '../../review/scheduler.js';
 import { listBlocks } from '../../storage/storage.js';
 import { getSectionLabel } from './section-utils.js';
@@ -152,6 +154,7 @@ function renderGroupView(container, groups, label, start) {
     card.appendChild(actions);
 
     list.appendChild(card);
+
   });
   container.appendChild(list);
 }
@@ -174,6 +177,20 @@ export async function renderReview(root, redraw) {
 
   const wrapper = document.createElement('section');
   wrapper.className = 'card review-panel';
+
+  const backRow = document.createElement('div');
+  backRow.className = 'review-back-row';
+  const backBtn = document.createElement('button');
+  backBtn.type = 'button';
+  backBtn.className = 'btn secondary';
+  backBtn.textContent = 'Back to study';
+  backBtn.addEventListener('click', () => {
+    setSubtab('Study', 'Builder');
+    redraw();
+  });
+  backRow.appendChild(backBtn);
+  wrapper.appendChild(backRow);
+
 
   const heading = document.createElement('h2');
   heading.textContent = 'Review queue';

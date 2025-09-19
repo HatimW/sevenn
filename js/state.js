@@ -4,7 +4,7 @@ export const state = {
     Diseases: "Browse",
     Drugs: "Browse",
     Concepts: "Browse",
-    Study: "Flashcards",
+    Study: "Builder",
     Exams: "", // placeholder
     Map: "",
     Settings: ""
@@ -35,7 +35,10 @@ export const state = {
   examSession: null,
   examAttemptExpanded: {},
   map: { panzoom:false },
-  blockMode: { section:"", assignments:{}, reveal:{}, order:{} }
+  blockMode: { section:"", assignments:{}, reveal:{}, order:{} },
+  study: { selectedMode: 'Flashcards' },
+  studySessions: {},
+  studySessionsLoaded: false
 };
 
 export function setTab(t){ state.tab = t; }
@@ -91,4 +94,32 @@ export function setEntryLayout(patch){
   if (Object.prototype.hasOwnProperty.call(patch, 'controlsVisible')) {
     layout.controlsVisible = Boolean(patch.controlsVisible);
   }
+}
+
+export function setStudySelectedMode(mode) {
+  if (!state.study) state.study = { selectedMode: 'Flashcards' };
+  if (mode === 'Flashcards' || mode === 'Quiz' || mode === 'Blocks') {
+    state.study.selectedMode = mode;
+  }
+}
+
+export function setStudySessions(map) {
+  state.studySessions = map ? { ...map } : {};
+  state.studySessionsLoaded = true;
+}
+
+export function setStudySessionEntry(mode, entry) {
+  if (!mode) return;
+  const next = { ...(state.studySessions || {}) };
+  if (entry) {
+    next[mode] = entry;
+  } else {
+    delete next[mode];
+  }
+  state.studySessions = next;
+}
+
+export function clearStudySessionsState() {
+  state.studySessions = {};
+  state.studySessionsLoaded = false;
 }
