@@ -5,6 +5,7 @@ import { renderSettings } from './ui/settings.js';
 import { renderCardList } from './ui/components/cardlist.js';
 import { renderCards } from './ui/components/cards.js';
 import { renderBuilder } from './ui/components/builder.js';
+import { renderLectures } from './ui/components/lectures.js';
 import { renderFlashcards } from './ui/components/flashcards.js';
 import { renderReview } from './ui/components/review.js';
 import { renderQuiz } from './ui/components/quiz.js';
@@ -24,6 +25,7 @@ const { renderApp, tabs, resolveListKind } = createAppShell({
   renderCardList,
   renderCards,
   renderBuilder,
+  renderLectures,
   renderFlashcards,
   renderReview,
   renderQuiz,

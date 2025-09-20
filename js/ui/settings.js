@@ -1,22 +1,8 @@
-import { getSettings, saveSettings, upsertBlock, deleteBlock, deleteLecture, updateLecture, exportJSON, importJSON, exportAnkiCSV } from '../storage/storage.js';
+import { getSettings, saveSettings, upsertBlock, deleteBlock, exportJSON, importJSON, exportAnkiCSV } from '../storage/storage.js';
 import { loadBlockCatalog, invalidateBlockCatalog } from '../storage/block-catalog.js';
 import { REVIEW_RATINGS } from '../review/constants.js';
 import { invalidateReviewDurationsCache } from '../review/scheduler.js';
 import { confirmModal } from './components/confirm.js';
-
-const collapsedLectureBlocks = new Set();
-
-function isLectureListCollapsed(blockId) {
-  return collapsedLectureBlocks.has(blockId);
-}
-
-function toggleLectureListCollapse(blockId) {
-  if (collapsedLectureBlocks.has(blockId)) {
-    collapsedLectureBlocks.delete(blockId);
-  } else {
-    collapsedLectureBlocks.add(blockId);
-  }
-}
 
 export async function renderSettings(root) {
   root.innerHTML = '';
@@ -88,14 +74,10 @@ export async function renderSettings(root) {
   blocksCard.appendChild(list);
 
   const catalog = await loadBlockCatalog();
-  const lectureLists = catalog.lectureLists || {};
   const blocks = catalog.blocks || [];
   blocks.forEach((b,i) => {
     const wrap = document.createElement('div');
     wrap.className = 'block';
-    const blockLectures = lectureLists[b.blockId] || [];
-    const lectures = blockLectures.slice().sort((a,b)=> b.week - a.week || b.id - a.id);
-    const lecturesCollapsed = isLectureListCollapsed(b.blockId);
     const title = document.createElement('h3');
     title.textContent = `${b.blockId} – ${b.title}`;
     wrap.appendChild(title);
@@ -104,17 +86,14 @@ export async function renderSettings(root) {
     wkInfo.textContent = `Weeks: ${b.weeks}`;
     wrap.appendChild(wkInfo);
 
-    if (lectures.length || lecturesCollapsed) {
-      const toggleLecturesBtn = document.createElement('button');
-      toggleLecturesBtn.type = 'button';
-      toggleLecturesBtn.className = 'btn secondary settings-lecture-toggle';
-      toggleLecturesBtn.textContent = lecturesCollapsed ? 'Show lectures' : 'Hide lectures';
-      toggleLecturesBtn.addEventListener('click', async () => {
-        toggleLectureListCollapse(b.blockId);
-        await renderSettings(root);
-      });
-      wrap.appendChild(toggleLecturesBtn);
-    }
+    const lectureList = catalog.lectureLists?.[b.blockId] || [];
+    const lectureCount = Array.isArray(lectureList) ? lectureList.length : 0;
+    const lectureNote = document.createElement('p');
+    lectureNote.className = 'settings-lecture-note';
+    lectureNote.textContent = lectureCount
+      ? `${lectureCount} lecture${lectureCount === 1 ? '' : 's'}. Manage lectures from the Lectures tab.`
+      : 'No lectures linked yet. Use the Lectures tab to add some.';
+    wrap.appendChild(lectureNote);
 
     const controls = document.createElement('div');
     controls.className = 'row';
@@ -195,100 +174,6 @@ export async function renderSettings(root) {
       editForm.style.display = editForm.style.display === 'none' ? 'flex' : 'none';
     });
 
-    const lectureSection = document.createElement('div');
-    lectureSection.className = 'settings-lecture-section';
-    lectureSection.hidden = lecturesCollapsed;
-
-    const lecList = document.createElement('ul');
-    lectures.forEach(l => {
-      const li = document.createElement('li');
-      li.className = 'row';
-      const span = document.createElement('span');
-      span.textContent = `${l.id}: ${l.name} (W${l.week})`;
-      li.appendChild(span);
-
-      const editLec = document.createElement('button');
-      editLec.className = 'btn';
-      editLec.textContent = 'Edit';
-      const delLec = document.createElement('button');
-      delLec.className = 'btn';
-      delLec.textContent = 'Delete';
-
-      editLec.addEventListener('click', () => {
-        li.innerHTML = '';
-        li.className = 'row';
-        const nameInput = document.createElement('input');
-        nameInput.className = 'input';
-        nameInput.value = l.name;
-        const weekInput = document.createElement('input');
-        weekInput.className = 'input';
-        weekInput.type = 'number';
-        weekInput.value = l.week;
-        const saveBtn = document.createElement('button');
-        saveBtn.className = 'btn';
-        saveBtn.textContent = 'Save';
-        const cancelBtn = document.createElement('button');
-        cancelBtn.className = 'btn';
-        cancelBtn.textContent = 'Cancel';
-        li.append(nameInput, weekInput, saveBtn, cancelBtn);
-        saveBtn.addEventListener('click', async () => {
-          const name = nameInput.value.trim();
-          const week = Number(weekInput.value);
-          if (!name || !week || week < 1 || week > b.weeks) return;
-          await updateLecture(b.blockId, { id: l.id, name, week });
-          invalidateBlockCatalog();
-          await renderSettings(root);
-        });
-        cancelBtn.addEventListener('click', async () => {
-          await renderSettings(root);
-        });
-      });
-
-      delLec.addEventListener('click', async () => {
-        if (await confirmModal('Delete lecture?')) {
-          await deleteLecture(b.blockId, l.id);
-          invalidateBlockCatalog();
-          await renderSettings(root);
-        }
-      });
-
-      li.append(editLec, delLec);
-      lecList.appendChild(li);
-    });
-    lectureSection.appendChild(lecList);
-
-    const lecForm = document.createElement('form');
-    lecForm.className = 'row';
-    const idInput = document.createElement('input');
-    idInput.className = 'input';
-    idInput.placeholder = 'id';
-    idInput.type = 'number';
-    const nameInput = document.createElement('input');
-    nameInput.className = 'input';
-    nameInput.placeholder = 'name';
-    const weekInput = document.createElement('input');
-    weekInput.className = 'input';
-    weekInput.placeholder = 'week';
-    weekInput.type = 'number';
-    const addBtn = document.createElement('button');
-    addBtn.className = 'btn';
-    addBtn.type = 'submit';
-    addBtn.textContent = 'Add lecture';
-    lecForm.append(idInput, nameInput, weekInput, addBtn);
-    lecForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const lecture = { id: Number(idInput.value), name: nameInput.value.trim(), week: Number(weekInput.value) };
-      if (!lecture.id || !lecture.name || !lecture.week) return;
-      if (lecture.week < 1 || lecture.week > b.weeks) return;
-      const updated = { ...b, lectures: [...blockLectures, lecture] };
-      await upsertBlock(updated);
-      invalidateBlockCatalog();
-      await renderSettings(root);
-    });
-    lectureSection.appendChild(lecForm);
-
-    wrap.appendChild(lectureSection);
-
     list.appendChild(wrap);
   });
 
@@ -319,8 +204,7 @@ export async function renderSettings(root) {
       blockId: id.value.trim(),
       title: titleInput.value.trim(),
       weeks: Number(weeks.value),
-      color: color.value,
-      lectures: [],
+      color: color.value
     };
     if (!def.blockId || !def.title || !def.weeks) return;
     await upsertBlock(def);

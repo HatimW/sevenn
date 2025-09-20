@@ -15,6 +15,9 @@ const renderCardsMock = mock.fn(async (container) => {
 const renderBuilderMock = mock.fn(async (container) => {
   container.dataset.rendered = 'builder';
 });
+const renderLecturesMock = mock.fn(async (container) => {
+  container.dataset.rendered = 'lectures';
+});
 const renderFlashcardsMock = mock.fn(() => {});
 const renderReviewMock = mock.fn(async () => {});
 const renderQuizMock = mock.fn(() => {});
@@ -51,6 +54,7 @@ const { renderApp, tabs } = createAppShell({
   renderCardList: renderCardListMock,
   renderCards: renderCardsMock,
   renderBuilder: renderBuilderMock,
+  renderLectures: renderLecturesMock,
   renderFlashcards: renderFlashcardsMock,
   renderReview: renderReviewMock,
   renderQuiz: renderQuizMock,
@@ -75,6 +79,7 @@ function resetMocks() {
   renderCardListMock.mock.resetCalls();
   renderCardsMock.mock.resetCalls();
   renderBuilderMock.mock.resetCalls();
+  renderLecturesMock.mock.resetCalls();
   renderFlashcardsMock.mock.resetCalls();
   renderReviewMock.mock.resetCalls();
   renderQuizMock.mock.resetCalls();
@@ -141,7 +146,7 @@ describe('tab layout', () => {
   it('routes to lectures via the builder', async () => {
     setTab('Lectures');
     await renderApp();
-    assert.equal(renderBuilderMock.mock.callCount(), 1);
+    assert.equal(renderLecturesMock.mock.callCount(), 1);
   });
 
   it('smoke tests cards, study, exams, and map tabs', async () => {
