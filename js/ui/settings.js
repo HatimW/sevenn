@@ -1,4 +1,5 @@
-import { getSettings, saveSettings, listBlocks, upsertBlock, deleteBlock, deleteLecture, updateLecture, exportJSON, importJSON, exportAnkiCSV } from '../storage/storage.js';
+import { getSettings, saveSettings, upsertBlock, deleteBlock, deleteLecture, updateLecture, exportJSON, importJSON, exportAnkiCSV } from '../storage/storage.js';
+import { loadBlockCatalog, invalidateBlockCatalog } from '../storage/block-catalog.js';
 import { REVIEW_RATINGS } from '../review/constants.js';
 import { invalidateReviewDurationsCache } from '../review/scheduler.js';
 import { confirmModal } from './components/confirm.js';
@@ -86,11 +87,14 @@ export async function renderSettings(root) {
   list.className = 'block-list';
   blocksCard.appendChild(list);
 
-  const blocks = await listBlocks();
+  const catalog = await loadBlockCatalog();
+  const lectureLists = catalog.lectureLists || {};
+  const blocks = catalog.blocks || [];
   blocks.forEach((b,i) => {
     const wrap = document.createElement('div');
     wrap.className = 'block';
-    const lectures = (b.lectures || []).slice().sort((a,b)=> b.week - a.week || b.id - a.id);
+    const blockLectures = lectureLists[b.blockId] || [];
+    const lectures = blockLectures.slice().sort((a,b)=> b.week - a.week || b.id - a.id);
     const lecturesCollapsed = isLectureListCollapsed(b.blockId);
     const title = document.createElement('h3');
     title.textContent = `${b.blockId} – ${b.title}`;
@@ -123,6 +127,7 @@ export async function renderSettings(root) {
       const other = blocks[i-1];
       const tmp = b.order; b.order = other.order; other.order = tmp;
       await upsertBlock(b); await upsertBlock(other);
+      invalidateBlockCatalog();
       await renderSettings(root);
     });
     controls.appendChild(upBtn);
@@ -135,6 +140,7 @@ export async function renderSettings(root) {
       const other = blocks[i+1];
       const tmp = b.order; b.order = other.order; other.order = tmp;
       await upsertBlock(b); await upsertBlock(other);
+      invalidateBlockCatalog();
       await renderSettings(root);
     });
     controls.appendChild(downBtn);
@@ -150,6 +156,7 @@ export async function renderSettings(root) {
     del.addEventListener('click', async () => {
       if (await confirmModal('Delete block?')) {
         await deleteBlock(b.blockId);
+        invalidateBlockCatalog();
         await renderSettings(root);
       }
     });
@@ -179,6 +186,7 @@ export async function renderSettings(root) {
       e.preventDefault();
       const updated = { ...b, title: titleInput.value.trim(), weeks: Number(weeksInput.value), color: colorInput.value };
       await upsertBlock(updated);
+      invalidateBlockCatalog();
       await renderSettings(root);
     });
     wrap.appendChild(editForm);
@@ -228,6 +236,7 @@ export async function renderSettings(root) {
           const week = Number(weekInput.value);
           if (!name || !week || week < 1 || week > b.weeks) return;
           await updateLecture(b.blockId, { id: l.id, name, week });
+          invalidateBlockCatalog();
           await renderSettings(root);
         });
         cancelBtn.addEventListener('click', async () => {
@@ -238,6 +247,7 @@ export async function renderSettings(root) {
       delLec.addEventListener('click', async () => {
         if (await confirmModal('Delete lecture?')) {
           await deleteLecture(b.blockId, l.id);
+          invalidateBlockCatalog();
           await renderSettings(root);
         }
       });
@@ -270,8 +280,9 @@ export async function renderSettings(root) {
       const lecture = { id: Number(idInput.value), name: nameInput.value.trim(), week: Number(weekInput.value) };
       if (!lecture.id || !lecture.name || !lecture.week) return;
       if (lecture.week < 1 || lecture.week > b.weeks) return;
-      const updated = { ...b, lectures: [...b.lectures, lecture] };
+      const updated = { ...b, lectures: [...blockLectures, lecture] };
       await upsertBlock(updated);
+      invalidateBlockCatalog();
       await renderSettings(root);
     });
     lectureSection.appendChild(lecForm);
@@ -313,6 +324,7 @@ export async function renderSettings(root) {
     };
     if (!def.blockId || !def.title || !def.weeks) return;
     await upsertBlock(def);
+    invalidateBlockCatalog();
     await renderSettings(root);
   });
   blocksCard.appendChild(form);

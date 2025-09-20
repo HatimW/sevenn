@@ -1,4 +1,5 @@
-import { listItemsByKind, getItem, upsertItem, getMapConfig, saveMapConfig, listBlocks } from '../../storage/storage.js';
+import { listItemsByKind, getItem, upsertItem, getMapConfig, saveMapConfig } from '../../storage/storage.js';
+import { loadBlockCatalog } from '../../storage/block-catalog.js';
 import { uid } from '../../utils.js';
 import { showPopup } from './popup.js';
 import { openEditor } from './editor.js';
@@ -942,7 +943,11 @@ export async function renderMap(root) {
   ensureListeners();
 
   await ensureMapConfig();
-  mapState.blocks = await listBlocks();
+  const catalog = await loadBlockCatalog();
+  mapState.blocks = (catalog.blocks || []).map(block => ({
+    ...block,
+    lectures: (catalog.lectureLists?.[block.blockId] || []).map(lecture => ({ ...lecture }))
+  }));
 
   const items = [
     ...(await listItemsByKind('disease')),
