@@ -8,6 +8,13 @@ import { upsertItem } from '../../storage/storage.js';
 import { persistStudySession, removeStudySession } from '../../study/study-sessions.js';
 
 
+const KIND_ACCENTS = {
+  disease: 'var(--pink)',
+  drug: 'var(--blue)',
+  concept: 'var(--green)'
+};
+
+
 const RATING_LABELS = {
   again: 'Again',
   hard: 'Hard',
@@ -21,6 +28,14 @@ const RATING_CLASS = {
   good: '',
   easy: ''
 };
+
+
+function getFlashcardAccent(item) {
+  if (item?.color) return item.color;
+  if (item?.kind && KIND_ACCENTS[item.kind]) return KIND_ACCENTS[item.kind];
+  return 'var(--accent)';
+}
+
 
 function queueStatusLabel(snapshot) {
   if (!snapshot || snapshot.retired) return 'Already in review queue';
@@ -146,8 +161,6 @@ export function renderFlashcards(root, redraw) {
   card.appendChild(title);
 
   const durationsPromise = getReviewDurations().catch(() => ({ ...DEFAULT_REVIEW_STEPS }));
-  const ratedSections = new Map();
-
   const sectionBlocks = sections.length ? sections : [];
   const sectionRequirements = new Map();
   if (!sectionBlocks.length) {
@@ -160,9 +173,8 @@ export function renderFlashcards(root, redraw) {
   sectionBlocks.forEach(({ key, label }) => {
     const ratingId = ratingKey(item, key);
     const previousRating = active.ratings[ratingId] || null;
-    if (previousRating) {
-      ratedSections.set(key, previousRating);
-    }
+    const snapshot = getSectionStateSnapshot(item, key);
+    const lockedByQueue = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
 
     const snapshot = getSectionStateSnapshot(item, key);
     const alreadyQueued = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
@@ -195,22 +207,31 @@ export function renderFlashcards(root, redraw) {
     const status = document.createElement('span');
     status.className = 'flash-rating-status';
 
+    let ratingLocked = lockedByQueue;
+
     const selectRating = (value) => {
-      ratedSections.set(key, value);
       active.ratings[ratingId] = value;
       Array.from(ratingButtons.querySelectorAll('button')).forEach(btn => {
         const btnValue = btn.dataset.value;
         const isSelected = btnValue === value;
         btn.classList.toggle('is-selected', isSelected);
+
+        if (isSelected) {
+          ratingButtons.dataset.selected = value;
+        } else if (ratingButtons.dataset.selected === btnValue) {
+          delete ratingButtons.dataset.selected;
+        }
+
         btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
       });
       status.classList.remove('is-error');
       commitSession({ ratings: { ...active.ratings } });
-      updateNextState();
+
     };
 
     const handleRating = async (value) => {
-      if (!requiresRating) return;
+      if (ratingLocked) return;
+
       const durations = await durationsPromise;
       setToggleState(sec, true, 'revealed');
       ratingRow.classList.add('is-saving');
@@ -231,34 +252,65 @@ export function renderFlashcards(root, redraw) {
       }
     };
 
-    if (requiresRating) {
-      REVIEW_RATINGS.forEach(value => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.dataset.value = value;
-        btn.className = 'btn flash-rating-btn';
-        const variant = RATING_CLASS[value];
-        if (variant) btn.classList.add(variant);
-        btn.textContent = RATING_LABELS[value];
-        btn.setAttribute('aria-pressed', 'false');
-        btn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          handleRating(value);
-        });
-        btn.addEventListener('keydown', (event) => {
-          event.stopPropagation();
-        });
-        ratingButtons.appendChild(btn);
+    REVIEW_RATINGS.forEach(value => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.dataset.value = value;
+      btn.dataset.rating = value;
+      btn.className = 'flash-rating-btn';
+      const variant = RATING_CLASS[value];
+      if (variant) btn.classList.add(variant);
+      btn.textContent = RATING_LABELS[value];
+      btn.setAttribute('aria-pressed', 'false');
+      btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        handleRating(value);
+      });
+      btn.addEventListener('keydown', (event) => {
+        event.stopPropagation();
+
       });
 
-      if (previousRating) {
-        selectRating(previousRating);
-        status.textContent = 'Saved';
-      }
-    } else {
+    const unlockRating = () => {
+      if (!ratingLocked) return;
+      ratingLocked = false;
+      ratingRow.classList.remove('is-locked');
+      ratingButtons.hidden = false;
+      status.classList.remove('flash-rating-status-action');
+      status.removeAttribute('role');
+      status.removeAttribute('tabindex');
+      status.textContent = previousRating ? 'Update rating' : 'Select a rating (optional)';
+    };
+
+    if (lockedByQueue) {
+      ratingLocked = true;
       ratingRow.classList.add('is-locked');
       ratingButtons.hidden = true;
-      status.textContent = queueStatusLabel(snapshot);
+      const label = queueStatusLabel(snapshot);
+      status.textContent = `${label} — click to adjust`;
+      status.classList.add('flash-rating-status-action');
+      status.setAttribute('role', 'button');
+      status.setAttribute('tabindex', '0');
+      status.setAttribute('aria-label', 'Update review rating');
+      status.addEventListener('click', (event) => {
+        event.stopPropagation();
+        unlockRating();
+      });
+      status.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          unlockRating();
+        }
+      });
+    } else if (previousRating) {
+      status.textContent = 'Saved';
+    } else {
+      status.textContent = 'Select a rating (optional)';
+    }
+
+    if (previousRating) {
+      selectRating(previousRating);
+
     }
 
     ratingRow.appendChild(ratingButtons);
@@ -311,8 +363,7 @@ export function renderFlashcards(root, redraw) {
   const isLast = active.idx >= items.length - 1;
 
   next.textContent = isLast ? (isReview ? 'Finish review' : 'Finish') : 'Next';
-  const hasRatingRequirement = sectionBlocks.some(sec => sectionRequirements.get(sec.key));
-  next.disabled = hasRatingRequirement;
+
   next.addEventListener('click', () => {
     const pool = Array.isArray(active.pool) ? active.pool : items;
     const idx = active.idx + 1;
@@ -336,7 +387,6 @@ export function renderFlashcards(root, redraw) {
       saveExit.disabled = true;
       saveExit.textContent = 'Saving…';
       try {
-
         const pool = resolvePool();
         await persistStudySession('flashcards', {
           session: { ...active, idx: active.idx, pool, ratings: { ...(active.ratings || {}) } },
@@ -401,22 +451,11 @@ export function renderFlashcards(root, redraw) {
     }
   });
 
-  updateNextState();
 
-  function updateNextState() {
-    if (!sectionBlocks.length) {
-      next.disabled = false;
-      return;
-    }
-    const needsRating = sectionBlocks.some(sec => sectionRequirements.get(sec.key));
-    if (!needsRating) {
-      next.disabled = false;
-      return;
-    }
-    const ready = sectionBlocks.every(sec => {
-      if (!sectionRequirements.get(sec.key)) return true;
-      return Boolean(ratedSections.get(sec.key));
-    });
-    next.disabled = !ready;
-  }
+  const accent = getFlashcardAccent(item);
+  card.style.setProperty('--flash-accent', accent);
+  card.style.setProperty('--flash-accent-soft', `color-mix(in srgb, ${accent} 16%, transparent)`);
+  card.style.setProperty('--flash-accent-strong', `color-mix(in srgb, ${accent} 32%, rgba(15, 23, 42, 0.08))`);
+  card.style.setProperty('--flash-accent-border', `color-mix(in srgb, ${accent} 42%, transparent)`);
+
 }
