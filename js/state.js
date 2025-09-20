@@ -1,9 +1,10 @@
 export const state = {
-  tab: "Diseases",
+  tab: "Block Board",
   subtab: {
     Diseases: "Browse",
     Drugs: "Browse",
     Concepts: "Browse",
+    Lists: "Diseases",
     Study: "Builder",
     Exams: "", // placeholder
     Map: "",
