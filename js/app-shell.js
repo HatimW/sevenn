@@ -8,6 +8,7 @@ export function createAppShell({
   renderCardList,
   renderCards,
   renderBuilder,
+  renderLectures,
   renderFlashcards,
   renderReview,
   renderQuiz,
@@ -191,13 +192,10 @@ export function createAppShell({
       main.appendChild(content);
       renderBlockMode(content, renderApp);
     } else if (state.tab === 'Lectures') {
-      main.appendChild(createEntryAddControl(renderApp, 'disease'));
       const content = document.createElement('div');
       content.className = 'tab-content';
       main.appendChild(content);
-      const wrap = document.createElement('div');
-      await renderBuilder(wrap, renderApp);
-      content.appendChild(wrap);
+      await renderLectures(content, renderApp);
     } else if (state.tab === 'Cards') {
       main.appendChild(createEntryAddControl(renderApp, 'disease'));
       const content = document.createElement('div');

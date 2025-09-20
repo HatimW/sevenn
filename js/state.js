@@ -12,6 +12,7 @@ export const state = {
   },
   query: "",
   filters: { types:["disease","drug","concept"], block:"", week:"", onlyFav:false, sort:"updated" },
+  lectures: { query: '', blockId: '', week: '', status: '', tag: '' },
   entryLayout: { mode: 'list', columns: 3, scale: 1, controlsVisible: false },
   builder: {
     blocks:[],
@@ -47,6 +48,33 @@ export function setSubtab(tab, sub){ state.subtab[tab] = sub; }
 export function setQuery(q){ state.query = q; }
 export function setFilters(patch){ Object.assign(state.filters, patch); }
 export function setBuilder(patch){ Object.assign(state.builder, patch); }
+export function setLecturesState(patch) {
+  if (!patch) return;
+  if (!state.lectures) {
+    state.lectures = { query: '', blockId: '', week: '', status: '', tag: '' };
+  }
+  const next = { ...state.lectures };
+  if (Object.prototype.hasOwnProperty.call(patch, 'query')) {
+    next.query = String(patch.query ?? '');
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'blockId')) {
+    next.blockId = String(patch.blockId ?? '');
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'week')) {
+    next.week = String(patch.week ?? '');
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'status')) {
+    next.status = String(patch.status ?? '');
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'tag')) {
+    next.tag = String(patch.tag ?? '');
+  }
+  state.lectures = next;
+}
+
+export function resetLecturesState() {
+  state.lectures = { query: '', blockId: '', week: '', status: '', tag: '' };
+}
 export function setCardsState(patch){
   if (!patch) return;
   if (!state.cards) {
