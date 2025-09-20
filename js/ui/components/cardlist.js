@@ -1,4 +1,5 @@
-import { listBlocks, upsertItem, deleteItem } from '../../storage/storage.js';
+import { upsertItem, deleteItem } from '../../storage/storage.js';
+import { loadBlockCatalog } from '../../storage/block-catalog.js';
 import { state, setEntryLayout } from '../../state.js';
 import { setToggleState } from '../../utils.js';
 import { openEditor } from './editor.js';
@@ -302,7 +303,7 @@ export async function renderCardList(container, itemSource, kind, onChange){
       items.push(...itemSource);
     }
   }
-  const blocks = await listBlocks();
+  const { blocks } = await loadBlockCatalog();
   const blockTitle = id => blocks.find(b => b.blockId === id)?.title || id;
   const orderMap = new Map(blocks.map((b,i)=>[b.blockId,i]));
   const groups = new Map();

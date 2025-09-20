@@ -1,7 +1,7 @@
 
 import { setFlashSession, setSubtab, setCohort } from '../../state.js';
 import { collectDueSections, collectUpcomingSections } from '../../review/scheduler.js';
-import { listBlocks } from '../../storage/storage.js';
+import { loadBlockCatalog } from '../../storage/block-catalog.js';
 import { getSectionLabel } from './section-utils.js';
 import { hydrateStudySessions, getStudySessionEntry, removeStudySession } from '../../study/study-sessions.js';
 import { loadReviewSourceItems } from '../../review/pool.js';
@@ -273,7 +273,7 @@ export async function renderReview(root, redraw) {
   const now = Date.now();
   const dueEntries = collectDueSections(cohort, { now });
   const upcomingEntries = collectUpcomingSections(cohort, { now, limit: 50 });
-  const blocks = await listBlocks();
+  const { blocks } = await loadBlockCatalog();
   const blockTitles = ensureBlockTitleMap(blocks);
 
   const savedEntry = getStudySessionEntry('review');

@@ -1,6 +1,6 @@
-import { listBlocks } from '../../storage/storage.js';
 import { state, setCardsState } from '../../state.js';
 import { renderRichText } from './rich-text.js';
+import { loadBlockCatalog } from '../../storage/block-catalog.js';
 
 const UNASSIGNED_BLOCK_KEY = '__unassigned__';
 const MISC_LECTURE_KEY = '__misc__';
@@ -146,7 +146,7 @@ export async function renderCards(container, items, onChange) {
   container.innerHTML = '';
   container.classList.add('cards-tab');
 
-  const blockDefs = await listBlocks();
+  const { blocks: blockDefs } = await loadBlockCatalog();
   const blockLookup = new Map(blockDefs.map(def => [def.blockId, def]));
   const blockOrder = new Map(blockDefs.map((def, idx) => [def.blockId, idx]));
 

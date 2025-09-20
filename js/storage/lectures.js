@@ -98,6 +98,17 @@ export async function listLecturesByBlock(blockId) {
   }
 }
 
+export async function listAllLectures() {
+  try {
+    const store = await lectureStore();
+    const rows = await prom(store.getAll());
+    return Array.isArray(rows) ? rows.map(clone) : [];
+  } catch (err) {
+    console.warn('listAllLectures failed', err);
+    return [];
+  }
+}
+
 export async function saveLecture(lecture) {
   if (!lecture || lecture.blockId == null || lecture.id == null) {
     throw new Error('Missing lecture identity for save');

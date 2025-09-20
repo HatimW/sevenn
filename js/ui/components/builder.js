@@ -1,5 +1,6 @@
 import { state, setBuilder, setCohort, resetBlockMode, setBlockMode, setSubtab, setFlashSession, setQuizSession, setStudySelectedMode } from '../../state.js';
-import { listBlocks, listItemsByKind } from '../../storage/storage.js';
+import { listItemsByKind } from '../../storage/storage.js';
+import { loadBlockCatalog } from '../../storage/block-catalog.js';
 import { setToggleState } from '../../utils.js';
 import { hydrateStudySessions, getStudySessionEntry, removeAllStudySessions, removeStudySession } from '../../study/study-sessions.js';
 
@@ -12,6 +13,25 @@ const MODE_KEY = {
   Quiz: 'quiz',
   Blocks: 'blocks'
 };
+
+
+let lectureSource = {};
+
+function setLectureSource(map) {
+  lectureSource = {};
+  for (const [blockId, list] of Object.entries(map || {})) {
+    lectureSource[blockId] = Array.isArray(list)
+      ? list.map(lecture => ({ ...lecture }))
+      : [];
+  }
+}
+
+function lectureListFor(blockId, options = {}) {
+  const list = lectureSource[blockId];
+  if (!Array.isArray(list)) return [];
+  if (options.clone === false) return list;
+  return list.map(lecture => ({ ...lecture }));
+}
 
 
 function collectReviewCount(items) {
@@ -44,8 +64,17 @@ export async function renderBuilder(root, redraw) {
 }
 
 async function loadBlocks() {
-  const blocks = await listBlocks();
-  blocks.push({ blockId: '__unlabeled', title: 'Unlabeled', weeks: 0, lectures: [] });
+  const catalog = await loadBlockCatalog();
+  const lectureLists = { ...catalog.lectureLists };
+  catalog.blocks.forEach(block => {
+    if (!Array.isArray(lectureLists[block.blockId])) {
+      lectureLists[block.blockId] = [];
+    }
+  });
+  lectureLists.__unlabeled = [];
+  setLectureSource(lectureLists);
+  const blocks = catalog.blocks.map(block => ({ ...block }));
+  blocks.push({ blockId: '__unlabeled', title: 'Unlabeled', weeks: 0 });
   return blocks;
 }
 
@@ -73,7 +102,7 @@ function drawBuilder(container, blocks, redraw) {
 
 function renderBlockPanel(block, rerender) {
   const blockId = block.blockId;
-  const lectures = Array.isArray(block.lectures) ? [...block.lectures] : [];
+  const lectures = lectureListFor(blockId);
   lectures.sort((a, b) => {
     const weekDiff = (a.week ?? 0) - (b.week ?? 0);
     if (weekDiff !== 0) return weekDiff;
@@ -630,8 +659,9 @@ function selectEntireBlock(block) {
   const blockSet = new Set(state.builder.blocks);
   const lectureSet = new Set(state.builder.lectures);
 
-  if (block.lectures?.length) {
-    (block.lectures || []).forEach(lecture => {
+  const lectures = lectureListFor(blockId, { clone: false });
+  if (lectures.length) {
+    lectures.forEach(lecture => {
       lectureSet.add(lectureKeyFor(blockId, lecture.id));
     });
     syncBlockWithLectureSelection(blockSet, lectureSet, block);
@@ -666,7 +696,8 @@ function selectWeek(block, week) {
   const blockId = block.blockId;
   const lectureSet = new Set(state.builder.lectures);
   const blockSet = new Set(state.builder.blocks);
-  (block.lectures || []).forEach(lecture => {
+  const lectures = lectureListFor(blockId, { clone: false });
+  lectures.forEach(lecture => {
     if (lecture.week === week) {
       lectureSet.add(lectureKeyFor(blockId, lecture.id));
     }
@@ -684,7 +715,8 @@ function clearWeek(block, week) {
   const blockId = block.blockId;
   const lectureSet = new Set(state.builder.lectures);
   const blockSet = new Set(state.builder.blocks);
-  (block.lectures || []).forEach(lecture => {
+  const lectures = lectureListFor(blockId, { clone: false });
+  lectures.forEach(lecture => {
     if (lecture.week === week) {
       lectureSet.delete(lectureKeyFor(blockId, lecture.id));
     }
@@ -825,7 +857,7 @@ function syncBlockWithLectureSelection(blockSet, lectureSet, block) {
     blockSet.delete(blockId);
     return;
   }
-  const blockLectures = Array.isArray(block.lectures) ? block.lectures : [];
+  const blockLectures = lectureListFor(blockId, { clone: false });
   if (!blockLectures.length) {
     blockSet.add(blockId);
     return;

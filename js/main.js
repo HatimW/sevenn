@@ -1,5 +1,6 @@
 import { state, setTab, setSubtab, setQuery } from './state.js';
 import { initDB, findItemsByFilter } from './storage/storage.js';
+import { loadBlockCatalog } from './storage/block-catalog.js';
 import { renderSettings } from './ui/settings.js';
 import { renderCardList } from './ui/components/cardlist.js';
 import { renderCards } from './ui/components/cards.js';
@@ -196,6 +197,11 @@ async function render() {
 async function bootstrap() {
   try {
     await initDB();
+    try {
+      await loadBlockCatalog();
+    } catch (err) {
+      console.warn('Failed to prime block catalog', err);
+    }
     render();
   } catch (err) {
     const root = document.getElementById('app');

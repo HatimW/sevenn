@@ -1,6 +1,7 @@
 import { openDB } from './idb.js';
 import {
   listLecturesByBlock as fetchLecturesByBlock,
+  listAllLectures as fetchAllLectures,
   saveLecture as persistLecture,
   deleteLectureRecord as dropLectureRecord,
   removeLecturesForBlock as dropLecturesForBlock,
@@ -247,26 +248,34 @@ export async function saveMapConfig(config) {
 
 export async function listBlocks() {
   try {
-    const b = await store('blocks');
-    const all = await prom(b.getAll());
-    const enriched = await Promise.all((all || []).map(async block => {
-      if (!block || !block.blockId) return block;
-      try {
-        const lectures = await fetchLecturesByBlock(block.blockId);
-        return { ...block, lectures };
-      } catch (err) {
-        console.warn('Failed to hydrate block lectures', err);
-        return { ...block, lectures: [] };
-      }
-    }));
-    return enriched.sort((a,b)=>{
-      const ao = a.order ?? a.createdAt;
-      const bo = b.order ?? b.createdAt;
-      return bo - ao;
-    });
+    const lecturePromise = fetchAllLectures();
+    const blockStore = await store('blocks');
+    const all = await prom(blockStore.getAll());
+    const lectures = await lecturePromise;
+    const blocks = (all || [])
+      .map(block => {
+        if (!block || typeof block !== 'object') return block;
+        const { lectures: _ignored, ...rest } = block;
+        return { ...rest };
+      })
+      .sort((a, b) => {
+        const ao = a.order ?? a.createdAt;
+        const bo = b.order ?? b.createdAt;
+        return bo - ao;
+      });
+
+    const lectureIndex = {};
+    for (const lecture of lectures || []) {
+      if (!lecture || lecture.blockId == null || lecture.id == null) continue;
+      const blockId = lecture.blockId;
+      if (!lectureIndex[blockId]) lectureIndex[blockId] = {};
+      lectureIndex[blockId][lecture.id] = { ...lecture };
+    }
+
+    return { blocks, lectureIndex };
   } catch (err) {
     console.warn('listBlocks failed', err);
-    return [];
+    return { blocks: [], lectureIndex: {} };
   }
 }
 

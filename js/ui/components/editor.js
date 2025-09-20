@@ -1,5 +1,6 @@
 import { uid, setToggleState } from '../../utils.js';
-import { upsertItem, listBlocks } from '../../storage/storage.js';
+import { upsertItem } from '../../storage/storage.js';
+import { loadBlockCatalog } from '../../storage/block-catalog.js';
 import { createFloatingWindow } from './window-manager.js';
 import { createRichTextEditor } from './rich-text.js';
 import { confirmModal } from './confirm.js';
@@ -222,7 +223,11 @@ export async function openEditor(kind, onSave, existing = null) {
   form.appendChild(colorLabel);
   colorInput.addEventListener('input', markDirty);
 
-  const blocks = await listBlocks();
+  const catalog = await loadBlockCatalog();
+  const blocks = (catalog.blocks || []).map(block => ({
+    ...block,
+    lectures: (catalog.lectureLists?.[block.blockId] || []).map(lecture => ({ ...lecture }))
+  }));
   const blockMap = new Map(blocks.map(b => [b.blockId, b]));
   const blockSet = new Set(existing?.blocks || []);
   const weekSet = new Set();

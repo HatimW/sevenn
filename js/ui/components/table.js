@@ -1,4 +1,4 @@
-import { listBlocks } from '../../storage/storage.js';
+import { loadBlockCatalog } from '../../storage/block-catalog.js';
 import { createTitleCell } from './titlecell.js';
 import { renderRichText } from './rich-text.js';
 
@@ -56,7 +56,7 @@ function collectExtras(item) {
 }
 
 export async function renderTable(container, items, kind, onChange) {
-  const blocks = await listBlocks();
+  const { blocks } = await loadBlockCatalog();
   const blockTitle = (id) => blocks.find(b => b.blockId === id)?.title || id;
   const orderMap = new Map(blocks.map((b,i)=>[b.blockId,i]));
   const groups = new Map(); // block -> week -> items
