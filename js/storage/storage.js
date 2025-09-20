@@ -1,4 +1,22 @@
 import { openDB } from './idb.js';
+import {
+  listLecturesByBlock as fetchLecturesByBlock,
+  saveLecture as persistLecture,
+  deleteLectureRecord as dropLectureRecord,
+  removeLecturesForBlock as dropLecturesForBlock,
+  lectureKey as composeLectureKey
+} from './lectures.js';
+
+export {
+  listLecturesByBlock,
+  saveLecture,
+  deleteLectureRecord,
+  removeLecturesForBlock,
+  bulkUpdateLectureStatus,
+  DEFAULT_PASS_PLAN,
+  DEFAULT_LECTURE_STATUS,
+  lectureKey
+} from './lectures.js';
 import { exportJSON, importJSON, exportAnkiCSV } from './export.js';
 import { DEFAULT_REVIEW_STEPS } from '../review/constants.js';
 import { normalizeReviewSteps } from '../review/settings.js';
@@ -10,7 +28,7 @@ const RESULT_BATCH_SIZE = 50;
 const MAP_CONFIG_KEY = 'map-config';
 const MAP_CONFIG_BACKUP_KEY = 'sevenn-map-config-backup';
 const DATA_BACKUP_KEY = 'sevenn-backup-snapshot';
-const DATA_BACKUP_STORES = ['items', 'blocks', 'exams', 'settings', 'exam_sessions', 'study_sessions'];
+const DATA_BACKUP_STORES = ['items', 'blocks', 'exams', 'settings', 'exam_sessions', 'study_sessions', 'lectures'];
 
 const DEFAULT_APP_SETTINGS = { id: 'app', dailyCount: 20, theme: 'dark', reviewSteps: { ...DEFAULT_REVIEW_STEPS } };
 
@@ -231,7 +249,17 @@ export async function listBlocks() {
   try {
     const b = await store('blocks');
     const all = await prom(b.getAll());
-    return all.sort((a,b)=>{
+    const enriched = await Promise.all((all || []).map(async block => {
+      if (!block || !block.blockId) return block;
+      try {
+        const lectures = await fetchLecturesByBlock(block.blockId);
+        return { ...block, lectures };
+      } catch (err) {
+        console.warn('Failed to hydrate block lectures', err);
+        return { ...block, lectures: [] };
+      }
+    }));
+    return enriched.sort((a,b)=>{
       const ao = a.order ?? a.createdAt;
       const bo = b.order ?? b.createdAt;
       return bo - ao;
@@ -245,11 +273,34 @@ export async function listBlocks() {
 export async function upsertBlock(def) {
   const b = await store('blocks', 'readwrite');
   const existing = await prom(b.get(def.blockId));
+  const existingLectures = await fetchLecturesByBlock(def.blockId);
   const now = Date.now();
-  let lectures = def.lectures || existing?.lectures || [];
+  const incomingLectures = Array.isArray(def.lectures)
+    ? def.lectures.map(lecture => ({
+        ...lecture,
+        blockId: def.blockId
+      }))
+    : existingLectures.map(lecture => ({
+        blockId: lecture.blockId,
+        id: lecture.id,
+        name: lecture.name,
+        week: lecture.week,
+        tags: Array.isArray(lecture.tags) ? lecture.tags : []
+      }));
+
+  const removedLectureIds = [];
+  let prunedLectures = incomingLectures;
+
   if (existing && typeof def.weeks === 'number' && def.weeks < existing.weeks) {
     const maxWeek = def.weeks;
-    lectures = lectures.filter(l => l.week <= maxWeek);
+    prunedLectures = incomingLectures.filter(lecture => {
+      const week = lecture?.week;
+      const keep = week == null || week <= maxWeek;
+      if (!keep && lecture?.id != null) {
+        removedLectureIds.push(lecture.id);
+      }
+      return keep;
+    });
     const i = await store('items', 'readwrite');
     const all = await prom(i.getAll());
     for (const it of all) {
@@ -271,21 +322,78 @@ export async function upsertBlock(def) {
       }
     }
   }
+
   const next = {
     ...def,
-    lectures,
     color: def.color || existing?.color || null,
     order: def.order || existing?.order || now,
     createdAt: existing?.createdAt || now,
     updatedAt: now
   };
+  delete next.lectures;
   await prom(b.put(next));
+
+  const incomingKeySet = new Set(
+    prunedLectures
+      .filter(lecture => lecture?.id != null)
+      .map(lecture => composeLectureKey(def.blockId, lecture.id))
+  );
+  for (const lecture of existingLectures) {
+    const key = lecture?.key || composeLectureKey(lecture.blockId, lecture.id);
+    if (!incomingKeySet.has(key) && lecture?.id != null) {
+      removedLectureIds.push(lecture.id);
+    }
+  }
+
+  for (const lecture of prunedLectures) {
+    if (lecture?.id == null) continue;
+    await persistLecture({
+      blockId: def.blockId,
+      id: lecture.id,
+      name: lecture.name,
+      week: lecture.week,
+      tags: Array.isArray(lecture.tags) ? lecture.tags : undefined,
+      passes: Array.isArray(lecture.passes) ? lecture.passes : undefined,
+      passPlan: lecture.passPlan,
+      status: lecture.status,
+      nextDueAt: lecture.nextDueAt
+    });
+  }
+
+  const uniqueRemoved = Array.from(new Set(removedLectureIds.filter(id => id != null)));
+  for (const lectureId of uniqueRemoved) {
+    await dropLectureRecord(def.blockId, lectureId);
+  }
+  if (uniqueRemoved.length) {
+    await removeLectureReferencesFromItems(def.blockId, uniqueRemoved);
+  }
+
   scheduleBackup();
+}
+
+async function removeLectureReferencesFromItems(blockId, lectureIds) {
+  if (!lectureIds.length) return;
+  const i = await store('items', 'readwrite');
+  const all = await prom(i.getAll());
+  for (const it of all) {
+    const before = it.lectures?.length || 0;
+    if (!before) continue;
+    it.lectures = it.lectures.filter(l => !(l.blockId === blockId && lectureIds.includes(l.id)));
+    if (it.lectures.length !== before) {
+      it.blocks = it.blocks?.filter(bid => bid !== blockId || it.lectures.some(l => l.blockId === bid));
+      const validWeeks = new Set((it.lectures || []).map(l => l.week));
+      it.weeks = Array.from(validWeeks);
+      it.tokens = buildTokens(it);
+      it.searchMeta = buildSearchMeta(it);
+      await prom(i.put(it));
+    }
+  }
 }
 
 export async function deleteBlock(blockId) {
   const b = await store('blocks', 'readwrite');
   await prom(b.delete(blockId));
+  await dropLecturesForBlock(blockId);
   // remove references from items to keep them "unlabeled"
   const i = await store('items', 'readwrite');
   const all = await prom(i.getAll());
@@ -311,38 +419,14 @@ export async function deleteBlock(blockId) {
 }
 
 export async function deleteLecture(blockId, lectureId) {
-  const b = await store('blocks', 'readwrite');
-  const blk = await prom(b.get(blockId));
-  if (blk) {
-    blk.lectures = (blk.lectures || []).filter(l => l.id !== lectureId);
-    await prom(b.put(blk));
-  }
-  const i = await store('items', 'readwrite');
-  const all = await prom(i.getAll());
-  for (const it of all) {
-    const before = it.lectures?.length || 0;
-    if (before) {
-      it.lectures = it.lectures.filter(l => !(l.blockId === blockId && l.id === lectureId));
-      if (it.lectures.length !== before) {
-        it.blocks = it.blocks?.filter(bid => bid !== blockId || it.lectures.some(l => l.blockId === bid));
-        const validWeeks = new Set((it.lectures || []).map(l => l.week));
-        it.weeks = Array.from(validWeeks);
-        it.tokens = buildTokens(it);
-        it.searchMeta = buildSearchMeta(it);
-        await prom(i.put(it));
-      }
-    }
-  }
+  await dropLectureRecord(blockId, lectureId);
+  await removeLectureReferencesFromItems(blockId, [lectureId]);
   scheduleBackup();
 }
 
 export async function updateLecture(blockId, lecture) {
-  const b = await store('blocks', 'readwrite');
-  const blk = await prom(b.get(blockId));
-  if (blk) {
-    blk.lectures = (blk.lectures || []).map(l => l.id === lecture.id ? lecture : l);
-    await prom(b.put(blk));
-  }
+  if (!lecture || lecture.id == null) return;
+  await persistLecture({ ...lecture, blockId });
   const i = await store('items', 'readwrite');
   const all = await prom(i.getAll());
   for (const it of all) {

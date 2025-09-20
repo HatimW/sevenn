@@ -1,5 +1,7 @@
+import { normalizeLectureRecord } from './lecture-schema.js';
+
 const DB_NAME = 'sevenn-db';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const MEMORY_STORAGE_KEY = 'sevenn-memory-db';
 
 const STORE_KEY_PATHS = {
@@ -8,7 +10,8 @@ const STORE_KEY_PATHS = {
   exams: 'id',
   settings: 'id',
   exam_sessions: 'examId',
-  study_sessions: 'mode'
+  study_sessions: 'mode',
+  lectures: 'key'
 };
 
 const enqueue = typeof queueMicrotask === 'function'
@@ -152,6 +155,17 @@ class MemoryStore {
           return new MemoryIndex(this, item => item.weeks || [], true);
         case 'by_favorite':
           return new MemoryIndex(this, item => !!item.favorite);
+        default:
+          break;
+      }
+    } else if (this.name === 'lectures') {
+      switch (name) {
+        case 'by_block':
+          return new MemoryIndex(this, item => item.blockId || null);
+        case 'by_tags':
+          return new MemoryIndex(this, item => item.tags || [], true);
+        case 'by_nextDue':
+          return new MemoryIndex(this, item => item.nextDueAt ?? null);
         default:
           break;
       }
@@ -333,8 +347,9 @@ export function openDB() {
       clearTimeout(timer);
       resolve(fallbackToMemory('IndexedDB failed to open, using in-memory storage.', req.error));
     };
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = event => {
       const db = req.result;
+      const tx = req.transaction;
 
       if (!db.objectStoreNames.contains('items')) {
         const items = db.createObjectStore('items', { keyPath: 'id' });
@@ -370,6 +385,80 @@ export function openDB() {
       if (!db.objectStoreNames.contains('study_sessions')) {
         const sessions = db.createObjectStore('study_sessions', { keyPath: 'mode' });
         sessions.createIndex('by_updatedAt', 'updatedAt');
+      }
+
+      let lecturesStore = null;
+      if (!db.objectStoreNames.contains('lectures')) {
+        lecturesStore = db.createObjectStore('lectures', { keyPath: 'key' });
+        lecturesStore.createIndex('by_block', 'blockId');
+        lecturesStore.createIndex('by_tags', 'tags', { multiEntry: true });
+        lecturesStore.createIndex('by_nextDue', 'nextDueAt');
+      } else if (tx) {
+        try {
+          lecturesStore = tx.objectStore('lectures');
+          if (lecturesStore) {
+            const indexNames = Array.from(lecturesStore.indexNames || []);
+            if (!indexNames.includes('by_block')) {
+              lecturesStore.createIndex('by_block', 'blockId');
+            }
+            if (!indexNames.includes('by_tags')) {
+              lecturesStore.createIndex('by_tags', 'tags', { multiEntry: true });
+            }
+            if (!indexNames.includes('by_nextDue')) {
+              lecturesStore.createIndex('by_nextDue', 'nextDueAt');
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to ensure lecture indexes', err);
+        }
+      }
+
+      if (tx && lecturesStore && event.oldVersion < 5) {
+        try {
+          const blocksStore = tx.objectStore('blocks');
+          if (blocksStore && typeof blocksStore.getAll === 'function') {
+            const readReq = blocksStore.getAll();
+            readReq.onsuccess = () => {
+              const blocks = Array.isArray(readReq.result) ? readReq.result : [];
+              const now = Date.now();
+              for (const block of blocks) {
+                const originalLectures = Array.isArray(block?.lectures) ? block.lectures : [];
+                const hadLecturesField = Object.prototype.hasOwnProperty.call(block || {}, 'lectures');
+                if (originalLectures.length) {
+                  const sanitized = { ...block };
+                  delete sanitized.lectures;
+                  try {
+                    blocksStore.put(sanitized);
+                  } catch (err) {
+                    console.warn('Failed to persist migrated block', err);
+                  }
+                  for (const lecture of originalLectures) {
+                    const normalized = normalizeLectureRecord(block.blockId, lecture, now);
+                    if (!normalized) continue;
+                    try {
+                      lecturesStore.put(normalized);
+                    } catch (err) {
+                      console.warn('Failed to migrate lecture', err);
+                    }
+                  }
+                } else if (hadLecturesField) {
+                  const sanitized = { ...block };
+                  delete sanitized.lectures;
+                  try {
+                    blocksStore.put(sanitized);
+                  } catch (err) {
+                    console.warn('Failed to clean block lectures field', err);
+                  }
+                }
+              }
+            };
+            readReq.onerror = () => {
+              console.warn('Failed to read blocks during lecture migration', readReq.error);
+            };
+          }
+        } catch (err) {
+          console.warn('Lecture migration failed', err);
+        }
       }
     };
     req.onsuccess = () => {
