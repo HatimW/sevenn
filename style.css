@@ -361,6 +361,45 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):hove
   background: linear-gradient(135deg, rgba(134, 239, 172, 0.96), rgba(16, 185, 129, 0.9));
 }
 
+.tab.tab-block-board {
+  background: rgba(254, 215, 170, 0.22);
+  border-color: rgba(251, 191, 36, 0.42);
+}
+
+.tab.tab-block-board:hover {
+  background: rgba(254, 215, 170, 0.32);
+}
+
+.tab.tab-block-board.active {
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.92), rgba(251, 146, 60, 0.9));
+}
+
+.tab.tab-lists {
+  background: rgba(191, 219, 254, 0.26);
+  border-color: rgba(96, 165, 250, 0.45);
+}
+
+.tab.tab-lists:hover {
+  background: rgba(191, 219, 254, 0.34);
+}
+
+.tab.tab-lists.active {
+  background: linear-gradient(135deg, rgba(147, 197, 253, 0.96), rgba(96, 165, 250, 0.9));
+}
+
+.tab.tab-lectures {
+  background: rgba(186, 230, 253, 0.24);
+  border-color: rgba(56, 189, 248, 0.42);
+}
+
+.tab.tab-lectures:hover {
+  background: rgba(186, 230, 253, 0.32);
+}
+
+.tab.tab-lectures.active {
+  background: linear-gradient(135deg, rgba(125, 211, 252, 0.96), rgba(14, 165, 233, 0.88));
+}
+
 .tab.tab-cards {
   background: rgba(196, 181, 253, 0.22);
   border-color: rgba(196, 181, 253, 0.4);
@@ -411,6 +450,30 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):hove
 
 .tab.tab-map.active {
   background: linear-gradient(135deg, rgba(165, 180, 252, 0.96), rgba(129, 140, 248, 0.92));
+}
+
+.list-subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: var(--pad-md);
+}
+
+.list-subtab {
+  border-radius: 999px;
+  padding: 6px 14px;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.list-subtab.active {
+  background: linear-gradient(135deg, rgba(191, 219, 254, 0.96), rgba(125, 211, 252, 0.9));
+  border-color: transparent;
+  color: #06283b;
+  box-shadow: 0 12px 26px rgba(14, 116, 144, 0.18);
+}
+
+.list-host {
+  margin-top: var(--pad-sm);
 }
 
 .subtabs {

@@ -1,4 +1,4 @@
-import { state, setBuilder, setCohort, resetBlockMode, setBlockMode, setSubtab, setFlashSession, setQuizSession, setStudySelectedMode } from '../../state.js';
+import { state, setBuilder, setCohort, resetBlockMode, setBlockMode, setSubtab, setFlashSession, setQuizSession, setStudySelectedMode, setTab } from '../../state.js';
 import { listItemsByKind } from '../../storage/storage.js';
 import { loadBlockCatalog } from '../../storage/block-catalog.js';
 import { setToggleState } from '../../utils.js';
@@ -475,6 +475,7 @@ function renderModeCard(rerender, redraw) {
       }
       resetBlockMode();
       setSubtab('Study', 'Blocks');
+      setTab('Block Board');
       redraw();
       return;
     }
@@ -490,6 +491,7 @@ function renderModeCard(rerender, redraw) {
       setQuizSession({ idx: 0, score: 0, pool: cohort });
     }
     setSubtab('Study', 'Builder');
+    setTab('Study');
     redraw();
   });
 
@@ -506,6 +508,7 @@ function renderModeCard(rerender, redraw) {
         setBlockMode(savedEntry.session);
       }
       setSubtab('Study', 'Blocks');
+      setTab('Block Board');
       redraw();
       return;
     }
@@ -517,6 +520,7 @@ function renderModeCard(rerender, redraw) {
       setQuizSession(savedEntry.session);
     }
     setSubtab('Study', 'Builder');
+    setTab('Study');
     redraw();
   });
 
