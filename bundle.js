@@ -7014,6 +7014,18 @@ var Sevenn = (() => {
     const months = minutes / (60 * 24 * 30);
     return `${Math.round(months)}mo`;
   }
+  var PASS_ACCENTS = [
+    "var(--pink)",
+    "var(--blue)",
+    "var(--green)",
+    "var(--orange)",
+    "var(--purple)",
+    "var(--teal)",
+    "var(--yellow)",
+    "var(--rose)",
+    "var(--indigo)",
+    "var(--cyan)"
+  ];
   var OFFSET_UNITS2 = [
     { id: "minutes", label: "minutes", minutes: 1 },
     { id: "hours", label: "hours", minutes: 60 },
@@ -7060,6 +7072,105 @@ var Sevenn = (() => {
     hour: "numeric",
     minute: "2-digit"
   });
+  function passAccent(order = 1) {
+    if (!Number.isFinite(order)) return PASS_ACCENTS[0];
+    const idx = Math.max(0, Math.floor(order) - 1) % PASS_ACCENTS.length;
+    return PASS_ACCENTS[idx];
+  }
+  function formatPassDueTimestamp(due) {
+    if (!Number.isFinite(due)) return "";
+    const date = new Date(due);
+    return `${PASS_DUE_FORMAT.format(date)} \u2022 ${PASS_TIME_FORMAT.format(date)}`;
+  }
+  function describePassCountdown(due, now = Date.now()) {
+    if (!Number.isFinite(due)) return "Unscheduled";
+    const diffMs = due - now;
+    const dayMs = 24 * 60 * 60 * 1e3;
+    if (Math.abs(diffMs) < dayMs) {
+      return diffMs >= 0 ? "Due today" : "Overdue today";
+    }
+    if (diffMs > 0) {
+      const days = Math.ceil(diffMs / dayMs);
+      return days === 1 ? "In 1 day" : `In ${days} days`;
+    }
+    const overdueDays = Math.ceil(Math.abs(diffMs) / dayMs);
+    return overdueDays === 1 ? "1 day overdue" : `${overdueDays} days overdue`;
+  }
+  function buildPassDisplayList(lecture) {
+    const scheduleList = Array.isArray(lecture?.passPlan?.schedule) ? lecture.passPlan.schedule : [];
+    const scheduleByOrder = /* @__PURE__ */ new Map();
+    scheduleList.forEach((step, index) => {
+      const order = Number.isFinite(step?.order) ? step.order : index + 1;
+      scheduleByOrder.set(order, { ...step, order });
+    });
+    const passes = Array.isArray(lecture?.passes) ? lecture.passes : [];
+    const passByOrder = /* @__PURE__ */ new Map();
+    passes.forEach((pass) => {
+      const order = Number(pass?.order);
+      if (Number.isFinite(order)) {
+        passByOrder.set(order, pass);
+      }
+    });
+    const orders = /* @__PURE__ */ new Set([
+      ...scheduleByOrder.keys(),
+      ...passByOrder.keys()
+    ]);
+    if (!orders.size) {
+      const planLength = scheduleList.length;
+      for (let i = 1; i <= planLength; i += 1) {
+        orders.add(i);
+      }
+    }
+    return Array.from(orders).filter((order) => Number.isFinite(order)).sort((a, b) => a - b).map((order) => {
+      const schedule = scheduleByOrder.get(order) || {};
+      const pass = passByOrder.get(order) || {};
+      return {
+        order,
+        label: schedule.label || pass.label || `Pass ${order}`,
+        action: schedule.action || pass.action || "",
+        due: Number.isFinite(pass?.due) ? pass.due : null,
+        completedAt: Number.isFinite(pass?.completedAt) ? pass.completedAt : null,
+        offsetMinutes: Number.isFinite(schedule?.offsetMinutes) ? schedule.offsetMinutes : null,
+        anchor: schedule.anchor || pass.anchor || null
+      };
+    });
+  }
+  function createPassChipDisplay(info, now = Date.now()) {
+    const chip = document.createElement("div");
+    chip.className = "lecture-pass-chip";
+    chip.style.setProperty("--chip-accent", passAccent(info?.order));
+    chip.dataset.passOrder = String(info?.order ?? "");
+    chip.setAttribute("role", "button");
+    chip.tabIndex = 0;
+    if (Number.isFinite(info?.completedAt)) chip.classList.add("is-complete");
+    if (!Number.isFinite(info?.completedAt) && Number.isFinite(info?.due) && info.due < now) {
+      chip.classList.add("is-overdue");
+    }
+    const header = document.createElement("div");
+    header.className = "lecture-pass-chip-header";
+    const badge = document.createElement("span");
+    badge.className = "lecture-pass-chip-order";
+    badge.textContent = `P${info?.order ?? ""}`;
+    header.appendChild(badge);
+    const label = document.createElement("span");
+    label.className = "lecture-pass-chip-label";
+    label.textContent = info?.action || info?.label || `Pass ${info?.order ?? ""}`;
+    header.appendChild(label);
+    chip.appendChild(header);
+    const functionLine = document.createElement("div");
+    functionLine.className = "lecture-pass-chip-function";
+    functionLine.textContent = info?.action || info?.label || "";
+    chip.appendChild(functionLine);
+    const timing = document.createElement("div");
+    timing.className = "lecture-pass-chip-due";
+    timing.textContent = Number.isFinite(info?.due) ? formatPassDueTimestamp(info.due) : "No scheduled date";
+    chip.appendChild(timing);
+    const countdown = document.createElement("div");
+    countdown.className = "lecture-pass-chip-countdown";
+    countdown.textContent = describePassCountdown(info?.due, now);
+    chip.appendChild(countdown);
+    return chip;
+  }
   var MAX_PASS_COUNT2 = 20;
   var DAY_MINUTES3 = 24 * 60;
   function defaultActionForIndex2(index) {
@@ -7201,12 +7312,6 @@ var Sevenn = (() => {
     const relative = nextDueAt <= now ? formatOverdue(nextDueAt, now) : formatTimeUntil(nextDueAt, now);
     return `${dateLabel} \u2022 ${relative}`;
   }
-  function formatPassSummary(lecture) {
-    const total = Array.isArray(lecture?.passes) ? lecture.passes.length : Array.isArray(lecture?.passPlan?.schedule) ? lecture.passPlan.schedule.length : 0;
-    const completed = Array.isArray(lecture?.passes) ? lecture.passes.filter((pass) => Number.isFinite(pass?.completedAt)).length : lecture?.status?.completedPasses ?? 0;
-    const stateLabel = lecture?.status?.state ? lecture.status.state : "pending";
-    return `${completed}/${total} passes \u2022 ${stateLabel}`;
-  }
   function renderEmptyState() {
     const empty = document.createElement("div");
     empty.className = "lectures-empty";
@@ -7279,7 +7384,7 @@ var Sevenn = (() => {
     if (counts.completed > 0) return "in-progress";
     return "pending";
   }
-  function renderLectureWeekRow(lecture, onEdit, onDelete, now = Date.now()) {
+  function renderLectureWeekRow(lecture, onEdit, onDelete, onEditPass, now = Date.now()) {
     const row = document.createElement("tr");
     row.dataset.lectureRow = "true";
     row.dataset.lectureId = String(lecture.id);
@@ -7318,23 +7423,43 @@ var Sevenn = (() => {
       });
       overviewCell.appendChild(tagList);
     }
-    const summary = document.createElement("div");
-    summary.className = "lecture-overview-summary";
-    summary.textContent = formatPassSummary(lecture);
-    overviewCell.appendChild(summary);
+    const metrics = document.createElement("div");
+    metrics.className = "lecture-overview-metrics";
+    const completedMetric = document.createElement("span");
+    completedMetric.className = "lecture-metric lecture-metric-complete";
+    completedMetric.textContent = `${stats.completed} complete`;
+    metrics.appendChild(completedMetric);
+    const remainingMetric = document.createElement("span");
+    remainingMetric.className = "lecture-metric lecture-metric-remaining";
+    remainingMetric.textContent = `${stats.remaining} remaining`;
+    metrics.appendChild(remainingMetric);
+    overviewCell.appendChild(metrics);
     row.appendChild(overviewCell);
-    const plannedCell = document.createElement("td");
-    plannedCell.className = "lecture-count-cell";
-    plannedCell.textContent = String(stats.planned);
-    row.appendChild(plannedCell);
-    const completedCell = document.createElement("td");
-    completedCell.className = "lecture-count-cell";
-    completedCell.textContent = String(stats.completed);
-    row.appendChild(completedCell);
-    const remainingCell = document.createElement("td");
-    remainingCell.className = "lecture-count-cell";
-    remainingCell.textContent = String(stats.remaining);
-    row.appendChild(remainingCell);
+    const passesCell = document.createElement("td");
+    passesCell.className = "lecture-passes-cell";
+    const passScroller = document.createElement("div");
+    passScroller.className = "lecture-pass-scroller";
+    const passList = buildPassDisplayList(lecture);
+    if (!passList.length) {
+      const empty = document.createElement("div");
+      empty.className = "lecture-pass-empty";
+      empty.textContent = "No passes planned";
+      passScroller.appendChild(empty);
+    } else {
+      passList.forEach((info) => {
+        const chip = createPassChipDisplay(info, now);
+        chip.addEventListener("click", () => onEditPass(lecture, info));
+        chip.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onEditPass(lecture, info);
+          }
+        });
+        passScroller.appendChild(chip);
+      });
+    }
+    passesCell.appendChild(passScroller);
+    row.appendChild(passesCell);
     const nextDueCell = document.createElement("td");
     nextDueCell.className = "lecture-next-cell";
     nextDueCell.textContent = formatNextDueDescriptor(resolveNextDueAt(lecture), now);
@@ -7358,7 +7483,7 @@ var Sevenn = (() => {
     row.appendChild(actions);
     return row;
   }
-  function renderLectureTable(blocks, lectures, filters, onEdit, onDelete) {
+  function renderLectureTable(blocks, lectures, filters, onEdit, onDelete, onEditPass) {
     const card = document.createElement("section");
     card.className = "card lectures-card";
     const title = document.createElement("h2");
@@ -7475,16 +7600,22 @@ var Sevenn = (() => {
         table.className = "lectures-week-table";
         const thead = document.createElement("thead");
         const headerRow = document.createElement("tr");
-        ["Lecture", "Planned passes", "Completed", "Remaining", "Next due", "Actions"].forEach((label) => {
+        [
+          { label: "Lecture", className: "lectures-col-lecture" },
+          { label: "Passes", className: "lectures-col-passes" },
+          { label: "Next due", className: "lectures-col-next" },
+          { label: "Actions", className: "lectures-col-actions" }
+        ].forEach((column) => {
           const th = document.createElement("th");
-          th.textContent = label;
+          th.textContent = column.label;
+          if (column.className) th.classList.add(column.className);
           headerRow.appendChild(th);
         });
         thead.appendChild(headerRow);
         table.appendChild(thead);
         const tbody = document.createElement("tbody");
         sortLecturesForDisplay(weekLectures).forEach((entry) => {
-          const row = renderLectureWeekRow(entry, onEdit, onDelete, now);
+          const row = renderLectureWeekRow(entry, onEdit, onDelete, onEditPass, now);
           tbody.appendChild(row);
         });
         table.appendChild(tbody);
@@ -8015,6 +8146,358 @@ var Sevenn = (() => {
       await redraw();
     })();
   }
+  function passScopeModal(mode) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.className = "modal lecture-pass-scope-modal";
+      const card = document.createElement("div");
+      card.className = "card lecture-pass-scope-card";
+      const title = document.createElement("h3");
+      title.textContent = mode === "push" ? "Push pass timing" : "Pull pass timing";
+      card.appendChild(title);
+      const message = document.createElement("p");
+      message.textContent = mode === "push" ? "Choose how far the push should ripple." : "Choose how far the pull should ripple.";
+      card.appendChild(message);
+      const buttons = document.createElement("div");
+      buttons.className = "row lecture-pass-scope-buttons";
+      const single = document.createElement("button");
+      single.className = "btn secondary";
+      single.textContent = "Only this pass";
+      single.addEventListener("click", () => {
+        cleanup("single");
+      });
+      const cascade = document.createElement("button");
+      cascade.className = "btn";
+      cascade.textContent = mode === "push" ? "This & following" : "This & preceding";
+      cascade.addEventListener("click", () => {
+        cleanup(mode === "push" ? "chain-after" : "chain-before");
+      });
+      const cancel = document.createElement("button");
+      cancel.className = "btn secondary";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => {
+        cleanup(null);
+      });
+      buttons.appendChild(single);
+      buttons.appendChild(cascade);
+      buttons.appendChild(cancel);
+      card.appendChild(buttons);
+      overlay.appendChild(card);
+      function cleanup(result) {
+        if (document.body.contains(overlay)) {
+          document.body.removeChild(overlay);
+        }
+        resolve(result);
+      }
+      overlay.addEventListener("click", (event) => {
+        if (event.target === overlay) {
+          cleanup(null);
+        }
+      });
+      document.body.appendChild(overlay);
+      single.focus();
+    });
+  }
+  function clampOffsetMinutes(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0;
+    return Math.max(0, Math.round(numeric));
+  }
+  function cloneLecturePasses(lecture) {
+    return Array.isArray(lecture?.passes) ? lecture.passes.map((pass) => ({ ...pass })) : [];
+  }
+  function normalizeSchedule(plan) {
+    return Array.isArray(plan?.schedule) ? plan.schedule.map((step) => ({ ...step })) : [];
+  }
+  async function updatePassFunction(lecture, order, action, redraw) {
+    if (!lecture || lecture.blockId == null || lecture.id == null) return;
+    const plan = clonePassPlan(lecture.passPlan || {});
+    const schedule = normalizeSchedule(plan);
+    const step = schedule.find((entry) => Number(entry?.order) === Number(order));
+    if (!step) return;
+    step.action = action;
+    const passes = cloneLecturePasses(lecture);
+    const pass = passes.find((entry) => Number(entry?.order) === Number(order));
+    if (pass) {
+      pass.action = action;
+    }
+    plan.schedule = schedule;
+    await saveLecture({
+      blockId: lecture.blockId,
+      id: lecture.id,
+      passPlan: plan,
+      passes
+    });
+    await invalidateBlockCatalog();
+    await redraw();
+  }
+  async function shiftPassTiming(lecture, order, deltaMinutes, scope, redraw) {
+    if (!lecture || lecture.blockId == null || lecture.id == null) return;
+    if (!Number.isFinite(deltaMinutes) || deltaMinutes === 0) return;
+    const plan = clonePassPlan(lecture.passPlan || {});
+    const schedule = normalizeSchedule(plan);
+    if (!schedule.length) return;
+    const targetOrder = Number(order);
+    if (!Number.isFinite(targetOrder)) return;
+    const affectedOrders = /* @__PURE__ */ new Set();
+    schedule.forEach((step) => {
+      const currentOrder = Number(step?.order);
+      if (!Number.isFinite(currentOrder)) return;
+      if (scope === "chain-after" && currentOrder >= targetOrder) {
+        affectedOrders.add(currentOrder);
+      } else if (scope === "chain-before" && currentOrder <= targetOrder) {
+        affectedOrders.add(currentOrder);
+      } else if (!scope || scope === "single") {
+        if (currentOrder === targetOrder) affectedOrders.add(currentOrder);
+      }
+    });
+    if (!affectedOrders.size) affectedOrders.add(targetOrder);
+    schedule.forEach((step) => {
+      const currentOrder = Number(step?.order);
+      if (!Number.isFinite(currentOrder)) return;
+      const offset = clampOffsetMinutes(step.offsetMinutes);
+      if (affectedOrders.has(currentOrder)) {
+        step.offsetMinutes = Math.max(0, offset + deltaMinutes);
+      } else {
+        step.offsetMinutes = offset;
+      }
+    });
+    const minuteMs = 60 * 1e3;
+    const passMap = /* @__PURE__ */ new Map();
+    cloneLecturePasses(lecture).forEach((pass) => {
+      const orderKey = Number(pass?.order);
+      if (Number.isFinite(orderKey) && !passMap.has(orderKey)) {
+        passMap.set(orderKey, { ...pass });
+      }
+    });
+    affectedOrders.forEach((orderKey) => {
+      const pass = passMap.get(orderKey);
+      if (pass && Number.isFinite(pass.due)) {
+        const nextDue = Math.max(0, Math.round(pass.due + deltaMinutes * minuteMs));
+        pass.due = nextDue;
+        passMap.set(orderKey, pass);
+      }
+    });
+    const decorated = schedule.map((step, index) => ({
+      ...step,
+      originalOrder: Number(step?.order) || index + 1,
+      offsetMinutes: clampOffsetMinutes(step.offsetMinutes)
+    }));
+    decorated.sort((a, b) => {
+      if (a.offsetMinutes !== b.offsetMinutes) return a.offsetMinutes - b.offsetMinutes;
+      return a.originalOrder - b.originalOrder;
+    });
+    const newSchedule = [];
+    const reassignedPasses = [];
+    decorated.forEach((entry, index) => {
+      const newOrder = index + 1;
+      const base = { ...entry };
+      delete base.originalOrder;
+      base.order = newOrder;
+      newSchedule.push(base);
+      const pass = passMap.get(entry.originalOrder);
+      if (pass) {
+        pass.order = newOrder;
+        reassignedPasses.push(pass);
+        passMap.delete(entry.originalOrder);
+      }
+    });
+    passMap.forEach((pass) => {
+      reassignedPasses.push(pass);
+    });
+    reassignedPasses.sort((a, b) => {
+      const ao = Number(a?.order) || 0;
+      const bo = Number(b?.order) || 0;
+      return ao - bo;
+    });
+    plan.schedule = newSchedule;
+    await saveLecture({
+      blockId: lecture.blockId,
+      id: lecture.id,
+      passPlan: plan,
+      passes: reassignedPasses
+    });
+    await invalidateBlockCatalog();
+    await redraw();
+  }
+  function openPassEditDialog({ lecture, passInfo, onUpdateAction, onShift }) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal lecture-pass-modal";
+    const card = document.createElement("div");
+    card.className = "card lecture-pass-card";
+    const title = document.createElement("h2");
+    const passLabel = passInfo?.label || `Pass ${passInfo?.order ?? ""}`;
+    title.textContent = `Edit ${passLabel}`;
+    card.appendChild(title);
+    const meta = document.createElement("div");
+    meta.className = "lecture-pass-meta";
+    const dateLine = document.createElement("div");
+    dateLine.className = "lecture-pass-meta-line";
+    dateLine.textContent = Number.isFinite(passInfo?.due) ? formatPassDueTimestamp(passInfo.due) : "No scheduled date";
+    meta.appendChild(dateLine);
+    const countdownLine = document.createElement("div");
+    countdownLine.className = "lecture-pass-meta-line";
+    countdownLine.textContent = describePassCountdown(passInfo?.due);
+    meta.appendChild(countdownLine);
+    card.appendChild(meta);
+    const actionField = document.createElement("label");
+    actionField.className = "lecture-pass-modal-field";
+    actionField.textContent = "Pass function";
+    const actionInput = document.createElement("input");
+    actionInput.type = "text";
+    actionInput.className = "input";
+    actionInput.value = passInfo?.action || passInfo?.label || "";
+    const actionListId = `pass-action-${lecture.blockId}-${lecture.id}-${passInfo?.order}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+    const actionDatalist = document.createElement("datalist");
+    actionDatalist.id = actionListId;
+    LECTURE_PASS_ACTIONS.forEach((action) => {
+      const option = document.createElement("option");
+      option.value = action;
+      actionDatalist.appendChild(option);
+    });
+    actionInput.setAttribute("list", actionListId);
+    actionField.appendChild(actionInput);
+    actionField.appendChild(actionDatalist);
+    card.appendChild(actionField);
+    const adjustSection = document.createElement("section");
+    adjustSection.className = "lecture-pass-adjust";
+    const adjustTitle = document.createElement("h3");
+    adjustTitle.textContent = "Adjust timing";
+    adjustSection.appendChild(adjustTitle);
+    const adjustControls = document.createElement("div");
+    adjustControls.className = "lecture-pass-adjust-controls";
+    const amountInput = document.createElement("input");
+    amountInput.type = "number";
+    amountInput.className = "input lecture-pass-adjust-value";
+    amountInput.min = "0";
+    amountInput.step = "1";
+    amountInput.value = "1";
+    const unitSelect = document.createElement("select");
+    unitSelect.className = "input lecture-pass-adjust-unit";
+    OFFSET_UNITS2.forEach((option) => {
+      const opt = document.createElement("option");
+      opt.value = option.id;
+      opt.textContent = option.label;
+      unitSelect.appendChild(opt);
+    });
+    unitSelect.value = "days";
+    adjustControls.appendChild(amountInput);
+    adjustControls.appendChild(unitSelect);
+    adjustSection.appendChild(adjustControls);
+    const adjustButtons = document.createElement("div");
+    adjustButtons.className = "lecture-pass-adjust-buttons";
+    const pushBtn = document.createElement("button");
+    pushBtn.type = "button";
+    pushBtn.className = "btn";
+    pushBtn.textContent = "Push later";
+    const pullBtn = document.createElement("button");
+    pullBtn.type = "button";
+    pullBtn.className = "btn secondary";
+    pullBtn.textContent = "Pull earlier";
+    adjustButtons.appendChild(pushBtn);
+    adjustButtons.appendChild(pullBtn);
+    adjustSection.appendChild(adjustButtons);
+    card.appendChild(adjustSection);
+    const feedback = document.createElement("div");
+    feedback.className = "lecture-pass-feedback";
+    card.appendChild(feedback);
+    const actions = document.createElement("div");
+    actions.className = "row lecture-pass-actions";
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "btn";
+    saveBtn.textContent = "Save function";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "btn secondary";
+    closeBtn.textContent = "Close";
+    actions.appendChild(saveBtn);
+    actions.appendChild(closeBtn);
+    card.appendChild(actions);
+    overlay.appendChild(card);
+    function showMessage(message) {
+      feedback.textContent = message || "";
+      if (message) {
+        feedback.classList.add("is-visible");
+      } else {
+        feedback.classList.remove("is-visible");
+      }
+    }
+    let busy = false;
+    function setBusy(value) {
+      busy = Boolean(value);
+      saveBtn.disabled = busy;
+      pushBtn.disabled = busy;
+      pullBtn.disabled = busy;
+    }
+    function close() {
+      if (document.body.contains(overlay)) {
+        document.body.removeChild(overlay);
+      }
+    }
+    async function handleSave() {
+      if (busy) return;
+      const value = actionInput.value.trim();
+      if (!value) {
+        showMessage("Enter a function for this pass.");
+        return;
+      }
+      setBusy(true);
+      try {
+        await onUpdateAction(value);
+        close();
+      } catch (err) {
+        console.error(err);
+        showMessage("Failed to update pass. Please try again.");
+        setBusy(false);
+      }
+    }
+    async function handleShift(mode) {
+      if (busy) return;
+      const amount = Number(amountInput.value);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        showMessage("Enter how much to adjust the pass by.");
+        return;
+      }
+      const minutes = combineOffsetValueUnit2(amount, unitSelect.value);
+      if (!Number.isFinite(minutes) || minutes <= 0) {
+        showMessage("Pick a timing greater than zero.");
+        return;
+      }
+      const scope = await passScopeModal(mode);
+      if (!scope) return;
+      const delta = mode === "push" ? minutes : -minutes;
+      setBusy(true);
+      try {
+        await onShift(delta, scope);
+        close();
+      } catch (err) {
+        console.error(err);
+        showMessage("Failed to adjust timing. Please try again.");
+        setBusy(false);
+      }
+    }
+    saveBtn.addEventListener("click", handleSave);
+    pushBtn.addEventListener("click", () => handleShift("push"));
+    pullBtn.addEventListener("click", () => handleShift("pull"));
+    closeBtn.addEventListener("click", close);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        close();
+      }
+    });
+    document.body.appendChild(overlay);
+    actionInput.focus();
+  }
+  function handlePassEdit(lecture, passInfo, redraw) {
+    if (!lecture || !passInfo) return;
+    openPassEditDialog({
+      lecture,
+      passInfo,
+      onUpdateAction: (action) => updatePassFunction(lecture, passInfo.order, action, redraw),
+      onShift: (delta, scope) => shiftPassTiming(lecture, passInfo.order, delta, scope, redraw)
+    });
+  }
   async function renderLectures(root, redraw) {
     const [catalog, settings] = await Promise.all([
       loadBlockCatalog(),
@@ -8037,7 +8520,8 @@ var Sevenn = (() => {
       filtered,
       filters,
       (lecture) => handleEdit(lecture, blocks, lectureLists, redraw),
-      (lecture) => handleDelete(lecture, redraw)
+      (lecture) => handleDelete(lecture, redraw),
+      (lecture, pass) => handlePassEdit(lecture, pass, redraw)
     );
     layout.appendChild(table);
   }
