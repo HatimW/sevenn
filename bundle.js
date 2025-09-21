@@ -1,11 +1,39 @@
 var Sevenn = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // js/main.js
+  var main_exports = {};
+  __export(main_exports, {
+    render: () => renderApp,
+    renderApp: () => renderApp,
+    resolveListKind: () => resolveListKind,
+    tabs: () => tabs
+  });
+
   // js/state.js
   var state = {
-    tab: "Diseases",
+    tab: "Block Board",
     subtab: {
       Diseases: "Browse",
       Drugs: "Browse",
       Concepts: "Browse",
+      Lists: "Diseases",
       Study: "Builder",
       Exams: "",
       // placeholder
@@ -14,7 +42,9 @@ var Sevenn = (() => {
     },
     query: "",
     filters: { types: ["disease", "drug", "concept"], block: "", week: "", onlyFav: false, sort: "updated" },
+    lectures: { query: "", blockId: "", week: "", status: "", tag: "" },
     entryLayout: { mode: "list", columns: 3, scale: 1, controlsVisible: false },
+    blockBoard: { collapsedBlocks: [], showDensity: true, showPomodoro: false },
     builder: {
       blocks: [],
       weeks: [],
@@ -54,6 +84,46 @@ var Sevenn = (() => {
   }
   function setBuilder(patch) {
     Object.assign(state.builder, patch);
+  }
+  function setBlockBoardState(patch) {
+    if (!patch) return;
+    if (!state.blockBoard) {
+      state.blockBoard = { collapsedBlocks: [], showDensity: true, showPomodoro: false };
+    }
+    const current = state.blockBoard;
+    if (Array.isArray(patch.collapsedBlocks)) {
+      const unique = Array.from(new Set(patch.collapsedBlocks.map((id) => String(id))));
+      current.collapsedBlocks = unique;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "showDensity")) {
+      current.showDensity = Boolean(patch.showDensity);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "showPomodoro")) {
+      current.showPomodoro = Boolean(patch.showPomodoro);
+    }
+  }
+  function setLecturesState(patch) {
+    if (!patch) return;
+    if (!state.lectures) {
+      state.lectures = { query: "", blockId: "", week: "", status: "", tag: "" };
+    }
+    const next = { ...state.lectures };
+    if (Object.prototype.hasOwnProperty.call(patch, "query")) {
+      next.query = String(patch.query ?? "");
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "blockId")) {
+      next.blockId = String(patch.blockId ?? "");
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "week")) {
+      next.week = String(patch.week ?? "");
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "status")) {
+      next.status = String(patch.status ?? "");
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "tag")) {
+      next.tag = String(patch.tag ?? "");
+    }
+    state.lectures = next;
   }
   function setCardsState(patch) {
     if (!patch) return;
@@ -139,9 +209,337 @@ var Sevenn = (() => {
     state.studySessionsLoaded = false;
   }
 
+  // js/lectures/scheduler.js
+  var DAY_MINUTES = 24 * 60;
+  var MINUTE_MS = 60 * 1e3;
+  function toNumber(value, fallback = 0) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : fallback;
+  }
+  function sanitizeLabel(label, order) {
+    if (typeof label === "string" && label.trim()) return label.trim();
+    return `Pass ${order}`;
+  }
+  function inferAnchor(offsetMinutes) {
+    if (!Number.isFinite(offsetMinutes)) return "today";
+    if (offsetMinutes < DAY_MINUTES) return "today";
+    if (offsetMinutes < DAY_MINUTES * 2) return "tomorrow";
+    return "upcoming";
+  }
+  function startOfDay(timestamp) {
+    const date = new Date(timestamp);
+    date.setHours(0, 0, 0, 0);
+    return date.getTime();
+  }
+  function computeAnchoredDue(startAt, step, plannerDefaults) {
+    const offsetMinutes = toNumber(step?.offsetMinutes, 0);
+    const base = startAt + Math.round(offsetMinutes * MINUTE_MS);
+    if (!plannerDefaults || typeof plannerDefaults !== "object") return base;
+    const anchorName = typeof step?.anchor === "string" && step.anchor.trim() ? step.anchor.trim() : inferAnchor(offsetMinutes);
+    const anchorOffsets = plannerDefaults.anchorOffsets || {};
+    const anchorMinutes = toNumber(anchorOffsets[anchorName], null);
+    if (anchorMinutes == null) return base;
+    const anchorBase = startOfDay(base) + Math.round(anchorMinutes * MINUTE_MS);
+    if (!Number.isFinite(anchorBase)) return base;
+    if (offsetMinutes >= 0 && anchorBase < base) {
+      return base;
+    }
+    return anchorBase;
+  }
+  var DEFAULT_PASS_PLAN = {
+    id: "default",
+    schedule: [
+      { order: 1, label: "Pass 1", offsetMinutes: 0, anchor: "today" },
+      { order: 2, label: "Pass 2", offsetMinutes: 24 * 60, anchor: "tomorrow" },
+      { order: 3, label: "Pass 3", offsetMinutes: 72 * 60, anchor: "upcoming" }
+    ]
+  };
+  var DEFAULT_PLANNER_DEFAULTS = {
+    anchorOffsets: {
+      today: 8 * 60,
+      tomorrow: 8 * 60,
+      upcoming: 8 * 60
+    },
+    passes: DEFAULT_PASS_PLAN.schedule.map((entry) => ({
+      order: entry.order,
+      label: entry.label,
+      offsetMinutes: entry.offsetMinutes,
+      anchor: entry.anchor
+    }))
+  };
+  function normalizePassPlan(plan) {
+    const source = plan && typeof plan === "object" ? plan : {};
+    const mergedSchedule = Array.isArray(source.schedule) && source.schedule.length ? source.schedule : DEFAULT_PASS_PLAN.schedule;
+    const normalizedSchedule = mergedSchedule.map((step, index) => {
+      const order = toNumber(step?.order, index + 1);
+      const offsetMinutes = toNumber(step?.offsetMinutes, DEFAULT_PASS_PLAN.schedule[index]?.offsetMinutes ?? 0);
+      const anchor = typeof step?.anchor === "string" && step.anchor.trim() ? step.anchor.trim() : inferAnchor(offsetMinutes);
+      const label = sanitizeLabel(step?.label, order);
+      return { order, offsetMinutes, anchor, label };
+    }).sort((a, b) => a.order - b.order);
+    return {
+      id: typeof source.id === "string" && source.id.trim() ? source.id.trim() : DEFAULT_PASS_PLAN.id,
+      schedule: normalizedSchedule
+    };
+  }
+  function normalizePlannerDefaults(raw) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const anchorOffsets = {};
+    const defaultAnchors = DEFAULT_PLANNER_DEFAULTS.anchorOffsets;
+    const incomingAnchors = source.anchorOffsets && typeof source.anchorOffsets === "object" ? source.anchorOffsets : {};
+    const allKeys = /* @__PURE__ */ new Set([
+      ...Object.keys(defaultAnchors),
+      ...Object.keys(incomingAnchors)
+    ]);
+    for (const key of allKeys) {
+      const fallback = defaultAnchors[key] ?? 0;
+      const value = incomingAnchors[key];
+      anchorOffsets[key] = toNumber(value, fallback);
+    }
+    const passesSource = Array.isArray(source.passes) && source.passes.length ? source.passes : DEFAULT_PLANNER_DEFAULTS.passes;
+    const normalizedPlan = normalizePassPlan({ schedule: passesSource });
+    return {
+      anchorOffsets,
+      passes: normalizedPlan.schedule.map((step) => ({
+        order: step.order,
+        label: step.label,
+        offsetMinutes: step.offsetMinutes,
+        anchor: step.anchor
+      }))
+    };
+  }
+  function sanitizeAttachments(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((att) => att != null).map((att) => typeof att === "object" ? JSON.parse(JSON.stringify(att)) : att);
+  }
+  function normalizeLecturePasses({
+    plan,
+    passes,
+    plannerDefaults,
+    startAt,
+    now = Date.now()
+  } = {}) {
+    const normalizedPlan = normalizePassPlan(plan || DEFAULT_PASS_PLAN);
+    const schedule = normalizedPlan.schedule;
+    const existingList = Array.isArray(passes) ? passes : [];
+    const existingByOrder = /* @__PURE__ */ new Map();
+    existingList.forEach((entry, index) => {
+      if (!entry || typeof entry !== "object") return;
+      const order = toNumber(entry.order, index + 1);
+      if (!existingByOrder.has(order)) {
+        existingByOrder.set(order, entry);
+      }
+    });
+    const planner = normalizePlannerDefaults(plannerDefaults || {});
+    const anchorConfig = {
+      anchorOffsets: planner.anchorOffsets,
+      schedule: planner.passes
+    };
+    const startTimestamp = Number.isFinite(startAt) ? startAt : now;
+    const normalizedPasses = schedule.map((step, index) => {
+      const existing = existingByOrder.get(step.order) || existingList[index] || {};
+      const dueCandidate = Number.isFinite(existing?.due) ? existing.due : null;
+      const due = dueCandidate != null ? dueCandidate : computeAnchoredDue(startTimestamp, step, anchorConfig);
+      const completedAt = Number.isFinite(existing?.completedAt) ? existing.completedAt : null;
+      const label = sanitizeLabel(existing?.label ?? step.label, step.order);
+      const anchor = typeof (existing?.anchor ?? step.anchor) === "string" ? existing?.anchor ?? step.anchor : inferAnchor(step.offsetMinutes);
+      const attachments = sanitizeAttachments(existing.attachments);
+      return {
+        order: step.order,
+        label,
+        offsetMinutes: step.offsetMinutes,
+        anchor,
+        due,
+        completedAt,
+        attachments
+      };
+    });
+    return normalizedPasses;
+  }
+  function calculateNextDue(passes) {
+    if (!Array.isArray(passes) || !passes.length) return null;
+    const dueTimes = passes.filter((pass) => pass && !pass.completedAt).map((pass) => Number.isFinite(pass.due) ? pass.due : null).filter((due) => due != null).sort((a, b) => a - b);
+    return dueTimes.length ? dueTimes[0] : null;
+  }
+  function deriveLectureStatus(passes, base = {}) {
+    const total = Array.isArray(passes) ? passes.length : 0;
+    const completed = Array.isArray(passes) ? passes.filter((pass) => Number.isFinite(pass?.completedAt)).length : 0;
+    const lastCompletedAt = Array.isArray(passes) ? passes.reduce((max, pass) => {
+      const ts = Number.isFinite(pass?.completedAt) ? pass.completedAt : null;
+      if (ts == null) return max;
+      return max == null ? ts : Math.max(max, ts);
+    }, null) : null;
+    let state2 = "pending";
+    if (total === 0) {
+      state2 = "unscheduled";
+    } else if (completed === 0) {
+      state2 = "pending";
+    } else if (completed < total) {
+      state2 = "in-progress";
+    } else {
+      state2 = "complete";
+    }
+    const merged = {
+      ...base,
+      completedPasses: completed,
+      lastCompletedAt,
+      state: state2
+    };
+    return merged;
+  }
+  function markPassCompleted(lecture, passIndex, completedAt = Date.now()) {
+    if (!lecture || typeof lecture !== "object") return null;
+    const passes = Array.isArray(lecture.passes) ? lecture.passes.map((pass) => ({ ...pass })) : [];
+    if (!Number.isFinite(passIndex)) return { ...lecture, passes, nextDueAt: calculateNextDue(passes), status: deriveLectureStatus(passes, lecture.status) };
+    if (passes.length === 0) {
+      return { ...lecture, passes, nextDueAt: calculateNextDue(passes), status: deriveLectureStatus(passes, lecture.status) };
+    }
+    const clamped = Math.floor(passIndex);
+    if (clamped < 0 || clamped >= passes.length) {
+      return { ...lecture, passes, nextDueAt: calculateNextDue(passes), status: deriveLectureStatus(passes, lecture.status) };
+    }
+    if (passes[clamped]) {
+      passes[clamped].completedAt = completedAt;
+    }
+    const status = deriveLectureStatus(passes, lecture.status);
+    const nextDueAt = calculateNextDue(passes);
+    return {
+      ...lecture,
+      passes,
+      status,
+      nextDueAt
+    };
+  }
+  function shiftLecturePasses(lecture, shiftMinutes, { includeCompleted = false } = {}) {
+    if (!lecture || typeof lecture !== "object") return null;
+    const shiftMs = Math.round(toNumber(shiftMinutes, 0) * MINUTE_MS);
+    const passes = Array.isArray(lecture.passes) ? lecture.passes.map((pass) => {
+      if (!pass || !Number.isFinite(pass.due)) return { ...pass };
+      if (!includeCompleted && Number.isFinite(pass.completedAt)) {
+        return { ...pass };
+      }
+      return { ...pass, due: pass.due + shiftMs };
+    }) : [];
+    const status = deriveLectureStatus(passes, lecture.status);
+    const nextDueAt = calculateNextDue(passes);
+    return {
+      ...lecture,
+      passes,
+      status,
+      nextDueAt
+    };
+  }
+  function groupLectureQueues(lectures, { now = Date.now() } = {}) {
+    const result = {
+      overdue: [],
+      today: [],
+      tomorrow: [],
+      upcoming: []
+    };
+    if (!Array.isArray(lectures) || !lectures.length) return result;
+    const startToday = startOfDay(now);
+    const startTomorrow = startToday + DAY_MINUTES * MINUTE_MS;
+    const startDayAfter = startTomorrow + DAY_MINUTES * MINUTE_MS;
+    const addEntry = (bucket, entry) => {
+      result[bucket].push(entry);
+    };
+    for (const lecture of lectures) {
+      if (!lecture || typeof lecture !== "object") continue;
+      const passes = Array.isArray(lecture.passes) ? lecture.passes : [];
+      const nextPass = passes.find((pass) => pass && !Number.isFinite(pass.completedAt));
+      const due = Number.isFinite(nextPass?.due) ? nextPass.due : null;
+      const entry = { lecture, pass: nextPass || null, due };
+      if (due == null) {
+        addEntry("upcoming", entry);
+        continue;
+      }
+      if (due <= now) {
+        addEntry("overdue", entry);
+      } else if (due < startTomorrow) {
+        addEntry("today", entry);
+      } else if (due < startDayAfter) {
+        addEntry("tomorrow", entry);
+      } else {
+        addEntry("upcoming", entry);
+      }
+    }
+    for (const key of Object.keys(result)) {
+      result[key].sort((a, b) => {
+        if (a.due == null && b.due == null) return 0;
+        if (a.due == null) return 1;
+        if (b.due == null) return -1;
+        return a.due - b.due;
+      });
+    }
+    return result;
+  }
+
+  // js/storage/lecture-schema.js
+  var KEY_SEPARATOR = "|";
+  function deepClone(value) {
+    if (value == null) return value;
+    return JSON.parse(JSON.stringify(value));
+  }
+  var DEFAULT_LECTURE_STATUS = {
+    state: "pending",
+    completedPasses: 0,
+    lastCompletedAt: null
+  };
+  function lectureKey(blockId, lectureId) {
+    return `${blockId}${KEY_SEPARATOR}${lectureId}`;
+  }
+  function cloneDefaultPassPlan() {
+    return deepClone(DEFAULT_PASS_PLAN);
+  }
+  function cloneDefaultStatus() {
+    return deepClone(DEFAULT_LECTURE_STATUS);
+  }
+  function normalizeLectureRecord(blockId, lecture, now = Date.now()) {
+    if (!lecture || blockId == null || lecture.id == null) return null;
+    const key = lecture.key || lectureKey(blockId, lecture.id);
+    const name = typeof lecture.name === "string" ? lecture.name : "";
+    const weekRaw = lecture.week;
+    let week = null;
+    if (typeof weekRaw === "number" && Number.isFinite(weekRaw)) {
+      week = weekRaw;
+    } else if (typeof weekRaw === "string" && weekRaw.trim()) {
+      const parsed = Number(weekRaw);
+      if (!Number.isNaN(parsed)) week = parsed;
+    }
+    const tags = Array.isArray(lecture.tags) ? lecture.tags.filter((tag) => typeof tag === "string" && tag.trim()).map((tag) => tag.trim()) : [];
+    const passPlan = lecture.passPlan ? normalizePassPlan({ ...cloneDefaultPassPlan(), ...lecture.passPlan }) : normalizePassPlan(cloneDefaultPassPlan());
+    const plannerDefaults = normalizePlannerDefaults(lecture.plannerDefaults || {});
+    const passes = normalizeLecturePasses({
+      plan: passPlan,
+      passes: lecture.passes,
+      plannerDefaults,
+      now
+    });
+    const statusBase = lecture.status ? { ...cloneDefaultStatus(), ...lecture.status } : cloneDefaultStatus();
+    const status = deriveLectureStatus(passes, statusBase);
+    const nextDueAt = calculateNextDue(passes);
+    const createdAt = typeof lecture.createdAt === "number" ? lecture.createdAt : now;
+    const updatedAt = now;
+    return {
+      key,
+      blockId,
+      id: lecture.id,
+      name,
+      week,
+      tags,
+      passes,
+      passPlan,
+      plannerDefaults,
+      status,
+      nextDueAt,
+      createdAt,
+      updatedAt
+    };
+  }
+
   // js/storage/idb.js
   var DB_NAME = "sevenn-db";
-  var DB_VERSION = 4;
+  var DB_VERSION = 5;
   var MEMORY_STORAGE_KEY = "sevenn-memory-db";
   var STORE_KEY_PATHS = {
     items: "id",
@@ -149,7 +547,8 @@ var Sevenn = (() => {
     exams: "id",
     settings: "id",
     exam_sessions: "examId",
-    study_sessions: "mode"
+    study_sessions: "mode",
+    lectures: "key"
   };
   var enqueue = typeof queueMicrotask === "function" ? queueMicrotask.bind(globalThis) : ((cb) => Promise.resolve().then(cb));
   function clone(value) {
@@ -276,6 +675,17 @@ var Sevenn = (() => {
             return new MemoryIndex(this, (item) => item.weeks || [], true);
           case "by_favorite":
             return new MemoryIndex(this, (item) => !!item.favorite);
+          default:
+            break;
+        }
+      } else if (this.name === "lectures") {
+        switch (name) {
+          case "by_block":
+            return new MemoryIndex(this, (item) => item.blockId || null);
+          case "by_tags":
+            return new MemoryIndex(this, (item) => item.tags || [], true);
+          case "by_nextDue":
+            return new MemoryIndex(this, (item) => item.nextDueAt ?? null);
           default:
             break;
         }
@@ -444,8 +854,9 @@ var Sevenn = (() => {
         clearTimeout(timer);
         resolve(fallbackToMemory("IndexedDB failed to open, using in-memory storage.", req.error));
       };
-      req.onupgradeneeded = () => {
+      req.onupgradeneeded = (event) => {
         const db = req.result;
+        const tx = req.transaction;
         if (!db.objectStoreNames.contains("items")) {
           const items = db.createObjectStore("items", { keyPath: "id" });
           items.createIndex("by_kind", "kind");
@@ -476,6 +887,78 @@ var Sevenn = (() => {
           const sessions = db.createObjectStore("study_sessions", { keyPath: "mode" });
           sessions.createIndex("by_updatedAt", "updatedAt");
         }
+        let lecturesStore = null;
+        if (!db.objectStoreNames.contains("lectures")) {
+          lecturesStore = db.createObjectStore("lectures", { keyPath: "key" });
+          lecturesStore.createIndex("by_block", "blockId");
+          lecturesStore.createIndex("by_tags", "tags", { multiEntry: true });
+          lecturesStore.createIndex("by_nextDue", "nextDueAt");
+        } else if (tx) {
+          try {
+            lecturesStore = tx.objectStore("lectures");
+            if (lecturesStore) {
+              const indexNames = Array.from(lecturesStore.indexNames || []);
+              if (!indexNames.includes("by_block")) {
+                lecturesStore.createIndex("by_block", "blockId");
+              }
+              if (!indexNames.includes("by_tags")) {
+                lecturesStore.createIndex("by_tags", "tags", { multiEntry: true });
+              }
+              if (!indexNames.includes("by_nextDue")) {
+                lecturesStore.createIndex("by_nextDue", "nextDueAt");
+              }
+            }
+          } catch (err) {
+            console.warn("Failed to ensure lecture indexes", err);
+          }
+        }
+        if (tx && lecturesStore && event.oldVersion < 5) {
+          try {
+            const blocksStore = tx.objectStore("blocks");
+            if (blocksStore && typeof blocksStore.getAll === "function") {
+              const readReq = blocksStore.getAll();
+              readReq.onsuccess = () => {
+                const blocks = Array.isArray(readReq.result) ? readReq.result : [];
+                const now = Date.now();
+                for (const block of blocks) {
+                  const originalLectures = Array.isArray(block?.lectures) ? block.lectures : [];
+                  const hadLecturesField = Object.prototype.hasOwnProperty.call(block || {}, "lectures");
+                  if (originalLectures.length) {
+                    const sanitized = { ...block };
+                    delete sanitized.lectures;
+                    try {
+                      blocksStore.put(sanitized);
+                    } catch (err) {
+                      console.warn("Failed to persist migrated block", err);
+                    }
+                    for (const lecture of originalLectures) {
+                      const normalized2 = normalizeLectureRecord(block.blockId, lecture, now);
+                      if (!normalized2) continue;
+                      try {
+                        lecturesStore.put(normalized2);
+                      } catch (err) {
+                        console.warn("Failed to migrate lecture", err);
+                      }
+                    }
+                  } else if (hadLecturesField) {
+                    const sanitized = { ...block };
+                    delete sanitized.lectures;
+                    try {
+                      blocksStore.put(sanitized);
+                    } catch (err) {
+                      console.warn("Failed to clean block lectures field", err);
+                    }
+                  }
+                }
+              };
+              readReq.onerror = () => {
+                console.warn("Failed to read blocks during lecture migration", readReq.error);
+              };
+            }
+          } catch (err) {
+            console.warn("Lecture migration failed", err);
+          }
+        }
       };
       req.onsuccess = () => {
         if (settled) return;
@@ -484,6 +967,121 @@ var Sevenn = (() => {
         resolve(req.result);
       };
     });
+  }
+
+  // js/storage/lectures.js
+  function clone2(value) {
+    if (value == null) return value;
+    return JSON.parse(JSON.stringify(value));
+  }
+  function prom(req) {
+    return new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function lectureStore(mode = "readonly") {
+    const db = await openDB();
+    return db.transaction("lectures", mode).objectStore("lectures");
+  }
+  async function fetchLecturesForBlock(storeRef, blockId) {
+    if (!blockId) return [];
+    try {
+      if (typeof storeRef.index === "function") {
+        const idx = storeRef.index("by_block");
+        if (idx && typeof idx.getAll === "function") {
+          const results = await prom(idx.getAll(blockId));
+          return Array.isArray(results) ? results : [];
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to use lecture block index, falling back to scan", err);
+    }
+    const all = await prom(storeRef.getAll());
+    return (Array.isArray(all) ? all : []).filter((entry) => entry?.blockId === blockId);
+  }
+  function buildNormalizedLecture(blockId, input, existing, now) {
+    const lectureId = input?.id ?? existing?.id;
+    if (blockId == null || lectureId == null) return null;
+    const tags = Array.isArray(input?.tags) ? input.tags : Array.isArray(existing?.tags) ? existing.tags : void 0;
+    const passes = Array.isArray(input?.passes) ? input.passes : Array.isArray(existing?.passes) ? existing.passes : void 0;
+    const passPlan = input?.passPlan ? { ...existing?.passPlan || {}, ...input.passPlan } : existing?.passPlan;
+    const status = input?.status ? { ...existing?.status || {}, ...input.status } : existing?.status;
+    const plannerDefaults = input?.plannerDefaults ? { ...existing?.plannerDefaults || {}, ...input.plannerDefaults } : existing?.plannerDefaults;
+    const nextDueAt = input?.nextDueAt !== void 0 ? input.nextDueAt : existing?.nextDueAt;
+    const composite = {
+      ...existing || {},
+      ...input || {},
+      blockId,
+      id: lectureId,
+      key: lectureKey(blockId, lectureId),
+      tags,
+      passes,
+      passPlan,
+      plannerDefaults,
+      status,
+      nextDueAt
+    };
+    const normalized2 = normalizeLectureRecord(blockId, composite, now);
+    if (existing?.createdAt != null) normalized2.createdAt = existing.createdAt;
+    if (existing && !input?.passPlan && existing.passPlan) normalized2.passPlan = clone2(existing.passPlan);
+    if (existing && !input?.status && existing.status) normalized2.status = clone2(existing.status);
+    if (existing && !Array.isArray(input?.passes) && Array.isArray(existing.passes)) {
+      normalized2.passes = clone2(existing.passes);
+    }
+    if (existing && !Array.isArray(input?.tags) && Array.isArray(existing.tags)) {
+      normalized2.tags = clone2(existing.tags);
+    }
+    if (existing && input?.nextDueAt === void 0 && existing.nextDueAt !== void 0) {
+      normalized2.nextDueAt = existing.nextDueAt ?? null;
+    }
+    return normalized2;
+  }
+  async function listLecturesByBlock(blockId) {
+    try {
+      const store2 = await lectureStore();
+      const rows = await fetchLecturesForBlock(store2, blockId);
+      return rows.map(clone2);
+    } catch (err) {
+      console.warn("listLecturesByBlock failed", err);
+      return [];
+    }
+  }
+  async function listAllLectures() {
+    try {
+      const store2 = await lectureStore();
+      const rows = await prom(store2.getAll());
+      return Array.isArray(rows) ? rows.map(clone2) : [];
+    } catch (err) {
+      console.warn("listAllLectures failed", err);
+      return [];
+    }
+  }
+  async function saveLecture(lecture) {
+    if (!lecture || lecture.blockId == null || lecture.id == null) {
+      throw new Error("Missing lecture identity for save");
+    }
+    const store2 = await lectureStore("readwrite");
+    const key = lectureKey(lecture.blockId, lecture.id);
+    const existing = await prom(store2.get(key));
+    const now = Date.now();
+    const normalized2 = buildNormalizedLecture(lecture.blockId, lecture, existing, now);
+    if (!normalized2) throw new Error("Failed to normalize lecture payload");
+    await prom(store2.put(normalized2));
+    return clone2(normalized2);
+  }
+  async function deleteLectureRecord(blockId, lectureId) {
+    if (blockId == null || lectureId == null) return;
+    const store2 = await lectureStore("readwrite");
+    await prom(store2.delete(lectureKey(blockId, lectureId)));
+  }
+  async function removeLecturesForBlock(blockId) {
+    if (!blockId) return;
+    const store2 = await lectureStore("readwrite");
+    const rows = await fetchLecturesForBlock(store2, blockId);
+    for (const row of rows) {
+      await prom(store2.delete(row.key));
+    }
   }
 
   // js/search.js
@@ -548,7 +1146,7 @@ var Sevenn = (() => {
   }
 
   // js/storage/export.js
-  function prom(req) {
+  function prom2(req) {
     return new Promise((resolve, reject) => {
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -557,10 +1155,10 @@ var Sevenn = (() => {
   async function exportJSON() {
     const db = await openDB();
     const tx = db.transaction(["items", "blocks", "exams", "settings"]);
-    const items = await prom(tx.objectStore("items").getAll());
-    const blocks = await prom(tx.objectStore("blocks").getAll());
-    const exams = await prom(tx.objectStore("exams").getAll());
-    const settingsArr = await prom(tx.objectStore("settings").getAll());
+    const items = await prom2(tx.objectStore("items").getAll());
+    const blocks = await prom2(tx.objectStore("blocks").getAll());
+    const exams = await prom2(tx.objectStore("exams").getAll());
+    const settingsArr = await prom2(tx.objectStore("settings").getAll());
     const settings = settingsArr.find((s) => s.id === "app") || { id: "app", dailyCount: 20, theme: "dark" };
     return { items, blocks, exams, settings };
   }
@@ -573,26 +1171,26 @@ var Sevenn = (() => {
       const exams = tx.objectStore("exams");
       const settings = tx.objectStore("settings");
       await Promise.all([
-        prom(items.clear()),
-        prom(blocks.clear()),
-        prom(exams.clear()),
-        prom(settings.clear())
+        prom2(items.clear()),
+        prom2(blocks.clear()),
+        prom2(exams.clear()),
+        prom2(settings.clear())
       ]);
-      if (dbDump.settings) await prom(settings.put({ ...dbDump.settings, id: "app" }));
+      if (dbDump.settings) await prom2(settings.put({ ...dbDump.settings, id: "app" }));
       if (Array.isArray(dbDump.blocks)) {
         for (const b of dbDump.blocks) {
-          await prom(blocks.put(b));
+          await prom2(blocks.put(b));
         }
       }
       if (Array.isArray(dbDump.items)) {
         for (const it of dbDump.items) {
           it.tokens = buildTokens(it);
-          await prom(items.put(it));
+          await prom2(items.put(it));
         }
       }
       if (Array.isArray(dbDump.exams)) {
         for (const ex of dbDump.exams) {
-          await prom(exams.put(ex));
+          await prom2(exams.put(ex));
         }
       }
       await new Promise((resolve, reject) => {
@@ -779,8 +1377,14 @@ var Sevenn = (() => {
   var MAP_CONFIG_KEY = "map-config";
   var MAP_CONFIG_BACKUP_KEY = "sevenn-map-config-backup";
   var DATA_BACKUP_KEY = "sevenn-backup-snapshot";
-  var DATA_BACKUP_STORES = ["items", "blocks", "exams", "settings", "exam_sessions", "study_sessions"];
-  var DEFAULT_APP_SETTINGS = { id: "app", dailyCount: 20, theme: "dark", reviewSteps: { ...DEFAULT_REVIEW_STEPS } };
+  var DATA_BACKUP_STORES = ["items", "blocks", "exams", "settings", "exam_sessions", "study_sessions", "lectures"];
+  var DEFAULT_APP_SETTINGS = {
+    id: "app",
+    dailyCount: 20,
+    theme: "dark",
+    reviewSteps: { ...DEFAULT_REVIEW_STEPS },
+    plannerDefaults: normalizePlannerDefaults(DEFAULT_PLANNER_DEFAULTS)
+  };
   var backupTimer = null;
   var DEFAULT_MAP_CONFIG = {
     activeTabId: "default",
@@ -797,7 +1401,7 @@ var Sevenn = (() => {
       }
     ]
   };
-  function prom2(req) {
+  function prom3(req) {
     return new Promise((resolve, reject) => {
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -842,7 +1446,7 @@ var Sevenn = (() => {
         try {
           const tx = db.transaction(name, "readonly");
           const s = tx.objectStore(name);
-          const all = await prom2(s.getAll());
+          const all = await prom3(s.getAll());
           snapshot[name] = Array.isArray(all) ? all : [];
         } catch (err) {
           console.warn(`Failed to snapshot store ${name}`, err);
@@ -882,7 +1486,7 @@ var Sevenn = (() => {
         try {
           const tx = db.transaction(name, "readonly");
           const s = tx.objectStore(name);
-          const existing = await prom2(s.getAll());
+          const existing = await prom3(s.getAll());
           return !existing || existing.length === 0;
         } catch (err) {
           console.warn(`Failed to inspect store ${name}`, err);
@@ -897,7 +1501,7 @@ var Sevenn = (() => {
           const tx = db.transaction(name, "readwrite");
           const s = tx.objectStore(name);
           for (const entry of list) {
-            await prom2(s.put(entry));
+            await prom3(s.put(entry));
           }
         } catch (err) {
           console.warn(`Failed to restore store ${name}`, err);
@@ -911,30 +1515,47 @@ var Sevenn = (() => {
     if (!dbPromise) dbPromise = openDB();
     await maybeRestoreFromBackup();
     const s = await store("settings", "readwrite");
-    const existing = await prom2(s.get("app"));
+    const existing = await prom3(s.get("app"));
     if (!existing) {
-      await prom2(s.put(DEFAULT_APP_SETTINGS));
+      await prom3(s.put(DEFAULT_APP_SETTINGS));
     }
     scheduleBackup();
   }
   async function getSettings() {
     const s = await store("settings");
-    const settings = await prom2(s.get("app"));
+    const settings = await prom3(s.get("app"));
     if (!settings) return { ...DEFAULT_APP_SETTINGS };
     const merged = { ...DEFAULT_APP_SETTINGS, ...settings };
     merged.reviewSteps = normalizeReviewSteps(settings.reviewSteps || merged.reviewSteps);
+    merged.plannerDefaults = normalizePlannerDefaults(settings.plannerDefaults || merged.plannerDefaults);
     return merged;
   }
   async function saveSettings(patch) {
     const s = await store("settings", "readwrite");
-    const current = await prom2(s.get("app")) || { ...DEFAULT_APP_SETTINGS };
+    const current = await prom3(s.get("app")) || { ...DEFAULT_APP_SETTINGS };
     const mergedSteps = normalizeReviewSteps({
       ...DEFAULT_APP_SETTINGS.reviewSteps,
       ...current.reviewSteps || {},
       ...patch.reviewSteps || {}
     });
-    const next = { ...current, ...patch, id: "app", reviewSteps: mergedSteps };
-    await prom2(s.put(next));
+    const basePlanner = current.plannerDefaults || DEFAULT_APP_SETTINGS.plannerDefaults;
+    const patchPlanner = patch?.plannerDefaults || {};
+    const mergedPlannerDefaults = normalizePlannerDefaults({
+      anchorOffsets: {
+        ...DEFAULT_APP_SETTINGS.plannerDefaults?.anchorOffsets || {},
+        ...basePlanner?.anchorOffsets || {},
+        ...patchPlanner.anchorOffsets || {}
+      },
+      passes: Array.isArray(patchPlanner.passes) && patchPlanner.passes.length ? patchPlanner.passes : basePlanner?.passes || DEFAULT_APP_SETTINGS.plannerDefaults?.passes
+    });
+    const next = {
+      ...current,
+      ...patch,
+      id: "app",
+      reviewSteps: mergedSteps,
+      plannerDefaults: mergedPlannerDefaults
+    };
+    await prom3(s.put(next));
     scheduleBackup();
   }
   function cloneConfig(config) {
@@ -943,7 +1564,7 @@ var Sevenn = (() => {
   async function getMapConfig() {
     try {
       const s = await store("settings", "readwrite");
-      const existing = await prom2(s.get(MAP_CONFIG_KEY));
+      const existing = await prom3(s.get(MAP_CONFIG_KEY));
       if (existing && existing.config) {
         const config = cloneConfig(existing.config);
         writeMapConfigBackup(config);
@@ -952,13 +1573,13 @@ var Sevenn = (() => {
       const backup = readMapConfigBackup();
       if (backup) {
         const payload = cloneConfig(backup);
-        await prom2(s.put({ id: MAP_CONFIG_KEY, config: payload }));
+        await prom3(s.put({ id: MAP_CONFIG_KEY, config: payload }));
         writeMapConfigBackup(payload);
         scheduleBackup();
         return payload;
       }
       const fallback = cloneConfig(DEFAULT_MAP_CONFIG);
-      await prom2(s.put({ id: MAP_CONFIG_KEY, config: fallback }));
+      await prom3(s.put({ id: MAP_CONFIG_KEY, config: fallback }));
       writeMapConfigBackup(fallback);
       scheduleBackup();
       return fallback;
@@ -974,34 +1595,67 @@ var Sevenn = (() => {
   async function saveMapConfig(config) {
     const payload = config ? cloneConfig(config) : cloneConfig(DEFAULT_MAP_CONFIG);
     const s = await store("settings", "readwrite");
-    await prom2(s.put({ id: MAP_CONFIG_KEY, config: payload }));
+    await prom3(s.put({ id: MAP_CONFIG_KEY, config: payload }));
     writeMapConfigBackup(payload);
     scheduleBackup();
   }
   async function listBlocks() {
     try {
-      const b = await store("blocks");
-      const all = await prom2(b.getAll());
-      return all.sort((a, b2) => {
+      const lecturePromise = listAllLectures();
+      const blockStore = await store("blocks");
+      const all = await prom3(blockStore.getAll());
+      const lectures = await lecturePromise;
+      const blocks = (all || []).map((block) => {
+        if (!block || typeof block !== "object") return block;
+        const { lectures: _ignored, ...rest } = block;
+        return { ...rest };
+      }).sort((a, b) => {
         const ao = a.order ?? a.createdAt;
-        const bo = b2.order ?? b2.createdAt;
+        const bo = b.order ?? b.createdAt;
         return bo - ao;
       });
+      const lectureIndex = {};
+      for (const lecture of lectures || []) {
+        if (!lecture || lecture.blockId == null || lecture.id == null) continue;
+        const blockId = lecture.blockId;
+        if (!lectureIndex[blockId]) lectureIndex[blockId] = {};
+        lectureIndex[blockId][lecture.id] = { ...lecture };
+      }
+      return { blocks, lectureIndex };
     } catch (err) {
       console.warn("listBlocks failed", err);
-      return [];
+      return { blocks: [], lectureIndex: {} };
     }
   }
   async function upsertBlock(def) {
     const b = await store("blocks", "readwrite");
-    const existing = await prom2(b.get(def.blockId));
+    const existing = await prom3(b.get(def.blockId));
+    const existingLectures = await listLecturesByBlock(def.blockId);
     const now = Date.now();
-    let lectures = def.lectures || existing?.lectures || [];
+    const incomingLectures = Array.isArray(def.lectures) ? def.lectures.map((lecture) => ({
+      ...lecture,
+      blockId: def.blockId
+    })) : existingLectures.map((lecture) => ({
+      blockId: lecture.blockId,
+      id: lecture.id,
+      name: lecture.name,
+      week: lecture.week,
+      tags: Array.isArray(lecture.tags) ? lecture.tags : []
+    }));
+    const removedLectureIds = [];
+    let prunedLectures = incomingLectures;
     if (existing && typeof def.weeks === "number" && def.weeks < existing.weeks) {
       const maxWeek = def.weeks;
-      lectures = lectures.filter((l) => l.week <= maxWeek);
+      prunedLectures = incomingLectures.filter((lecture) => {
+        const week = lecture?.week;
+        const keep = week == null || week <= maxWeek;
+        if (!keep && lecture?.id != null) {
+          removedLectureIds.push(lecture.id);
+        }
+        return keep;
+      });
       const i = await store("items", "readwrite");
-      const all = await prom2(i.getAll());
+      const all = await prom3(i.getAll());
       for (const it of all) {
         let changed = false;
         if (it.lectures) {
@@ -1017,26 +1671,75 @@ var Sevenn = (() => {
         if (changed) {
           it.tokens = buildTokens(it);
           it.searchMeta = buildSearchMeta(it);
-          await prom2(i.put(it));
+          await prom3(i.put(it));
         }
       }
     }
     const next = {
       ...def,
-      lectures,
       color: def.color || existing?.color || null,
       order: def.order || existing?.order || now,
       createdAt: existing?.createdAt || now,
       updatedAt: now
     };
-    await prom2(b.put(next));
+    delete next.lectures;
+    await prom3(b.put(next));
+    const incomingKeySet = new Set(
+      prunedLectures.filter((lecture) => lecture?.id != null).map((lecture) => lectureKey(def.blockId, lecture.id))
+    );
+    for (const lecture of existingLectures) {
+      const key = lecture?.key || lectureKey(lecture.blockId, lecture.id);
+      if (!incomingKeySet.has(key) && lecture?.id != null) {
+        removedLectureIds.push(lecture.id);
+      }
+    }
+    for (const lecture of prunedLectures) {
+      if (lecture?.id == null) continue;
+      await saveLecture({
+        blockId: def.blockId,
+        id: lecture.id,
+        name: lecture.name,
+        week: lecture.week,
+        tags: Array.isArray(lecture.tags) ? lecture.tags : void 0,
+        passes: Array.isArray(lecture.passes) ? lecture.passes : void 0,
+        passPlan: lecture.passPlan,
+        status: lecture.status,
+        nextDueAt: lecture.nextDueAt
+      });
+    }
+    const uniqueRemoved = Array.from(new Set(removedLectureIds.filter((id) => id != null)));
+    for (const lectureId of uniqueRemoved) {
+      await deleteLectureRecord(def.blockId, lectureId);
+    }
+    if (uniqueRemoved.length) {
+      await removeLectureReferencesFromItems(def.blockId, uniqueRemoved);
+    }
     scheduleBackup();
+  }
+  async function removeLectureReferencesFromItems(blockId, lectureIds) {
+    if (!lectureIds.length) return;
+    const i = await store("items", "readwrite");
+    const all = await prom3(i.getAll());
+    for (const it of all) {
+      const before = it.lectures?.length || 0;
+      if (!before) continue;
+      it.lectures = it.lectures.filter((l) => !(l.blockId === blockId && lectureIds.includes(l.id)));
+      if (it.lectures.length !== before) {
+        it.blocks = it.blocks?.filter((bid) => bid !== blockId || it.lectures.some((l) => l.blockId === bid));
+        const validWeeks = new Set((it.lectures || []).map((l) => l.week));
+        it.weeks = Array.from(validWeeks);
+        it.tokens = buildTokens(it);
+        it.searchMeta = buildSearchMeta(it);
+        await prom3(i.put(it));
+      }
+    }
   }
   async function deleteBlock(blockId) {
     const b = await store("blocks", "readwrite");
-    await prom2(b.delete(blockId));
+    await prom3(b.delete(blockId));
+    await removeLecturesForBlock(blockId);
     const i = await store("items", "readwrite");
-    const all = await prom2(i.getAll());
+    const all = await prom3(i.getAll());
     for (const it of all) {
       const beforeBlocks = it.blocks?.length || 0;
       const beforeLects = it.lectures?.length || 0;
@@ -1050,71 +1753,21 @@ var Sevenn = (() => {
         if ((it.blocks?.length || 0) !== beforeBlocks || (it.lectures?.length || 0) !== beforeLects) {
           it.tokens = buildTokens(it);
           it.searchMeta = buildSearchMeta(it);
-          await prom2(i.put(it));
+          await prom3(i.put(it));
         }
       }
     }
     scheduleBackup();
   }
   async function deleteLecture(blockId, lectureId) {
-    const b = await store("blocks", "readwrite");
-    const blk = await prom2(b.get(blockId));
-    if (blk) {
-      blk.lectures = (blk.lectures || []).filter((l) => l.id !== lectureId);
-      await prom2(b.put(blk));
-    }
-    const i = await store("items", "readwrite");
-    const all = await prom2(i.getAll());
-    for (const it of all) {
-      const before = it.lectures?.length || 0;
-      if (before) {
-        it.lectures = it.lectures.filter((l) => !(l.blockId === blockId && l.id === lectureId));
-        if (it.lectures.length !== before) {
-          it.blocks = it.blocks?.filter((bid) => bid !== blockId || it.lectures.some((l) => l.blockId === bid));
-          const validWeeks = new Set((it.lectures || []).map((l) => l.week));
-          it.weeks = Array.from(validWeeks);
-          it.tokens = buildTokens(it);
-          it.searchMeta = buildSearchMeta(it);
-          await prom2(i.put(it));
-        }
-      }
-    }
-    scheduleBackup();
-  }
-  async function updateLecture(blockId, lecture) {
-    const b = await store("blocks", "readwrite");
-    const blk = await prom2(b.get(blockId));
-    if (blk) {
-      blk.lectures = (blk.lectures || []).map((l) => l.id === lecture.id ? lecture : l);
-      await prom2(b.put(blk));
-    }
-    const i = await store("items", "readwrite");
-    const all = await prom2(i.getAll());
-    for (const it of all) {
-      let changed = false;
-      if (it.lectures) {
-        it.lectures = it.lectures.map((l) => {
-          if (l.blockId === blockId && l.id === lecture.id) {
-            changed = true;
-            return { blockId, id: lecture.id, name: lecture.name, week: lecture.week };
-          }
-          return l;
-        });
-      }
-      if (changed) {
-        const validWeeks = new Set((it.lectures || []).map((l) => l.week));
-        it.weeks = Array.from(validWeeks);
-        it.tokens = buildTokens(it);
-        it.searchMeta = buildSearchMeta(it);
-        await prom2(i.put(it));
-      }
-    }
+    await deleteLectureRecord(blockId, lectureId);
+    await removeLectureReferencesFromItems(blockId, [lectureId]);
     scheduleBackup();
   }
   async function listItemsByKind(kind) {
     const i = await store("items");
     const idx = i.index("by_kind");
-    return await prom2(idx.getAll(kind));
+    return await prom3(idx.getAll(kind));
   }
   function titleOf(item) {
     return item.name || item.concept || "";
@@ -1148,7 +1801,7 @@ var Sevenn = (() => {
     if (typeof storeRef.index !== "function") return null;
     const idx = storeRef.index(indexName);
     if (!idx || typeof idx.getAllKeys !== "function") return null;
-    const keys = await prom2(idx.getAllKeys(value));
+    const keys = await prom3(idx.getAllKeys(value));
     return new Set(keys);
   }
   async function keysForKinds(storeRef, kinds) {
@@ -1159,9 +1812,9 @@ var Sevenn = (() => {
       if (!kind) continue;
       let keys = [];
       if (idx && typeof idx.getAllKeys === "function") {
-        keys = await prom2(idx.getAllKeys(kind));
+        keys = await prom3(idx.getAllKeys(kind));
       } else if (idx && typeof idx.getAll === "function") {
-        const values = await prom2(idx.getAll(kind));
+        const values = await prom3(idx.getAll(kind));
         keys = values.map((v) => v?.id).filter(Boolean);
       }
       for (const key of keys) {
@@ -1190,7 +1843,7 @@ var Sevenn = (() => {
     const results = [];
     for (let i = 0; i < filteredKeys.length; i += RESULT_BATCH_SIZE) {
       const chunk = filteredKeys.slice(i, i + RESULT_BATCH_SIZE);
-      const fetched = await Promise.all(chunk.map((id) => prom2(itemsStore.get(id))));
+      const fetched = await Promise.all(chunk.map((id) => prom3(itemsStore.get(id))));
       for (const item of fetched) {
         if (!item) continue;
         if (normalized2.block === "__unlabeled" && Array.isArray(item.blocks) && item.blocks.length) continue;
@@ -1231,11 +1884,11 @@ var Sevenn = (() => {
   }
   async function getItem(id) {
     const i = await store("items");
-    return await prom2(i.get(id));
+    return await prom3(i.get(id));
   }
   async function upsertItem(item) {
     const i = await store("items", "readwrite");
-    const existing = await prom2(i.get(item.id));
+    const existing = await prom3(i.get(item.id));
     const now = Date.now();
     const next = cleanItem({
       ...item,
@@ -1245,41 +1898,41 @@ var Sevenn = (() => {
     next.tokens = buildTokens(next);
     next.searchMeta = buildSearchMeta(next);
     for (const link of next.links) {
-      const other = await prom2(i.get(link.id));
+      const other = await prom3(i.get(link.id));
       if (other) {
         other.links = other.links || [];
         if (!other.links.find((l) => l.id === next.id)) {
           other.links.push({ id: next.id, type: link.type });
           other.tokens = buildTokens(other);
           other.searchMeta = buildSearchMeta(other);
-          await prom2(i.put(other));
+          await prom3(i.put(other));
         }
       }
     }
-    await prom2(i.put(next));
+    await prom3(i.put(next));
     scheduleBackup();
   }
   async function deleteItem(id) {
     const i = await store("items", "readwrite");
-    const all = await prom2(i.getAll());
+    const all = await prom3(i.getAll());
     for (const it of all) {
       if (it.links?.some((l) => l.id === id)) {
         it.links = it.links.filter((l) => l.id !== id);
         it.tokens = buildTokens(it);
         it.searchMeta = buildSearchMeta(it);
-        await prom2(i.put(it));
+        await prom3(i.put(it));
       }
     }
-    await prom2(i.delete(id));
+    await prom3(i.delete(id));
     scheduleBackup();
   }
   async function listExams() {
     const e = await store("exams");
-    return await prom2(e.getAll());
+    return await prom3(e.getAll());
   }
   async function upsertExam(exam) {
     const e = await store("exams", "readwrite");
-    const existing = await prom2(e.get(exam.id));
+    const existing = await prom3(e.get(exam.id));
     const now = Date.now();
     const next = {
       ...exam,
@@ -1287,37 +1940,37 @@ var Sevenn = (() => {
       updatedAt: now,
       results: exam.results || existing?.results || []
     };
-    await prom2(e.put(next));
+    await prom3(e.put(next));
     scheduleBackup();
   }
   async function deleteExam(id) {
     const e = await store("exams", "readwrite");
-    await prom2(e.delete(id));
+    await prom3(e.delete(id));
     scheduleBackup();
   }
   async function listExamSessions() {
     const s = await store("exam_sessions");
-    return await prom2(s.getAll());
+    return await prom3(s.getAll());
   }
   async function loadExamSession(examId) {
     const s = await store("exam_sessions");
-    return await prom2(s.get(examId));
+    return await prom3(s.get(examId));
   }
   async function saveExamSessionProgress(progress) {
     const s = await store("exam_sessions", "readwrite");
     const now = Date.now();
-    await prom2(s.put({ ...progress, updatedAt: now }));
+    await prom3(s.put({ ...progress, updatedAt: now }));
     scheduleBackup();
   }
   async function deleteExamSessionProgress(examId) {
     const s = await store("exam_sessions", "readwrite");
-    await prom2(s.delete(examId));
+    await prom3(s.delete(examId));
     scheduleBackup();
   }
   async function listStudySessions() {
     try {
       const s = await store("study_sessions");
-      const list = await prom2(s.getAll());
+      const list = await prom3(s.getAll());
       return Array.isArray(list) ? list : [];
     } catch (err) {
       console.warn("Failed to list study sessions", err);
@@ -1328,19 +1981,91 @@ var Sevenn = (() => {
     if (!record || !record.mode) throw new Error("Study session record requires a mode");
     const s = await store("study_sessions", "readwrite");
     const now = Date.now();
-    await prom2(s.put({ ...record, updatedAt: now }));
+    await prom3(s.put({ ...record, updatedAt: now }));
     scheduleBackup();
   }
   async function deleteStudySessionRecord(mode) {
     if (!mode) return;
     const s = await store("study_sessions", "readwrite");
-    await prom2(s.delete(mode));
+    await prom3(s.delete(mode));
     scheduleBackup();
   }
   async function clearAllStudySessionRecords() {
     const s = await store("study_sessions", "readwrite");
-    await prom2(s.clear());
+    await prom3(s.clear());
     scheduleBackup();
+  }
+
+  // js/storage/block-catalog.js
+  var cache = null;
+  var pending = null;
+  function cloneBlock(block) {
+    if (!block || typeof block !== "object") return block;
+    return { ...block };
+  }
+  function cloneLecture(lecture) {
+    if (!lecture || typeof lecture !== "object") return lecture;
+    return { ...lecture };
+  }
+  function cloneLectureIndex(index) {
+    const copy = {};
+    for (const [blockId, lectures] of Object.entries(index || {})) {
+      const next = {};
+      for (const [lectureId, lecture] of Object.entries(lectures || {})) {
+        next[lectureId] = cloneLecture(lecture);
+      }
+      copy[blockId] = next;
+    }
+    return copy;
+  }
+  function sortLectures(a, b) {
+    const aw = a?.week ?? 0;
+    const bw = b?.week ?? 0;
+    if (aw !== bw) return aw - bw;
+    const an = (a?.name || "").toLowerCase();
+    const bn = (b?.name || "").toLowerCase();
+    if (an !== bn) return an.localeCompare(bn);
+    const ai = a?.id ?? 0;
+    const bi = b?.id ?? 0;
+    return ai - bi;
+  }
+  function buildLectureLists(index) {
+    const map = {};
+    for (const [blockId, lectures] of Object.entries(index || {})) {
+      const list = Object.values(lectures || {}).map(cloneLecture);
+      list.sort(sortLectures);
+      map[blockId] = list;
+    }
+    return map;
+  }
+  function snapshotCatalog(source) {
+    return {
+      blocks: (source?.blocks || []).map(cloneBlock),
+      lectureIndex: cloneLectureIndex(source?.lectureIndex || {}),
+      lectureLists: Object.fromEntries(
+        Object.entries(source?.lectureLists || {}).map(([blockId, list]) => [
+          blockId,
+          list.map(cloneLecture)
+        ])
+      )
+    };
+  }
+  async function loadBlockCatalog(options = {}) {
+    if (!pending || options.force) {
+      pending = (async () => {
+        const { blocks, lectureIndex } = await listBlocks();
+        const normalizedBlocks = (blocks || []).map(cloneBlock);
+        const normalizedIndex = cloneLectureIndex(lectureIndex || {});
+        const lectureLists = buildLectureLists(normalizedIndex);
+        cache = { blocks: normalizedBlocks, lectureIndex: normalizedIndex, lectureLists };
+        return snapshotCatalog(cache);
+      })();
+    }
+    return pending;
+  }
+  function invalidateBlockCatalog() {
+    cache = null;
+    pending = null;
   }
 
   // js/ui/components/sections.js
@@ -1557,17 +2282,6 @@ var Sevenn = (() => {
   }
 
   // js/ui/settings.js
-  var collapsedLectureBlocks = /* @__PURE__ */ new Set();
-  function isLectureListCollapsed(blockId) {
-    return collapsedLectureBlocks.has(blockId);
-  }
-  function toggleLectureListCollapse(blockId) {
-    if (collapsedLectureBlocks.has(blockId)) {
-      collapsedLectureBlocks.delete(blockId);
-    } else {
-      collapsedLectureBlocks.add(blockId);
-    }
-  }
   async function renderSettings(root) {
     root.innerHTML = "";
     const settings = await getSettings();
@@ -1628,29 +2342,23 @@ var Sevenn = (() => {
     const list = document.createElement("div");
     list.className = "block-list";
     blocksCard.appendChild(list);
-    const blocks = await listBlocks();
+    const catalog = await loadBlockCatalog();
+    const blocks = catalog.blocks || [];
     blocks.forEach((b, i) => {
       const wrap = document.createElement("div");
       wrap.className = "block";
-      const lectures = (b.lectures || []).slice().sort((a, b2) => b2.week - a.week || b2.id - a.id);
-      const lecturesCollapsed = isLectureListCollapsed(b.blockId);
       const title = document.createElement("h3");
       title.textContent = `${b.blockId} \u2013 ${b.title}`;
       wrap.appendChild(title);
       const wkInfo = document.createElement("div");
       wkInfo.textContent = `Weeks: ${b.weeks}`;
       wrap.appendChild(wkInfo);
-      if (lectures.length || lecturesCollapsed) {
-        const toggleLecturesBtn = document.createElement("button");
-        toggleLecturesBtn.type = "button";
-        toggleLecturesBtn.className = "btn secondary settings-lecture-toggle";
-        toggleLecturesBtn.textContent = lecturesCollapsed ? "Show lectures" : "Hide lectures";
-        toggleLecturesBtn.addEventListener("click", async () => {
-          toggleLectureListCollapse(b.blockId);
-          await renderSettings(root);
-        });
-        wrap.appendChild(toggleLecturesBtn);
-      }
+      const lectureList = catalog.lectureLists?.[b.blockId] || [];
+      const lectureCount = Array.isArray(lectureList) ? lectureList.length : 0;
+      const lectureNote = document.createElement("p");
+      lectureNote.className = "settings-lecture-note";
+      lectureNote.textContent = lectureCount ? `${lectureCount} lecture${lectureCount === 1 ? "" : "s"}. Manage lectures from the Lectures tab.` : "No lectures linked yet. Use the Lectures tab to add some.";
+      wrap.appendChild(lectureNote);
       const controls = document.createElement("div");
       controls.className = "row";
       const upBtn = document.createElement("button");
@@ -1664,6 +2372,7 @@ var Sevenn = (() => {
         other.order = tmp;
         await upsertBlock(b);
         await upsertBlock(other);
+        invalidateBlockCatalog();
         await renderSettings(root);
       });
       controls.appendChild(upBtn);
@@ -1678,6 +2387,7 @@ var Sevenn = (() => {
         other.order = tmp;
         await upsertBlock(b);
         await upsertBlock(other);
+        invalidateBlockCatalog();
         await renderSettings(root);
       });
       controls.appendChild(downBtn);
@@ -1691,6 +2401,7 @@ var Sevenn = (() => {
       del.addEventListener("click", async () => {
         if (await confirmModal("Delete block?")) {
           await deleteBlock(b.blockId);
+          invalidateBlockCatalog();
           await renderSettings(root);
         }
       });
@@ -1719,95 +2430,13 @@ var Sevenn = (() => {
         e.preventDefault();
         const updated = { ...b, title: titleInput2.value.trim(), weeks: Number(weeksInput.value), color: colorInput.value };
         await upsertBlock(updated);
+        invalidateBlockCatalog();
         await renderSettings(root);
       });
       wrap.appendChild(editForm);
       edit.addEventListener("click", () => {
         editForm.style.display = editForm.style.display === "none" ? "flex" : "none";
       });
-      const lectureSection = document.createElement("div");
-      lectureSection.className = "settings-lecture-section";
-      lectureSection.hidden = lecturesCollapsed;
-      const lecList = document.createElement("ul");
-      lectures.forEach((l) => {
-        const li = document.createElement("li");
-        li.className = "row";
-        const span = document.createElement("span");
-        span.textContent = `${l.id}: ${l.name} (W${l.week})`;
-        li.appendChild(span);
-        const editLec = document.createElement("button");
-        editLec.className = "btn";
-        editLec.textContent = "Edit";
-        const delLec = document.createElement("button");
-        delLec.className = "btn";
-        delLec.textContent = "Delete";
-        editLec.addEventListener("click", () => {
-          li.innerHTML = "";
-          li.className = "row";
-          const nameInput2 = document.createElement("input");
-          nameInput2.className = "input";
-          nameInput2.value = l.name;
-          const weekInput2 = document.createElement("input");
-          weekInput2.className = "input";
-          weekInput2.type = "number";
-          weekInput2.value = l.week;
-          const saveBtn2 = document.createElement("button");
-          saveBtn2.className = "btn";
-          saveBtn2.textContent = "Save";
-          const cancelBtn = document.createElement("button");
-          cancelBtn.className = "btn";
-          cancelBtn.textContent = "Cancel";
-          li.append(nameInput2, weekInput2, saveBtn2, cancelBtn);
-          saveBtn2.addEventListener("click", async () => {
-            const name = nameInput2.value.trim();
-            const week = Number(weekInput2.value);
-            if (!name || !week || week < 1 || week > b.weeks) return;
-            await updateLecture(b.blockId, { id: l.id, name, week });
-            await renderSettings(root);
-          });
-          cancelBtn.addEventListener("click", async () => {
-            await renderSettings(root);
-          });
-        });
-        delLec.addEventListener("click", async () => {
-          if (await confirmModal("Delete lecture?")) {
-            await deleteLecture(b.blockId, l.id);
-            await renderSettings(root);
-          }
-        });
-        li.append(editLec, delLec);
-        lecList.appendChild(li);
-      });
-      lectureSection.appendChild(lecList);
-      const lecForm = document.createElement("form");
-      lecForm.className = "row";
-      const idInput = document.createElement("input");
-      idInput.className = "input";
-      idInput.placeholder = "id";
-      idInput.type = "number";
-      const nameInput = document.createElement("input");
-      nameInput.className = "input";
-      nameInput.placeholder = "name";
-      const weekInput = document.createElement("input");
-      weekInput.className = "input";
-      weekInput.placeholder = "week";
-      weekInput.type = "number";
-      const addBtn = document.createElement("button");
-      addBtn.className = "btn";
-      addBtn.type = "submit";
-      addBtn.textContent = "Add lecture";
-      lecForm.append(idInput, nameInput, weekInput, addBtn);
-      lecForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const lecture = { id: Number(idInput.value), name: nameInput.value.trim(), week: Number(weekInput.value) };
-        if (!lecture.id || !lecture.name || !lecture.week) return;
-        if (lecture.week < 1 || lecture.week > b.weeks) return;
-        const updated = { ...b, lectures: [...b.lectures, lecture] };
-        await upsertBlock(updated);
-        await renderSettings(root);
-      });
-      lectureSection.appendChild(lecForm);
-      wrap.appendChild(lectureSection);
       list.appendChild(wrap);
     });
     const form = document.createElement("form");
@@ -1837,11 +2466,11 @@ var Sevenn = (() => {
         blockId: id.value.trim(),
         title: titleInput.value.trim(),
         weeks: Number(weeks.value),
-        color: color.value,
-        lectures: []
+        color: color.value
       };
       if (!def.blockId || !def.title || !def.weeks) return;
       await upsertBlock(def);
+      invalidateBlockCatalog();
       await renderSettings(root);
     });
     blocksCard.appendChild(form);
@@ -1907,6 +2536,13 @@ var Sevenn = (() => {
   function uid() {
     const g = globalThis;
     return g.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+  }
+  function debounce(fn, delay = 150) {
+    let t;
+    return (...args) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), delay);
+    };
   }
   function setToggleState(element, active, className = "active") {
     if (!element) return;
@@ -2331,9 +2967,9 @@ var Sevenn = (() => {
       const selection = window.getSelection();
       if (!selection) return false;
       selection.removeAllRanges();
-      const clone4 = range.cloneRange();
-      selection.addRange(clone4);
-      savedRange = clone4.cloneRange();
+      const clone5 = range.cloneRange();
+      selection.addRange(clone5);
+      savedRange = clone5.cloneRange();
       return true;
     }
     function runCommand(action, { requireSelection = false } = {}) {
@@ -2915,7 +3551,11 @@ var Sevenn = (() => {
     colorLabel.appendChild(colorInput);
     form.appendChild(colorLabel);
     colorInput.addEventListener("input", markDirty);
-    const blocks = await listBlocks();
+    const catalog = await loadBlockCatalog();
+    const blocks = (catalog.blocks || []).map((block) => ({
+      ...block,
+      lectures: (catalog.lectureLists?.[block.blockId] || []).map((lecture) => ({ ...lecture }))
+    }));
     const blockMap = new Map(blocks.map((b) => [b.blockId, b]));
     const blockSet = new Set(existing?.blocks || []);
     const weekSet = /* @__PURE__ */ new Set();
@@ -3562,7 +4202,7 @@ var Sevenn = (() => {
         items.push(...itemSource);
       }
     }
-    const blocks = await listBlocks();
+    const { blocks } = await loadBlockCatalog();
     const blockTitle = (id) => blocks.find((b) => b.blockId === id)?.title || id;
     const orderMap = new Map(blocks.map((b, i) => [b.blockId, i]));
     const groups = /* @__PURE__ */ new Map();
@@ -3899,7 +4539,7 @@ var Sevenn = (() => {
   async function renderCards(container, items, onChange) {
     container.innerHTML = "";
     container.classList.add("cards-tab");
-    const blockDefs = await listBlocks();
+    const { blocks: blockDefs } = await loadBlockCatalog();
     const blockLookup = new Map(blockDefs.map((def) => [def.blockId, def]));
     const blockOrder = new Map(blockDefs.map((def, idx) => [def.blockId, idx]));
     const itemLookup = new Map(items.map((item) => [item.id, item]));
@@ -3974,15 +4614,15 @@ var Sevenn = (() => {
       }
       return blockBucket.weeks.get(weekKey);
     }
-    function ensureLecture(weekBucket, lectureKey, lectureName) {
-      if (!weekBucket.lectures.has(lectureKey)) {
-        weekBucket.lectures.set(lectureKey, {
-          key: lectureKey,
+    function ensureLecture(weekBucket, lectureKey2, lectureName) {
+      if (!weekBucket.lectures.has(lectureKey2)) {
+        weekBucket.lectures.set(lectureKey2, {
+          key: lectureKey2,
           title: lectureName || "Lecture",
           cards: []
         });
       }
-      return weekBucket.lectures.get(lectureKey);
+      return weekBucket.lectures.get(lectureKey2);
     }
     items.forEach((item) => {
       const lectureRefs = Array.isArray(item.lectures) ? item.lectures : [];
@@ -3993,8 +4633,8 @@ var Sevenn = (() => {
           const lectureKeyParts = [ref.blockId || blockBucket.key];
           if (ref.id != null) lectureKeyParts.push(`lec-${ref.id}`);
           if (ref.name) lectureKeyParts.push(ref.name);
-          const lectureKey = lectureKeyParts.join("::") || `${blockBucket.key}-${titleFromItem(item)}`;
-          const lecture = ensureLecture(weekBucket, lectureKey, ref.name || (ref.id != null ? `Lecture ${ref.id}` : "Lecture"));
+          const lectureKey2 = lectureKeyParts.join("::") || `${blockBucket.key}-${titleFromItem(item)}`;
+          const lecture = ensureLecture(weekBucket, lectureKey2, ref.name || (ref.id != null ? `Lecture ${ref.id}` : "Lecture"));
           if (!lecture.cards.includes(item)) {
             lecture.cards.push(item);
           }
@@ -4724,7 +5364,7 @@ var Sevenn = (() => {
 
   // js/study/study-sessions.js
   var pendingLoad = null;
-  function clone2(value) {
+  function clone3(value) {
     return JSON.parse(JSON.stringify(value ?? null));
   }
   async function hydrateStudySessions(force = false) {
@@ -4760,9 +5400,9 @@ var Sevenn = (() => {
     const entry = {
       mode,
       updatedAt: Date.now(),
-      session: clone2(payload?.session ?? {}),
-      cohort: clone2(payload?.cohort ?? []),
-      metadata: clone2(payload?.metadata ?? {})
+      session: clone3(payload?.session ?? {}),
+      cohort: clone3(payload?.cohort ?? []),
+      metadata: clone3(payload?.metadata ?? {})
     };
     await saveStudySessionRecord(entry);
     setStudySessionEntry(mode, entry);
@@ -4812,6 +5452,19 @@ var Sevenn = (() => {
     Quiz: "quiz",
     Blocks: "blocks"
   };
+  var lectureSource = {};
+  function setLectureSource(map) {
+    lectureSource = {};
+    for (const [blockId, list] of Object.entries(map || {})) {
+      lectureSource[blockId] = Array.isArray(list) ? list.map((lecture) => ({ ...lecture })) : [];
+    }
+  }
+  function lectureListFor(blockId, options = {}) {
+    const list = lectureSource[blockId];
+    if (!Array.isArray(list)) return [];
+    if (options.clone === false) return list;
+    return list.map((lecture) => ({ ...lecture }));
+  }
   function collectReviewCount(items) {
     try {
       return collectDueSections(items, { now: Date.now() }).length;
@@ -4838,8 +5491,17 @@ var Sevenn = (() => {
     drawBuilder(wrap, blocks, redraw);
   }
   async function loadBlocks() {
-    const blocks = await listBlocks();
-    blocks.push({ blockId: "__unlabeled", title: "Unlabeled", weeks: 0, lectures: [] });
+    const catalog = await loadBlockCatalog();
+    const lectureLists = { ...catalog.lectureLists };
+    catalog.blocks.forEach((block) => {
+      if (!Array.isArray(lectureLists[block.blockId])) {
+        lectureLists[block.blockId] = [];
+      }
+    });
+    lectureLists.__unlabeled = [];
+    setLectureSource(lectureLists);
+    const blocks = catalog.blocks.map((block) => ({ ...block }));
+    blocks.push({ blockId: "__unlabeled", title: "Unlabeled", weeks: 0 });
     return blocks;
   }
   function drawBuilder(container, blocks, redraw) {
@@ -4862,7 +5524,7 @@ var Sevenn = (() => {
   }
   function renderBlockPanel(block, rerender) {
     const blockId = block.blockId;
-    const lectures = Array.isArray(block.lectures) ? [...block.lectures] : [];
+    const lectures = lectureListFor(blockId);
     lectures.sort((a, b) => {
       const weekDiff = (a.week ?? 0) - (b.week ?? 0);
       if (weekDiff !== 0) return weekDiff;
@@ -5002,8 +5664,8 @@ var Sevenn = (() => {
   }
   function renderLecture(block, lecture, rerender) {
     const blockId = block.blockId;
-    const lectureKey = lectureKeyFor(blockId, lecture.id);
-    const active = state.builder.lectures.includes(lectureKey);
+    const lectureKey2 = lectureKeyFor(blockId, lecture.id);
+    const active = state.builder.lectures.includes(lectureKey2);
     const pill = createPill(active, lecture.name || `Lecture ${lecture.id}`, () => {
       toggleLecture(block, lecture);
       rerender();
@@ -5176,6 +5838,7 @@ var Sevenn = (() => {
         }
         resetBlockMode();
         setSubtab("Study", "Blocks");
+        setTab("Block Board");
         redraw();
         return;
       }
@@ -5188,6 +5851,7 @@ var Sevenn = (() => {
         setQuizSession({ idx: 0, score: 0, pool: cohort });
       }
       setSubtab("Study", "Builder");
+      setTab("Study");
       redraw();
     });
     resumeBtn.addEventListener("click", async () => {
@@ -5202,6 +5866,7 @@ var Sevenn = (() => {
           setBlockMode(savedEntry.session);
         }
         setSubtab("Study", "Blocks");
+        setTab("Block Board");
         redraw();
         return;
       }
@@ -5211,6 +5876,7 @@ var Sevenn = (() => {
         setQuizSession(savedEntry.session);
       }
       setSubtab("Study", "Builder");
+      setTab("Study");
       redraw();
     });
     actions.appendChild(startBtn);
@@ -5330,8 +5996,9 @@ var Sevenn = (() => {
     const blockId = block.blockId;
     const blockSet = new Set(state.builder.blocks);
     const lectureSet = new Set(state.builder.lectures);
-    if (block.lectures?.length) {
-      (block.lectures || []).forEach((lecture) => {
+    const lectures = lectureListFor(blockId, { clone: false });
+    if (lectures.length) {
+      lectures.forEach((lecture) => {
         lectureSet.add(lectureKeyFor(blockId, lecture.id));
       });
       syncBlockWithLectureSelection(blockSet, lectureSet, block);
@@ -5363,7 +6030,8 @@ var Sevenn = (() => {
     const blockId = block.blockId;
     const lectureSet = new Set(state.builder.lectures);
     const blockSet = new Set(state.builder.blocks);
-    (block.lectures || []).forEach((lecture) => {
+    const lectures = lectureListFor(blockId, { clone: false });
+    lectures.forEach((lecture) => {
       if (lecture.week === week) {
         lectureSet.add(lectureKeyFor(blockId, lecture.id));
       }
@@ -5380,7 +6048,8 @@ var Sevenn = (() => {
     const blockId = block.blockId;
     const lectureSet = new Set(state.builder.lectures);
     const blockSet = new Set(state.builder.blocks);
-    (block.lectures || []).forEach((lecture) => {
+    const lectures = lectureListFor(blockId, { clone: false });
+    lectures.forEach((lecture) => {
       if (lecture.week === week) {
         lectureSet.delete(lectureKeyFor(blockId, lecture.id));
       }
@@ -5504,7 +6173,7 @@ var Sevenn = (() => {
       blockSet.delete(blockId);
       return;
     }
-    const blockLectures = Array.isArray(block.lectures) ? block.lectures : [];
+    const blockLectures = lectureListFor(blockId, { clone: false });
     if (!blockLectures.length) {
       blockSet.add(blockId);
       return;
@@ -5553,6 +6222,550 @@ var Sevenn = (() => {
     return btn;
   }
 
+  // js/ui/components/lectures.js
+  function ensureLectureState() {
+    if (!state.lectures) {
+      setLecturesState({});
+    }
+    return state.lectures;
+  }
+  function collectLectures(catalog) {
+    const lists = catalog?.lectureLists || {};
+    const result = [];
+    for (const list of Object.values(lists)) {
+      if (!Array.isArray(list)) continue;
+      list.forEach((entry) => {
+        if (entry && typeof entry === "object") {
+          result.push({ ...entry });
+        }
+      });
+    }
+    return result;
+  }
+  function buildBlockOrderMap(blocks) {
+    const order = /* @__PURE__ */ new Map();
+    blocks.forEach((block, index) => {
+      if (!block || !block.blockId) return;
+      order.set(block.blockId, index);
+    });
+    return order;
+  }
+  function normalizeWeekValue(value) {
+    if (value == null || value === "") return "";
+    return String(value);
+  }
+  function formatWeekLabel3(week) {
+    if (week == null || week === "") return "\u2014";
+    const num = Number(week);
+    if (!Number.isFinite(num)) return String(week);
+    return num === 0 ? "0" : `Week ${num}`;
+  }
+  function formatOffset(minutes) {
+    if (!Number.isFinite(minutes)) return "0m";
+    const abs = Math.abs(minutes);
+    if (abs < 60) return `${Math.round(minutes)}m`;
+    const hours = minutes / 60;
+    if (Math.abs(hours) < 24) return `${Math.round(hours)}h`;
+    const days = minutes / (60 * 24);
+    if (Math.abs(days) < 7) return `${Math.round(days)}d`;
+    const weeks = minutes / (60 * 24 * 7);
+    if (Math.abs(weeks) < 4) return `${Math.round(weeks)}w`;
+    const months = minutes / (60 * 24 * 30);
+    return `${Math.round(months)}mo`;
+  }
+  function formatPassPlan(plan) {
+    if (!plan || !Array.isArray(plan.schedule) || !plan.schedule.length) {
+      return "No pass plan";
+    }
+    const steps = plan.schedule.slice().sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0)).map((step) => formatOffset(step?.offsetMinutes ?? 0));
+    return `Plan: ${steps.join(", ")}`;
+  }
+  function formatOverdue(due, now) {
+    const diffMs = Math.max(0, now - due);
+    if (diffMs < 60 * 1e3) return "due now";
+    const minutes = Math.round(diffMs / (60 * 1e3));
+    if (minutes < 60) return `${minutes} min overdue`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours} hr overdue`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? "" : "s"} overdue`;
+  }
+  function formatTimeUntil(due, now) {
+    const diffMs = Math.max(0, due - now);
+    if (diffMs < 60 * 1e3) return "due in under a minute";
+    const minutes = Math.round(diffMs / (60 * 1e3));
+    if (minutes < 60) return `due in ${minutes} min`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `due in ${hours} hr`;
+    const days = Math.round(hours / 24);
+    return `due in ${days} day${days === 1 ? "" : "s"}`;
+  }
+  function formatNextDue(nextDueAt, now = Date.now()) {
+    if (nextDueAt == null) return "Not scheduled";
+    if (!Number.isFinite(nextDueAt)) return "\u2014";
+    if (nextDueAt <= now) return formatOverdue(nextDueAt, now);
+    return formatTimeUntil(nextDueAt, now);
+  }
+  function formatPassSummary(lecture) {
+    const total = Array.isArray(lecture?.passes) ? lecture.passes.length : Array.isArray(lecture?.passPlan?.schedule) ? lecture.passPlan.schedule.length : 0;
+    const completed = Array.isArray(lecture?.passes) ? lecture.passes.filter((pass) => Number.isFinite(pass?.completedAt)).length : lecture?.status?.completedPasses ?? 0;
+    const stateLabel = lecture?.status?.state ? lecture.status.state : "pending";
+    return `${completed}/${total} passes \u2022 ${stateLabel}`;
+  }
+  function renderEmptyState() {
+    const empty = document.createElement("div");
+    empty.className = "lectures-empty";
+    empty.textContent = "No lectures found. Use \u201CAdd Lecture\u201D to create one.";
+    return empty;
+  }
+  function renderLectureRow(lecture, blockMap, onEdit, onDelete) {
+    const row = document.createElement("tr");
+    row.dataset.lectureRow = "true";
+    row.dataset.lectureId = String(lecture.id);
+    row.dataset.blockId = String(lecture.blockId ?? "");
+    const lectureCell = document.createElement("td");
+    lectureCell.className = "lecture-cell";
+    const blockBadge = document.createElement("div");
+    blockBadge.className = "lecture-block";
+    const block = blockMap.get(lecture.blockId);
+    blockBadge.textContent = block?.title || lecture.blockId || "Unknown block";
+    if (block?.color) {
+      blockBadge.style.background = block.color;
+    }
+    lectureCell.appendChild(blockBadge);
+    const name = document.createElement("div");
+    name.className = "lecture-name";
+    name.textContent = lecture.name || `Lecture ${lecture.id}`;
+    lectureCell.appendChild(name);
+    const id = document.createElement("div");
+    id.className = "lecture-id";
+    id.textContent = `ID: ${lecture.id}`;
+    lectureCell.appendChild(id);
+    const tags = Array.isArray(lecture.tags) ? lecture.tags.filter(Boolean) : [];
+    if (tags.length) {
+      const tagList = document.createElement("div");
+      tagList.className = "lecture-tags";
+      tagList.textContent = tags.join(", ");
+      lectureCell.appendChild(tagList);
+    }
+    row.appendChild(lectureCell);
+    const weekCell = document.createElement("td");
+    weekCell.className = "lecture-week";
+    weekCell.textContent = formatWeekLabel3(lecture.week);
+    row.appendChild(weekCell);
+    const passesCell = document.createElement("td");
+    passesCell.className = "lecture-passes";
+    const summary = document.createElement("div");
+    summary.className = "lecture-pass-summary";
+    summary.textContent = formatPassSummary(lecture);
+    passesCell.appendChild(summary);
+    const plan = document.createElement("div");
+    plan.className = "lecture-pass-plan";
+    plan.textContent = formatPassPlan(lecture.passPlan);
+    passesCell.appendChild(plan);
+    const due = document.createElement("div");
+    due.className = "lecture-pass-due";
+    due.textContent = formatNextDue(lecture.nextDueAt);
+    passesCell.appendChild(due);
+    row.appendChild(passesCell);
+    const actions = document.createElement("td");
+    actions.className = "lecture-actions";
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "btn secondary";
+    editBtn.dataset.action = "edit-lecture";
+    editBtn.textContent = "Edit";
+    editBtn.addEventListener("click", () => onEdit(lecture));
+    actions.appendChild(editBtn);
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "btn secondary";
+    deleteBtn.dataset.action = "delete-lecture";
+    deleteBtn.textContent = "Delete";
+    deleteBtn.addEventListener("click", () => onDelete(lecture));
+    actions.appendChild(deleteBtn);
+    row.appendChild(actions);
+    return row;
+  }
+  function renderLectureTable(blocks, lectures, onEdit, onDelete) {
+    const card = document.createElement("section");
+    card.className = "card lectures-card";
+    const table = document.createElement("table");
+    table.className = "table lectures-table";
+    const thead = document.createElement("thead");
+    const headerRow = document.createElement("tr");
+    ["Lecture", "Week", "Passes", "Actions"].forEach((label) => {
+      const th = document.createElement("th");
+      th.textContent = label;
+      headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    const blockMap = new Map(blocks.map((block) => [block.blockId, block]));
+    const orderMap = buildBlockOrderMap(blocks);
+    const now = Date.now();
+    const sorted = lectures.slice().sort((a, b) => {
+      const ao = orderMap.has(a.blockId) ? orderMap.get(a.blockId) : Number.POSITIVE_INFINITY;
+      const bo = orderMap.has(b.blockId) ? orderMap.get(b.blockId) : Number.POSITIVE_INFINITY;
+      if (ao !== bo) return ao - bo;
+      const aw = a.week ?? Number.POSITIVE_INFINITY;
+      const bw = b.week ?? Number.POSITIVE_INFINITY;
+      if (aw !== bw) return aw - bw;
+      const an = (a.name || "").toLowerCase();
+      const bn = (b.name || "").toLowerCase();
+      if (an !== bn) return an.localeCompare(bn);
+      return (a.id ?? 0) - (b.id ?? 0);
+    });
+    if (!sorted.length) {
+      card.appendChild(renderEmptyState());
+      return card;
+    }
+    sorted.forEach((lecture) => {
+      const row = renderLectureRow(
+        { ...lecture, nextDueAt: lecture.nextDueAt ?? null, status: lecture.status, passPlan: lecture.passPlan },
+        blockMap,
+        onEdit,
+        onDelete
+      );
+      const dueEl = row.querySelector(".lecture-pass-due");
+      if (dueEl && lecture.nextDueAt != null) {
+        dueEl.textContent = formatNextDue(lecture.nextDueAt, now);
+      }
+      tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+    card.appendChild(table);
+    return card;
+  }
+  function uniqueStatusValues(lectures) {
+    const set = /* @__PURE__ */ new Set();
+    lectures.forEach((lecture) => {
+      const state2 = lecture?.status?.state;
+      if (state2) set.add(state2);
+    });
+    return Array.from(set);
+  }
+  function uniqueWeeks(lectures) {
+    const set = /* @__PURE__ */ new Set();
+    lectures.forEach((lecture) => {
+      if (lecture.week == null) {
+        set.add("");
+      } else {
+        set.add(String(lecture.week));
+      }
+    });
+    return Array.from(set).filter((value) => value !== "").map((value) => Number(value)).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  }
+  function applyFilters(lectures, filters) {
+    const query = (filters.query || "").trim().toLowerCase();
+    const blockId = (filters.blockId || "").trim();
+    const weekFilter = (filters.week || "").trim();
+    const statusFilter = (filters.status || "").trim();
+    const tagFilter = (filters.tag || "").trim().toLowerCase();
+    return lectures.filter((lecture) => {
+      if (blockId && String(lecture.blockId) !== blockId) return false;
+      if (weekFilter) {
+        const week = lecture.week == null ? "" : String(lecture.week);
+        if (week !== weekFilter) return false;
+      }
+      if (statusFilter && statusFilter !== "all") {
+        const statusState = lecture?.status?.state || "";
+        if (statusState !== statusFilter) return false;
+      }
+      if (query) {
+        const haystacks = [lecture.name, lecture.id != null ? String(lecture.id) : "", lecture.blockId];
+        if (!haystacks.some((value) => String(value || "").toLowerCase().includes(query))) {
+          return false;
+        }
+      }
+      if (tagFilter) {
+        const tags = Array.isArray(lecture.tags) ? lecture.tags : [];
+        if (!tags.some((tag) => String(tag).toLowerCase().includes(tagFilter))) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }
+  function buildToolbar(blocks, lectures, redraw) {
+    const filters = ensureLectureState();
+    const toolbar = document.createElement("div");
+    toolbar.className = "lectures-toolbar";
+    toolbar.setAttribute("role", "toolbar");
+    toolbar.setAttribute("aria-label", "Lecture filters");
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "input lectures-search";
+    search.placeholder = "Search lectures";
+    search.value = filters.query || "";
+    const debouncedSearch = debounce((value) => {
+      setLecturesState({ query: value });
+      redraw();
+    }, 150);
+    search.addEventListener("input", (e) => {
+      debouncedSearch(e.target.value);
+    });
+    toolbar.appendChild(search);
+    const blockSelect = document.createElement("select");
+    blockSelect.className = "input lectures-filter";
+    blockSelect.setAttribute("aria-label", "Filter by block");
+    const allBlocksOption = document.createElement("option");
+    allBlocksOption.value = "";
+    allBlocksOption.textContent = "All blocks";
+    blockSelect.appendChild(allBlocksOption);
+    blocks.forEach((block) => {
+      if (!block || !block.blockId) return;
+      const option = document.createElement("option");
+      option.value = block.blockId;
+      option.textContent = block.title || block.blockId;
+      blockSelect.appendChild(option);
+    });
+    blockSelect.value = filters.blockId || "";
+    blockSelect.addEventListener("change", () => {
+      setLecturesState({ blockId: blockSelect.value });
+      redraw();
+    });
+    toolbar.appendChild(blockSelect);
+    const weekSelect = document.createElement("select");
+    weekSelect.className = "input lectures-filter";
+    weekSelect.setAttribute("aria-label", "Filter by week");
+    const allWeeksOption = document.createElement("option");
+    allWeeksOption.value = "";
+    allWeeksOption.textContent = "All weeks";
+    weekSelect.appendChild(allWeeksOption);
+    uniqueWeeks(lectures).forEach((week) => {
+      const option = document.createElement("option");
+      option.value = String(week);
+      option.textContent = `Week ${week}`;
+      weekSelect.appendChild(option);
+    });
+    weekSelect.value = normalizeWeekValue(filters.week);
+    weekSelect.addEventListener("change", () => {
+      setLecturesState({ week: weekSelect.value });
+      redraw();
+    });
+    toolbar.appendChild(weekSelect);
+    const statuses = uniqueStatusValues(lectures);
+    if (statuses.length) {
+      const statusSelect = document.createElement("select");
+      statusSelect.className = "input lectures-filter";
+      statusSelect.setAttribute("aria-label", "Filter by status");
+      const allStatusOption = document.createElement("option");
+      allStatusOption.value = "all";
+      allStatusOption.textContent = "All statuses";
+      statusSelect.appendChild(allStatusOption);
+      statuses.sort().forEach((status) => {
+        const option = document.createElement("option");
+        option.value = status;
+        option.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        statusSelect.appendChild(option);
+      });
+      statusSelect.value = filters.status || "all";
+      statusSelect.addEventListener("change", () => {
+        setLecturesState({ status: statusSelect.value });
+        redraw();
+      });
+      toolbar.appendChild(statusSelect);
+    }
+    const tagSearch = document.createElement("input");
+    tagSearch.type = "search";
+    tagSearch.className = "input lectures-tag-search";
+    tagSearch.placeholder = "Filter tags";
+    tagSearch.value = filters.tag || "";
+    const debouncedTag = debounce((value) => {
+      setLecturesState({ tag: value });
+      redraw();
+    }, 150);
+    tagSearch.addEventListener("input", (e) => {
+      debouncedTag(e.target.value);
+    });
+    toolbar.appendChild(tagSearch);
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "btn";
+    addBtn.dataset.action = "add-lecture";
+    addBtn.textContent = "Add Lecture";
+    addBtn.disabled = !blocks.length;
+    addBtn.addEventListener("click", () => {
+      const defaultBlockId = filters.blockId || (blocks[0]?.blockId || "");
+      openLectureDialog({
+        mode: "create",
+        blocks,
+        defaults: {
+          blockId: defaultBlockId,
+          id: "",
+          name: "",
+          week: ""
+        },
+        onSubmit: async (payload) => {
+          await saveLecture(payload);
+          await invalidateBlockCatalog();
+          await redraw();
+        }
+      });
+    });
+    toolbar.appendChild(addBtn);
+    return toolbar;
+  }
+  function openLectureDialog(options) {
+    const { mode, blocks, defaults = {}, onSubmit } = options;
+    const overlay = document.createElement("div");
+    overlay.className = "modal lecture-dialog";
+    const card = document.createElement("div");
+    card.className = "card";
+    const title = document.createElement("h2");
+    title.textContent = mode === "edit" ? "Edit lecture" : "Add lecture";
+    card.appendChild(title);
+    const form = document.createElement("form");
+    form.className = "lecture-form";
+    const blockField = document.createElement("label");
+    blockField.textContent = "Block";
+    const blockSelect = document.createElement("select");
+    blockSelect.className = "input";
+    blockSelect.dataset.field = "blockId";
+    blocks.forEach((block) => {
+      if (!block || !block.blockId) return;
+      const option = document.createElement("option");
+      option.value = block.blockId;
+      option.textContent = block.title || block.blockId;
+      blockSelect.appendChild(option);
+    });
+    blockSelect.value = defaults.blockId || (blocks[0]?.blockId || "");
+    if (mode === "edit") {
+      blockSelect.disabled = true;
+    }
+    blockField.appendChild(blockSelect);
+    form.appendChild(blockField);
+    const idField = document.createElement("label");
+    idField.textContent = "Lecture ID";
+    const idInput = document.createElement("input");
+    idInput.type = "number";
+    idInput.required = true;
+    idInput.className = "input";
+    idInput.dataset.field = "id";
+    idInput.value = defaults.id ?? "";
+    if (mode === "edit") {
+      idInput.disabled = true;
+    }
+    idField.appendChild(idInput);
+    form.appendChild(idField);
+    const nameField = document.createElement("label");
+    nameField.textContent = "Name";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.required = true;
+    nameInput.className = "input";
+    nameInput.dataset.field = "name";
+    nameInput.value = defaults.name ?? "";
+    nameField.appendChild(nameInput);
+    form.appendChild(nameField);
+    const weekField = document.createElement("label");
+    weekField.textContent = "Week";
+    const weekInput = document.createElement("input");
+    weekInput.type = "number";
+    weekInput.className = "input";
+    weekInput.dataset.field = "week";
+    if (defaults.week != null && defaults.week !== "") {
+      weekInput.value = defaults.week;
+    }
+    weekField.appendChild(weekInput);
+    form.appendChild(weekField);
+    const actions = document.createElement("div");
+    actions.className = "row lecture-dialog-actions";
+    const submitBtn = document.createElement("button");
+    submitBtn.type = "submit";
+    submitBtn.className = "btn";
+    submitBtn.textContent = mode === "edit" ? "Save changes" : "Add lecture";
+    actions.appendChild(submitBtn);
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "btn secondary";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.addEventListener("click", () => {
+      document.body.removeChild(overlay);
+    });
+    actions.appendChild(cancelBtn);
+    form.appendChild(actions);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const blockId = blockSelect.value.trim();
+      const idRaw = idInput.value;
+      const id = Number(idRaw);
+      const name = nameInput.value.trim();
+      const weekValue = weekInput.value;
+      const week = weekValue === "" ? null : Number(weekValue);
+      if (!blockId || !name || Number.isNaN(id) || weekValue !== "" && Number.isNaN(week)) {
+        return;
+      }
+      const payload = {
+        blockId,
+        id,
+        name,
+        week
+      };
+      await onSubmit(payload);
+      if (document.body.contains(overlay)) {
+        document.body.removeChild(overlay);
+      }
+    });
+    card.appendChild(form);
+    overlay.appendChild(card);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        document.body.removeChild(overlay);
+      }
+    });
+    document.body.appendChild(overlay);
+    nameInput.focus();
+  }
+  function handleEdit(lecture, blocks, redraw) {
+    openLectureDialog({
+      mode: "edit",
+      blocks,
+      defaults: {
+        blockId: lecture.blockId,
+        id: lecture.id,
+        name: lecture.name || "",
+        week: lecture.week ?? ""
+      },
+      onSubmit: async (payload) => {
+        await saveLecture({
+          ...lecture,
+          blockId: lecture.blockId,
+          id: lecture.id,
+          name: payload.name,
+          week: payload.week
+        });
+        await invalidateBlockCatalog();
+        await redraw();
+      }
+    });
+  }
+  function handleDelete(lecture, redraw) {
+    (async () => {
+      if (!await confirmModal("Delete lecture?")) return;
+      await deleteLecture(lecture.blockId, lecture.id);
+      await invalidateBlockCatalog();
+      await redraw();
+    })();
+  }
+  async function renderLectures(root, redraw) {
+    const catalog = await loadBlockCatalog();
+    const filters = ensureLectureState();
+    const blocks = (catalog.blocks || []).map((block) => ({ ...block }));
+    const allLectures = collectLectures(catalog);
+    const filtered = applyFilters(allLectures, filters);
+    root.innerHTML = "";
+    const layout = document.createElement("div");
+    layout.className = "lectures-view";
+    root.appendChild(layout);
+    const toolbar = buildToolbar(blocks, allLectures, redraw);
+    layout.appendChild(toolbar);
+    const table = renderLectureTable(blocks, filtered, (lecture) => handleEdit(lecture, blocks, redraw), (lecture) => handleDelete(lecture, redraw));
+    layout.appendChild(table);
+  }
+
   // js/ui/components/section-utils.js
   function stripHtml2(value) {
     return String(value || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
@@ -5594,13 +6807,11 @@ var Sevenn = (() => {
     good: "",
     easy: ""
   };
-
   function getFlashcardAccent(item) {
     if (item?.color) return item.color;
     if (item?.kind && KIND_ACCENTS[item.kind]) return KIND_ACCENTS[item.kind];
     return "var(--accent)";
   }
-
   function queueStatusLabel(snapshot) {
     if (!snapshot || snapshot.retired) return "Already in review queue";
     const rating = snapshot.lastRating;
@@ -5720,10 +6931,15 @@ var Sevenn = (() => {
     sectionBlocks.forEach(({ key, label }) => {
       const ratingId = ratingKey(item, key);
       const previousRating = active.ratings[ratingId] || null;
-
       const snapshot = getSectionStateSnapshot(item, key);
       const lockedByQueue = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
-
+      const alreadyQueued = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
+      const requiresRating = isReview || !alreadyQueued;
+      sectionRequirements.set(key, requiresRating);
+      if (!requiresRating && !ratedSections.has(key)) {
+        const recorded = snapshot?.lastRating || "queued";
+        ratedSections.set(key, recorded);
+      }
       const sec = document.createElement("div");
       sec.className = "flash-section";
       sec.setAttribute("role", "button");
@@ -5747,22 +6963,18 @@ var Sevenn = (() => {
           const btnValue = btn.dataset.value;
           const isSelected = btnValue === value;
           btn.classList.toggle("is-selected", isSelected);
-
           if (isSelected) {
             ratingButtons.dataset.selected = value;
           } else if (ratingButtons.dataset.selected === btnValue) {
             delete ratingButtons.dataset.selected;
           }
-
           btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
         });
         status.classList.remove("is-error");
         commitSession({ ratings: { ...active.ratings } });
-
       };
       const handleRating = async (value) => {
         if (ratingLocked) return;
-
         const durations = await durationsPromise;
         setToggleState(sec, true, "revealed");
         ratingRow.classList.add("is-saving");
@@ -5798,6 +7010,10 @@ var Sevenn = (() => {
         });
         btn.addEventListener("keydown", (event) => {
           event.stopPropagation();
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            handleRating(value);
+          }
         });
         ratingButtons.appendChild(btn);
       });
@@ -5838,7 +7054,6 @@ var Sevenn = (() => {
       }
       if (previousRating) {
         selectRating(previousRating);
-
       }
       ratingRow.appendChild(ratingButtons);
       ratingRow.appendChild(status);
@@ -5882,8 +7097,8 @@ var Sevenn = (() => {
     next.className = "btn";
     const isLast = active.idx >= items.length - 1;
     next.textContent = isLast ? isReview ? "Finish review" : "Finish" : "Next";
-
     next.addEventListener("click", () => {
+      const pool = Array.isArray(active.pool) ? active.pool : items;
       const idx = active.idx + 1;
       if (idx >= items.length) {
         setFlashSession(null);
@@ -5962,13 +7177,11 @@ var Sevenn = (() => {
         prev.click();
       }
     });
-
     const accent = getFlashcardAccent(item);
     card.style.setProperty("--flash-accent", accent);
     card.style.setProperty("--flash-accent-soft", `color-mix(in srgb, ${accent} 16%, transparent)`);
     card.style.setProperty("--flash-accent-strong", `color-mix(in srgb, ${accent} 32%, rgba(15, 23, 42, 0.08))`);
     card.style.setProperty("--flash-accent-border", `color-mix(in srgb, ${accent} 42%, transparent)`);
-
   }
 
   // js/ui/components/review.js
@@ -5988,7 +7201,7 @@ var Sevenn = (() => {
   function titleOf2(item) {
     return item?.name || item?.concept || "Untitled";
   }
-  function formatOverdue(due, now) {
+  function formatOverdue2(due, now) {
     const diffMs = Math.max(0, now - due);
     if (diffMs < 60 * 1e3) return "due now";
     const minutes = Math.round(diffMs / (60 * 1e3));
@@ -5998,7 +7211,7 @@ var Sevenn = (() => {
     const days = Math.round(hours / 24);
     return `${days} day${days === 1 ? "" : "s"} overdue`;
   }
-  function formatTimeUntil(due, now) {
+  function formatTimeUntil2(due, now) {
     const diffMs = Math.max(0, due - now);
     if (diffMs < 60 * 1e3) return "due in under a minute";
     const minutes = Math.round(diffMs / (60 * 1e3));
@@ -6042,7 +7255,7 @@ var Sevenn = (() => {
   function buildSessionPayload(entries) {
     return entries.map((entry) => ({ item: entry.item, sections: [entry.sectionKey] }));
   }
-  function renderEmptyState(container) {
+  function renderEmptyState2(container) {
     const empty = document.createElement("div");
     empty.className = "review-empty";
     empty.textContent = "No cards are due right now. Nice work!";
@@ -6072,7 +7285,7 @@ var Sevenn = (() => {
     }
     container.appendChild(actionRow);
     if (!dueEntries.length && !upcomingEntries.length) {
-      renderEmptyState(container);
+      renderEmptyState2(container);
       return;
     }
     if (!dueEntries.length) {
@@ -6095,7 +7308,7 @@ var Sevenn = (() => {
         title.textContent = titleOf2(entry.item);
         const meta = document.createElement("div");
         meta.className = "review-entry-meta";
-        meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} \u2022 ${formatOverdue(entry.due, now)}`;
+        meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} \u2022 ${formatOverdue2(entry.due, now)}`;
         item.appendChild(title);
         item.appendChild(meta);
         const launch = () => {
@@ -6137,7 +7350,7 @@ var Sevenn = (() => {
         title.textContent = titleOf2(entry.item);
         const meta = document.createElement("div");
         meta.className = "review-entry-meta";
-        meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} \u2022 ${formatTimeUntil(entry.due, now)}`;
+        meta.textContent = `${getSectionLabel(entry.item, entry.sectionKey)} \u2022 ${formatTimeUntil2(entry.due, now)}`;
         item.appendChild(title);
         item.appendChild(meta);
         const launch = () => {
@@ -6158,7 +7371,7 @@ var Sevenn = (() => {
   }
   function renderGroupView(container, groups, label, start, metaBuilder = null) {
     if (!groups.length) {
-      renderEmptyState(container);
+      renderEmptyState2(container);
       return;
     }
     const list = document.createElement("div");
@@ -6207,7 +7420,7 @@ var Sevenn = (() => {
     const now = Date.now();
     const dueEntries = collectDueSections(cohort, { now });
     const upcomingEntries = collectUpcomingSections(cohort, { now, limit: 50 });
-    const blocks = await listBlocks();
+    const { blocks } = await loadBlockCatalog();
     const blockTitles = ensureBlockTitleMap(blocks);
     const savedEntry = getStudySessionEntry("review");
     const wrapper = document.createElement("section");
@@ -6827,12 +8040,12 @@ var Sevenn = (() => {
   }
   function snapshotBlockState() {
     const source = state.blockMode || {};
-    const clone4 = (value) => JSON.parse(JSON.stringify(value ?? {}));
+    const clone5 = (value) => JSON.parse(JSON.stringify(value ?? {}));
     return {
       section: source.section || "",
-      assignments: clone4(source.assignments),
-      reveal: clone4(source.reveal),
-      order: clone4(source.order)
+      assignments: clone5(source.assignments),
+      reveal: clone5(source.reveal),
+      order: clone5(source.order)
     };
   }
   function renderFooter({ globalRedraw, sectionLabel, filledCount, total }) {
@@ -7159,13 +8372,447 @@ var Sevenn = (() => {
     return card;
   }
 
+  // js/ui/components/block-board.js
+  var loadCatalog = loadBlockCatalog;
+  var fetchLectures = listAllLectures;
+  var persistLecture = saveLecture;
+  var DAY_MS = 24 * 60 * 60 * 1e3;
+  var PASS_COLORS = [
+    "var(--pink)",
+    "var(--blue)",
+    "var(--green)",
+    "var(--orange)",
+    "var(--purple)",
+    "var(--teal)"
+  ];
+  var BOARD_DAYS = 14;
+  function ensureBoardState() {
+    if (!state.blockBoard) {
+      state.blockBoard = { collapsedBlocks: [], showDensity: true, showPomodoro: false };
+    }
+    return state.blockBoard;
+  }
+  function passColor(order = 1) {
+    if (!Number.isFinite(order)) return PASS_COLORS[0];
+    const idx = Math.max(0, Math.floor(order) - 1) % PASS_COLORS.length;
+    return PASS_COLORS[idx];
+  }
+  function startOfDay2(timestamp) {
+    const date = new Date(timestamp);
+    date.setHours(0, 0, 0, 0);
+    return date.getTime();
+  }
+  function formatDay(timestamp) {
+    const date = new Date(Number(timestamp));
+    const formatter = new Intl.DateTimeFormat(void 0, { weekday: "short", month: "short", day: "numeric" });
+    return formatter.format(date);
+  }
+  function formatDueTime(due) {
+    if (!Number.isFinite(due)) return "Unscheduled";
+    const formatter = new Intl.DateTimeFormat(void 0, { hour: "numeric", minute: "2-digit" });
+    return formatter.format(new Date(due));
+  }
+  function collectBoardDays(now = Date.now()) {
+    const today = startOfDay2(now);
+    const start = today - 2 * DAY_MS;
+    return Array.from({ length: BOARD_DAYS }, (_, idx) => start + idx * DAY_MS);
+  }
+  function buildPassElement(entry, onComplete, onDelay) {
+    const chip = document.createElement("div");
+    chip.className = "block-board-pass-chip";
+    chip.style.setProperty("--chip-accent", passColor(entry?.pass?.order));
+    const title = document.createElement("div");
+    title.className = "block-board-pass-title";
+    title.textContent = entry?.lecture?.name || `Lecture ${entry?.lecture?.id}`;
+    chip.appendChild(title);
+    const meta = document.createElement("div");
+    meta.className = "block-board-pass-meta";
+    const label = entry?.pass?.label || `Pass ${entry?.pass?.order ?? ""}`;
+    const dueLabel = formatDueTime(entry?.pass?.due);
+    meta.textContent = `${label} \u2022 ${dueLabel}`;
+    chip.appendChild(meta);
+    const actions = document.createElement("div");
+    actions.className = "block-board-pass-actions";
+    const done = document.createElement("button");
+    done.type = "button";
+    done.className = "btn tertiary";
+    done.textContent = "Mark done";
+    done.addEventListener("click", () => onComplete(entry));
+    actions.appendChild(done);
+    const delay = document.createElement("button");
+    delay.type = "button";
+    delay.className = "btn tertiary";
+    delay.textContent = "+1 day";
+    delay.addEventListener("click", () => onDelay(entry));
+    actions.appendChild(delay);
+    chip.appendChild(actions);
+    return chip;
+  }
+  function applyPassDueUpdate(lecture, passOrder, newDue) {
+    const passes = Array.isArray(lecture?.passes) ? lecture.passes.map((pass) => ({ ...pass })) : [];
+    const index = passes.findIndex((pass) => pass?.order === passOrder);
+    if (index >= 0) {
+      passes[index] = { ...passes[index], due: newDue ?? null };
+      if (!Number.isFinite(newDue)) {
+        passes[index].due = null;
+      }
+      passes[index].completedAt = passes[index].completedAt ?? null;
+      if (passes[index].completedAt && newDue && newDue > passes[index].completedAt) {
+        passes[index].completedAt = null;
+      }
+    }
+    const status = deriveLectureStatus(passes, lecture?.status);
+    const nextDueAt = calculateNextDue(passes);
+    return { ...lecture, passes, status, nextDueAt };
+  }
+  function createDensityBar(dayCount, isToday) {
+    const bar = document.createElement("div");
+    bar.className = "block-board-density-bar";
+    if (isToday) bar.classList.add("today");
+    bar.style.setProperty("--density-value", String(dayCount));
+    const fill = document.createElement("div");
+    fill.className = "block-board-density-fill";
+    fill.style.height = `${Math.min(100, dayCount * 12)}%`;
+    bar.appendChild(fill);
+    return bar;
+  }
+  function createDensityLegend(day, count, isToday) {
+    const slot = document.createElement("div");
+    slot.className = "block-board-density-slot";
+    if (isToday) slot.classList.add("today");
+    const bar = createDensityBar(count, isToday);
+    slot.appendChild(bar);
+    const label = document.createElement("div");
+    label.className = "block-board-density-label";
+    label.textContent = new Date(day).getDate();
+    slot.appendChild(label);
+    return slot;
+  }
+  function createPassCard(entry, onDrag) {
+    const card = document.createElement("div");
+    card.className = "block-board-pass-card";
+    card.draggable = true;
+    card.style.setProperty("--card-accent", passColor(entry?.pass?.order));
+    card.dataset.blockId = entry?.lecture?.blockId ?? "";
+    card.dataset.lectureId = entry?.lecture?.id ?? "";
+    card.dataset.passOrder = entry?.pass?.order ?? "";
+    card.dataset.passDue = Number.isFinite(entry?.pass?.due) ? String(entry.pass.due) : "";
+    card.innerHTML = `<div class="card-title">${entry?.lecture?.name || "Lecture"}</div><div class="card-meta">${entry?.pass?.label || ""}</div>`;
+    card.addEventListener("dragstart", (event) => {
+      if (!event.dataTransfer) return;
+      const payload = {
+        blockId: card.dataset.blockId,
+        lectureId: card.dataset.lectureId,
+        passOrder: Number(card.dataset.passOrder),
+        due: card.dataset.passDue ? Number(card.dataset.passDue) : null
+      };
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("application/json", JSON.stringify(payload));
+      onDrag?.(payload);
+    });
+    return card;
+  }
+  function createDayColumn(dayTs) {
+    const column = document.createElement("div");
+    column.className = "block-board-day-column";
+    column.dataset.day = String(dayTs);
+    const header = document.createElement("div");
+    header.className = "block-board-day-header";
+    header.textContent = formatDay(dayTs);
+    if (startOfDay2(Date.now()) === dayTs) {
+      column.classList.add("today");
+    }
+    column.appendChild(header);
+    const list = document.createElement("div");
+    list.className = "block-board-day-list";
+    column.appendChild(list);
+    column.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      column.classList.add("dropping");
+    });
+    column.addEventListener("dragleave", () => {
+      column.classList.remove("dropping");
+    });
+    return column;
+  }
+  async function updateLectureSchedule(lecture, updateFn) {
+    const updated = updateFn(lecture);
+    await persistLecture(updated);
+  }
+  function renderUrgentQueues(root, queues, handlers) {
+    const wrapper = document.createElement("section");
+    wrapper.className = "block-board-urgent";
+    const config = [
+      { key: "overdue", label: "Overdue" },
+      { key: "today", label: "Today" },
+      { key: "tomorrow", label: "Tomorrow" }
+    ];
+    config.forEach(({ key, label }) => {
+      const group = document.createElement("div");
+      group.className = "block-board-urgent-group";
+      const header = document.createElement("div");
+      header.className = "block-board-urgent-header";
+      header.textContent = label;
+      const pushAll = document.createElement("button");
+      pushAll.type = "button";
+      pushAll.className = "btn tertiary";
+      pushAll.textContent = "Push all +1 day";
+      pushAll.addEventListener("click", () => handlers.onPushAll(key));
+      header.appendChild(pushAll);
+      group.appendChild(header);
+      const list = document.createElement("div");
+      list.className = "block-board-urgent-list";
+      const entries = queues[key] || [];
+      if (!entries.length) {
+        const empty = document.createElement("div");
+        empty.className = "block-board-empty";
+        empty.textContent = "Nothing queued.";
+        list.appendChild(empty);
+      } else {
+        entries.forEach((entry) => {
+          const chip = buildPassElement(entry, handlers.onComplete, handlers.onDelay);
+          list.appendChild(chip);
+        });
+      }
+      group.appendChild(list);
+      wrapper.appendChild(group);
+    });
+    root.appendChild(wrapper);
+  }
+  function renderPomodoroControls(root) {
+    const stateRef = ensureBoardState();
+    const section = document.createElement("section");
+    section.className = "block-board-pomodoro";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "btn secondary";
+    toggle.textContent = stateRef.showPomodoro ? "Hide Pomodoro" : "Show Pomodoro";
+    toggle.addEventListener("click", () => {
+      const next = !ensureBoardState().showPomodoro;
+      setBlockBoardState({ showPomodoro: next });
+      renderPomodoroControls(root);
+    });
+    section.appendChild(toggle);
+    if (stateRef.showPomodoro) {
+      const timer = document.createElement("div");
+      timer.className = "block-board-pomodoro-timer";
+      timer.textContent = "Pomodoro timer ready";
+      section.appendChild(timer);
+    }
+    if (root.firstChild) {
+      root.replaceChild(section, root.firstChild);
+    } else {
+      root.appendChild(section);
+    }
+  }
+  function buildDayAssignments(blockLectures, days) {
+    const assignments = /* @__PURE__ */ new Map();
+    blockLectures.forEach((lecture) => {
+      const passes = Array.isArray(lecture?.passes) ? lecture.passes : [];
+      passes.forEach((pass) => {
+        if (!pass || Number.isFinite(pass.completedAt)) return;
+        const due = Number.isFinite(pass.due) ? startOfDay2(pass.due) : null;
+        const key = due != null ? due : "unscheduled";
+        if (!assignments.has(key)) assignments.set(key, []);
+        assignments.get(key).push({ lecture, pass });
+      });
+    });
+    days.forEach((day) => {
+      if (!assignments.has(day)) assignments.set(day, []);
+    });
+    if (!assignments.has("unscheduled")) assignments.set("unscheduled", []);
+    return assignments;
+  }
+  function attachDropHandlers(column, blockEntries, refresh) {
+    column.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      column.classList.remove("dropping");
+      const payloadRaw = event.dataTransfer?.getData("application/json");
+      if (!payloadRaw) return;
+      let payload;
+      try {
+        payload = JSON.parse(payloadRaw);
+      } catch (err) {
+        return;
+      }
+      const { lectureId, passOrder } = payload || {};
+      const lecture = blockEntries.find((item) => String(item.lecture?.id) === String(lectureId))?.lecture;
+      if (!lecture) return;
+      const dayValue = column.dataset.day;
+      const targetDay = dayValue ? Number(dayValue) : null;
+      const newDue = targetDay != null ? targetDay + (payload?.due != null ? payload.due % DAY_MS : 9 * 60 * 60 * 1e3) : null;
+      await updateLectureSchedule(lecture, (lec) => applyPassDueUpdate(lec, passOrder, newDue));
+      await refresh();
+    });
+  }
+  function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
+    const boardState = ensureBoardState();
+    const wrapper = document.createElement("section");
+    wrapper.className = "block-board-block";
+    wrapper.dataset.blockId = String(block?.blockId ?? "");
+    const header = document.createElement("div");
+    header.className = "block-board-block-header";
+    const title = document.createElement("h2");
+    title.textContent = block?.title || block?.name || `Block ${block?.blockId}`;
+    header.appendChild(title);
+    const controls = document.createElement("div");
+    controls.className = "block-board-block-controls";
+    const collapseBtn = document.createElement("button");
+    collapseBtn.type = "button";
+    collapseBtn.className = "btn secondary";
+    const isCollapsed = boardState.collapsedBlocks.includes(String(block?.blockId));
+    collapseBtn.textContent = isCollapsed ? "Expand" : "Collapse";
+    collapseBtn.addEventListener("click", () => {
+      const current = ensureBoardState();
+      const nextCollapsed = new Set(current.collapsedBlocks.map(String));
+      if (nextCollapsed.has(String(block.blockId))) {
+        nextCollapsed.delete(String(block.blockId));
+      } else {
+        nextCollapsed.add(String(block.blockId));
+      }
+      setBlockBoardState({ collapsedBlocks: Array.from(nextCollapsed) });
+      refresh();
+    });
+    controls.appendChild(collapseBtn);
+    const densityBtn = document.createElement("button");
+    densityBtn.type = "button";
+    densityBtn.className = "btn secondary";
+    densityBtn.textContent = boardState.showDensity ? "Hide density" : "Show density";
+    densityBtn.addEventListener("click", () => {
+      setBlockBoardState({ showDensity: !ensureBoardState().showDensity });
+      refresh();
+    });
+    controls.appendChild(densityBtn);
+    header.appendChild(controls);
+    wrapper.appendChild(header);
+    if (boardState.showDensity) {
+      const density = document.createElement("div");
+      density.className = "block-board-density";
+      const counts = days.map((day) => {
+        const start = day;
+        const end = day + DAY_MS;
+        let total = 0;
+        blockLectures.forEach((lecture) => {
+          const passes = Array.isArray(lecture?.passes) ? lecture.passes : [];
+          passes.forEach((pass) => {
+            if (Number.isFinite(pass?.completedAt)) return;
+            if (!Number.isFinite(pass?.due)) return;
+            if (pass.due >= start && pass.due < end) total += 1;
+          });
+        });
+        return total;
+      });
+      counts.forEach((count, idx) => {
+        const day = days[idx];
+        const slot = createDensityLegend(day, count, startOfDay2(Date.now()) === day);
+        density.appendChild(slot);
+      });
+      wrapper.appendChild(density);
+    }
+    if (isCollapsed) {
+      container.appendChild(wrapper);
+      return;
+    }
+    const assignments = buildDayAssignments(blockLectures, days);
+    const board = document.createElement("div");
+    board.className = "block-board-grid";
+    const unscheduled = document.createElement("div");
+    unscheduled.className = "block-board-unscheduled";
+    const unscheduledHeader = document.createElement("div");
+    unscheduledHeader.className = "block-board-day-header";
+    unscheduledHeader.textContent = "Unscheduled";
+    unscheduled.appendChild(unscheduledHeader);
+    const unscheduledList = document.createElement("div");
+    unscheduledList.className = "block-board-day-list";
+    (assignments.get("unscheduled") || []).forEach((entry) => {
+      const card = createPassCard(entry);
+      unscheduledList.appendChild(card);
+    });
+    unscheduled.appendChild(unscheduledList);
+    board.appendChild(unscheduled);
+    const blockEntries = [];
+    assignments.forEach((entries) => {
+      entries.forEach((entry) => blockEntries.push(entry));
+    });
+    days.forEach((day) => {
+      const column = createDayColumn(day);
+      const entries = assignments.get(day) || [];
+      entries.forEach((entry) => {
+        const card = createPassCard(entry);
+        column.querySelector(".block-board-day-list").appendChild(card);
+      });
+      attachDropHandlers(column, blockEntries, refresh);
+      board.appendChild(column);
+    });
+    wrapper.appendChild(board);
+    container.appendChild(wrapper);
+  }
+  async function renderBlockBoard(container, refresh) {
+    container.innerHTML = "";
+    container.classList.add("block-board-container");
+    const { blocks } = await loadCatalog();
+    const lectures = await fetchLectures();
+    const days = collectBoardDays();
+    const queues = groupLectureQueues(lectures);
+    const urgentHost = document.createElement("div");
+    renderUrgentQueues(urgentHost, queues, {
+      onComplete: async (entry) => {
+        const passOrder = entry?.pass?.order;
+        const lecture = entry?.lecture;
+        if (!lecture || !Number.isFinite(passOrder)) return;
+        const passIndex = Array.isArray(lecture.passes) ? lecture.passes.findIndex((pass) => pass?.order === passOrder) : -1;
+        if (passIndex < 0) return;
+        await updateLectureSchedule(lecture, (lec) => markPassCompleted(lec, passIndex));
+        await renderBlockBoard(container, refresh);
+      },
+      onDelay: async (entry) => {
+        const lecture = entry?.lecture;
+        if (!lecture) return;
+        await updateLectureSchedule(lecture, (lec) => shiftLecturePasses(lec, 24 * 60));
+        await renderBlockBoard(container, refresh);
+      },
+      onPushAll: async (bucket) => {
+        const entries = queues[bucket] || [];
+        const affected = /* @__PURE__ */ new Set();
+        for (const entry of entries) {
+          if (!entry?.lecture) continue;
+          const key = `${entry.lecture.blockId}-${entry.lecture.id}`;
+          if (affected.has(key)) continue;
+          affected.add(key);
+          await updateLectureSchedule(entry.lecture, (lec) => shiftLecturePasses(lec, 24 * 60));
+        }
+        await renderBlockBoard(container, refresh);
+      }
+    });
+    container.appendChild(urgentHost);
+    const pomodoroHost = document.createElement("div");
+    renderPomodoroControls(pomodoroHost);
+    container.appendChild(pomodoroHost);
+    const blockList = document.createElement("div");
+    blockList.className = "block-board-list";
+    const refreshBoard = async () => {
+      await renderBlockBoard(container, refresh);
+    };
+    const lecturesByBlock = /* @__PURE__ */ new Map();
+    lectures.forEach((lecture) => {
+      const key = String(lecture?.blockId ?? "");
+      if (!lecturesByBlock.has(key)) lecturesByBlock.set(key, []);
+      lecturesByBlock.get(key).push(lecture);
+    });
+    blocks.forEach((block) => {
+      const blockLectures = lecturesByBlock.get(String(block.blockId)) || [];
+      renderBlockBoardBlock(blockList, block, blockLectures, days, refreshBoard);
+    });
+    container.appendChild(blockList);
+  }
+
   // js/ui/components/exams.js
   var DEFAULT_SECONDS = 60;
   var timerHandles = /* @__PURE__ */ new WeakMap();
   var keyHandler = null;
   var keyHandlerSession = null;
   var lastExamStatusMessage = "";
-  function clone3(value) {
+  function clone4(value) {
     return value ? JSON.parse(JSON.stringify(value)) : value;
   }
   function totalExamTimeMs(exam) {
@@ -7188,7 +8835,7 @@ var Sevenn = (() => {
       sess.startedAt = null;
     }
   }
-  function ensureTimer(sess, render2) {
+  function ensureTimer(sess, render) {
     if (!sess || sess.mode !== "taking" || sess.exam.timerMode !== "timed") return;
     if (timerHandles.has(sess)) return;
     if (typeof sess.remainingMs !== "number") {
@@ -7205,9 +8852,9 @@ var Sevenn = (() => {
       sess.remainingMs = Math.max(0, (sess.remainingMs ?? 0) - delta);
       if (sess.remainingMs <= 0) {
         stopTimer(sess);
-        finalizeExam(sess, render2, { autoSubmit: true });
+        finalizeExam(sess, render, { autoSubmit: true });
       } else {
-        render2();
+        render();
       }
     }, 1e3);
     timerHandles.set(sess, handle);
@@ -7219,7 +8866,7 @@ var Sevenn = (() => {
       keyHandlerSession = null;
     }
   }
-  function setupKeyboardNavigation(sess, render2) {
+  function setupKeyboardNavigation(sess, render) {
     if (!sess || sess.mode === "summary") {
       teardownKeyboardNavigation();
       return;
@@ -7238,13 +8885,13 @@ var Sevenn = (() => {
         if (sess.idx < sess.exam.questions.length - 1) {
           event.preventDefault();
           sess.idx += 1;
-          render2();
+          render();
         }
       } else if (event.key === "ArrowLeft") {
         if (sess.idx > 0) {
           event.preventDefault();
           sess.idx -= 1;
-          render2();
+          render();
         }
       }
     };
@@ -7291,7 +8938,7 @@ var Sevenn = (() => {
     }
   }
   function ensureExamShape(exam) {
-    const next = clone3(exam) || {};
+    const next = clone4(exam) || {};
     let changed = false;
     if (!next.id) {
       next.id = uid();
@@ -7407,7 +9054,7 @@ var Sevenn = (() => {
     };
   }
   function createTakingSession(exam) {
-    const snapshot = clone3(exam);
+    const snapshot = clone4(exam);
     const totalMs = snapshot.timerMode === "timed" ? totalExamTimeMs(snapshot) : null;
     return {
       mode: "taking",
@@ -7423,7 +9070,7 @@ var Sevenn = (() => {
   }
   function hydrateSavedSession(saved, fallbackExam) {
     const baseExam = saved?.exam ? ensureExamShape(saved.exam).exam : fallbackExam;
-    const exam = clone3(baseExam);
+    const exam = clone4(baseExam);
     const questionCount = exam.questions.length;
     const idx = Math.min(Math.max(Number(saved?.idx) || 0, 0), Math.max(0, questionCount - 1));
     const remaining = typeof saved?.remainingMs === "number" ? Math.max(0, saved.remainingMs) : exam.timerMode === "timed" ? totalExamTimeMs(exam) : null;
@@ -7440,7 +9087,7 @@ var Sevenn = (() => {
       remainingMs: remaining
     };
   }
-  async function renderExams(root, render2) {
+  async function renderExams(root, render) {
     root.innerHTML = "";
     root.className = "exam-view";
     const controls = document.createElement("div");
@@ -7465,7 +9112,7 @@ var Sevenn = (() => {
         const parsed = JSON.parse(text);
         const { exam } = ensureExamShape(parsed);
         await upsertExam({ ...exam, updatedAt: Date.now() });
-        render2();
+        render();
       } catch (err) {
         console.warn("Failed to import exam", err);
         status.textContent = "Unable to import exam \u2014 invalid JSON structure.";
@@ -7483,7 +9130,7 @@ var Sevenn = (() => {
     newBtn.type = "button";
     newBtn.className = "btn";
     newBtn.textContent = "New Exam";
-    newBtn.addEventListener("click", () => openExamEditor(null, render2));
+    newBtn.addEventListener("click", () => openExamEditor(null, render));
     actions.appendChild(newBtn);
     controls.appendChild(actions);
     controls.appendChild(status);
@@ -7523,11 +9170,11 @@ var Sevenn = (() => {
     const grid = document.createElement("div");
     grid.className = "exam-grid";
     exams.forEach((exam) => {
-      grid.appendChild(buildExamCard(exam, render2, sessionMap.get(exam.id), status));
+      grid.appendChild(buildExamCard(exam, render, sessionMap.get(exam.id), status));
     });
     root.appendChild(grid);
   }
-  function buildExamCard(exam, render2, savedSession, statusEl) {
+  function buildExamCard(exam, render, savedSession, statusEl) {
     const card = document.createElement("article");
     card.className = "card exam-card";
     const title = document.createElement("h2");
@@ -7580,12 +9227,12 @@ var Sevenn = (() => {
         const latest = await loadExamSession(exam.id);
         if (!latest) {
           if (statusEl) statusEl.textContent = "Saved attempt could not be found.";
-          render2();
+          render();
           return;
         }
         const session = hydrateSavedSession(latest, exam);
         setExamSession(session);
-        render2();
+        render();
       });
       actions.appendChild(resumeBtn);
     }
@@ -7600,7 +9247,7 @@ var Sevenn = (() => {
         await deleteExamSessionProgress(exam.id);
       }
       setExamSession(createTakingSession(exam));
-      render2();
+      render();
     });
     actions.appendChild(startBtn);
     if (last) {
@@ -7608,15 +9255,15 @@ var Sevenn = (() => {
       reviewBtn.className = "btn secondary";
       reviewBtn.textContent = "Review Last Attempt";
       reviewBtn.addEventListener("click", () => {
-        setExamSession({ mode: "review", exam: clone3(exam), result: clone3(last), idx: 0 });
-        render2();
+        setExamSession({ mode: "review", exam: clone4(exam), result: clone4(last), idx: 0 });
+        render();
       });
       actions.appendChild(reviewBtn);
     }
     const editBtn = document.createElement("button");
     editBtn.className = "btn secondary";
     editBtn.textContent = "Edit";
-    editBtn.addEventListener("click", () => openExamEditor(exam, render2));
+    editBtn.addEventListener("click", () => openExamEditor(exam, render));
     actions.appendChild(editBtn);
     const exportBtn = document.createElement("button");
     exportBtn.className = "btn secondary";
@@ -7639,7 +9286,7 @@ var Sevenn = (() => {
       await deleteExamSessionProgress(exam.id).catch(() => {
       });
       await deleteExam(exam.id);
-      render2();
+      render();
     });
     actions.appendChild(delBtn);
     card.appendChild(actions);
@@ -7659,7 +9306,7 @@ var Sevenn = (() => {
       toggle.textContent = isExpanded ? "Hide Attempts" : "Show Attempts";
       toggle.addEventListener("click", () => {
         setExamAttemptExpanded(exam.id, !isExpanded);
-        render2();
+        render();
       });
       attemptsHeader.appendChild(toggle);
     }
@@ -7674,14 +9321,14 @@ var Sevenn = (() => {
       const list = document.createElement("div");
       list.className = "exam-attempt-list";
       [...exam.results].sort((a, b) => b.when - a.when).forEach((result) => {
-        list.appendChild(buildAttemptRow(exam, result, render2));
+        list.appendChild(buildAttemptRow(exam, result, render));
       });
       attemptsWrap.appendChild(list);
     }
     card.appendChild(attemptsWrap);
     return card;
   }
-  function buildAttemptRow(exam, result, render2) {
+  function buildAttemptRow(exam, result, render) {
     const row = document.createElement("div");
     row.className = "exam-attempt-row";
     const info = document.createElement("div");
@@ -7703,8 +9350,8 @@ var Sevenn = (() => {
     review.className = "btn secondary";
     review.textContent = "Review";
     review.addEventListener("click", () => {
-      setExamSession({ mode: "review", exam: clone3(exam), result: clone3(result), idx: 0 });
-      render2();
+      setExamSession({ mode: "review", exam: clone4(exam), result: clone4(result), idx: 0 });
+      render();
     });
     row.appendChild(review);
     return row;
@@ -7785,7 +9432,7 @@ var Sevenn = (() => {
     }
     return isCorrect ? "correct-answer" : "";
   }
-  function renderPalette(sidebar, sess, render2) {
+  function renderPalette(sidebar, sess, render) {
     const palette = document.createElement("div");
     palette.className = "exam-palette";
     const title = document.createElement("h3");
@@ -7812,14 +9459,14 @@ var Sevenn = (() => {
       if (flaggedSet.has(idx)) btn.classList.add("flagged");
       btn.addEventListener("click", () => {
         sess.idx = idx;
-        render2();
+        render();
       });
       grid.appendChild(btn);
     });
     palette.appendChild(grid);
     sidebar.appendChild(palette);
   }
-  function renderExamRunner(root, render2) {
+  function renderExamRunner(root, render) {
     const sess = state.examSession;
     if (!sess) {
       teardownKeyboardNavigation();
@@ -7829,10 +9476,10 @@ var Sevenn = (() => {
     root.className = "exam-session";
     if (sess.mode === "summary") {
       teardownKeyboardNavigation();
-      renderSummary(root, render2, sess);
+      renderSummary(root, render, sess);
       return;
     }
-    setupKeyboardNavigation(sess, render2);
+    setupKeyboardNavigation(sess, render);
     if (!sess.answers) sess.answers = {};
     if (!sess.flagged) sess.flagged = {};
     if (!sess.checked) sess.checked = {};
@@ -7852,14 +9499,14 @@ var Sevenn = (() => {
       back.addEventListener("click", () => {
         teardownKeyboardNavigation();
         setExamSession(null);
-        render2();
+        render();
       });
       empty.appendChild(back);
       root.appendChild(empty);
       return;
     }
     if (sess.mode === "taking" && sess.exam.timerMode === "timed") {
-      ensureTimer(sess, render2);
+      ensureTimer(sess, render);
     }
     if (sess.idx < 0) sess.idx = 0;
     if (sess.idx >= questionCount) sess.idx = questionCount - 1;
@@ -7893,7 +9540,7 @@ var Sevenn = (() => {
       flagBtn.addEventListener("click", () => {
         if (!sess.flagged) sess.flagged = {};
         sess.flagged[sess.idx] = !isFlagged;
-        render2();
+        render();
       });
     } else {
       flagBtn.disabled = true;
@@ -7952,7 +9599,7 @@ var Sevenn = (() => {
           if (sess.exam.timerMode !== "timed" && sess.checked) {
             delete sess.checked[sess.idx];
           }
-          render2();
+          render();
         });
         if (isInstantCheck) {
           const cls = answerClass(question, selected, opt.id);
@@ -8002,7 +9649,7 @@ var Sevenn = (() => {
         main.appendChild(explain);
       }
     }
-    renderPalette(sidebar, sess, render2);
+    renderPalette(sidebar, sess, render);
     renderSidebarMeta(sidebar, sess);
     const nav = document.createElement("div");
     nav.className = "exam-nav";
@@ -8013,7 +9660,7 @@ var Sevenn = (() => {
     prev.addEventListener("click", () => {
       if (sess.idx > 0) {
         sess.idx -= 1;
-        render2();
+        render();
       }
     });
     nav.appendChild(prev);
@@ -8022,7 +9669,7 @@ var Sevenn = (() => {
       saveBtn.className = "btn secondary";
       saveBtn.textContent = "Save & Exit";
       saveBtn.addEventListener("click", async () => {
-        await saveProgressAndExit(sess, render2);
+        await saveProgressAndExit(sess, render);
       });
       nav.appendChild(saveBtn);
       if (sess.exam.timerMode !== "timed") {
@@ -8037,7 +9684,7 @@ var Sevenn = (() => {
           } else {
             sess.checked[sess.idx] = true;
           }
-          render2();
+          render();
         });
         nav.appendChild(checkBtn);
       }
@@ -8048,7 +9695,7 @@ var Sevenn = (() => {
       nextBtn.addEventListener("click", () => {
         if (sess.idx < questionCount - 1) {
           sess.idx += 1;
-          render2();
+          render();
         }
       });
       nav.appendChild(nextBtn);
@@ -8056,7 +9703,7 @@ var Sevenn = (() => {
       submit.className = "btn";
       submit.textContent = "Submit Exam";
       submit.addEventListener("click", async () => {
-        await finalizeExam(sess, render2);
+        await finalizeExam(sess, render);
       });
       nav.appendChild(submit);
     } else {
@@ -8067,7 +9714,7 @@ var Sevenn = (() => {
       nextBtn.addEventListener("click", () => {
         if (sess.idx < questionCount - 1) {
           sess.idx += 1;
-          render2();
+          render();
         }
       });
       nav.appendChild(nextBtn);
@@ -8077,14 +9724,14 @@ var Sevenn = (() => {
         exit.textContent = "Back to Summary";
         exit.addEventListener("click", () => {
           setExamSession({ mode: "summary", exam: sess.exam, latestResult: sess.fromSummary });
-          render2();
+          render();
         });
       } else {
         exit.textContent = "Back to Exams";
         exit.addEventListener("click", () => {
           teardownKeyboardNavigation();
           setExamSession(null);
-          render2();
+          render();
         });
       }
       nav.appendChild(exit);
@@ -8121,11 +9768,11 @@ var Sevenn = (() => {
     }
     sidebar.appendChild(info);
   }
-  async function saveProgressAndExit(sess, render2) {
+  async function saveProgressAndExit(sess, render) {
     stopTimer(sess);
     const payload = {
       examId: sess.exam.id,
-      exam: clone3(sess.exam),
+      exam: clone4(sess.exam),
       idx: sess.idx,
       answers: { ...sess.answers || {} },
       flagged: { ...sess.flagged || {} },
@@ -8138,9 +9785,9 @@ var Sevenn = (() => {
     lastExamStatusMessage = "Attempt saved. You can resume later.";
     teardownKeyboardNavigation();
     setExamSession(null);
-    render2();
+    render();
   }
-  async function finalizeExam(sess, render2, options = {}) {
+  async function finalizeExam(sess, render, options = {}) {
     const isAuto = Boolean(options.autoSubmit);
     stopTimer(sess);
     const unanswered = sess.exam.questions.filter((_, idx) => sess.answers[idx] == null);
@@ -8170,7 +9817,7 @@ var Sevenn = (() => {
       durationMs: sess.elapsedMs || 0,
       answered: answeredCount
     };
-    const updatedExam = clone3(sess.exam);
+    const updatedExam = clone4(sess.exam);
     updatedExam.results = [...updatedExam.results || [], result];
     updatedExam.updatedAt = Date.now();
     await upsertExam(updatedExam);
@@ -8181,9 +9828,9 @@ var Sevenn = (() => {
     }
     teardownKeyboardNavigation();
     setExamSession({ mode: "summary", exam: updatedExam, latestResult: result });
-    render2();
+    render();
   }
-  function renderSummary(root, render2, sess) {
+  function renderSummary(root, render, sess) {
     const wrap = document.createElement("div");
     wrap.className = "exam-summary";
     const title = document.createElement("h2");
@@ -8208,12 +9855,12 @@ var Sevenn = (() => {
     reviewBtn.addEventListener("click", () => {
       setExamSession({
         mode: "review",
-        exam: clone3(sess.exam),
-        result: clone3(sess.latestResult),
+        exam: clone4(sess.exam),
+        result: clone4(sess.latestResult),
         idx: 0,
-        fromSummary: clone3(sess.latestResult)
+        fromSummary: clone4(sess.latestResult)
       });
-      render2();
+      render();
     });
     actions.appendChild(reviewBtn);
     const retake = document.createElement("button");
@@ -8221,7 +9868,7 @@ var Sevenn = (() => {
     retake.textContent = "Retake Exam";
     retake.addEventListener("click", () => {
       setExamSession(createTakingSession(sess.exam));
-      render2();
+      render();
     });
     actions.appendChild(retake);
     const exit = document.createElement("button");
@@ -8229,13 +9876,13 @@ var Sevenn = (() => {
     exit.textContent = "Back to Exams";
     exit.addEventListener("click", () => {
       setExamSession(null);
-      render2();
+      render();
     });
     actions.appendChild(exit);
     wrap.appendChild(actions);
     root.appendChild(wrap);
   }
-  function openExamEditor(existing, render2) {
+  function openExamEditor(existing, render) {
     const overlay = document.createElement("div");
     overlay.className = "modal";
     const form = document.createElement("form");
@@ -8525,7 +10172,7 @@ var Sevenn = (() => {
       };
       await upsertExam(payload);
       document.body.removeChild(overlay);
-      render2();
+      render();
     });
     overlay.appendChild(form);
     overlay.addEventListener("click", (e) => {
@@ -8797,9 +10444,9 @@ var Sevenn = (() => {
     const deduped = [];
     tabs2.forEach((tab) => {
       if (ids.has(tab.id)) {
-        const clone4 = { ...tab, id: uid() };
-        ids.add(clone4.id);
-        deduped.push(clone4);
+        const clone5 = { ...tab, id: uid() };
+        ids.add(clone5.id);
+        deduped.push(clone5);
       } else {
         ids.add(tab.id);
         deduped.push(tab);
@@ -9345,7 +10992,7 @@ var Sevenn = (() => {
     if (!filter) return true;
     const blockId = filter.blockId || "";
     const week = filter.week;
-    const lectureKey = filter.lectureKey || "";
+    const lectureKey2 = filter.lectureKey || "";
     if (blockId) {
       const inBlock = (item.blocks || []).includes(blockId) || (item.lectures || []).some((lec) => lec.blockId === blockId);
       if (!inBlock) return false;
@@ -9361,8 +11008,8 @@ var Sevenn = (() => {
         }
       }
     }
-    if (lectureKey) {
-      const [blk, lecStr] = lectureKey.split("|");
+    if (lectureKey2) {
+      const [blk, lecStr] = lectureKey2.split("|");
       const lecId = Number(lecStr);
       if (Number.isFinite(lecId)) {
         const blockMatch = blk || blockId;
@@ -9460,7 +11107,11 @@ var Sevenn = (() => {
     setAreaInteracting(false);
     ensureListeners();
     await ensureMapConfig();
-    mapState.blocks = await listBlocks();
+    const catalog = await loadBlockCatalog();
+    mapState.blocks = (catalog.blocks || []).map((block) => ({
+      ...block,
+      lectures: (catalog.lectureLists?.[block.blockId] || []).map((lecture) => ({ ...lecture }))
+    }));
     const items = [
       ...await listItemsByKind("disease"),
       ...await listItemsByKind("drug"),
@@ -11122,181 +12773,279 @@ var Sevenn = (() => {
     return wrapper;
   }
 
-  // js/main.js
-  var tabs = ["Diseases", "Drugs", "Concepts", "Cards", "Study", "Exams", "Map"];
-  async function render() {
-    const root = document.getElementById("app");
-    const activeEl = document.activeElement;
-    const shouldRestoreSearch = activeEl && activeEl.dataset && activeEl.dataset.role === "global-search";
-    const selectionStart = shouldRestoreSearch && typeof activeEl.selectionStart === "number" ? activeEl.selectionStart : null;
-    const selectionEnd = shouldRestoreSearch && typeof activeEl.selectionEnd === "number" ? activeEl.selectionEnd : null;
-    root.innerHTML = "";
-    const header = document.createElement("header");
-    header.className = "header";
-    const left = document.createElement("div");
-    left.className = "header-left";
-    const brand = document.createElement("div");
-    brand.className = "brand";
-    brand.textContent = "\u2728 Sevenn";
-    left.appendChild(brand);
-    const nav = document.createElement("nav");
-    nav.className = "tabs";
-    nav.setAttribute("aria-label", "Primary sections");
-    const tabClassMap = {
-      Diseases: "tab-disease",
-      Drugs: "tab-drug",
-      Concepts: "tab-concept",
-      Cards: "tab-cards",
-      Study: "tab-study",
-      Exams: "tab-exams",
-      Map: "tab-map"
-    };
-    tabs.forEach((t) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "tab";
-      if (state.tab === t) btn.classList.add("active");
-      const variant = tabClassMap[t];
-      if (variant) btn.classList.add(variant);
-      btn.textContent = t;
-      btn.addEventListener("click", () => {
-        const wasActive = state.tab === t;
-        if (t === "Study" && wasActive && state.subtab?.Study === "Review" && !state.flashSession && !state.quizSession) {
-          setSubtab("Study", "Builder");
-        }
-        setTab(t);
-        render();
-      });
-      nav.appendChild(btn);
-    });
-    left.appendChild(nav);
-    header.appendChild(left);
-    const right = document.createElement("div");
-    right.className = "header-right";
-    const searchField = document.createElement("label");
-    searchField.className = "search-field";
-    searchField.setAttribute("aria-label", "Search entries");
-    const searchIcon = document.createElement("span");
-    searchIcon.className = "search-icon";
-    searchIcon.setAttribute("aria-hidden", "true");
-    searchIcon.innerHTML = '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 14.5L18 18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="9" cy="9" r="5.8" stroke="currentColor" stroke-width="1.6"/></svg>';
-    searchField.appendChild(searchIcon);
-    const search = document.createElement("input");
-    search.type = "search";
-    search.placeholder = "Search entries";
-    search.value = state.query;
-    search.autocomplete = "off";
-    search.spellcheck = false;
-    search.className = "search-input";
-    search.dataset.role = "global-search";
-    search.addEventListener("input", (e) => {
-      setQuery(e.target.value);
-      render();
-    });
-    search.addEventListener("search", (e) => {
-      setQuery(e.target.value);
-      render();
-    });
-    searchField.appendChild(search);
-    right.appendChild(searchField);
-    const settingsBtn = document.createElement("button");
-    settingsBtn.type = "button";
-    settingsBtn.className = "header-settings-btn";
-    if (state.tab === "Settings") settingsBtn.classList.add("active");
-    settingsBtn.setAttribute("aria-label", "Settings");
-    settingsBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.8" stroke="currentColor" stroke-width="1.6"/></svg>';
-    settingsBtn.addEventListener("click", () => {
-      setTab("Settings");
-      render();
-    });
-    right.appendChild(settingsBtn);
-    header.appendChild(right);
-    root.appendChild(header);
-    if (shouldRestoreSearch) {
-      requestAnimationFrame(() => {
-        search.focus();
-        if (selectionStart !== null && selectionEnd !== null && search.setSelectionRange) {
-          search.setSelectionRange(selectionStart, selectionEnd);
-        } else {
-          const len = search.value.length;
-          if (search.setSelectionRange) search.setSelectionRange(len, len);
-        }
-      });
+  // js/app-shell.js
+  function createAppShell({
+    state: state2,
+    setTab: setTab2,
+    setSubtab: setSubtab2,
+    setQuery: setQuery2,
+    findItemsByFilter: findItemsByFilter2,
+    renderSettings: renderSettings2,
+    renderCardList: renderCardList2,
+    renderCards: renderCards2,
+    renderBuilder: renderBuilder2,
+    renderLectures: renderLectures2,
+    renderFlashcards: renderFlashcards2,
+    renderReview: renderReview2,
+    renderQuiz: renderQuiz2,
+    renderBlockMode: renderBlockMode2,
+    renderBlockBoard: renderBlockBoard2,
+    renderExams: renderExams2,
+    renderExamRunner: renderExamRunner2,
+    renderMap: renderMap2,
+    createEntryAddControl: createEntryAddControl2
+  }) {
+    const tabs2 = ["Block Board", "Lists", "Lectures", "Cards", "Study", "Exams", "Map"];
+    const listTabConfig = [
+      { label: "Diseases", kind: "disease" },
+      { label: "Drugs", kind: "drug" },
+      { label: "Concepts", kind: "concept" }
+    ];
+    function resolveListKind2() {
+      const active = state2?.subtab?.Lists;
+      const match = listTabConfig.find((cfg) => cfg.label === active);
+      return match ? match.kind : "disease";
     }
-    const main = document.createElement("main");
-    if (state.tab === "Map") main.className = "map-main";
-    root.appendChild(main);
-    if (state.tab === "Settings") {
-      await renderSettings(main);
-    } else if (["Diseases", "Drugs", "Concepts"].includes(state.tab)) {
-      const kindMap = { Diseases: "disease", Drugs: "drug", Concepts: "concept" };
-      const kind = kindMap[state.tab];
-      main.appendChild(createEntryAddControl(render, kind));
-      const listHost = document.createElement("div");
-      listHost.className = "tab-content";
-      main.appendChild(listHost);
-      const filter = { ...state.filters, types: [kind], query: state.query };
-      const query = findItemsByFilter(filter);
-      await renderCardList(listHost, query, kind, render);
-    } else if (state.tab === "Cards") {
-      main.appendChild(createEntryAddControl(render, "disease"));
-      const content = document.createElement("div");
-      content.className = "tab-content";
-      main.appendChild(content);
-      const filter = { ...state.filters, query: state.query };
-      const query = findItemsByFilter(filter);
-      const items = await query.toArray();
-      await renderCards(content, items, render);
-    } else if (state.tab === "Study") {
-      main.appendChild(createEntryAddControl(render, "disease"));
-      const content = document.createElement("div");
-      content.className = "tab-content";
-      main.appendChild(content);
-      if (state.flashSession) {
-        renderFlashcards(content, render);
-      } else if (state.quizSession) {
-        renderQuiz(content, render);
-      } else {
-        const activeStudy = state.subtab.Study === "Blocks" ? "Blocks" : state.subtab.Study || "Builder";
-        if (activeStudy === "Review") {
-          await renderReview(content, render);
-        } else if (activeStudy === "Blocks") {
-          renderBlockMode(content, render);
+    async function renderApp2() {
+      const root = document.getElementById("app");
+      const activeEl = document.activeElement;
+      const shouldRestoreSearch = activeEl && activeEl.dataset && activeEl.dataset.role === "global-search";
+      const selectionStart = shouldRestoreSearch && typeof activeEl.selectionStart === "number" ? activeEl.selectionStart : null;
+      const selectionEnd = shouldRestoreSearch && typeof activeEl.selectionEnd === "number" ? activeEl.selectionEnd : null;
+      root.innerHTML = "";
+      const header = document.createElement("header");
+      header.className = "header";
+      const left = document.createElement("div");
+      left.className = "header-left";
+      const brand = document.createElement("div");
+      brand.className = "brand";
+      brand.textContent = "\u2728 Sevenn";
+      left.appendChild(brand);
+      const nav = document.createElement("nav");
+      nav.className = "tabs";
+      nav.setAttribute("aria-label", "Primary sections");
+      const tabClassMap = {
+        "Block Board": "tab-block-board",
+        Lists: "tab-lists",
+        Lectures: "tab-lectures",
+        Cards: "tab-cards",
+        Study: "tab-study",
+        Exams: "tab-exams",
+        Map: "tab-map"
+      };
+      tabs2.forEach((t) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "tab";
+        if (state2.tab === t) btn.classList.add("active");
+        const variant = tabClassMap[t];
+        if (variant) btn.classList.add(variant);
+        btn.textContent = t;
+        btn.addEventListener("click", () => {
+          const wasActive = state2.tab === t;
+          if (t === "Study" && wasActive && state2.subtab?.Study === "Review" && !state2.flashSession && !state2.quizSession) {
+            setSubtab2("Study", "Builder");
+          }
+          setTab2(t);
+          renderApp2();
+        });
+        nav.appendChild(btn);
+      });
+      left.appendChild(nav);
+      header.appendChild(left);
+      const right = document.createElement("div");
+      right.className = "header-right";
+      const searchField = document.createElement("label");
+      searchField.className = "search-field";
+      searchField.setAttribute("aria-label", "Search entries");
+      const searchIcon = document.createElement("span");
+      searchIcon.className = "search-icon";
+      searchIcon.setAttribute("aria-hidden", "true");
+      searchIcon.innerHTML = '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 14.5L18 18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="9" cy="9" r="5.8" stroke="currentColor" stroke-width="1.6"/></svg>';
+      searchField.appendChild(searchIcon);
+      const search = document.createElement("input");
+      search.type = "search";
+      search.placeholder = "Search entries";
+      search.value = state2.query;
+      search.autocomplete = "off";
+      search.spellcheck = false;
+      search.className = "search-input";
+      search.dataset.role = "global-search";
+      search.addEventListener("input", (e) => {
+        setQuery2(e.target.value);
+        renderApp2();
+      });
+      search.addEventListener("search", (e) => {
+        setQuery2(e.target.value);
+        renderApp2();
+      });
+      searchField.appendChild(search);
+      right.appendChild(searchField);
+      const settingsBtn = document.createElement("button");
+      settingsBtn.type = "button";
+      settingsBtn.className = "header-settings-btn";
+      if (state2.tab === "Settings") settingsBtn.classList.add("active");
+      settingsBtn.setAttribute("aria-label", "Settings");
+      settingsBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.8" stroke="currentColor" stroke-width="1.6"/></svg>';
+      settingsBtn.addEventListener("click", () => {
+        setTab2("Settings");
+        renderApp2();
+      });
+      right.appendChild(settingsBtn);
+      header.appendChild(right);
+      root.appendChild(header);
+      if (shouldRestoreSearch) {
+        requestAnimationFrame(() => {
+          search.focus();
+          if (selectionStart !== null && selectionEnd !== null && search.setSelectionRange) {
+            search.setSelectionRange(selectionStart, selectionEnd);
+          } else {
+            const len = search.value.length;
+            if (search.setSelectionRange) search.setSelectionRange(len, len);
+          }
+        });
+      }
+      const main = document.createElement("main");
+      if (state2.tab === "Map") main.className = "map-main";
+      root.appendChild(main);
+      if (state2.tab === "Settings") {
+        await renderSettings2(main);
+      } else if (state2.tab === "Lists") {
+        const kind = resolveListKind2();
+        const listMeta = listTabConfig.find((cfg) => cfg.kind === kind) || listTabConfig[0];
+        const createTarget = listMeta?.kind || "disease";
+        main.appendChild(createEntryAddControl2(renderApp2, createTarget));
+        const content = document.createElement("div");
+        content.className = "tab-content";
+        main.appendChild(content);
+        const selector = document.createElement("div");
+        selector.className = "list-subtabs";
+        selector.setAttribute("role", "tablist");
+        listTabConfig.forEach((cfg) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "btn secondary list-subtab";
+          btn.textContent = cfg.label;
+          btn.dataset.listKind = cfg.kind;
+          btn.setAttribute("role", "tab");
+          if (cfg.kind === kind) btn.classList.add("active");
+          btn.addEventListener("click", () => {
+            if (state2.subtab?.Lists === cfg.label) return;
+            setSubtab2("Lists", cfg.label);
+            renderApp2();
+          });
+          selector.appendChild(btn);
+        });
+        content.appendChild(selector);
+        const listHost = document.createElement("div");
+        listHost.className = "list-host";
+        content.appendChild(listHost);
+        const filter = { ...state2.filters, types: [kind], query: state2.query };
+        const query = findItemsByFilter2(filter);
+        await renderCardList2(listHost, query, kind, renderApp2);
+      } else if (state2.tab === "Block Board") {
+        main.appendChild(createEntryAddControl2(renderApp2, "disease"));
+        const content = document.createElement("div");
+        content.className = "tab-content";
+        main.appendChild(content);
+        await renderBlockBoard2(content, renderApp2);
+      } else if (state2.tab === "Lectures") {
+        const content = document.createElement("div");
+        content.className = "tab-content";
+        main.appendChild(content);
+        await renderLectures2(content, renderApp2);
+      } else if (state2.tab === "Cards") {
+        main.appendChild(createEntryAddControl2(renderApp2, "disease"));
+        const content = document.createElement("div");
+        content.className = "tab-content";
+        main.appendChild(content);
+        const filter = { ...state2.filters, query: state2.query };
+        const query = findItemsByFilter2(filter);
+        const items = await query.toArray();
+        await renderCards2(content, items, renderApp2);
+      } else if (state2.tab === "Study") {
+        main.appendChild(createEntryAddControl2(renderApp2, "disease"));
+        const content = document.createElement("div");
+        content.className = "tab-content";
+        main.appendChild(content);
+        if (state2.flashSession) {
+          renderFlashcards2(content, renderApp2);
+        } else if (state2.quizSession) {
+          renderQuiz2(content, renderApp2);
         } else {
-          const wrap = document.createElement("div");
-          await renderBuilder(wrap, render);
-          content.appendChild(wrap);
+          const activeStudy = state2.subtab.Study === "Blocks" ? "Blocks" : state2.subtab.Study || "Builder";
+          if (activeStudy === "Review") {
+            await renderReview2(content, renderApp2);
+          } else if (activeStudy === "Blocks") {
+            renderBlockMode2(content, renderApp2);
+          } else {
+            const wrap = document.createElement("div");
+            await renderBuilder2(wrap, renderApp2);
+            content.appendChild(wrap);
+          }
         }
-      }
-    } else if (state.tab === "Exams") {
-      main.appendChild(createEntryAddControl(render, "disease"));
-      const content = document.createElement("div");
-      content.className = "tab-content";
-      main.appendChild(content);
-      if (state.examSession) {
-        renderExamRunner(content, render);
+      } else if (state2.tab === "Exams") {
+        main.appendChild(createEntryAddControl2(renderApp2, "disease"));
+        const content = document.createElement("div");
+        content.className = "tab-content";
+        main.appendChild(content);
+        if (state2.examSession) {
+          renderExamRunner2(content, renderApp2);
+        } else {
+          await renderExams2(content, renderApp2);
+        }
+      } else if (state2.tab === "Map") {
+        main.appendChild(createEntryAddControl2(renderApp2, "disease"));
+        const mapHost = document.createElement("div");
+        mapHost.className = "tab-content map-host";
+        main.appendChild(mapHost);
+        await renderMap2(mapHost);
       } else {
-        await renderExams(content, render);
+        main.textContent = `Currently viewing: ${state2.tab}`;
       }
-    } else if (state.tab === "Map") {
-      main.appendChild(createEntryAddControl(render, "disease"));
-      const mapHost = document.createElement("div");
-      mapHost.className = "tab-content map-host";
-      main.appendChild(mapHost);
-      await renderMap(mapHost);
-    } else {
-      main.textContent = `Currently viewing: ${state.tab}`;
     }
+    return { renderApp: renderApp2, tabs: tabs2, resolveListKind: resolveListKind2 };
   }
+
+  // js/main.js
+  var { renderApp, tabs, resolveListKind } = createAppShell({
+    state,
+    setTab,
+    setSubtab,
+    setQuery,
+    findItemsByFilter,
+    renderSettings,
+    renderCardList,
+    renderCards,
+    renderBuilder,
+    renderLectures,
+    renderFlashcards,
+    renderReview,
+    renderQuiz,
+    renderBlockMode,
+    renderBlockBoard,
+    renderExams,
+    renderExamRunner,
+    renderMap,
+    createEntryAddControl
+  });
   async function bootstrap() {
     try {
       await initDB();
-      render();
+      try {
+        await loadBlockCatalog();
+      } catch (err) {
+        console.warn("Failed to prime block catalog", err);
+      }
+      renderApp();
     } catch (err) {
       const root = document.getElementById("app");
       if (root) root.textContent = "Failed to load app";
       console.error(err);
     }
   }
-  bootstrap();
+  if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
+    bootstrap();
+  }
+  return __toCommonJS(main_exports);
 })();

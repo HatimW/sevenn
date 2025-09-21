@@ -175,8 +175,6 @@ export function renderFlashcards(root, redraw) {
     const previousRating = active.ratings[ratingId] || null;
     const snapshot = getSectionStateSnapshot(item, key);
     const lockedByQueue = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
-
-    const snapshot = getSectionStateSnapshot(item, key);
     const alreadyQueued = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
     const requiresRating = isReview || !alreadyQueued;
     sectionRequirements.set(key, requiresRating);
@@ -268,8 +266,13 @@ export function renderFlashcards(root, redraw) {
       });
       btn.addEventListener('keydown', (event) => {
         event.stopPropagation();
-
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          handleRating(value);
+        }
       });
+      ratingButtons.appendChild(btn);
+    });
 
     const unlockRating = () => {
       if (!ratingLocked) return;
