@@ -114,14 +114,32 @@ export async function listAllLectures() {
 }
 
 export async function saveLecture(lecture) {
-  if (!lecture || lecture.blockId == null || lecture.id == null) {
+  if (!lecture || lecture.blockId == null) {
     throw new Error('Missing lecture identity for save');
   }
   const store = await lectureStore('readwrite');
-  const key = lectureKey(lecture.blockId, lecture.id);
+  let lectureId = lecture.id;
+  if (lectureId == null) {
+    const rows = await fetchLecturesForBlock(store, lecture.blockId);
+    let maxId = 0;
+    for (const row of rows) {
+      const value = Number(row?.id);
+      if (Number.isFinite(value) && value > maxId) {
+        maxId = value;
+      }
+    }
+    lectureId = maxId + 1;
+  }
+  if (typeof lectureId === 'string') {
+    const parsed = Number(lectureId);
+    if (!Number.isNaN(parsed)) {
+      lectureId = parsed;
+    }
+  }
+  const key = lectureKey(lecture.blockId, lectureId);
   const existing = await prom(store.get(key));
   const now = Date.now();
-  const normalized = buildNormalizedLecture(lecture.blockId, lecture, existing, now);
+  const normalized = buildNormalizedLecture(lecture.blockId, { ...lecture, id: lectureId }, existing, now);
   if (!normalized) throw new Error('Failed to normalize lecture payload');
   await prom(store.put(normalized));
   return clone(normalized);

@@ -16,6 +16,14 @@ function sanitizeLabel(label, order) {
   return `Pass ${order}`;
 }
 
+function sanitizeAction(action) {
+  if (typeof action === 'string') {
+    const trimmed = action.trim();
+    if (trimmed) return trimmed;
+  }
+  return '';
+}
+
 function inferAnchor(offsetMinutes) {
   if (!Number.isFinite(offsetMinutes)) return 'today';
   if (offsetMinutes < DAY_MINUTES) return 'today';
@@ -50,9 +58,9 @@ function computeAnchoredDue(startAt, step, plannerDefaults) {
 export const DEFAULT_PASS_PLAN = {
   id: 'default',
   schedule: [
-    { order: 1, label: 'Pass 1', offsetMinutes: 0, anchor: 'today' },
-    { order: 2, label: 'Pass 2', offsetMinutes: 24 * 60, anchor: 'tomorrow' },
-    { order: 3, label: 'Pass 3', offsetMinutes: 72 * 60, anchor: 'upcoming' }
+    { order: 1, label: 'Pass 1', offsetMinutes: 0, anchor: 'today', action: 'Notes' },
+    { order: 2, label: 'Pass 2', offsetMinutes: 24 * 60, anchor: 'tomorrow', action: 'Review' },
+    { order: 3, label: 'Pass 3', offsetMinutes: 72 * 60, anchor: 'upcoming', action: 'Quiz' }
   ]
 };
 
@@ -83,7 +91,8 @@ export function normalizePassPlan(plan) {
         ? step.anchor.trim()
         : inferAnchor(offsetMinutes);
       const label = sanitizeLabel(step?.label, order);
-      return { order, offsetMinutes, anchor, label };
+      const action = sanitizeAction(step?.action ?? DEFAULT_PASS_PLAN.schedule[index]?.action);
+      return { order, offsetMinutes, anchor, label, action };
     })
     .sort((a, b) => a.order - b.order);
   return {
@@ -120,7 +129,8 @@ export function normalizePlannerDefaults(raw) {
       order: step.order,
       label: step.label,
       offsetMinutes: step.offsetMinutes,
-      anchor: step.anchor
+      anchor: step.anchor,
+      action: step.action
     }))
   };
 }
@@ -168,6 +178,7 @@ export function normalizeLecturePasses({
       ? (existing?.anchor ?? step.anchor)
       : inferAnchor(step.offsetMinutes);
     const attachments = sanitizeAttachments(existing.attachments);
+    const action = sanitizeAction(existing?.action ?? step.action);
     return {
       order: step.order,
       label,
@@ -175,7 +186,8 @@ export function normalizeLecturePasses({
       anchor,
       due,
       completedAt,
-      attachments
+      attachments,
+      action
     };
   });
   return normalizedPasses;
