@@ -5783,3 +5783,34 @@ body.map-toolbox-dragging {
   color: var(--gray);
   padding: var(--pad-lg);
 }
+
+.block-board-container { display: flex; flex-direction: column; gap: 1.5rem; }
+.block-board-urgent { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+.block-board-urgent-group { background: var(--surface-2); border-radius: 12px; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.block-board-urgent-header { font-weight: 600; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.block-board-urgent-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.block-board-pass-chip { background: color-mix(in srgb, var(--chip-accent) 16%, var(--surface-1)); border: 1px solid color-mix(in srgb, var(--chip-accent) 40%, transparent); border-radius: 10px; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.block-board-pass-title { font-weight: 600; }
+.block-board-pass-meta { font-size: 0.85rem; opacity: 0.8; }
+.block-board-pass-actions { display: flex; gap: 0.5rem; }
+.block-board-empty { font-size: 0.85rem; opacity: 0.7; }
+.block-board-pomodoro { display: flex; flex-direction: column; gap: 0.75rem; }
+.block-board-pomodoro-timer { padding: 1rem; border-radius: 12px; background: var(--surface-2); text-align: center; font-weight: 600; }
+.block-board-list { display: flex; flex-direction: column; gap: 2rem; }
+.block-board-block { display: flex; flex-direction: column; gap: 1rem; }
+.block-board-block-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.block-board-block-controls { display: flex; gap: 0.5rem; }
+.block-board-density { display: grid; grid-template-columns: repeat(auto-fit, minmax(20px, 1fr)); gap: 0.25rem; align-items: end; }
+.block-board-density-slot { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; font-size: 0.7rem; opacity: 0.8; }
+.block-board-density-slot.today { font-weight: 600; opacity: 1; }
+.block-board-density-bar { width: 100%; background: var(--surface-1); border-radius: 8px; height: 60px; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }
+.block-board-density-fill { width: 100%; background: color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 8px; transition: height 0.2s ease; }
+.block-board-grid { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, 1fr); gap: 1rem; overflow-x: auto; padding-bottom: 0.5rem; }
+.block-board-day-column, .block-board-unscheduled { background: var(--surface-2); border-radius: 12px; display: flex; flex-direction: column; }
+.block-board-day-header { font-weight: 600; padding: 0.75rem 1rem; border-bottom: 1px solid var(--surface-3); }
+.block-board-day-list { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem 1rem 1rem; }
+.block-board-day-column.today .block-board-day-header { color: var(--accent); }
+.block-board-day-column.dropping { outline: 2px dashed var(--accent); }
+.block-board-pass-card { border-radius: 12px; border: 1px solid color-mix(in srgb, var(--card-accent) 45%, transparent); padding: 0.75rem; background: color-mix(in srgb, var(--card-accent) 12%, var(--surface-1)); display: flex; flex-direction: column; gap: 0.35rem; cursor: grab; }
+.block-board-pass-card .card-title { font-weight: 600; }
+.block-board-pass-card .card-meta { font-size: 0.8rem; opacity: 0.75; }

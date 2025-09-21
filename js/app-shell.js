@@ -13,6 +13,7 @@ export function createAppShell({
   renderReview,
   renderQuiz,
   renderBlockMode,
+  renderBlockBoard,
   renderExams,
   renderExamRunner,
   renderMap,
@@ -190,7 +191,7 @@ export function createAppShell({
       const content = document.createElement('div');
       content.className = 'tab-content';
       main.appendChild(content);
-      renderBlockMode(content, renderApp);
+      await renderBlockBoard(content, renderApp);
     } else if (state.tab === 'Lectures') {
       const content = document.createElement('div');
       content.className = 'tab-content';

@@ -10,6 +10,7 @@ import {
 
 export {
   listLecturesByBlock,
+  listAllLectures,
   saveLecture,
   deleteLectureRecord,
   removeLecturesForBlock,
