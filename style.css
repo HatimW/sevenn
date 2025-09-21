@@ -5740,6 +5740,97 @@ body.map-toolbox-dragging {
   width: 100%;
 }
 
+.settings-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad);
+}
+
+.block-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad-sm);
+}
+
+.settings-empty-blocks {
+  color: var(--gray);
+  font-style: italic;
+  padding: var(--pad-sm);
+  border-radius: var(--radius);
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.settings-block-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: var(--pad-sm);
+  border-radius: var(--radius);
+  background: var(--panel-elevated);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.settings-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.settings-block-title {
+  font-weight: 600;
+  margin: 0;
+}
+
+.settings-block-title.has-accent {
+  border-left: 6px solid var(--block-accent);
+  padding-left: 0.5rem;
+}
+
+.settings-block-meta {
+  color: var(--gray);
+  font-size: 0.85rem;
+}
+
+.settings-block-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.settings-block-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.settings-block-edit[hidden] {
+  display: none;
+}
+
+.settings-block-edit .input {
+  flex: 1 1 160px;
+}
+
+.settings-block-edit .btn {
+  flex: none;
+}
+
+.settings-block-add {
+  margin-top: var(--pad);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.settings-block-add .input {
+  flex: 1 1 160px;
+}
+
+.settings-block-add .btn {
+  flex: none;
+}
+
 .block-mode-bank {
   display: flex;
   flex-direction: column;
