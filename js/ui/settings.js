@@ -1,6 +1,15 @@
-import { upsertBlock, deleteBlock, exportJSON, importJSON, exportAnkiCSV } from '../storage/storage.js';
+import {
+  upsertBlock,
+  deleteBlock,
+  exportJSON,
+  importJSON,
+  exportAnkiCSV,
+  getSettings,
+  saveSettings
+} from '../storage/storage.js';
 import { loadBlockCatalog, invalidateBlockCatalog } from '../storage/block-catalog.js';
 import { confirmModal } from './components/confirm.js';
+import { DEFAULT_REVIEW_STEPS, REVIEW_RATINGS } from '../review/constants.js';
 
 function createEmptyState() {
   const empty = document.createElement('div');
@@ -21,6 +30,28 @@ export async function renderSettings(root) {
   layout.className = 'settings-layout';
   root.appendChild(layout);
 
+  const [catalogResult, settingsResult] = await Promise.allSettled([
+    loadBlockCatalog(),
+    getSettings()
+  ]);
+
+  if (catalogResult.status === 'rejected') {
+    console.warn('Failed to load block catalog', catalogResult.reason);
+  }
+  if (settingsResult.status === 'rejected') {
+    console.warn('Failed to load app settings', settingsResult.reason);
+  }
+
+  const catalog = catalogResult.status === 'fulfilled' && catalogResult.value
+    ? catalogResult.value
+    : { blocks: [] };
+  const settings = settingsResult.status === 'fulfilled' ? settingsResult.value : null;
+  const blocks = Array.isArray(catalog.blocks) ? catalog.blocks : [];
+  const reviewSteps = {
+    ...DEFAULT_REVIEW_STEPS,
+    ...(settings?.reviewSteps || {})
+  };
+
   const blocksCard = document.createElement('section');
   blocksCard.className = 'card';
   const bHeading = document.createElement('h2');
@@ -31,8 +62,6 @@ export async function renderSettings(root) {
   list.className = 'block-list';
   blocksCard.appendChild(list);
 
-  const catalog = await loadBlockCatalog();
-  const blocks = catalog.blocks || [];
   if (!blocks.length) {
     list.appendChild(createEmptyState());
   }
@@ -233,6 +262,118 @@ export async function renderSettings(root) {
   blocksCard.appendChild(form);
 
   layout.appendChild(blocksCard);
+
+  const reviewCard = document.createElement('section');
+  reviewCard.className = 'card';
+  const rHeading = document.createElement('h2');
+  rHeading.textContent = 'Review';
+  reviewCard.appendChild(rHeading);
+
+  const reviewForm = document.createElement('form');
+  reviewForm.className = 'settings-review-form';
+  reviewForm.dataset.section = 'review';
+
+  const stepsHeading = document.createElement('h3');
+  stepsHeading.className = 'settings-subheading';
+  stepsHeading.textContent = 'Spaced repetition steps (minutes)';
+  reviewForm.appendChild(stepsHeading);
+
+  const grid = document.createElement('div');
+  grid.className = 'settings-review-grid';
+  reviewForm.appendChild(grid);
+
+  const labels = {
+    again: 'Again',
+    hard: 'Hard',
+    good: 'Good',
+    easy: 'Easy'
+  };
+
+  const reviewInputs = new Map();
+  for (const rating of REVIEW_RATINGS) {
+    const row = document.createElement('label');
+    row.className = 'settings-review-row';
+
+    const label = document.createElement('span');
+    label.textContent = labels[rating] || rating;
+    row.appendChild(label);
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '1';
+    input.required = true;
+    input.className = 'input settings-review-input';
+    input.value = String(reviewSteps[rating] ?? DEFAULT_REVIEW_STEPS[rating]);
+    input.dataset.rating = rating;
+    row.appendChild(input);
+
+    reviewInputs.set(rating, input);
+    grid.appendChild(row);
+  }
+
+  const saveReviewBtn = document.createElement('button');
+  saveReviewBtn.type = 'submit';
+  saveReviewBtn.className = 'btn';
+  saveReviewBtn.textContent = 'Save review settings';
+  reviewForm.appendChild(saveReviewBtn);
+
+  const reviewStatus = document.createElement('p');
+  reviewStatus.className = 'settings-review-status';
+  reviewStatus.hidden = true;
+  reviewForm.appendChild(reviewStatus);
+
+  reviewForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    reviewStatus.textContent = '';
+    reviewStatus.hidden = true;
+    reviewStatus.classList.remove('is-error');
+
+    const nextSteps = {};
+    for (const [rating, input] of reviewInputs) {
+      const value = Number(input.value);
+      if (!Number.isFinite(value) || value <= 0) {
+        reviewStatus.textContent = 'Enter a positive number of minutes for each step.';
+        reviewStatus.classList.add('is-error');
+        reviewStatus.hidden = false;
+        input.focus();
+        return;
+      }
+      const rounded = Math.max(1, Math.round(value));
+      nextSteps[rating] = rounded;
+    }
+
+    const originalText = saveReviewBtn.textContent;
+    saveReviewBtn.disabled = true;
+    saveReviewBtn.textContent = 'Saving…';
+
+    try {
+      await saveSettings({ reviewSteps: nextSteps });
+      const updated = await getSettings();
+      const normalized = {
+        ...DEFAULT_REVIEW_STEPS,
+        ...(updated?.reviewSteps || {})
+      };
+      for (const [rating, input] of reviewInputs) {
+        const value = normalized[rating];
+        if (Number.isFinite(value) && value > 0) {
+          input.value = String(value);
+        }
+      }
+      reviewStatus.textContent = 'Review settings saved.';
+      reviewStatus.hidden = false;
+    } catch (err) {
+      console.warn('Failed to save review settings', err);
+      reviewStatus.textContent = 'Failed to save review settings.';
+      reviewStatus.classList.add('is-error');
+      reviewStatus.hidden = false;
+    } finally {
+      saveReviewBtn.disabled = false;
+      saveReviewBtn.textContent = originalText;
+    }
+  });
+
+  reviewCard.appendChild(reviewForm);
+  layout.appendChild(reviewCard);
 
   const dataCard = document.createElement('section');
   dataCard.className = 'card';

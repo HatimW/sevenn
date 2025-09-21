@@ -5740,6 +5740,16 @@ body.map-toolbox-dragging {
   width: 100%;
 }
 
+.settings-review-status {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--gray);
+}
+
+.settings-review-status.is-error {
+  color: #fca5a5;
+}
+
 .settings-layout {
   display: flex;
   flex-direction: column;

@@ -1563,6 +1563,34 @@ var Sevenn = (() => {
     merged.plannerDefaults = normalizePlannerDefaults(settings.plannerDefaults || merged.plannerDefaults);
     return merged;
   }
+  async function saveSettings(patch) {
+    const s = await store("settings", "readwrite");
+    const current = await prom3(s.get("app")) || { ...DEFAULT_APP_SETTINGS };
+    const mergedSteps = normalizeReviewSteps({
+      ...DEFAULT_APP_SETTINGS.reviewSteps,
+      ...current.reviewSteps || {},
+      ...patch.reviewSteps || {}
+    });
+    const basePlanner = current.plannerDefaults || DEFAULT_APP_SETTINGS.plannerDefaults;
+    const patchPlanner = patch?.plannerDefaults || {};
+    const mergedPlannerDefaults = normalizePlannerDefaults({
+      anchorOffsets: {
+        ...DEFAULT_APP_SETTINGS.plannerDefaults?.anchorOffsets || {},
+        ...basePlanner?.anchorOffsets || {},
+        ...patchPlanner.anchorOffsets || {}
+      },
+      passes: Array.isArray(patchPlanner.passes) && patchPlanner.passes.length ? patchPlanner.passes : basePlanner?.passes || DEFAULT_APP_SETTINGS.plannerDefaults?.passes
+    });
+    const next = {
+      ...current,
+      ...patch,
+      id: "app",
+      reviewSteps: mergedSteps,
+      plannerDefaults: mergedPlannerDefaults
+    };
+    await prom3(s.put(next));
+    scheduleBackup();
+  }
   function cloneConfig(config) {
     return JSON.parse(JSON.stringify(config));
   }
@@ -1654,13 +1682,13 @@ var Sevenn = (() => {
     }
   }
   async function upsertBlock(def) {
-    const b = await store("blocks", "readwrite");
     const title = typeof def?.title === "string" ? def.title : "";
     let blockId = typeof def?.blockId === "string" && def.blockId.trim() ? def.blockId.trim() : "";
+    const readStore = await store("blocks");
     if (!blockId) {
-      blockId = await generateBlockId(b, title || "block");
+      blockId = await generateBlockId(readStore, title || "block");
     }
-    const existing = await prom3(b.get(blockId));
+    const existing = await prom3(readStore.get(blockId));
     const existingLectures = await listLecturesByBlock(blockId);
     const now = Date.now();
     const incomingLectures = Array.isArray(def.lectures) ? def.lectures.map((lecture) => ({
@@ -1716,7 +1744,8 @@ var Sevenn = (() => {
       weeks: typeof def.weeks === "number" ? def.weeks : existing?.weeks
     };
     delete next.lectures;
-    await prom3(b.put(next));
+    const writeStore = await store("blocks", "readwrite");
+    await prom3(writeStore.put(next));
     const incomingKeySet = new Set(
       prunedLectures.filter((lecture) => lecture?.id != null).map((lecture) => lectureKey(blockId, lecture.id))
     );
@@ -2158,6 +2187,23 @@ var Sevenn = (() => {
     const layout = document.createElement("div");
     layout.className = "settings-layout";
     root.appendChild(layout);
+    const [catalogResult, settingsResult] = await Promise.allSettled([
+      loadBlockCatalog(),
+      getSettings()
+    ]);
+    if (catalogResult.status === "rejected") {
+      console.warn("Failed to load block catalog", catalogResult.reason);
+    }
+    if (settingsResult.status === "rejected") {
+      console.warn("Failed to load app settings", settingsResult.reason);
+    }
+    const catalog = catalogResult.status === "fulfilled" && catalogResult.value ? catalogResult.value : { blocks: [] };
+    const settings = settingsResult.status === "fulfilled" ? settingsResult.value : null;
+    const blocks = Array.isArray(catalog.blocks) ? catalog.blocks : [];
+    const reviewSteps = {
+      ...DEFAULT_REVIEW_STEPS,
+      ...settings?.reviewSteps || {}
+    };
     const blocksCard = document.createElement("section");
     blocksCard.className = "card";
     const bHeading = document.createElement("h2");
@@ -2166,8 +2212,6 @@ var Sevenn = (() => {
     const list = document.createElement("div");
     list.className = "block-list";
     blocksCard.appendChild(list);
-    const catalog = await loadBlockCatalog();
-    const blocks = catalog.blocks || [];
     if (!blocks.length) {
       list.appendChild(createEmptyState());
     }
@@ -2339,6 +2383,102 @@ var Sevenn = (() => {
     });
     blocksCard.appendChild(form);
     layout.appendChild(blocksCard);
+    const reviewCard = document.createElement("section");
+    reviewCard.className = "card";
+    const rHeading = document.createElement("h2");
+    rHeading.textContent = "Review";
+    reviewCard.appendChild(rHeading);
+    const reviewForm = document.createElement("form");
+    reviewForm.className = "settings-review-form";
+    reviewForm.dataset.section = "review";
+    const stepsHeading = document.createElement("h3");
+    stepsHeading.className = "settings-subheading";
+    stepsHeading.textContent = "Spaced repetition steps (minutes)";
+    reviewForm.appendChild(stepsHeading);
+    const grid = document.createElement("div");
+    grid.className = "settings-review-grid";
+    reviewForm.appendChild(grid);
+    const labels = {
+      again: "Again",
+      hard: "Hard",
+      good: "Good",
+      easy: "Easy"
+    };
+    const reviewInputs = /* @__PURE__ */ new Map();
+    for (const rating of REVIEW_RATINGS) {
+      const row = document.createElement("label");
+      row.className = "settings-review-row";
+      const label = document.createElement("span");
+      label.textContent = labels[rating] || rating;
+      row.appendChild(label);
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "1";
+      input.required = true;
+      input.className = "input settings-review-input";
+      input.value = String(reviewSteps[rating] ?? DEFAULT_REVIEW_STEPS[rating]);
+      input.dataset.rating = rating;
+      row.appendChild(input);
+      reviewInputs.set(rating, input);
+      grid.appendChild(row);
+    }
+    const saveReviewBtn = document.createElement("button");
+    saveReviewBtn.type = "submit";
+    saveReviewBtn.className = "btn";
+    saveReviewBtn.textContent = "Save review settings";
+    reviewForm.appendChild(saveReviewBtn);
+    const reviewStatus = document.createElement("p");
+    reviewStatus.className = "settings-review-status";
+    reviewStatus.hidden = true;
+    reviewForm.appendChild(reviewStatus);
+    reviewForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      reviewStatus.textContent = "";
+      reviewStatus.hidden = true;
+      reviewStatus.classList.remove("is-error");
+      const nextSteps = {};
+      for (const [rating, input] of reviewInputs) {
+        const value = Number(input.value);
+        if (!Number.isFinite(value) || value <= 0) {
+          reviewStatus.textContent = "Enter a positive number of minutes for each step.";
+          reviewStatus.classList.add("is-error");
+          reviewStatus.hidden = false;
+          input.focus();
+          return;
+        }
+        const rounded = Math.max(1, Math.round(value));
+        nextSteps[rating] = rounded;
+      }
+      const originalText = saveReviewBtn.textContent;
+      saveReviewBtn.disabled = true;
+      saveReviewBtn.textContent = "Saving\u2026";
+      try {
+        await saveSettings({ reviewSteps: nextSteps });
+        const updated = await getSettings();
+        const normalized2 = {
+          ...DEFAULT_REVIEW_STEPS,
+          ...updated?.reviewSteps || {}
+        };
+        for (const [rating, input] of reviewInputs) {
+          const value = normalized2[rating];
+          if (Number.isFinite(value) && value > 0) {
+            input.value = String(value);
+          }
+        }
+        reviewStatus.textContent = "Review settings saved.";
+        reviewStatus.hidden = false;
+      } catch (err) {
+        console.warn("Failed to save review settings", err);
+        reviewStatus.textContent = "Failed to save review settings.";
+        reviewStatus.classList.add("is-error");
+        reviewStatus.hidden = false;
+      } finally {
+        saveReviewBtn.disabled = false;
+        saveReviewBtn.textContent = originalText;
+      }
+    });
+    reviewCard.appendChild(reviewForm);
+    layout.appendChild(reviewCard);
     const dataCard = document.createElement("section");
     dataCard.className = "card";
     const dHeading = document.createElement("h2");
