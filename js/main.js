@@ -10,6 +10,7 @@ import { renderFlashcards } from './ui/components/flashcards.js';
 import { renderReview } from './ui/components/review.js';
 import { renderQuiz } from './ui/components/quiz.js';
 import { renderBlockMode } from './ui/components/block-mode.js';
+import { renderBlockBoard } from './ui/components/block-board.js';
 import { renderExams, renderExamRunner } from './ui/components/exams.js';
 import { renderMap } from './ui/components/map.js';
 import { createEntryAddControl } from './ui/components/entry-controls.js';
@@ -30,6 +31,7 @@ const { renderApp, tabs, resolveListKind } = createAppShell({
   renderReview,
   renderQuiz,
   renderBlockMode,
+  renderBlockBoard,
   renderExams,
   renderExamRunner,
   renderMap,

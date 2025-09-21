@@ -14,6 +14,7 @@ export const state = {
   filters: { types:["disease","drug","concept"], block:"", week:"", onlyFav:false, sort:"updated" },
   lectures: { query: '', blockId: '', week: '', status: '', tag: '' },
   entryLayout: { mode: 'list', columns: 3, scale: 1, controlsVisible: false },
+  blockBoard: { collapsedBlocks: [], showDensity: true, showPomodoro: false },
   builder: {
     blocks:[],
     weeks:[],
@@ -48,6 +49,23 @@ export function setSubtab(tab, sub){ state.subtab[tab] = sub; }
 export function setQuery(q){ state.query = q; }
 export function setFilters(patch){ Object.assign(state.filters, patch); }
 export function setBuilder(patch){ Object.assign(state.builder, patch); }
+export function setBlockBoardState(patch) {
+  if (!patch) return;
+  if (!state.blockBoard) {
+    state.blockBoard = { collapsedBlocks: [], showDensity: true, showPomodoro: false };
+  }
+  const current = state.blockBoard;
+  if (Array.isArray(patch.collapsedBlocks)) {
+    const unique = Array.from(new Set(patch.collapsedBlocks.map(id => String(id))));
+    current.collapsedBlocks = unique;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'showDensity')) {
+    current.showDensity = Boolean(patch.showDensity);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'showPomodoro')) {
+    current.showPomodoro = Boolean(patch.showPomodoro);
+  }
+}
 export function setLecturesState(patch) {
   if (!patch) return;
   if (!state.lectures) {

@@ -22,6 +22,9 @@ const renderFlashcardsMock = mock.fn(() => {});
 const renderReviewMock = mock.fn(async () => {});
 const renderQuizMock = mock.fn(() => {});
 const renderBlockModeMock = mock.fn(() => {});
+const renderBlockBoardMock = mock.fn(async (container) => {
+  container.dataset.rendered = 'block-board';
+});
 const renderExamsMock = mock.fn(async (container) => {
   container.dataset.rendered = 'exams';
 });
@@ -59,6 +62,7 @@ const { renderApp, tabs } = createAppShell({
   renderReview: renderReviewMock,
   renderQuiz: renderQuizMock,
   renderBlockMode: renderBlockModeMock,
+  renderBlockBoard: renderBlockBoardMock,
   renderExams: renderExamsMock,
   renderExamRunner: renderExamRunnerMock,
   renderMap: renderMapMock,
@@ -84,6 +88,7 @@ function resetMocks() {
   renderReviewMock.mock.resetCalls();
   renderQuizMock.mock.resetCalls();
   renderBlockModeMock.mock.resetCalls();
+  renderBlockBoardMock.mock.resetCalls();
   renderExamsMock.mock.resetCalls();
   renderExamRunnerMock.mock.resetCalls();
   renderMapMock.mock.resetCalls();
@@ -140,7 +145,7 @@ describe('tab layout', () => {
   it('routes to the block board view', async () => {
     setTab('Block Board');
     await renderApp();
-    assert.equal(renderBlockModeMock.mock.callCount(), 1);
+    assert.equal(renderBlockBoardMock.mock.callCount(), 1);
   });
 
   it('routes to lectures via the builder', async () => {
