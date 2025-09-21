@@ -1,67 +1,25 @@
-import { getSettings, saveSettings, upsertBlock, deleteBlock, exportJSON, importJSON, exportAnkiCSV } from '../storage/storage.js';
+import { upsertBlock, deleteBlock, exportJSON, importJSON, exportAnkiCSV } from '../storage/storage.js';
 import { loadBlockCatalog, invalidateBlockCatalog } from '../storage/block-catalog.js';
-import { REVIEW_RATINGS } from '../review/constants.js';
-import { invalidateReviewDurationsCache } from '../review/scheduler.js';
 import { confirmModal } from './components/confirm.js';
+
+function createEmptyState() {
+  const empty = document.createElement('div');
+  empty.className = 'settings-empty-blocks';
+  empty.textContent = 'No blocks yet. Use “Add block” to create one.';
+  return empty;
+}
+
+function formatWeeks(weeks) {
+  if (!Number.isFinite(weeks)) return 'Weeks: —';
+  return `Weeks: ${weeks}`;
+}
 
 export async function renderSettings(root) {
   root.innerHTML = '';
 
-  const settings = await getSettings();
-
-  const settingsCard = document.createElement('section');
-  settingsCard.className = 'card';
-  const heading = document.createElement('h2');
-  heading.textContent = 'Settings';
-  settingsCard.appendChild(heading);
-
-  const dailyLabel = document.createElement('label');
-  dailyLabel.textContent = 'Daily review target:';
-  const dailyInput = document.createElement('input');
-  dailyInput.type = 'number';
-  dailyInput.className = 'input';
-  dailyInput.min = '1';
-  dailyInput.value = settings.dailyCount;
-  dailyInput.addEventListener('change', () => {
-    saveSettings({ dailyCount: Number(dailyInput.value) });
-  });
-  dailyLabel.appendChild(dailyInput);
-  settingsCard.appendChild(dailyLabel);
-
-  const timingHeader = document.createElement('h3');
-  timingHeader.className = 'settings-subheading';
-  timingHeader.textContent = 'Review timing (minutes)';
-  settingsCard.appendChild(timingHeader);
-
-  const timingGrid = document.createElement('div');
-  timingGrid.className = 'settings-review-grid';
-  const ratingLabels = { again: 'Again', hard: 'Hard', good: 'Good', easy: 'Easy' };
-  const stepValues = settings.reviewSteps || {};
-  REVIEW_RATINGS.forEach(key => {
-    const row = document.createElement('label');
-    row.className = 'settings-review-row';
-    row.textContent = `${ratingLabels[key]}:`;
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.className = 'input settings-review-input';
-    input.min = '1';
-    input.step = '1';
-    input.value = stepValues[key] ?? '';
-    input.addEventListener('change', async () => {
-      const value = Number(input.value);
-      if (!Number.isFinite(value) || value <= 0) {
-        input.value = stepValues[key] ?? '';
-        return;
-      }
-      await saveSettings({ reviewSteps: { [key]: value } });
-      invalidateReviewDurationsCache();
-    });
-    row.appendChild(input);
-    timingGrid.appendChild(row);
-  });
-  settingsCard.appendChild(timingGrid);
-
-  root.appendChild(settingsCard);
+  const layout = document.createElement('div');
+  layout.className = 'settings-layout';
+  root.appendChild(layout);
 
   const blocksCard = document.createElement('section');
   blocksCard.className = 'card';
@@ -75,143 +33,206 @@ export async function renderSettings(root) {
 
   const catalog = await loadBlockCatalog();
   const blocks = catalog.blocks || [];
-  blocks.forEach((b,i) => {
-    const wrap = document.createElement('div');
-    wrap.className = 'block';
-    const title = document.createElement('h3');
-    title.textContent = b.title || 'Untitled block';
-    if (b.color) {
-      title.style.borderLeft = `8px solid ${b.color}`;
-      title.style.paddingLeft = '0.5rem';
-    }
-    wrap.appendChild(title);
+  if (!blocks.length) {
+    list.appendChild(createEmptyState());
+  }
 
-    const wkInfo = document.createElement('div');
-    const weekLabel = Number.isFinite(Number(b.weeks)) ? Number(b.weeks) : null;
-    wkInfo.textContent = weekLabel != null ? `Weeks: ${weekLabel}` : 'Weeks: —';
-    wrap.appendChild(wkInfo);
+  blocks.forEach((block, index) => {
+    if (!block) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'settings-block-row';
+
+    const header = document.createElement('div');
+    header.className = 'settings-block-header';
+    const title = document.createElement('h3');
+    title.className = 'settings-block-title';
+    title.textContent = block.title || 'Untitled block';
+    if (block.color) {
+      title.style.setProperty('--block-accent', block.color);
+      title.classList.add('has-accent');
+    }
+    header.appendChild(title);
+
+    const meta = document.createElement('div');
+    meta.className = 'settings-block-meta';
+    meta.textContent = formatWeeks(Number(block.weeks));
+    header.appendChild(meta);
+
+    wrap.appendChild(header);
 
     const controls = document.createElement('div');
-    controls.className = 'row';
+    controls.className = 'settings-block-controls';
 
     const upBtn = document.createElement('button');
-    upBtn.className = 'btn';
+    upBtn.type = 'button';
+    upBtn.className = 'btn tertiary';
     upBtn.textContent = '↑';
-    upBtn.disabled = i === 0;
+    upBtn.disabled = index === 0;
     upBtn.addEventListener('click', async () => {
-      const other = blocks[i-1];
-      const tmp = b.order; b.order = other.order; other.order = tmp;
-      await upsertBlock(b); await upsertBlock(other);
+      const other = blocks[index - 1];
+      if (!other) return;
+      const tmp = block.order;
+      block.order = other.order;
+      other.order = tmp;
+      await upsertBlock(block);
+      await upsertBlock(other);
       invalidateBlockCatalog();
       await renderSettings(root);
     });
     controls.appendChild(upBtn);
 
     const downBtn = document.createElement('button');
-    downBtn.className = 'btn';
+    downBtn.type = 'button';
+    downBtn.className = 'btn tertiary';
     downBtn.textContent = '↓';
-    downBtn.disabled = i === blocks.length - 1;
+    downBtn.disabled = index === blocks.length - 1;
     downBtn.addEventListener('click', async () => {
-      const other = blocks[i+1];
-      const tmp = b.order; b.order = other.order; other.order = tmp;
-      await upsertBlock(b); await upsertBlock(other);
+      const other = blocks[index + 1];
+      if (!other) return;
+      const tmp = block.order;
+      block.order = other.order;
+      other.order = tmp;
+      await upsertBlock(block);
+      await upsertBlock(other);
       invalidateBlockCatalog();
       await renderSettings(root);
     });
     controls.appendChild(downBtn);
 
-    const edit = document.createElement('button');
-    edit.className = 'btn';
-    edit.textContent = 'Edit';
-    controls.appendChild(edit);
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'btn secondary';
+    editBtn.textContent = 'Edit';
+    controls.appendChild(editBtn);
 
-    const del = document.createElement('button');
-    del.className = 'btn';
-    del.textContent = 'Delete';
-    del.addEventListener('click', async () => {
-      if (await confirmModal('Delete block?')) {
-        await deleteBlock(b.blockId);
-        invalidateBlockCatalog();
-        await renderSettings(root);
-      }
-    });
-    controls.appendChild(del);
-    wrap.appendChild(controls);
-
-    const editForm = document.createElement('form');
-    editForm.className = 'row';
-    editForm.style.display = 'none';
-    const titleInput = document.createElement('input');
-    titleInput.className = 'input';
-    titleInput.value = b.title;
-    const weeksInput = document.createElement('input');
-    weeksInput.className = 'input';
-    weeksInput.type = 'number';
-    weeksInput.min = '1';
-    weeksInput.value = b.weeks;
-    const colorInput = document.createElement('input');
-    colorInput.className = 'input';
-    colorInput.type = 'color';
-    colorInput.value = b.color || '#ffffff';
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'btn';
-    saveBtn.type = 'submit';
-    saveBtn.textContent = 'Save';
-    editForm.append(titleInput, weeksInput, colorInput, saveBtn);
-    editForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const titleValue = titleInput.value.trim();
-      const weeksValue = Number(weeksInput.value);
-      if (!titleValue || Number.isNaN(weeksValue) || weeksValue <= 0) return;
-      const updated = { ...b, title: titleValue, weeks: weeksValue, color: colorInput.value };
-      await upsertBlock(updated);
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'btn secondary';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', async () => {
+      if (!(await confirmModal('Delete block?'))) return;
+      await deleteBlock(block.blockId);
       invalidateBlockCatalog();
       await renderSettings(root);
     });
+    controls.appendChild(deleteBtn);
+
+    wrap.appendChild(controls);
+
+    const editForm = document.createElement('form');
+    editForm.className = 'settings-block-edit';
+    editForm.hidden = true;
+
+    const titleInput = document.createElement('input');
+    titleInput.type = 'text';
+    titleInput.required = true;
+    titleInput.className = 'input';
+    titleInput.value = block.title || '';
+
+    const weeksInput = document.createElement('input');
+    weeksInput.type = 'number';
+    weeksInput.min = '1';
+    weeksInput.required = true;
+    weeksInput.className = 'input';
+    weeksInput.value = block.weeks != null ? String(block.weeks) : '1';
+
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.className = 'input';
+    colorInput.value = block.color || '#ffffff';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'submit';
+    saveBtn.className = 'btn';
+    saveBtn.textContent = 'Save changes';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn secondary';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      editForm.hidden = true;
+    });
+
+    editForm.append(titleInput, weeksInput, colorInput, saveBtn, cancelBtn);
+    editForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const titleValue = titleInput.value.trim();
+      const weeksValue = Number(weeksInput.value);
+      if (!titleValue || !Number.isFinite(weeksValue) || weeksValue <= 0) {
+        return;
+      }
+      const payload = {
+        ...block,
+        title: titleValue,
+        weeks: weeksValue,
+        color: colorInput.value || null
+      };
+      await upsertBlock(payload);
+      invalidateBlockCatalog();
+      await renderSettings(root);
+    });
+
     wrap.appendChild(editForm);
 
-    edit.addEventListener('click', () => {
-      editForm.style.display = editForm.style.display === 'none' ? 'flex' : 'none';
+    editBtn.addEventListener('click', () => {
+      editForm.hidden = !editForm.hidden;
     });
 
     list.appendChild(wrap);
   });
 
   const form = document.createElement('form');
-  form.className = 'row';
+  form.className = 'settings-block-add';
+
   const titleInput = document.createElement('input');
+  titleInput.type = 'text';
+  titleInput.required = true;
+  titleInput.placeholder = 'Block title';
   titleInput.className = 'input';
-  titleInput.placeholder = 'Title';
-  const weeks = document.createElement('input');
-  weeks.className = 'input';
-  weeks.type = 'number';
-  weeks.min = '1';
-  weeks.placeholder = 'Weeks';
-  const color = document.createElement('input');
-  color.className = 'input';
-  color.type = 'color';
-  color.value = '#ffffff';
-  const add = document.createElement('button');
-  add.className = 'btn';
-  add.type = 'submit';
-  add.textContent = 'Add block';
-  form.append(titleInput, weeks, color, add);
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
+
+  const weeksInput = document.createElement('input');
+  weeksInput.type = 'number';
+  weeksInput.min = '1';
+  weeksInput.required = true;
+  weeksInput.value = '1';
+  weeksInput.placeholder = 'Weeks';
+  weeksInput.className = 'input';
+
+  const colorInput = document.createElement('input');
+  colorInput.type = 'color';
+  colorInput.className = 'input';
+  colorInput.value = '#ffffff';
+
+  const submitBtn = document.createElement('button');
+  submitBtn.type = 'submit';
+  submitBtn.className = 'btn';
+  submitBtn.textContent = 'Add block';
+
+  form.append(titleInput, weeksInput, colorInput, submitBtn);
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
     const titleValue = titleInput.value.trim();
-    const weekValue = Number(weeks.value);
-    if (!titleValue || Number.isNaN(weekValue) || weekValue <= 0) return;
+    const weeksValue = Number(weeksInput.value);
+    if (!titleValue || !Number.isFinite(weeksValue) || weeksValue <= 0) {
+      return;
+    }
     await upsertBlock({
       title: titleValue,
-      weeks: weekValue,
-      color: color.value
+      weeks: weeksValue,
+      color: colorInput.value || null
     });
+    titleInput.value = '';
+    weeksInput.value = '1';
+    colorInput.value = '#ffffff';
     invalidateBlockCatalog();
     await renderSettings(root);
   });
+
   blocksCard.appendChild(form);
 
-  root.appendChild(blocksCard);
+  layout.appendChild(blocksCard);
 
   const dataCard = document.createElement('section');
   dataCard.className = 'card';
@@ -272,5 +293,5 @@ export async function renderSettings(root) {
   });
   dataCard.appendChild(ankiBtn);
 
-  root.appendChild(dataCard);
+  layout.appendChild(dataCard);
 }
