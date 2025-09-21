@@ -10,6 +10,8 @@ import {
 import { loadBlockCatalog, invalidateBlockCatalog } from '../storage/block-catalog.js';
 import { confirmModal } from './components/confirm.js';
 import { DEFAULT_REVIEW_STEPS, REVIEW_RATINGS } from '../review/constants.js';
+import { DEFAULT_PASS_PLAN } from '../lectures/scheduler.js';
+import { LECTURE_PASS_ACTIONS } from '../lectures/actions.js';
 
 function createEmptyState() {
   const empty = document.createElement('div');
@@ -19,6 +21,180 @@ function createEmptyState() {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+const PASS_DAY_MINUTES = 24 * 60;
+const PASS_MAX_COUNT = 20;
+const PASS_TIME_UNITS = [
+  { value: 'minutes', label: 'Minutes', minutes: 1 },
+  { value: 'hours', label: 'Hours', minutes: 60 },
+  { value: 'days', label: 'Days', minutes: 60 * 24 },
+  { value: 'weeks', label: 'Weeks', minutes: 60 * 24 * 7 }
+];
+
+function formatPassOffset(minutes) {
+  if (!Number.isFinite(minutes)) return '0m';
+  const abs = Math.abs(minutes);
+  if (abs < 60) return `${Math.round(minutes)}m`;
+  const hours = minutes / 60;
+  if (Math.abs(hours) < 24) return `${Math.round(hours)}h`;
+  const days = minutes / (60 * 24);
+  if (Math.abs(days) < 7) return `${Math.round(days)}d`;
+  const weeks = minutes / (60 * 24 * 7);
+  if (Math.abs(weeks) < 4) return `${Math.round(weeks)}w`;
+  const months = minutes / (60 * 24 * 30);
+  return `${Math.round(months)}mo`;
+}
+
+function plannerFallbackAnchor(index) {
+  if (index === 0) return 'today';
+  if (index === 1) return 'tomorrow';
+  return 'upcoming';
+}
+
+function plannerDefaultAction(index) {
+  if (!Array.isArray(LECTURE_PASS_ACTIONS) || !LECTURE_PASS_ACTIONS.length) return '';
+  const normalized = index % LECTURE_PASS_ACTIONS.length;
+  return LECTURE_PASS_ACTIONS[Math.max(0, normalized)];
+}
+
+function plannerBaseSchedule(plan) {
+  if (plan && Array.isArray(plan.schedule) && plan.schedule.length) {
+    return plan.schedule;
+  }
+  return DEFAULT_PASS_PLAN.schedule;
+}
+
+function plannerBuildTemplate(plan, count) {
+  const template = plannerBaseSchedule(plan);
+  const safeCount = Math.max(0, Number(count) || 0);
+  if (safeCount === 0) return [];
+  const deltas = [];
+  for (let i = 1; i < template.length; i += 1) {
+    const prev = Number(template[i - 1]?.offsetMinutes);
+    const next = Number(template[i]?.offsetMinutes);
+    if (Number.isFinite(prev) && Number.isFinite(next)) {
+      const delta = next - prev;
+      if (delta > 0) deltas.push(delta);
+    }
+  }
+  const defaultGap = deltas.length ? deltas[deltas.length - 1] : PASS_DAY_MINUTES;
+  const schedule = [];
+  for (let i = 0; i < safeCount; i += 1) {
+    const source = template[i] || {};
+    const previous = schedule[i - 1] || null;
+    const previousOffset = Number.isFinite(previous?.offsetMinutes) ? previous.offsetMinutes : null;
+    const hasExplicitOffset = Number.isFinite(source.offsetMinutes);
+    const isExplicitNull = source.offsetMinutes === null;
+    const order = i + 1;
+    const offset = hasExplicitOffset
+      ? source.offsetMinutes
+      : isExplicitNull
+        ? null
+        : previousOffset != null
+          ? previousOffset + defaultGap
+          : i === 0
+            ? 0
+            : defaultGap * i;
+    const anchor = typeof source.anchor === 'string' && source.anchor.trim()
+      ? source.anchor.trim()
+      : previous?.anchor || plannerFallbackAnchor(i);
+    const label = typeof source.label === 'string' && source.label.trim()
+      ? source.label.trim()
+      : `Pass ${order}`;
+    const action = typeof source.action === 'string' && source.action.trim()
+      ? source.action.trim()
+      : plannerDefaultAction(i);
+    schedule.push({ order, offsetMinutes: offset, anchor, label, action });
+  }
+  return schedule;
+}
+
+function plannerAdjustConfigs(current, count, plan) {
+  const template = plannerBuildTemplate(plan || { schedule: current }, count);
+  return template.map((step, index) => {
+    const existing = current[index];
+    const action = existing && typeof existing.action === 'string' && existing.action.trim()
+      ? existing.action.trim()
+      : step.action;
+    const label = existing && typeof existing.label === 'string' && existing.label.trim()
+      ? existing.label.trim()
+      : step.label;
+    const anchor = existing && typeof existing.anchor === 'string' && existing.anchor.trim()
+      ? existing.anchor.trim()
+      : step.anchor;
+    const existingOffset = existing?.offsetMinutes;
+    const offsetMinutes = Number.isFinite(existingOffset) || existingOffset === null
+      ? existingOffset
+      : step.offsetMinutes;
+    return { ...step, action, label, anchor, offsetMinutes };
+  });
+}
+
+function plannerClampCount(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.min(PASS_MAX_COUNT, Math.max(0, Math.round(parsed)));
+}
+
+function plannerDecomposeOffset(offsetMinutes) {
+  if (!Number.isFinite(offsetMinutes)) {
+    return { value: '', unit: 'days' };
+  }
+  const abs = Math.abs(offsetMinutes);
+  for (const unit of PASS_TIME_UNITS.slice().reverse()) {
+    if (abs % unit.minutes === 0) {
+      return { value: offsetMinutes / unit.minutes, unit: unit.value };
+    }
+  }
+  return { value: offsetMinutes, unit: 'minutes' };
+}
+
+function plannerComposeOffset(value, unit) {
+  if (value === '') return null;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  const unitConfig = PASS_TIME_UNITS.find(entry => entry.value === unit) || PASS_TIME_UNITS[2];
+  return Math.round(numeric * unitConfig.minutes);
+}
+
+function plannerNormalizeConfig(config, index, previousOffset) {
+  const order = index + 1;
+  const label = typeof config.label === 'string' && config.label.trim()
+    ? config.label.trim()
+    : `Pass ${order}`;
+  const hasOffset = Number.isFinite(config.offsetMinutes);
+  const isExplicitNull = config.offsetMinutes === null;
+  const offset = hasOffset
+    ? config.offsetMinutes
+    : isExplicitNull
+      ? null
+      : Number.isFinite(previousOffset)
+        ? previousOffset
+        : index === 0
+          ? 0
+          : index * PASS_DAY_MINUTES;
+  const anchor = typeof config.anchor === 'string' && config.anchor.trim()
+    ? config.anchor.trim()
+    : plannerFallbackAnchor(index);
+  const action = typeof config.action === 'string' && config.action.trim()
+    ? config.action.trim()
+    : plannerDefaultAction(index);
+  return { order, label, offsetMinutes: offset, anchor, action };
+}
+
+function plannerBuildPayload(passConfigs) {
+  if (!Array.isArray(passConfigs) || !passConfigs.length) return [];
+  let lastOffset = null;
+  return passConfigs.map((config, index) => {
+    const normalized = plannerNormalizeConfig(config, index, lastOffset);
+    if (Number.isFinite(normalized.offsetMinutes)) {
+      lastOffset = normalized.offsetMinutes;
+    } else {
+      lastOffset = null;
+    }
+    return normalized;
+  });
+}
 
 function formatWeekCount(weeks) {
   if (!Number.isFinite(weeks) || weeks <= 0) return null;
@@ -396,6 +572,308 @@ export async function renderSettings(root) {
   blocksCard.appendChild(form);
 
   layout.appendChild(blocksCard);
+
+  const plannerCard = document.createElement('section');
+  plannerCard.className = 'card settings-lecture-defaults-card';
+  const plannerHeading = document.createElement('h2');
+  plannerHeading.textContent = 'Lecture defaults';
+  plannerCard.appendChild(plannerHeading);
+
+  const plannerIntro = document.createElement('p');
+  plannerIntro.className = 'settings-lecture-defaults-intro';
+  plannerIntro.textContent = 'Configure the default pass timing and learning methods applied when you add a new lecture.';
+  plannerCard.appendChild(plannerIntro);
+
+  const plannerPasses = Array.isArray(settings?.plannerDefaults?.passes)
+    ? settings.plannerDefaults.passes.map(entry => ({ ...entry }))
+    : [];
+  const templateSchedule = plannerPasses.length
+    ? plannerPasses.map(entry => ({ ...entry }))
+    : DEFAULT_PASS_PLAN.schedule.map(entry => ({ ...entry }));
+  let planTemplate = { schedule: templateSchedule };
+  let passDefaults = plannerAdjustConfigs(plannerPasses, plannerPasses.length, planTemplate);
+  let defaultsAdvancedOpen = false;
+
+  function updatePlanTemplateFromCurrent() {
+    if (passDefaults.length) {
+      planTemplate = { schedule: passDefaults.map(entry => ({ ...entry })) };
+    } else {
+      planTemplate = { schedule: DEFAULT_PASS_PLAN.schedule.map(entry => ({ ...entry })) };
+    }
+  }
+
+  const passCountField = document.createElement('label');
+  passCountField.className = 'settings-pass-count-field';
+  passCountField.textContent = 'Number of passes';
+  const passCountInput = document.createElement('input');
+  passCountInput.type = 'number';
+  passCountInput.min = '0';
+  passCountInput.max = String(PASS_MAX_COUNT);
+  passCountInput.className = 'input';
+  passCountInput.value = String(passDefaults.length);
+  passCountField.appendChild(passCountInput);
+  plannerCard.appendChild(passCountField);
+
+  const passSummary = document.createElement('div');
+  passSummary.className = 'lecture-pass-editor settings-pass-summary';
+  plannerCard.appendChild(passSummary);
+
+  const plannerAdvancedControls = document.createElement('div');
+  plannerAdvancedControls.className = 'lecture-pass-advanced-controls';
+  const plannerAdvancedToggle = document.createElement('button');
+  plannerAdvancedToggle.type = 'button';
+  plannerAdvancedToggle.className = 'btn tertiary lecture-pass-advanced-toggle';
+  plannerAdvancedToggle.textContent = 'Advanced settings';
+  plannerAdvancedControls.appendChild(plannerAdvancedToggle);
+  plannerCard.appendChild(plannerAdvancedControls);
+
+  const plannerAdvancedSection = document.createElement('div');
+  plannerAdvancedSection.className = 'lecture-pass-advanced';
+  const plannerAdvancedNote = document.createElement('p');
+  plannerAdvancedNote.className = 'lecture-pass-advanced-note';
+  plannerAdvancedNote.textContent = 'Adjust the schedule and learning method for each pass.';
+  plannerAdvancedSection.appendChild(plannerAdvancedNote);
+  const plannerAdvancedList = document.createElement('div');
+  plannerAdvancedList.className = 'lecture-pass-advanced-list';
+  plannerAdvancedSection.appendChild(plannerAdvancedList);
+  plannerCard.appendChild(plannerAdvancedSection);
+
+  const plannerActions = document.createElement('div');
+  plannerActions.className = 'settings-lecture-defaults-actions';
+  const saveDefaultsBtn = document.createElement('button');
+  saveDefaultsBtn.type = 'button';
+  saveDefaultsBtn.className = 'btn';
+  saveDefaultsBtn.textContent = 'Save lecture defaults';
+  plannerActions.appendChild(saveDefaultsBtn);
+  plannerCard.appendChild(plannerActions);
+
+  const defaultsStatus = document.createElement('p');
+  defaultsStatus.className = 'settings-defaults-status';
+  defaultsStatus.hidden = true;
+  plannerCard.appendChild(defaultsStatus);
+
+  function renderDefaultsSummary() {
+    passSummary.innerHTML = '';
+    if (!passDefaults.length) {
+      const empty = document.createElement('div');
+      empty.className = 'lecture-pass-empty';
+      empty.textContent = 'No passes scheduled.';
+      passSummary.appendChild(empty);
+      return;
+    }
+    passDefaults.forEach((config, index) => {
+      const row = document.createElement('div');
+      row.className = 'lecture-pass-row';
+
+      const label = document.createElement('span');
+      label.className = 'lecture-pass-label';
+      label.textContent = `Pass ${index + 1}`;
+      row.appendChild(label);
+
+      const method = document.createElement('span');
+      method.className = 'lecture-pass-method';
+      method.textContent = config.action || plannerDefaultAction(index) || '—';
+      row.appendChild(method);
+
+      const timing = document.createElement('span');
+      timing.className = 'lecture-pass-offset';
+      const timingLabel = Number.isFinite(config.offsetMinutes)
+        ? formatPassOffset(config.offsetMinutes)
+        : 'Unscheduled';
+      timing.textContent = `Timing: ${timingLabel}`;
+      row.appendChild(timing);
+
+      passSummary.appendChild(row);
+    });
+  }
+
+  function rebuildDefaultsAdvancedRows() {
+    plannerAdvancedList.innerHTML = '';
+    if (!passDefaults.length) {
+      const empty = document.createElement('div');
+      empty.className = 'lecture-pass-empty';
+      empty.textContent = 'No passes to configure.';
+      plannerAdvancedList.appendChild(empty);
+      return;
+    }
+    passDefaults.forEach((config, index) => {
+      const row = document.createElement('div');
+      row.className = 'lecture-pass-advanced-row';
+
+      const header = document.createElement('div');
+      header.className = 'lecture-pass-advanced-header';
+      header.textContent = `Pass ${index + 1}`;
+      row.appendChild(header);
+
+      const actionField = document.createElement('label');
+      actionField.className = 'lecture-pass-advanced-field';
+      const actionTitle = document.createElement('span');
+      actionTitle.textContent = 'Learning method';
+      actionField.appendChild(actionTitle);
+      const actionSelect = document.createElement('select');
+      actionSelect.className = 'input lecture-pass-action';
+      LECTURE_PASS_ACTIONS.forEach(action => {
+        const option = document.createElement('option');
+        option.value = action;
+        option.textContent = action;
+        actionSelect.appendChild(option);
+      });
+      if (config.action && !LECTURE_PASS_ACTIONS.includes(config.action)) {
+        const custom = document.createElement('option');
+        custom.value = config.action;
+        custom.textContent = config.action;
+        actionSelect.appendChild(custom);
+      }
+      actionSelect.value = config.action || '';
+      actionSelect.addEventListener('change', event => {
+        passDefaults[index] = { ...passDefaults[index], action: event.target.value };
+        updatePlanTemplateFromCurrent();
+        renderDefaultsSummary();
+      });
+      actionField.appendChild(actionSelect);
+      row.appendChild(actionField);
+
+      const timingField = document.createElement('label');
+      timingField.className = 'lecture-pass-advanced-field';
+      const timingTitle = document.createElement('span');
+      timingTitle.textContent = 'Timing';
+      timingField.appendChild(timingTitle);
+      const offsetWrap = document.createElement('div');
+      offsetWrap.className = 'lecture-pass-offset-editor';
+      const offsetInput = document.createElement('input');
+      offsetInput.type = 'number';
+      offsetInput.className = 'input';
+      offsetInput.step = '1';
+      const { value: offsetValue, unit } = plannerDecomposeOffset(config.offsetMinutes ?? 0);
+      if (offsetValue !== '') {
+        offsetInput.value = String(offsetValue);
+      }
+      offsetWrap.appendChild(offsetInput);
+      const unitSelect = document.createElement('select');
+      unitSelect.className = 'input';
+      PASS_TIME_UNITS.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.value;
+        opt.textContent = item.label;
+        unitSelect.appendChild(opt);
+      });
+      unitSelect.value = unit;
+      offsetWrap.appendChild(unitSelect);
+      const preview = document.createElement('div');
+      preview.className = 'lecture-pass-advanced-preview';
+      preview.textContent = Number.isFinite(config.offsetMinutes)
+        ? `Current: ${formatPassOffset(config.offsetMinutes)}`
+        : 'Current: Unscheduled';
+      offsetWrap.appendChild(preview);
+
+      function applyOffsetUpdate() {
+        if (offsetInput.value === '') {
+          passDefaults[index] = { ...passDefaults[index], offsetMinutes: null };
+          preview.textContent = 'Current: Unscheduled';
+        } else {
+          const minutes = plannerComposeOffset(offsetInput.value, unitSelect.value);
+          if (minutes == null) {
+            passDefaults[index] = { ...passDefaults[index], offsetMinutes: null };
+            preview.textContent = 'Current: Unscheduled';
+          } else {
+            passDefaults[index] = { ...passDefaults[index], offsetMinutes: minutes };
+            preview.textContent = `Current: ${formatPassOffset(minutes)}`;
+          }
+        }
+        updatePlanTemplateFromCurrent();
+        renderDefaultsSummary();
+      }
+
+      offsetInput.addEventListener('input', applyOffsetUpdate);
+      unitSelect.addEventListener('change', applyOffsetUpdate);
+
+      timingField.appendChild(offsetWrap);
+      row.appendChild(timingField);
+
+      plannerAdvancedList.appendChild(row);
+    });
+  }
+
+  function renderDefaultsEditor(forceAdvancedRebuild = false) {
+    passCountInput.value = String(passDefaults.length);
+    renderDefaultsSummary();
+    plannerAdvancedToggle.disabled = passDefaults.length === 0;
+    plannerAdvancedToggle.setAttribute('aria-expanded', defaultsAdvancedOpen && passDefaults.length ? 'true' : 'false');
+    if (!passDefaults.length) {
+      plannerAdvancedSection.hidden = true;
+      plannerAdvancedSection.classList.remove('is-open');
+      plannerAdvancedList.innerHTML = '';
+      return;
+    }
+    if (defaultsAdvancedOpen) {
+      plannerAdvancedSection.hidden = false;
+      plannerAdvancedSection.classList.add('is-open');
+      if (forceAdvancedRebuild || !plannerAdvancedList.childElementCount) {
+        rebuildDefaultsAdvancedRows();
+      } else {
+        Array.from(plannerAdvancedList.querySelectorAll('.lecture-pass-advanced-header')).forEach((header, idx) => {
+          header.textContent = `Pass ${idx + 1}`;
+        });
+      }
+    } else {
+      plannerAdvancedSection.hidden = true;
+      plannerAdvancedSection.classList.remove('is-open');
+      plannerAdvancedList.innerHTML = '';
+    }
+  }
+
+  updatePlanTemplateFromCurrent();
+  renderDefaultsEditor(true);
+
+  function handlePlannerCountChange() {
+    const next = plannerClampCount(passCountInput.value);
+    passCountInput.value = String(next);
+    passDefaults = plannerAdjustConfigs(passDefaults, next, planTemplate);
+    updatePlanTemplateFromCurrent();
+    renderDefaultsEditor(true);
+  }
+
+  passCountInput.addEventListener('input', handlePlannerCountChange);
+  passCountInput.addEventListener('change', handlePlannerCountChange);
+
+  plannerAdvancedToggle.addEventListener('click', () => {
+    if (!passDefaults.length) return;
+    defaultsAdvancedOpen = !defaultsAdvancedOpen;
+    renderDefaultsEditor(true);
+  });
+
+  saveDefaultsBtn.addEventListener('click', async () => {
+    defaultsStatus.textContent = '';
+    defaultsStatus.hidden = true;
+    defaultsStatus.classList.remove('is-error');
+    const payload = plannerBuildPayload(passDefaults);
+    const originalText = saveDefaultsBtn.textContent;
+    saveDefaultsBtn.disabled = true;
+    saveDefaultsBtn.textContent = 'Saving…';
+    try {
+      await saveSettings({ plannerDefaults: { passes: payload } });
+      const updated = await getSettings();
+      const updatedPasses = Array.isArray(updated?.plannerDefaults?.passes)
+        ? updated.plannerDefaults.passes.map(entry => ({ ...entry }))
+        : [];
+      planTemplate = { schedule: (updatedPasses.length ? updatedPasses : DEFAULT_PASS_PLAN.schedule).map(entry => ({ ...entry })) };
+      passDefaults = plannerAdjustConfigs(updatedPasses, updatedPasses.length, planTemplate);
+      updatePlanTemplateFromCurrent();
+      renderDefaultsEditor(true);
+      defaultsStatus.textContent = 'Lecture defaults saved.';
+      defaultsStatus.hidden = false;
+    } catch (err) {
+      console.warn('Failed to save lecture defaults', err);
+      defaultsStatus.textContent = 'Failed to save lecture defaults.';
+      defaultsStatus.classList.add('is-error');
+      defaultsStatus.hidden = false;
+    } finally {
+      saveDefaultsBtn.disabled = false;
+      saveDefaultsBtn.textContent = originalText;
+    }
+  });
+
+  layout.appendChild(plannerCard);
 
   const reviewCard = document.createElement('section');
   reviewCard.className = 'card';

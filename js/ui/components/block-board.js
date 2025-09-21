@@ -32,7 +32,7 @@ const PASS_COLORS = [
   'var(--indigo)',
   'var(--cyan)'
 ];
-const BOARD_DAYS = 14;
+const BOARD_DEFAULT_DAYS = 14;
 
 const BLOCK_RANGE_FORMAT = new Intl.DateTimeFormat(undefined, {
   month: 'short',
@@ -120,10 +120,55 @@ function formatPassDueLabel(due) {
   return `${datePart} • ${timePart}`;
 }
 
-function collectBoardDays(now = Date.now()) {
+function collectDefaultBoardDays(now = Date.now()) {
   const today = startOfDay(now);
   const start = today - 2 * DAY_MS;
-  return Array.from({ length: BOARD_DAYS }, (_, idx) => start + idx * DAY_MS);
+  return Array.from({ length: BOARD_DEFAULT_DAYS }, (_, idx) => start + idx * DAY_MS);
+}
+
+function resolveBlockRange(block, now = Date.now()) {
+  if (!block) return null;
+  const startDate = parseBlockDate(block.startDate);
+  const endDate = parseBlockDate(block.endDate);
+  if (startDate && endDate && endDate >= startDate) {
+    const start = startOfDay(startDate.getTime());
+    const end = startOfDay(endDate.getTime());
+    return { start, end };
+  }
+  const weeks = Number(block?.weeks);
+  if (Number.isFinite(weeks) && weeks > 0) {
+    const spanDays = Math.max(1, Math.round(weeks * 7));
+    if (startDate) {
+      const start = startOfDay(startDate.getTime());
+      const end = start + (spanDays - 1) * DAY_MS;
+      return { start, end };
+    }
+    if (endDate) {
+      const end = startOfDay(endDate.getTime());
+      const start = end - (spanDays - 1) * DAY_MS;
+      return { start, end };
+    }
+    const today = startOfDay(now);
+    const start = today;
+    const end = start + (spanDays - 1) * DAY_MS;
+    return { start, end };
+  }
+  return null;
+}
+
+function collectBoardDays(block, now = Date.now()) {
+  const range = resolveBlockRange(block, now);
+  if (!range) {
+    return collectDefaultBoardDays(now);
+  }
+  const days = [];
+  for (let ts = range.start; ts <= range.end; ts += DAY_MS) {
+    days.push(ts);
+  }
+  if (!days.length) {
+    return collectDefaultBoardDays(now);
+  }
+  return days;
 }
 
 function buildPassElement(entry, onComplete, onDelay) {
@@ -577,7 +622,6 @@ export async function renderBlockBoard(container, refresh) {
 
   const { blocks } = await loadCatalog();
   const lectures = await fetchLectures();
-  const days = collectBoardDays();
 
   const queues = groupLectureQueues(lectures);
 
@@ -626,9 +670,11 @@ export async function renderBlockBoard(container, refresh) {
     if (!lecturesByBlock.has(key)) lecturesByBlock.set(key, []);
     lecturesByBlock.get(key).push(lecture);
   });
+  const now = Date.now();
   blocks.forEach(block => {
     const blockLectures = lecturesByBlock.get(String(block.blockId)) || [];
-    renderBlockBoardBlock(blockList, block, blockLectures, days, refreshBoard);
+    const blockDays = collectBoardDays(block, now);
+    renderBlockBoardBlock(blockList, block, blockLectures, blockDays, refreshBoard);
   });
   container.appendChild(blockList);
 }

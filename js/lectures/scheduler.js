@@ -1,6 +1,8 @@
 const DAY_MINUTES = 24 * 60;
 const MINUTE_MS = 60 * 1000;
 
+export const EMPTY_PASS_PLAN_ID = 'none';
+
 function clone(value) {
   if (value == null) return value;
   return JSON.parse(JSON.stringify(value));
@@ -80,9 +82,16 @@ export const DEFAULT_PLANNER_DEFAULTS = {
 
 export function normalizePassPlan(plan) {
   const source = plan && typeof plan === 'object' ? plan : {};
-  const mergedSchedule = Array.isArray(source.schedule) && source.schedule.length
-    ? source.schedule
-    : DEFAULT_PASS_PLAN.schedule;
+  const scheduleSource = Array.isArray(source.schedule) ? source.schedule : [];
+  const allowEmpty = source.allowEmpty === true
+    || source.id === EMPTY_PASS_PLAN_ID
+    || (Array.isArray(source.schedule) && scheduleSource.length === 0
+      && Object.prototype.hasOwnProperty.call(source, 'schedule'));
+  const mergedSchedule = allowEmpty
+    ? scheduleSource
+    : scheduleSource.length
+      ? scheduleSource
+      : DEFAULT_PASS_PLAN.schedule;
   const normalizedSchedule = mergedSchedule
     .map((step, index) => {
       const order = toNumber(step?.order, index + 1);
@@ -95,6 +104,12 @@ export function normalizePassPlan(plan) {
       return { order, offsetMinutes, anchor, label, action };
     })
     .sort((a, b) => a.order - b.order);
+  if (allowEmpty && normalizedSchedule.length === 0) {
+    return {
+      id: typeof source.id === 'string' && source.id.trim() ? source.id.trim() : EMPTY_PASS_PLAN_ID,
+      schedule: []
+    };
+  }
   return {
     id: typeof source.id === 'string' && source.id.trim() ? source.id.trim() : DEFAULT_PASS_PLAN.id,
     schedule: normalizedSchedule
@@ -118,10 +133,16 @@ export function normalizePlannerDefaults(raw) {
     anchorOffsets[key] = toNumber(value, fallback);
   }
 
-  const passesSource = Array.isArray(source.passes) && source.passes.length
-    ? source.passes
+  const hasPassesProp = Object.prototype.hasOwnProperty.call(source, 'passes');
+  const passesSource = hasPassesProp
+    ? (Array.isArray(source.passes) ? source.passes : [])
     : DEFAULT_PLANNER_DEFAULTS.passes;
-  const normalizedPlan = normalizePassPlan({ schedule: passesSource });
+  const allowEmptyPasses = hasPassesProp && passesSource.length === 0;
+  const normalizedPlan = normalizePassPlan({
+    id: allowEmptyPasses ? EMPTY_PASS_PLAN_ID : source.passPlanId,
+    schedule: passesSource,
+    allowEmpty: allowEmptyPasses
+  });
 
   return {
     anchorOffsets,

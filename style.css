@@ -5935,12 +5935,12 @@ body.map-toolbox-dragging {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 1.2rem 1.4rem;
+  gap: 0.85rem;
+  padding: 1rem 1.2rem;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: linear-gradient(160deg, rgba(15, 23, 42, 0.88), rgba(15, 23, 42, 0.72));
-  box-shadow: 0 22px 50px rgba(2, 6, 23, 0.45);
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.38);
 }
 
 .block-board-summary-card::before {
@@ -5988,8 +5988,8 @@ body.map-toolbox-dragging {
 .block-board-summary-list {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  max-height: 320px;
+  gap: 0.6rem;
+  max-height: 280px;
   overflow-y: auto;
 }
 
@@ -6090,8 +6090,8 @@ body.map-toolbox-dragging {
 .block-board-timeline {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 1.1rem 1.3rem;
+  gap: 0.85rem;
+  padding: 0.9rem 1.05rem;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: linear-gradient(160deg, rgba(10, 15, 28, 0.9), rgba(12, 20, 36, 0.72));
@@ -6117,8 +6117,8 @@ body.map-toolbox-dragging {
 
 .block-board-density {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(26px, 1fr));
-  gap: 0.55rem;
+  grid-template-columns: repeat(auto-fit, minmax(18px, 1fr));
+  gap: 0.4rem;
   align-items: end;
 }
 
@@ -6138,8 +6138,8 @@ body.map-toolbox-dragging {
 
 .block-board-density-bar {
   width: 100%;
-  height: 120px;
-  border-radius: 12px;
+  height: 88px;
+  border-radius: 10px;
   background: var(--surface-1);
   overflow: hidden;
   display: flex;
@@ -6160,16 +6160,16 @@ body.map-toolbox-dragging {
 .block-board-list {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 1.5rem;
 }
 
 .block-board-grid {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(240px, 1fr);
-  gap: 1.25rem;
+  grid-auto-columns: minmax(180px, 1fr);
+  gap: 0.85rem;
   overflow-x: auto;
-  padding-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
 }
 
 .block-board-day-column,
@@ -6179,7 +6179,7 @@ body.map-toolbox-dragging {
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--surface-2);
-  min-height: 280px;
+  min-height: 220px;
   backdrop-filter: blur(12px);
 }
 
@@ -6189,29 +6189,30 @@ body.map-toolbox-dragging {
 }
 
 .block-board-day-header {
-  padding: 1rem;
+  padding: 0.75rem 0.9rem;
   border-bottom: 1px solid var(--surface-3);
   font-weight: 600;
   letter-spacing: 0.01em;
 }
 
 .block-board-day-list {
-  padding: 1rem;
+  padding: 0.75rem 0.9rem 0.9rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.6rem;
+  flex: 1;
   overflow-y: auto;
 }
 
 .block-board-pass-card {
   border-radius: var(--radius);
-  border: 1px solid color-mix(in srgb, var(--card-accent) 40%, transparent);
-  background: color-mix(in srgb, var(--card-accent) 12%, rgba(10, 16, 28, 0.88));
-  padding: 0.85rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--card-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--card-accent) 12%, rgba(10, 16, 28, 0.9));
+  padding: 0.65rem 0.85rem;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
-  box-shadow: 0 24px 44px rgba(2, 6, 23, 0.45);
+  gap: 0.35rem;
+  box-shadow: 0 14px 28px rgba(2, 6, 23, 0.35);
 }
 
 .block-board-pass-card .card-title {
@@ -6302,6 +6303,54 @@ body.map-toolbox-dragging {
 .settings-block-edit .input,
 .settings-block-add .input {
   flex: 1 1 180px;
+}
+
+.settings-lecture-defaults-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.settings-lecture-defaults-intro {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.settings-pass-count-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: 200px;
+}
+
+.settings-pass-summary .lecture-pass-row {
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
+.settings-pass-summary .lecture-pass-method {
+  color: var(--text);
+}
+
+.settings-pass-summary .lecture-pass-offset {
+  color: var(--text-muted);
+}
+
+.settings-lecture-defaults-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.settings-defaults-status {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.settings-defaults-status.is-error {
+  color: var(--rose);
 }
 
 /* --- Lecture table refresh --- */
@@ -6473,4 +6522,174 @@ body.map-toolbox-dragging {
   font-size: 0.8rem;
   color: var(--text-muted);
   font-style: italic;
+}
+
+.lectures-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-bottom: 1.25rem;
+}
+
+.lectures-toolbar .input,
+.lectures-toolbar select {
+  min-width: 160px;
+}
+
+.lectures-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.1rem;
+  border-radius: 999px;
+  font-weight: 600;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 70%, rgba(255,255,255,0.08)), var(--accent));
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.35);
+  color: #fff;
+}
+
+.lectures-add-btn::before {
+  content: '+';
+  font-size: 1.1rem;
+}
+
+.lecture-pass-section {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.lecture-pass-section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.lecture-pass-section-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.lecture-pass-count-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: 180px;
+}
+
+.lecture-pass-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.lecture-pass-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--surface-3);
+  background: color-mix(in srgb, var(--surface-2) 80%, rgba(12, 18, 32, 0.65));
+}
+
+.lecture-pass-label {
+  font-weight: 600;
+  min-width: 68px;
+}
+
+.lecture-pass-method {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.lecture-pass-offset {
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.lecture-pass-advanced-controls {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.lecture-pass-advanced-toggle {
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.85rem;
+}
+
+.lecture-pass-advanced[hidden] {
+  display: none !important;
+}
+
+.lecture-pass-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--surface-3);
+  background: rgba(12, 18, 32, 0.6);
+}
+
+.lecture-pass-advanced-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.lecture-pass-advanced-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.lecture-pass-advanced-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--surface-3);
+}
+
+.lecture-pass-advanced-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.lecture-pass-advanced-header {
+  grid-column: 1 / -1;
+  font-weight: 600;
+}
+
+.lecture-pass-advanced-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.lecture-pass-offset-editor {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.lecture-pass-offset-editor .input {
+  flex: 1;
+}
+
+.lecture-pass-offset-editor select.input {
+  max-width: 120px;
+}
+
+.lecture-pass-advanced-preview {
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }

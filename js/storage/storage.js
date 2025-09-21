@@ -208,14 +208,18 @@ export async function saveSettings(patch) {
   });
   const basePlanner = current.plannerDefaults || DEFAULT_APP_SETTINGS.plannerDefaults;
   const patchPlanner = patch?.plannerDefaults || {};
+  const hasPassPatch = Object.prototype.hasOwnProperty.call(patchPlanner, 'passes');
+  const patchPasses = hasPassPatch
+    ? (Array.isArray(patchPlanner.passes) ? patchPlanner.passes : [])
+    : null;
   const mergedPlannerDefaults = normalizePlannerDefaults({
     anchorOffsets: {
       ...(DEFAULT_APP_SETTINGS.plannerDefaults?.anchorOffsets || {}),
       ...(basePlanner?.anchorOffsets || {}),
       ...(patchPlanner.anchorOffsets || {})
     },
-    passes: Array.isArray(patchPlanner.passes) && patchPlanner.passes.length
-      ? patchPlanner.passes
+    passes: hasPassPatch
+      ? patchPasses
       : basePlanner?.passes || DEFAULT_APP_SETTINGS.plannerDefaults?.passes
   });
   const next = {
