@@ -32,7 +32,7 @@ const BOARD_DAYS = 14;
 
 function ensureBoardState() {
   if (!state.blockBoard) {
-    state.blockBoard = { collapsedBlocks: [], showDensity: true, showPomodoro: false };
+    state.blockBoard = { collapsedBlocks: [], showDensity: true };
   }
   return state.blockBoard;
 }
@@ -79,8 +79,9 @@ function buildPassElement(entry, onComplete, onDelay) {
   const meta = document.createElement('div');
   meta.className = 'block-board-pass-meta';
   const label = entry?.pass?.label || `Pass ${entry?.pass?.order ?? ''}`;
+  const action = entry?.pass?.action ? ` • ${entry.pass.action}` : '';
   const dueLabel = formatDueTime(entry?.pass?.due);
-  meta.textContent = `${label} • ${dueLabel}`;
+  meta.textContent = `${label}${action ? action : ''} • ${dueLabel}`;
   chip.appendChild(meta);
 
   const actions = document.createElement('div');
@@ -157,8 +158,9 @@ function createPassCard(entry, onDrag) {
   card.dataset.lectureId = entry?.lecture?.id ?? '';
   card.dataset.passOrder = entry?.pass?.order ?? '';
   card.dataset.passDue = Number.isFinite(entry?.pass?.due) ? String(entry.pass.due) : '';
+  const action = entry?.pass?.action ? ` • ${entry.pass.action}` : '';
   card.innerHTML = `<div class="card-title">${entry?.lecture?.name || 'Lecture'}</div>`
-    + `<div class="card-meta">${entry?.pass?.label || ''}</div>`;
+    + `<div class="card-meta">${(entry?.pass?.label || '')}${action}</div>`;
   card.addEventListener('dragstart', (event) => {
     if (!event.dataTransfer) return;
     const payload = {
@@ -243,33 +245,6 @@ function renderUrgentQueues(root, queues, handlers) {
     wrapper.appendChild(group);
   });
   root.appendChild(wrapper);
-}
-
-function renderPomodoroControls(root) {
-  const stateRef = ensureBoardState();
-  const section = document.createElement('section');
-  section.className = 'block-board-pomodoro';
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.className = 'btn secondary';
-  toggle.textContent = stateRef.showPomodoro ? 'Hide Pomodoro' : 'Show Pomodoro';
-  toggle.addEventListener('click', () => {
-    const next = !ensureBoardState().showPomodoro;
-    setBlockBoardState({ showPomodoro: next });
-    renderPomodoroControls(root);
-  });
-  section.appendChild(toggle);
-  if (stateRef.showPomodoro) {
-    const timer = document.createElement('div');
-    timer.className = 'block-board-pomodoro-timer';
-    timer.textContent = 'Pomodoro timer ready';
-    section.appendChild(timer);
-  }
-  if (root.firstChild) {
-    root.replaceChild(section, root.firstChild);
-  } else {
-    root.appendChild(section);
-  }
 }
 
 function buildDayAssignments(blockLectures, days) {
@@ -468,10 +443,6 @@ export async function renderBlockBoard(container, refresh) {
     }
   });
   container.appendChild(urgentHost);
-
-  const pomodoroHost = document.createElement('div');
-  renderPomodoroControls(pomodoroHost);
-  container.appendChild(pomodoroHost);
 
   const blockList = document.createElement('div');
   blockList.className = 'block-board-list';

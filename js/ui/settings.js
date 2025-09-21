@@ -79,21 +79,17 @@ export async function renderSettings(root) {
     const wrap = document.createElement('div');
     wrap.className = 'block';
     const title = document.createElement('h3');
-    title.textContent = `${b.blockId} – ${b.title}`;
+    title.textContent = b.title || 'Untitled block';
+    if (b.color) {
+      title.style.borderLeft = `8px solid ${b.color}`;
+      title.style.paddingLeft = '0.5rem';
+    }
     wrap.appendChild(title);
 
     const wkInfo = document.createElement('div');
-    wkInfo.textContent = `Weeks: ${b.weeks}`;
+    const weekLabel = Number.isFinite(Number(b.weeks)) ? Number(b.weeks) : null;
+    wkInfo.textContent = weekLabel != null ? `Weeks: ${weekLabel}` : 'Weeks: —';
     wrap.appendChild(wkInfo);
-
-    const lectureList = catalog.lectureLists?.[b.blockId] || [];
-    const lectureCount = Array.isArray(lectureList) ? lectureList.length : 0;
-    const lectureNote = document.createElement('p');
-    lectureNote.className = 'settings-lecture-note';
-    lectureNote.textContent = lectureCount
-      ? `${lectureCount} lecture${lectureCount === 1 ? '' : 's'}. Manage lectures from the Lectures tab.`
-      : 'No lectures linked yet. Use the Lectures tab to add some.';
-    wrap.appendChild(lectureNote);
 
     const controls = document.createElement('div');
     controls.className = 'row';
@@ -151,6 +147,7 @@ export async function renderSettings(root) {
     const weeksInput = document.createElement('input');
     weeksInput.className = 'input';
     weeksInput.type = 'number';
+    weeksInput.min = '1';
     weeksInput.value = b.weeks;
     const colorInput = document.createElement('input');
     colorInput.className = 'input';
@@ -163,7 +160,10 @@ export async function renderSettings(root) {
     editForm.append(titleInput, weeksInput, colorInput, saveBtn);
     editForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const updated = { ...b, title: titleInput.value.trim(), weeks: Number(weeksInput.value), color: colorInput.value };
+      const titleValue = titleInput.value.trim();
+      const weeksValue = Number(weeksInput.value);
+      if (!titleValue || Number.isNaN(weeksValue) || weeksValue <= 0) return;
+      const updated = { ...b, title: titleValue, weeks: weeksValue, color: colorInput.value };
       await upsertBlock(updated);
       invalidateBlockCatalog();
       await renderSettings(root);
@@ -179,15 +179,13 @@ export async function renderSettings(root) {
 
   const form = document.createElement('form');
   form.className = 'row';
-  const id = document.createElement('input');
-  id.className = 'input';
-  id.placeholder = 'ID';
   const titleInput = document.createElement('input');
   titleInput.className = 'input';
   titleInput.placeholder = 'Title';
   const weeks = document.createElement('input');
   weeks.className = 'input';
   weeks.type = 'number';
+  weeks.min = '1';
   weeks.placeholder = 'Weeks';
   const color = document.createElement('input');
   color.className = 'input';
@@ -197,17 +195,17 @@ export async function renderSettings(root) {
   add.className = 'btn';
   add.type = 'submit';
   add.textContent = 'Add block';
-  form.append(id, titleInput, weeks, color, add);
+  form.append(titleInput, weeks, color, add);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const def = {
-      blockId: id.value.trim(),
-      title: titleInput.value.trim(),
-      weeks: Number(weeks.value),
+    const titleValue = titleInput.value.trim();
+    const weekValue = Number(weeks.value);
+    if (!titleValue || Number.isNaN(weekValue) || weekValue <= 0) return;
+    await upsertBlock({
+      title: titleValue,
+      weeks: weekValue,
       color: color.value
-    };
-    if (!def.blockId || !def.title || !def.weeks) return;
-    await upsertBlock(def);
+    });
     invalidateBlockCatalog();
     await renderSettings(root);
   });

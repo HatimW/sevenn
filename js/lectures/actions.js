@@ -1,0 +1,22 @@
+export const LECTURE_PASS_ACTIONS = [
+  'Notes',
+  'Read',
+  'Tape',
+  'Quiz',
+  'Flashcards',
+  'Summarize',
+  'Review',
+  'Active Recall',
+  'Anki',
+  'Practice Questions',
+  'Teach-Back',
+  'Whiteboard',
+  'Mind Map',
+  'Case Review',
+  'Group Study',
+  'Audio Review',
+  'Lecture Rewatch',
+  'Cheat Sheet',
+  'Sketch/Diagram',
+  'Blocks'
+];

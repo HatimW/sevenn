@@ -3,6 +3,8 @@ import { loadBlockCatalog, invalidateBlockCatalog } from '../../storage/block-ca
 import { saveLecture, deleteLecture } from '../../storage/storage.js';
 import { confirmModal } from './confirm.js';
 import { debounce } from '../../utils.js';
+import { DEFAULT_PASS_PLAN, clonePassPlan } from '../../lectures/scheduler.js';
+import { LECTURE_PASS_ACTIONS } from '../../lectures/actions.js';
 
 function ensureLectureState() {
   if (!state.lectures) {
@@ -60,6 +62,128 @@ function formatOffset(minutes) {
   return `${Math.round(months)}mo`;
 }
 
+const MAX_PASS_COUNT = 20;
+const DAY_MINUTES = 24 * 60;
+
+function defaultActionForIndex(index) {
+  if (!Array.isArray(LECTURE_PASS_ACTIONS) || !LECTURE_PASS_ACTIONS.length) return '';
+  const normalized = index % LECTURE_PASS_ACTIONS.length;
+  return LECTURE_PASS_ACTIONS[Math.max(0, normalized)];
+}
+
+function baseSchedule(plan) {
+  if (plan && Array.isArray(plan.schedule) && plan.schedule.length) {
+    return plan.schedule;
+  }
+  return DEFAULT_PASS_PLAN.schedule;
+}
+
+function computeDefaultGap(schedule) {
+  if (!Array.isArray(schedule) || schedule.length < 2) return DAY_MINUTES;
+  const deltas = [];
+  for (let i = 1; i < schedule.length; i += 1) {
+    const prev = Number(schedule[i - 1]?.offsetMinutes);
+    const current = Number(schedule[i]?.offsetMinutes);
+    if (Number.isFinite(prev) && Number.isFinite(current)) {
+      const delta = current - prev;
+      if (delta > 0) deltas.push(delta);
+    }
+  }
+  return deltas.length ? deltas[deltas.length - 1] : DAY_MINUTES;
+}
+
+function fallbackAnchor(index) {
+  if (index === 0) return 'today';
+  if (index === 1) return 'tomorrow';
+  return 'upcoming';
+}
+
+function buildScheduleTemplate(plan, count) {
+  const template = baseSchedule(plan);
+  const safeCount = Math.max(1, count);
+  const defaultGap = computeDefaultGap(template);
+  const schedule = [];
+  for (let i = 0; i < safeCount; i += 1) {
+    const source = template[i] || {};
+    const previous = schedule[i - 1] || null;
+    const order = i + 1;
+    const offset = Number.isFinite(source.offsetMinutes)
+      ? source.offsetMinutes
+      : previous
+        ? previous.offsetMinutes + defaultGap
+        : i === 0
+          ? 0
+          : defaultGap * i;
+    const anchor = typeof source.anchor === 'string' && source.anchor.trim()
+      ? source.anchor.trim()
+      : previous?.anchor || fallbackAnchor(i);
+    const label = typeof source.label === 'string' && source.label.trim()
+      ? source.label.trim()
+      : `Pass ${order}`;
+    const action = typeof source.action === 'string' && source.action.trim()
+      ? source.action.trim()
+      : defaultActionForIndex(i);
+    schedule.push({
+      order,
+      offsetMinutes: offset,
+      anchor,
+      label,
+      action
+    });
+  }
+  return schedule;
+}
+
+function adjustPassConfigs(current, count, plan) {
+  const template = buildScheduleTemplate(plan || { schedule: current }, count);
+  return template.map((step, index) => {
+    const existing = current[index];
+    const action = existing && typeof existing.action === 'string' && existing.action.trim()
+      ? existing.action.trim()
+      : step.action;
+    return { ...step, action };
+  });
+}
+
+function clampPassCount(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.min(MAX_PASS_COUNT, Math.max(1, Math.round(parsed)));
+}
+
+function buildPassPlanPayload(passConfigs, existingPlan) {
+  const planId = existingPlan && typeof existingPlan.id === 'string' && existingPlan.id.trim()
+    ? existingPlan.id.trim()
+    : 'custom';
+  return {
+    id: planId,
+    schedule: passConfigs.map((config, index) => {
+      const order = index + 1;
+      const label = typeof config.label === 'string' && config.label.trim()
+        ? config.label.trim()
+        : `Pass ${order}`;
+      const offset = Number.isFinite(config.offsetMinutes)
+        ? config.offsetMinutes
+        : index === 0
+          ? 0
+          : (passConfigs[index - 1]?.offsetMinutes ?? 0) + DAY_MINUTES;
+      const anchor = typeof config.anchor === 'string' && config.anchor.trim()
+        ? config.anchor.trim()
+        : fallbackAnchor(index);
+      const action = typeof config.action === 'string' && config.action.trim()
+        ? config.action.trim()
+        : defaultActionForIndex(index);
+      return {
+        order,
+        label,
+        offsetMinutes: offset,
+        anchor,
+        action
+      };
+    })
+  };
+}
+
 function formatPassPlan(plan) {
   if (!plan || !Array.isArray(plan.schedule) || !plan.schedule.length) {
     return 'No pass plan';
@@ -67,7 +191,13 @@ function formatPassPlan(plan) {
   const steps = plan.schedule
     .slice()
     .sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0))
-    .map(step => formatOffset(step?.offsetMinutes ?? 0));
+    .map(step => {
+      const action = typeof step?.action === 'string' && step.action.trim()
+        ? step.action.trim()
+        : `Pass ${step?.order ?? ''}`;
+      const offset = formatOffset(step?.offsetMinutes ?? 0);
+      return `${action} (${offset})`;
+    });
   return `Plan: ${steps.join(', ')}`;
 }
 
@@ -142,10 +272,13 @@ function renderLectureRow(lecture, blockMap, onEdit, onDelete) {
   name.textContent = lecture.name || `Lecture ${lecture.id}`;
   lectureCell.appendChild(name);
 
-  const id = document.createElement('div');
-  id.className = 'lecture-id';
-  id.textContent = `ID: ${lecture.id}`;
-  lectureCell.appendChild(id);
+  const positionValue = lecture.position ?? lecture.id;
+  if (positionValue != null) {
+    const position = document.createElement('div');
+    position.className = 'lecture-position';
+    position.textContent = `Position: ${positionValue}`;
+    lectureCell.appendChild(position);
+  }
 
   const tags = Array.isArray(lecture.tags) ? lecture.tags.filter(Boolean) : [];
   if (tags.length) {
@@ -309,7 +442,10 @@ function applyFilters(lectures, filters) {
       if (statusState !== statusFilter) return false;
     }
     if (query) {
-      const haystacks = [lecture.name, lecture.id != null ? String(lecture.id) : '', lecture.blockId];
+      const actionTerms = Array.isArray(lecture?.passPlan?.schedule)
+        ? lecture.passPlan.schedule.map(step => step?.action || '')
+        : [];
+      const haystacks = [lecture.name, lecture.id != null ? String(lecture.id) : '', lecture.blockId, ...actionTerms];
       if (!haystacks.some(value => String(value || '').toLowerCase().includes(query))) {
         return false;
       }
@@ -324,7 +460,7 @@ function applyFilters(lectures, filters) {
   });
 }
 
-function buildToolbar(blocks, lectures, redraw) {
+function buildToolbar(blocks, lectures, lectureLists, redraw) {
   const filters = ensureLectureState();
   const toolbar = document.createElement('div');
   toolbar.className = 'lectures-toolbar';
@@ -434,11 +570,12 @@ function buildToolbar(blocks, lectures, redraw) {
     openLectureDialog({
       mode: 'create',
       blocks,
+      lectureLists,
       defaults: {
         blockId: defaultBlockId,
-        id: '',
         name: '',
-        week: ''
+        week: '',
+        passPlan: clonePassPlan()
       },
       onSubmit: async payload => {
         await saveLecture(payload);
@@ -453,7 +590,7 @@ function buildToolbar(blocks, lectures, redraw) {
 }
 
 function openLectureDialog(options) {
-  const { mode, blocks, defaults = {}, onSubmit } = options;
+  const { mode, blocks, defaults = {}, lectureLists = {}, onSubmit } = options;
   const overlay = document.createElement('div');
   overlay.className = 'modal lecture-dialog';
   const card = document.createElement('div');
@@ -483,21 +620,10 @@ function openLectureDialog(options) {
     blockSelect.disabled = true;
   }
   blockField.appendChild(blockSelect);
+  const positionNote = document.createElement('div');
+  positionNote.className = 'lecture-position-note';
+  blockField.appendChild(positionNote);
   form.appendChild(blockField);
-
-  const idField = document.createElement('label');
-  idField.textContent = 'Lecture ID';
-  const idInput = document.createElement('input');
-  idInput.type = 'number';
-  idInput.required = true;
-  idInput.className = 'input';
-  idInput.dataset.field = 'id';
-  idInput.value = defaults.id ?? '';
-  if (mode === 'edit') {
-    idInput.disabled = true;
-  }
-  idField.appendChild(idInput);
-  form.appendChild(idField);
 
   const nameField = document.createElement('label');
   nameField.textContent = 'Name';
@@ -522,6 +648,108 @@ function openLectureDialog(options) {
   weekField.appendChild(weekInput);
   form.appendChild(weekField);
 
+  const initialSchedule = Array.isArray(defaults.passPlan?.schedule) ? defaults.passPlan.schedule : [];
+  const initialCount = Math.max(1, initialSchedule.length || DEFAULT_PASS_PLAN.schedule.length);
+  let passConfigs = adjustPassConfigs(initialSchedule, initialCount, defaults.passPlan);
+
+  const passCountField = document.createElement('label');
+  passCountField.textContent = 'Number of passes';
+  const passCountInput = document.createElement('input');
+  passCountInput.type = 'number';
+  passCountInput.min = '1';
+  passCountInput.max = String(MAX_PASS_COUNT);
+  passCountInput.className = 'input';
+  passCountInput.value = String(passConfigs.length);
+  passCountField.appendChild(passCountInput);
+  form.appendChild(passCountField);
+
+  const passList = document.createElement('div');
+  passList.className = 'lecture-pass-editor';
+  form.appendChild(passList);
+
+  function updatePositionNote() {
+    if (mode === 'edit') {
+      if (defaults.id != null) {
+        positionNote.textContent = `Position: ${defaults.id}`;
+      } else {
+        positionNote.textContent = '';
+      }
+      return;
+    }
+    const activeBlock = blockSelect.value.trim();
+    if (!activeBlock) {
+      positionNote.textContent = '';
+      return;
+    }
+    const list = Array.isArray(lectureLists[activeBlock]) ? lectureLists[activeBlock] : [];
+    let maxId = 0;
+    for (const entry of list) {
+      const value = Number(entry?.id);
+      if (Number.isFinite(value) && value > maxId) {
+        maxId = value;
+      }
+    }
+    positionNote.textContent = `Next position in block: ${maxId + 1}`;
+  }
+
+  function renderPassEditor() {
+    passList.innerHTML = '';
+    passConfigs.forEach((config, index) => {
+      const row = document.createElement('div');
+      row.className = 'lecture-pass-row';
+
+      const label = document.createElement('span');
+      label.className = 'lecture-pass-label';
+      label.textContent = `Pass ${index + 1}`;
+      row.appendChild(label);
+
+      const select = document.createElement('select');
+      select.className = 'input lecture-pass-action';
+      LECTURE_PASS_ACTIONS.forEach(action => {
+        const option = document.createElement('option');
+        option.value = action;
+        option.textContent = action;
+        select.appendChild(option);
+      });
+      if (config.action && !LECTURE_PASS_ACTIONS.includes(config.action)) {
+        const custom = document.createElement('option');
+        custom.value = config.action;
+        custom.textContent = config.action;
+        select.appendChild(custom);
+      }
+      select.value = config.action || '';
+      select.addEventListener('change', event => {
+        const value = event.target.value;
+        passConfigs[index] = { ...passConfigs[index], action: value };
+      });
+      row.appendChild(select);
+
+      const timing = document.createElement('span');
+      timing.className = 'lecture-pass-offset';
+      timing.textContent = `Timing: ${formatOffset(config.offsetMinutes ?? 0)}`;
+      row.appendChild(timing);
+
+      passList.appendChild(row);
+    });
+  }
+
+  renderPassEditor();
+
+  passCountInput.addEventListener('change', () => {
+    const next = clampPassCount(passCountInput.value);
+    passCountInput.value = String(next);
+    passConfigs = adjustPassConfigs(passConfigs, next, defaults.passPlan);
+    renderPassEditor();
+  });
+
+  if (mode !== 'edit') {
+    blockSelect.addEventListener('change', () => {
+      updatePositionNote();
+    });
+  }
+
+  updatePositionNote();
+
   const actions = document.createElement('div');
   actions.className = 'row lecture-dialog-actions';
   const submitBtn = document.createElement('button');
@@ -542,20 +770,22 @@ function openLectureDialog(options) {
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const blockId = blockSelect.value.trim();
-    const idRaw = idInput.value;
-    const id = Number(idRaw);
     const name = nameInput.value.trim();
     const weekValue = weekInput.value;
     const week = weekValue === '' ? null : Number(weekValue);
-    if (!blockId || !name || Number.isNaN(id) || (weekValue !== '' && Number.isNaN(week))) {
+    if (!blockId || !name || (weekValue !== '' && Number.isNaN(week))) {
       return;
     }
+    const passPlan = buildPassPlanPayload(passConfigs, defaults.passPlan);
     const payload = {
       blockId,
-      id,
       name,
-      week
+      week,
+      passPlan
     };
+    if (mode === 'edit') {
+      payload.id = defaults.id;
+    }
     await onSubmit(payload);
     if (document.body.contains(overlay)) {
       document.body.removeChild(overlay);
@@ -573,23 +803,25 @@ function openLectureDialog(options) {
   nameInput.focus();
 }
 
-function handleEdit(lecture, blocks, redraw) {
+function handleEdit(lecture, blocks, lectureLists, redraw) {
   openLectureDialog({
     mode: 'edit',
     blocks,
+    lectureLists,
     defaults: {
       blockId: lecture.blockId,
       id: lecture.id,
       name: lecture.name || '',
-      week: lecture.week ?? ''
+      week: lecture.week ?? '',
+      passPlan: lecture.passPlan
     },
     onSubmit: async payload => {
       await saveLecture({
-        ...lecture,
         blockId: lecture.blockId,
         id: lecture.id,
         name: payload.name,
-        week: payload.week
+        week: payload.week,
+        passPlan: payload.passPlan
       });
       await invalidateBlockCatalog();
       await redraw();
@@ -611,6 +843,7 @@ export async function renderLectures(root, redraw) {
   const filters = ensureLectureState();
   const blocks = (catalog.blocks || []).map(block => ({ ...block }));
   const allLectures = collectLectures(catalog);
+  const lectureLists = catalog.lectureLists || {};
   const filtered = applyFilters(allLectures, filters);
 
   root.innerHTML = '';
@@ -618,9 +851,14 @@ export async function renderLectures(root, redraw) {
   layout.className = 'lectures-view';
   root.appendChild(layout);
 
-  const toolbar = buildToolbar(blocks, allLectures, redraw);
+  const toolbar = buildToolbar(blocks, allLectures, lectureLists, redraw);
   layout.appendChild(toolbar);
 
-  const table = renderLectureTable(blocks, filtered, lecture => handleEdit(lecture, blocks, redraw), lecture => handleDelete(lecture, redraw));
+  const table = renderLectureTable(
+    blocks,
+    filtered,
+    lecture => handleEdit(lecture, blocks, lectureLists, redraw),
+    lecture => handleDelete(lecture, redraw)
+  );
   layout.appendChild(table);
 }

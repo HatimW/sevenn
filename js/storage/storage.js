@@ -306,15 +306,47 @@ export async function listBlocks() {
   }
 }
 
+function slugifyBlockTitle(title) {
+  if (typeof title !== 'string' || !title.trim()) return 'block';
+  const base = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+  return base || 'block';
+}
+
+async function generateBlockId(storeRef, title) {
+  const base = slugifyBlockTitle(title);
+  let candidate = base;
+  let attempt = 1;
+  while (true) {
+    const existing = candidate ? await prom(storeRef.get(candidate)) : null;
+    if (!existing && candidate) {
+      return candidate;
+    }
+    attempt += 1;
+    candidate = `${base}-${attempt}`;
+    if (attempt > 1000) {
+      return `block-${Date.now()}`;
+    }
+  }
+}
+
 export async function upsertBlock(def) {
   const b = await store('blocks', 'readwrite');
-  const existing = await prom(b.get(def.blockId));
-  const existingLectures = await fetchLecturesByBlock(def.blockId);
+  const title = typeof def?.title === 'string' ? def.title : '';
+  let blockId = typeof def?.blockId === 'string' && def.blockId.trim() ? def.blockId.trim() : '';
+  if (!blockId) {
+    blockId = await generateBlockId(b, title || 'block');
+  }
+  const existing = await prom(b.get(blockId));
+  const existingLectures = await fetchLecturesByBlock(blockId);
   const now = Date.now();
   const incomingLectures = Array.isArray(def.lectures)
     ? def.lectures.map(lecture => ({
         ...lecture,
-        blockId: def.blockId
+        blockId
       }))
     : existingLectures.map(lecture => ({
         blockId: lecture.blockId,
@@ -343,7 +375,7 @@ export async function upsertBlock(def) {
       let changed = false;
       if (it.lectures) {
         const before = it.lectures.length;
-        it.lectures = it.lectures.filter(l => !(l.blockId === def.blockId && l.week > maxWeek));
+        it.lectures = it.lectures.filter(l => !(l.blockId === blockId && l.week > maxWeek));
         if (it.lectures.length !== before) changed = true;
       }
       if (it.weeks) {
@@ -361,10 +393,12 @@ export async function upsertBlock(def) {
 
   const next = {
     ...def,
+    blockId,
     color: def.color || existing?.color || null,
     order: def.order || existing?.order || now,
     createdAt: existing?.createdAt || now,
-    updatedAt: now
+    updatedAt: now,
+    weeks: typeof def.weeks === 'number' ? def.weeks : existing?.weeks
   };
   delete next.lectures;
   await prom(b.put(next));
@@ -372,7 +406,7 @@ export async function upsertBlock(def) {
   const incomingKeySet = new Set(
     prunedLectures
       .filter(lecture => lecture?.id != null)
-      .map(lecture => composeLectureKey(def.blockId, lecture.id))
+      .map(lecture => composeLectureKey(blockId, lecture.id))
   );
   for (const lecture of existingLectures) {
     const key = lecture?.key || composeLectureKey(lecture.blockId, lecture.id);
@@ -384,7 +418,7 @@ export async function upsertBlock(def) {
   for (const lecture of prunedLectures) {
     if (lecture?.id == null) continue;
     await persistLecture({
-      blockId: def.blockId,
+      blockId,
       id: lecture.id,
       name: lecture.name,
       week: lecture.week,
@@ -398,10 +432,10 @@ export async function upsertBlock(def) {
 
   const uniqueRemoved = Array.from(new Set(removedLectureIds.filter(id => id != null)));
   for (const lectureId of uniqueRemoved) {
-    await dropLectureRecord(def.blockId, lectureId);
+    await dropLectureRecord(blockId, lectureId);
   }
   if (uniqueRemoved.length) {
-    await removeLectureReferencesFromItems(def.blockId, uniqueRemoved);
+    await removeLectureReferencesFromItems(blockId, uniqueRemoved);
   }
 
   scheduleBackup();

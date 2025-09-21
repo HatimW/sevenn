@@ -30,7 +30,7 @@ describe('block board rendering', () => {
     global.Node = dom.window.Node;
     container = document.createElement('div');
     document.body.appendChild(container);
-    state.blockBoard = { collapsedBlocks: [], showDensity: true, showPomodoro: false };
+    state.blockBoard = { collapsedBlocks: [], showDensity: true };
   });
 
   afterEach(() => {
@@ -80,7 +80,7 @@ describe('block board rendering', () => {
     assert.equal(saveLectureMock.mock.callCount(), 3);
   });
 
-  it('persists density, collapse, and pomodoro state', async () => {
+  it('persists density and collapse state', async () => {
     const data = sampleData();
     setupBoardDeps(data);
     await renderBlockBoard(container, () => {});
@@ -95,12 +95,6 @@ describe('block board rendering', () => {
     collapseBtn.click();
     await renderBlockBoard(container, () => {});
     assert(state.blockBoard.collapsedBlocks.includes('b1'));
-
-    const pomodoroToggle = container.querySelector('.block-board-pomodoro .btn.secondary');
-    assert(pomodoroToggle);
-    pomodoroToggle.click();
-    await Promise.resolve();
-    assert.equal(state.blockBoard.showPomodoro, true);
   });
 
   it('supports drag and drop scheduling updates', async () => {

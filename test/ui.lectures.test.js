@@ -94,12 +94,28 @@ describe('lectures management UI', () => {
 
     const form = document.querySelector('.lecture-dialog form');
     assert.ok(form, 'lecture dialog form should render');
-    const idInput = form.querySelector('[data-field="id"]');
     const nameInput = form.querySelector('[data-field="name"]');
     const weekInput = form.querySelector('[data-field="week"]');
-    assert.ok(idInput && nameInput && weekInput);
+    assert.ok(nameInput && weekInput);
 
-    idInput.value = '101';
+    const numberInputs = Array.from(form.querySelectorAll('input[type="number"]'));
+    const passCountInput = numberInputs.find(input => !input.dataset.field);
+    assert.ok(passCountInput, 'Pass count input should exist');
+
+    passCountInput.value = '2';
+    passCountInput.dispatchEvent(new window.Event('change', { bubbles: true }));
+
+    let actionSelects = [];
+    await waitFor(() => {
+      actionSelects = Array.from(form.querySelectorAll('.lecture-pass-action'));
+      return actionSelects.length === 2;
+    });
+    assert.equal(actionSelects.length, 2);
+    actionSelects[0].value = 'Notes';
+    actionSelects[0].dispatchEvent(new window.Event('change', { bubbles: true }));
+    actionSelects[1].value = 'Quiz';
+    actionSelects[1].dispatchEvent(new window.Event('change', { bubbles: true }));
+
     nameInput.value = 'Intro to Cardio';
     weekInput.value = '1';
 
@@ -111,6 +127,9 @@ describe('lectures management UI', () => {
     const lectures = await listLecturesByBlock('cardio');
     assert.equal(lectures.length, 1);
     assert.equal(lectures[0].name, 'Intro to Cardio');
+    assert.equal(lectures[0].id, 1);
+    assert.equal(lectures[0].passPlan.schedule.length, 2);
+    assert.equal(lectures[0].passPlan.schedule[1].action, 'Quiz');
 
     const rows = document.querySelectorAll('[data-lecture-row]');
     assert.equal(rows.length, 1);

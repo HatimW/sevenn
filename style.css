@@ -5794,8 +5794,6 @@ body.map-toolbox-dragging {
 .block-board-pass-meta { font-size: 0.85rem; opacity: 0.8; }
 .block-board-pass-actions { display: flex; gap: 0.5rem; }
 .block-board-empty { font-size: 0.85rem; opacity: 0.7; }
-.block-board-pomodoro { display: flex; flex-direction: column; gap: 0.75rem; }
-.block-board-pomodoro-timer { padding: 1rem; border-radius: 12px; background: var(--surface-2); text-align: center; font-weight: 600; }
 .block-board-list { display: flex; flex-direction: column; gap: 2rem; }
 .block-board-block { display: flex; flex-direction: column; gap: 1rem; }
 .block-board-block-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
