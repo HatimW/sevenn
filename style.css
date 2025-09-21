@@ -6493,51 +6493,154 @@ body.map-toolbox-dragging {
   flex: 1 1 180px;
 }
 
-/* --- Lecture table refresh --- */
-.lectures-table th {
+/* --- Lecture overview layout --- */
+.lectures-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.lectures-card > h2 {
+  margin-bottom: 0;
+}
+
+.lectures-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.lectures-block-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(170deg, rgba(15, 23, 42, 0.92), rgba(11, 18, 32, 0.82));
+  box-shadow: 0 26px 60px rgba(2, 6, 23, 0.45);
+  overflow: hidden;
+}
+
+.lectures-block-group.has-accent {
+  border-color: color-mix(in srgb, var(--block-accent) 32%, var(--border));
+  box-shadow: 0 30px 70px color-mix(in srgb, var(--block-accent) 24%, transparent);
+}
+
+.lectures-block-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  background: rgba(148, 163, 184, 0.08);
+  cursor: pointer;
+}
+
+.lectures-block-summary::marker {
+  color: var(--text-muted);
+}
+
+.lectures-block-name {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.lectures-block-counts {
+  margin-left: auto;
   font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.lectures-week-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 0 1.25rem 1.25rem;
+}
+
+.lectures-week-group {
+  border: 1px solid var(--surface-3);
+  border-radius: var(--radius);
+  background: rgba(15, 23, 42, 0.65);
+  overflow: hidden;
+}
+
+.lectures-week-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(148, 163, 184, 0.06);
+  cursor: pointer;
+}
+
+.lectures-week-summary::marker {
+  color: var(--text-muted);
+}
+
+.lectures-week-title {
+  font-weight: 600;
+}
+
+.lectures-week-counts {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.lectures-week-body {
+  padding: 0.2rem 0 1rem;
+}
+
+.lectures-week-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.lectures-week-table th,
+.lectures-week-table td {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--surface-3);
+  vertical-align: top;
+}
+
+.lectures-week-table thead th {
+  font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-muted);
 }
 
-.lecture-cell {
+.lectures-week-table tbody tr:hover {
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.lecture-overview {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.45rem;
+  min-width: 220px;
 }
 
-.lecture-cell-header {
+.lecture-overview-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.65rem;
 }
 
-.lecture-block {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.25rem 0.7rem;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  background: color-mix(in srgb, var(--block-accent, var(--accent)) 16%, rgba(148, 163, 184, 0.12));
-  color: var(--text);
+.lecture-overview-position {
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
-.lecture-block.has-accent {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--block-accent) 40%, transparent);
+.lecture-overview-summary {
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
 .lecture-name {
   font-size: 1.05rem;
   font-weight: 600;
   margin: 0;
-}
-
-.lecture-position {
-  font-size: 0.8rem;
-  color: var(--text-muted);
 }
 
 .lecture-tags {
@@ -6552,24 +6655,6 @@ body.map-toolbox-dragging {
   background: rgba(148, 163, 184, 0.12);
   font-size: 0.75rem;
   color: var(--text-muted);
-}
-
-.lecture-schedule {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  color: var(--text-muted);
-}
-
-.lecture-week {
-  font-weight: 600;
-  color: var(--text);
-}
-
-.lecture-status-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
 }
 
 .lecture-status-pill {
@@ -6590,29 +6675,45 @@ body.map-toolbox-dragging {
   background: color-mix(in srgb, var(--rose) 30%, transparent);
 }
 
-.lecture-next-due {
-  font-size: 0.8rem;
+.lecture-count-cell {
+  width: 110px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
 }
 
-.lecture-passes {
+.lecture-next-cell {
+  min-width: 200px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.lecture-actions {
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.lecture-actions .btn {
+  font-size: 0.8rem;
+  padding: 0.4rem 0.85rem;
 }
 
 .lecture-pass-summary {
   font-weight: 500;
 }
 
+.lecture-pass-empty {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .lecture-pass-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
-}
-
-.lecture-pass-plan {
-  font-size: 0.8rem;
-  color: var(--text-muted);
 }
 
 .lecture-pass-chip {
@@ -6656,10 +6757,4 @@ body.map-toolbox-dragging {
 
 .lecture-pass-chip.is-overdue {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--chip-accent) 45%, transparent);
-}
-
-.lecture-pass-empty {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  font-style: italic;
 }
