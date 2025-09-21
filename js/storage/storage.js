@@ -334,13 +334,13 @@ async function generateBlockId(storeRef, title) {
 }
 
 export async function upsertBlock(def) {
-  const b = await store('blocks', 'readwrite');
   const title = typeof def?.title === 'string' ? def.title : '';
   let blockId = typeof def?.blockId === 'string' && def.blockId.trim() ? def.blockId.trim() : '';
+  const readStore = await store('blocks');
   if (!blockId) {
-    blockId = await generateBlockId(b, title || 'block');
+    blockId = await generateBlockId(readStore, title || 'block');
   }
-  const existing = await prom(b.get(blockId));
+  const existing = await prom(readStore.get(blockId));
   const existingLectures = await fetchLecturesByBlock(blockId);
   const now = Date.now();
   const incomingLectures = Array.isArray(def.lectures)
@@ -401,7 +401,8 @@ export async function upsertBlock(def) {
     weeks: typeof def.weeks === 'number' ? def.weeks : existing?.weeks
   };
   delete next.lectures;
-  await prom(b.put(next));
+  const writeStore = await store('blocks', 'readwrite');
+  await prom(writeStore.put(next));
 
   const incomingKeySet = new Set(
     prunedLectures
