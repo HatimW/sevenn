@@ -5893,7 +5893,7 @@ body.map-toolbox-dragging {
   padding: var(--pad-lg);
 }
 
-.block-board-container { display: flex; flex-direction: column; gap: 1.5rem; }
+.block-board-container { display: flex; flex-direction: column; gap: 1.8rem; }
 .block-board-urgent { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
 .block-board-urgent-group { background: var(--surface-2); border-radius: 12px; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
 .block-board-urgent-header { font-weight: 600; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
@@ -5903,19 +5903,19 @@ body.map-toolbox-dragging {
 .block-board-pass-meta { font-size: 0.85rem; opacity: 0.8; }
 .block-board-pass-actions { display: flex; gap: 0.5rem; }
 .block-board-empty { font-size: 0.85rem; opacity: 0.7; }
-.block-board-list { display: flex; flex-direction: column; gap: 2rem; }
-.block-board-block { display: flex; flex-direction: column; gap: 1rem; }
+.block-board-list { display: flex; flex-direction: column; gap: 1.5rem; }
+.block-board-block { display: flex; flex-direction: column; gap: 1.1rem; }
 .block-board-block-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
 .block-board-block-controls { display: flex; gap: 0.5rem; }
-.block-board-density { display: grid; grid-template-columns: repeat(auto-fit, minmax(20px, 1fr)); gap: 0.25rem; align-items: end; }
+.block-board-density { display: grid; grid-template-columns: repeat(auto-fit, minmax(22px, 1fr)); gap: 0.4rem; align-items: end; }
 .block-board-density-slot { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; font-size: 0.7rem; opacity: 0.8; }
 .block-board-density-slot.today { font-weight: 600; opacity: 1; }
-.block-board-density-bar { width: 100%; background: var(--surface-1); border-radius: 8px; height: 60px; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }
-.block-board-density-fill { width: 100%; background: color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 8px; transition: height 0.2s ease; }
-.block-board-grid { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, 1fr); gap: 1rem; overflow-x: auto; padding-bottom: 0.5rem; }
-.block-board-day-column, .block-board-unscheduled { background: var(--surface-2); border-radius: 12px; display: flex; flex-direction: column; }
-.block-board-day-header { font-weight: 600; padding: 0.75rem 1rem; border-bottom: 1px solid var(--surface-3); }
-.block-board-day-list { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem 1rem 1rem; }
+.block-board-density-bar { width: 100%; background: var(--surface-1); border-radius: 10px; height: 82px; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }
+.block-board-density-fill { width: 100%; background: color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 10px; transition: height 0.2s ease; }
+.block-board-grid { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(210px, 1fr); gap: 0.85rem; overflow-x: auto; padding-bottom: 0.5rem; }
+.block-board-day-column, .block-board-unscheduled { background: color-mix(in srgb, var(--surface-2) 90%, rgba(15, 23, 42, 0.55)); border-radius: 12px; display: flex; flex-direction: column; }
+.block-board-day-header { font-weight: 600; padding: 0.75rem 0.9rem; border-bottom: 1px solid var(--surface-3); }
+.block-board-day-list { display: flex; flex-direction: column; gap: 0.6rem; padding: 0.75rem 0.9rem 0.9rem; }
 .block-board-day-column.today .block-board-day-header { color: var(--accent); }
 .block-board-day-column.dropping { outline: 2px dashed var(--accent); }
 .block-board-pass-card { border-radius: 12px; border: 1px solid color-mix(in srgb, var(--card-accent) 45%, transparent); padding: 0.75rem; background: color-mix(in srgb, var(--card-accent) 12%, var(--surface-1)); display: flex; flex-direction: column; gap: 0.35rem; cursor: grab; }
@@ -5923,7 +5923,7 @@ body.map-toolbox-dragging {
 .block-board-pass-card .card-meta { font-size: 0.8rem; opacity: 0.75; }
 
 /* --- Refined block board styling --- */
-.block-board-container { gap: 2.5rem; }
+.block-board-container { gap: 1.8rem; }
 
 .block-board-summary {
   display: grid;
@@ -6034,23 +6034,23 @@ body.map-toolbox-dragging {
 .block-board-block {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-  padding: 1.5rem;
+  gap: 1.1rem;
+  padding: 1.1rem 1.25rem;
   border-radius: var(--radius-lg);
-  border: 1px solid var(--border);
-  background: linear-gradient(170deg, rgba(11, 16, 28, 0.92), rgba(15, 22, 37, 0.78));
-  box-shadow: 0 28px 60px rgba(2, 6, 23, 0.5);
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: linear-gradient(165deg, rgba(11, 16, 28, 0.88), rgba(15, 22, 37, 0.65));
+  box-shadow: 0 18px 34px rgba(2, 6, 23, 0.35);
 }
 
 .block-board-block.has-accent {
-  border-color: color-mix(in srgb, var(--block-accent) 32%, var(--border));
-  box-shadow: 0 34px 70px color-mix(in srgb, var(--block-accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--block-accent) 26%, var(--border));
+  box-shadow: 0 22px 44px color-mix(in srgb, var(--block-accent) 14%, transparent);
 }
 
 .block-board-block-header {
   display: flex;
   align-items: flex-start;
-  gap: 1.5rem;
+  gap: 1rem;
   justify-content: space-between;
 }
 
@@ -6079,22 +6079,22 @@ body.map-toolbox-dragging {
 .block-board-block-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
 
 .block-board-block-controls .btn {
-  font-size: 0.8rem;
-  padding: 0.45rem 0.85rem;
+  font-size: 0.75rem;
+  padding: 0.4rem 0.75rem;
 }
 
 .block-board-timeline {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 1.1rem 1.3rem;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
-  background: linear-gradient(160deg, rgba(10, 15, 28, 0.9), rgba(12, 20, 36, 0.72));
+  background: linear-gradient(160deg, rgba(10, 15, 28, 0.85), rgba(12, 20, 36, 0.65));
 }
 
 .block-board-timeline-header {
@@ -6117,17 +6117,17 @@ body.map-toolbox-dragging {
 
 .block-board-density {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(26px, 1fr));
-  gap: 0.55rem;
+  grid-template-columns: repeat(auto-fit, minmax(22px, 1fr));
+  gap: 0.4rem;
   align-items: end;
 }
 
 .block-board-density-slot {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.35rem;
   align-items: center;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: var(--text-muted);
 }
 
@@ -6138,8 +6138,8 @@ body.map-toolbox-dragging {
 
 .block-board-density-bar {
   width: 100%;
-  height: 120px;
-  border-radius: 12px;
+  height: 82px;
+  border-radius: 10px;
   background: var(--surface-1);
   overflow: hidden;
   display: flex;
@@ -6148,28 +6148,28 @@ body.map-toolbox-dragging {
 
 .block-board-density-fill {
   width: 100%;
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--accent);
   transition: height 0.2s ease;
 }
 
 .block-board-density-label {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
 }
 
 .block-board-list {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 1.5rem;
 }
 
 .block-board-grid {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(240px, 1fr);
-  gap: 1.25rem;
+  grid-auto-columns: minmax(210px, 1fr);
+  gap: 0.85rem;
   overflow-x: auto;
-  padding-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
 }
 
 .block-board-day-column,
@@ -6177,10 +6177,10 @@ body.map-toolbox-dragging {
   display: flex;
   flex-direction: column;
   border-radius: var(--radius-lg);
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  min-height: 280px;
-  backdrop-filter: blur(12px);
+  border: 1px solid color-mix(in srgb, var(--surface-3) 85%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 90%, rgba(15, 23, 42, 0.55));
+  min-height: 240px;
+  backdrop-filter: blur(10px);
 }
 
 .block-board-day-column.today {
@@ -6189,29 +6189,29 @@ body.map-toolbox-dragging {
 }
 
 .block-board-day-header {
-  padding: 1rem;
+  padding: 0.75rem 0.9rem;
   border-bottom: 1px solid var(--surface-3);
   font-weight: 600;
   letter-spacing: 0.01em;
 }
 
 .block-board-day-list {
-  padding: 1rem;
+  padding: 0.75rem 0.9rem 0.9rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.6rem;
   overflow-y: auto;
 }
 
 .block-board-pass-card {
   border-radius: var(--radius);
   border: 1px solid color-mix(in srgb, var(--card-accent) 40%, transparent);
-  background: color-mix(in srgb, var(--card-accent) 12%, rgba(10, 16, 28, 0.88));
-  padding: 0.85rem 1rem;
+  background: color-mix(in srgb, var(--card-accent) 10%, rgba(10, 16, 28, 0.85));
+  padding: 0.75rem 0.85rem;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
-  box-shadow: 0 24px 44px rgba(2, 6, 23, 0.45);
+  gap: 0.4rem;
+  box-shadow: 0 16px 30px rgba(2, 6, 23, 0.35);
 }
 
 .block-board-pass-card .card-title {
@@ -6237,6 +6237,195 @@ body.map-toolbox-dragging {
   margin-top: 0.25rem;
 }
 
+.add-lecture-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.65rem 1.05rem;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 82%, rgba(15, 23, 42, 0.75)), color-mix(in srgb, var(--accent) 58%, rgba(15, 23, 42, 0.85)));
+  box-shadow: 0 18px 32px color-mix(in srgb, var(--accent) 30%, transparent);
+  border: none;
+}
+
+.add-lecture-btn:disabled {
+  background: color-mix(in srgb, var(--surface-3) 70%, transparent);
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+.add-lecture-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.add-lecture-btn-label {
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+}
+
+/* --- Lecture pass editor --- */
+.lecture-pass-count {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-weight: 600;
+}
+
+.lecture-pass-count .input {
+  max-width: 140px;
+}
+
+.lecture-pass-help {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.lecture-pass-summary-line {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.lecture-pass-advanced {
+  margin-top: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.9rem 1rem;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.lecture-pass-advanced summary {
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.lecture-pass-advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.lecture-pass-advanced summary::after {
+  content: '▾';
+  font-size: 0.75rem;
+  margin-left: 0.5rem;
+  transition: transform 0.2s ease;
+}
+
+.lecture-pass-advanced[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.lecture-pass-advanced-hint {
+  margin: 0.6rem 0 1rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.lecture-pass-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.lecture-pass-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--surface-3);
+  background: color-mix(in srgb, rgba(148, 163, 184, 0.2) 8%, transparent);
+  padding: 0.85rem 1rem;
+}
+
+.lecture-pass-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.lecture-pass-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.lecture-pass-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1 1 200px;
+  min-width: 180px;
+}
+
+.lecture-pass-field-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.lecture-pass-offset-inputs {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.lecture-pass-offset-value {
+  max-width: 90px;
+}
+
+.lecture-pass-offset-unit {
+  max-width: 120px;
+}
+
+.lecture-pass-offset-preview {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.lecture-pass-editor .lecture-pass-empty {
+  padding: 0.75rem;
+  border-radius: var(--radius);
+  border: 1px dashed var(--border);
+  background: rgba(148, 163, 184, 0.08);
+  font-style: normal;
+}
+
+.settings-pass-description {
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.settings-pass-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.settings-pass-status {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.settings-pass-status.is-error {
+  color: var(--rose);
+}
+
+.settings-pass-editor {
+  border: 1px solid var(--surface-3);
+  border-radius: var(--radius-lg);
+  background: rgba(15, 23, 42, 0.55);
+  padding: 0.85rem;
+}
 /* --- Settings block details --- */
 .settings-block-row {
   background: linear-gradient(170deg, rgba(14, 22, 36, 0.92), rgba(11, 17, 30, 0.82));

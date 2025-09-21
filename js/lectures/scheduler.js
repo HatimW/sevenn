@@ -80,10 +80,10 @@ export const DEFAULT_PLANNER_DEFAULTS = {
 
 export function normalizePassPlan(plan) {
   const source = plan && typeof plan === 'object' ? plan : {};
-  const mergedSchedule = Array.isArray(source.schedule) && source.schedule.length
+  const mergedSchedule = Array.isArray(source.schedule)
     ? source.schedule
     : DEFAULT_PASS_PLAN.schedule;
-  const normalizedSchedule = mergedSchedule
+  const normalizedSchedule = (Array.isArray(mergedSchedule) ? mergedSchedule : [])
     .map((step, index) => {
       const order = toNumber(step?.order, index + 1);
       const offsetMinutes = toNumber(step?.offsetMinutes, DEFAULT_PASS_PLAN.schedule[index]?.offsetMinutes ?? 0);
@@ -118,7 +118,7 @@ export function normalizePlannerDefaults(raw) {
     anchorOffsets[key] = toNumber(value, fallback);
   }
 
-  const passesSource = Array.isArray(source.passes) && source.passes.length
+  const passesSource = Array.isArray(source.passes)
     ? source.passes
     : DEFAULT_PLANNER_DEFAULTS.passes;
   const normalizedPlan = normalizePassPlan({ schedule: passesSource });
@@ -352,7 +352,28 @@ export function clonePlannerDefaults() {
   return clone(DEFAULT_PLANNER_DEFAULTS);
 }
 
-export function clonePassPlan() {
-  return clone(DEFAULT_PASS_PLAN);
+export function clonePassPlan(plan = DEFAULT_PASS_PLAN) {
+  return clone(plan || DEFAULT_PASS_PLAN);
+}
+
+export function plannerDefaultsToPassPlan(defaults) {
+  const normalized = normalizePlannerDefaults(defaults || {});
+  const schedule = (normalized?.passes || []).map((step, index) => {
+    const order = toNumber(step?.order, index + 1);
+    const offsetMinutes = toNumber(
+      step?.offsetMinutes,
+      DEFAULT_PASS_PLAN.schedule[index]?.offsetMinutes ?? 0
+    );
+    const anchor = typeof step?.anchor === 'string' && step.anchor.trim()
+      ? step.anchor.trim()
+      : inferAnchor(offsetMinutes);
+    const label = sanitizeLabel(step?.label, order);
+    const action = sanitizeAction(step?.action ?? DEFAULT_PASS_PLAN.schedule[index]?.action);
+    return { order, offsetMinutes, anchor, label, action };
+  }).sort((a, b) => a.order - b.order);
+  return {
+    id: normalized?.id || 'planner-defaults',
+    schedule
+  };
 }
 
