@@ -333,6 +333,27 @@ async function generateBlockId(storeRef, title) {
   }
 }
 
+function normalizeDateInput(value) {
+  if (value == null) return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return value.toISOString().slice(0, 10);
+  }
+  if (typeof value === 'number') {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toISOString().slice(0, 10);
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const date = new Date(trimmed);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toISOString().slice(0, 10);
+  }
+  return null;
+}
+
 export async function upsertBlock(def) {
   const title = typeof def?.title === 'string' ? def.title : '';
   let blockId = typeof def?.blockId === 'string' && def.blockId.trim() ? def.blockId.trim() : '';
@@ -398,7 +419,19 @@ export async function upsertBlock(def) {
     order: def.order || existing?.order || now,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
-    weeks: typeof def.weeks === 'number' ? def.weeks : existing?.weeks
+    weeks: typeof def.weeks === 'number' ? def.weeks : existing?.weeks,
+    startDate:
+      def.startDate !== undefined
+        ? normalizeDateInput(def.startDate)
+        : existing?.startDate
+          ? normalizeDateInput(existing.startDate)
+          : null,
+    endDate:
+      def.endDate !== undefined
+        ? normalizeDateInput(def.endDate)
+        : existing?.endDate
+          ? normalizeDateInput(existing.endDate)
+          : null
   };
   delete next.lectures;
   const writeStore = await store('blocks', 'readwrite');

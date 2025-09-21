@@ -62,6 +62,121 @@ function formatOffset(minutes) {
   return `${Math.round(months)}mo`;
 }
 
+const PASS_ACCENTS = [
+  'var(--pink)',
+  'var(--blue)',
+  'var(--green)',
+  'var(--orange)',
+  'var(--purple)',
+  'var(--teal)',
+  'var(--yellow)',
+  'var(--rose)',
+  'var(--indigo)',
+  'var(--cyan)'
+];
+
+const PASS_DUE_FORMAT = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric'
+});
+
+const PASS_TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
+  hour: 'numeric',
+  minute: '2-digit'
+});
+
+function passAccent(order = 1) {
+  if (!Number.isFinite(order)) return PASS_ACCENTS[0];
+  const idx = Math.max(0, Math.floor(order) - 1) % PASS_ACCENTS.length;
+  return PASS_ACCENTS[idx];
+}
+
+function formatPassDueTimestamp(due) {
+  if (!Number.isFinite(due)) return '';
+  const date = new Date(due);
+  return `${PASS_DUE_FORMAT.format(date)} • ${PASS_TIME_FORMAT.format(date)}`;
+}
+
+function buildPassDisplayList(lecture) {
+  const scheduleList = Array.isArray(lecture?.passPlan?.schedule)
+    ? lecture.passPlan.schedule
+    : [];
+  const scheduleByOrder = new Map();
+  scheduleList.forEach((step, index) => {
+    const order = Number.isFinite(step?.order) ? step.order : index + 1;
+    scheduleByOrder.set(order, { ...step, order });
+  });
+  const passes = Array.isArray(lecture?.passes) ? lecture.passes : [];
+  const passByOrder = new Map();
+  passes.forEach(pass => {
+    const order = Number(pass?.order);
+    if (Number.isFinite(order)) {
+      passByOrder.set(order, pass);
+    }
+  });
+  const orders = new Set([
+    ...scheduleByOrder.keys(),
+    ...passByOrder.keys()
+  ]);
+  if (!orders.size) {
+    const planLength = scheduleList.length;
+    for (let i = 1; i <= planLength; i += 1) {
+      orders.add(i);
+    }
+  }
+  return Array.from(orders)
+    .filter(order => Number.isFinite(order))
+    .sort((a, b) => a - b)
+    .map(order => {
+      const schedule = scheduleByOrder.get(order) || {};
+      const pass = passByOrder.get(order) || {};
+      return {
+        order,
+        label: schedule.label || pass.label || `Pass ${order}`,
+        action: schedule.action || pass.action || '',
+        due: Number.isFinite(pass?.due) ? pass.due : null,
+        completedAt: Number.isFinite(pass?.completedAt) ? pass.completedAt : null
+      };
+    });
+}
+
+function createPassChipDisplay(info, now = Date.now()) {
+  const chip = document.createElement('div');
+  chip.className = 'lecture-pass-chip';
+  chip.style.setProperty('--chip-accent', passAccent(info?.order));
+  chip.dataset.passOrder = String(info?.order ?? '');
+  if (Number.isFinite(info?.completedAt)) chip.classList.add('is-complete');
+  if (!Number.isFinite(info?.completedAt) && Number.isFinite(info?.due) && info.due < now) {
+    chip.classList.add('is-overdue');
+  }
+
+  const header = document.createElement('div');
+  header.className = 'lecture-pass-chip-header';
+  const badge = document.createElement('span');
+  badge.className = 'lecture-pass-chip-order';
+  badge.textContent = `P${info?.order ?? ''}`;
+  header.appendChild(badge);
+  const label = document.createElement('span');
+  label.className = 'lecture-pass-chip-label';
+  label.textContent = info?.action || info?.label || `Pass ${info?.order ?? ''}`;
+  header.appendChild(label);
+  chip.appendChild(header);
+
+  const meta = document.createElement('div');
+  meta.className = 'lecture-pass-chip-meta';
+  let metaText = '';
+  if (Number.isFinite(info?.completedAt)) {
+    metaText = 'Completed';
+  } else if (Number.isFinite(info?.due)) {
+    metaText = formatPassDueTimestamp(info.due);
+  } else {
+    metaText = 'Unscheduled';
+  }
+  meta.textContent = metaText;
+  chip.appendChild(meta);
+  return chip;
+}
+
 const MAX_PASS_COUNT = 20;
 const DAY_MINUTES = 24 * 60;
 
@@ -230,6 +345,19 @@ function formatNextDue(nextDueAt, now = Date.now()) {
   return formatTimeUntil(nextDueAt, now);
 }
 
+function formatNextDueDescriptor(nextDueAt, now = Date.now()) {
+  if (nextDueAt == null || !Number.isFinite(nextDueAt)) return 'Not scheduled';
+  const date = new Date(nextDueAt);
+  const dateLabel = new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(date);
+  const relative = nextDueAt <= now ? formatOverdue(nextDueAt, now) : formatTimeUntil(nextDueAt, now);
+  return `${dateLabel} • ${relative}`;
+}
+
 function formatPassSummary(lecture) {
   const total = Array.isArray(lecture?.passes)
     ? lecture.passes.length
@@ -250,7 +378,8 @@ function renderEmptyState() {
   return empty;
 }
 
-function renderLectureRow(lecture, blockMap, onEdit, onDelete) {
+
+function renderLectureRow(lecture, blockMap, onEdit, onDelete, now = Date.now()) {
   const row = document.createElement('tr');
   row.dataset.lectureRow = 'true';
   row.dataset.lectureId = String(lecture.id);
@@ -258,42 +387,74 @@ function renderLectureRow(lecture, blockMap, onEdit, onDelete) {
 
   const lectureCell = document.createElement('td');
   lectureCell.className = 'lecture-cell';
-  const blockBadge = document.createElement('div');
-  blockBadge.className = 'lecture-block';
   const block = blockMap.get(lecture.blockId);
+
+  const header = document.createElement('div');
+  header.className = 'lecture-cell-header';
+
+  const blockBadge = document.createElement('span');
+  blockBadge.className = 'lecture-block';
   blockBadge.textContent = block?.title || lecture.blockId || 'Unknown block';
   if (block?.color) {
-    blockBadge.style.background = block.color;
+    blockBadge.style.setProperty('--block-accent', block.color);
+    blockBadge.classList.add('has-accent');
   }
-  lectureCell.appendChild(blockBadge);
+  header.appendChild(blockBadge);
 
   const name = document.createElement('div');
   name.className = 'lecture-name';
   name.textContent = lecture.name || `Lecture ${lecture.id}`;
-  lectureCell.appendChild(name);
+  header.appendChild(name);
+
+  lectureCell.appendChild(header);
 
   const positionValue = lecture.position ?? lecture.id;
   if (positionValue != null) {
-    const position = document.createElement('div');
-    position.className = 'lecture-position';
-    position.textContent = `Position: ${positionValue}`;
-    lectureCell.appendChild(position);
+    const meta = document.createElement('div');
+    meta.className = 'lecture-position';
+    meta.textContent = `Position: ${positionValue}`;
+    lectureCell.appendChild(meta);
   }
 
   const tags = Array.isArray(lecture.tags) ? lecture.tags.filter(Boolean) : [];
   if (tags.length) {
     const tagList = document.createElement('div');
     tagList.className = 'lecture-tags';
-    tagList.textContent = tags.join(', ');
+    tags.forEach(tag => {
+      const chip = document.createElement('span');
+      chip.className = 'lecture-tag';
+      chip.textContent = tag;
+      tagList.appendChild(chip);
+    });
     lectureCell.appendChild(tagList);
   }
 
   row.appendChild(lectureCell);
 
-  const weekCell = document.createElement('td');
-  weekCell.className = 'lecture-week';
-  weekCell.textContent = formatWeekLabel(lecture.week);
-  row.appendChild(weekCell);
+  const scheduleCell = document.createElement('td');
+  scheduleCell.className = 'lecture-schedule';
+
+  const week = document.createElement('div');
+  week.className = 'lecture-week';
+  week.textContent = formatWeekLabel(lecture.week);
+  scheduleCell.appendChild(week);
+
+  const statusRow = document.createElement('div');
+  statusRow.className = 'lecture-status-row';
+  const statusBadge = document.createElement('span');
+  statusBadge.className = 'lecture-status-pill';
+  const statusLabel = lecture?.status?.state || 'pending';
+  statusBadge.textContent = statusLabel;
+  statusBadge.dataset.status = statusLabel;
+  statusRow.appendChild(statusBadge);
+  scheduleCell.appendChild(statusRow);
+
+  const nextDue = document.createElement('div');
+  nextDue.className = 'lecture-next-due';
+  nextDue.textContent = formatNextDueDescriptor(lecture.nextDueAt, now);
+  scheduleCell.appendChild(nextDue);
+
+  row.appendChild(scheduleCell);
 
   const passesCell = document.createElement('td');
   passesCell.className = 'lecture-passes';
@@ -303,15 +464,28 @@ function renderLectureRow(lecture, blockMap, onEdit, onDelete) {
   summary.textContent = formatPassSummary(lecture);
   passesCell.appendChild(summary);
 
-  const plan = document.createElement('div');
-  plan.className = 'lecture-pass-plan';
-  plan.textContent = formatPassPlan(lecture.passPlan);
-  passesCell.appendChild(plan);
+  const passList = buildPassDisplayList(lecture);
+  const chips = document.createElement('div');
+  chips.className = 'lecture-pass-chips';
+  if (passList.length) {
+    passList.forEach(info => {
+      chips.appendChild(createPassChipDisplay(info, now));
+    });
+  } else {
+    const empty = document.createElement('div');
+    empty.className = 'lecture-pass-empty';
+    empty.textContent = 'No passes scheduled';
+    chips.appendChild(empty);
+  }
+  passesCell.appendChild(chips);
 
-  const due = document.createElement('div');
-  due.className = 'lecture-pass-due';
-  due.textContent = formatNextDue(lecture.nextDueAt);
-  passesCell.appendChild(due);
+  const planText = formatPassPlan(lecture.passPlan);
+  if (planText) {
+    const plan = document.createElement('div');
+    plan.className = 'lecture-pass-plan';
+    plan.textContent = planText;
+    passesCell.appendChild(plan);
+  }
 
   row.appendChild(passesCell);
 
@@ -347,7 +521,7 @@ function renderLectureTable(blocks, lectures, onEdit, onDelete) {
 
   const thead = document.createElement('thead');
   const headerRow = document.createElement('tr');
-  ['Lecture', 'Week', 'Passes', 'Actions'].forEach(label => {
+  ['Lecture', 'Schedule', 'Pass plan', 'Actions'].forEach(label => {
     const th = document.createElement('th');
     th.textContent = label;
     headerRow.appendChild(th);
@@ -384,13 +558,9 @@ function renderLectureTable(blocks, lectures, onEdit, onDelete) {
       { ...lecture, nextDueAt: lecture.nextDueAt ?? null, status: lecture.status, passPlan: lecture.passPlan },
       blockMap,
       onEdit,
-      onDelete
+      onDelete,
+      now
     );
-    // ensure due labels use consistent now reference for deterministic order
-    const dueEl = row.querySelector('.lecture-pass-due');
-    if (dueEl && lecture.nextDueAt != null) {
-      dueEl.textContent = formatNextDue(lecture.nextDueAt, now);
-    }
     tbody.appendChild(row);
   });
 
