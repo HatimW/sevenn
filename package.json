@@ -8,6 +8,6 @@
   "devDependencies": {
     "esbuild": "^0.25.9",
     "fake-indexeddb": "^5.0.2",
-    "jsdom": "^24.0.0"
+    "jsdom": "^24.1.3"
   }
 }
