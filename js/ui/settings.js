@@ -18,9 +18,63 @@ function createEmptyState() {
   return empty;
 }
 
-function formatWeeks(weeks) {
-  if (!Number.isFinite(weeks)) return 'Weeks: —';
-  return `Weeks: ${weeks}`;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function formatWeekCount(weeks) {
+  if (!Number.isFinite(weeks) || weeks <= 0) return null;
+  const rounded = Math.max(1, Math.round(weeks));
+  return `${rounded} week${rounded === 1 ? '' : 's'}`;
+}
+
+function parseBlockDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
+function formatBlockDate(value, options = { month: 'short', day: 'numeric', year: 'numeric' }) {
+  const date = parseBlockDate(value);
+  if (!date) return null;
+  const formatter = new Intl.DateTimeFormat(undefined, options);
+  return formatter.format(date);
+}
+
+function formatDateRange(start, end) {
+  const startDate = parseBlockDate(start);
+  const endDate = parseBlockDate(end);
+  if (!startDate && !endDate) return null;
+  if (startDate && endDate) {
+    const formatter = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    return `${formatter.format(startDate)} → ${formatter.format(endDate)}`;
+  }
+  if (startDate) {
+    const formatted = formatBlockDate(startDate);
+    return formatted ? `Starts ${formatted}` : null;
+  }
+  const formatted = formatBlockDate(endDate);
+  return formatted ? `Ends ${formatted}` : null;
+}
+
+function computeSpanDays(start, end) {
+  const startDate = parseBlockDate(start);
+  const endDate = parseBlockDate(end);
+  if (!startDate || !endDate) return null;
+  const diff = endDate.getTime() - startDate.getTime();
+  if (diff < 0) return null;
+  return Math.round(diff / DAY_MS) + 1;
+}
+
+function formatBlockMeta(block) {
+  if (!block) return 'No block data';
+  const parts = [];
+  const weeks = formatWeekCount(Number(block.weeks));
+  if (weeks) parts.push(weeks);
+  const range = formatDateRange(block.startDate, block.endDate);
+  if (range) parts.push(range);
+  const spanDays = computeSpanDays(block.startDate, block.endDate);
+  if (spanDays) parts.push(`${spanDays} day${spanDays === 1 ? '' : 's'}`);
+  return parts.join(' • ') || 'Block details unavailable';
 }
 
 export async function renderSettings(root) {
@@ -70,6 +124,10 @@ export async function renderSettings(root) {
     if (!block) return;
     const wrap = document.createElement('div');
     wrap.className = 'settings-block-row';
+    if (block.color) {
+      wrap.style.setProperty('--block-accent', block.color);
+      wrap.classList.add('has-accent');
+    }
 
     const header = document.createElement('div');
     header.className = 'settings-block-header';
@@ -84,10 +142,8 @@ export async function renderSettings(root) {
 
     const meta = document.createElement('div');
     meta.className = 'settings-block-meta';
-    meta.textContent = formatWeeks(Number(block.weeks));
+    meta.textContent = formatBlockMeta(block);
     header.appendChild(meta);
-
-    wrap.appendChild(header);
 
     const controls = document.createElement('div');
     controls.className = 'settings-block-controls';
@@ -146,7 +202,35 @@ export async function renderSettings(root) {
     });
     controls.appendChild(deleteBtn);
 
-    wrap.appendChild(controls);
+    header.appendChild(controls);
+
+    wrap.appendChild(header);
+
+    const detailGrid = document.createElement('div');
+    detailGrid.className = 'settings-block-detail-grid';
+
+    const startDetail = document.createElement('div');
+    startDetail.className = 'settings-block-detail';
+    startDetail.innerHTML = `<span>Start</span><strong>${formatBlockDate(block.startDate) || '—'}</strong>`;
+    detailGrid.appendChild(startDetail);
+
+    const endDetail = document.createElement('div');
+    endDetail.className = 'settings-block-detail';
+    endDetail.innerHTML = `<span>End</span><strong>${formatBlockDate(block.endDate) || '—'}</strong>`;
+    detailGrid.appendChild(endDetail);
+
+    const weeksDetail = document.createElement('div');
+    weeksDetail.className = 'settings-block-detail';
+    weeksDetail.innerHTML = `<span>Weeks</span><strong>${formatWeekCount(Number(block.weeks)) || '—'}</strong>`;
+    detailGrid.appendChild(weeksDetail);
+
+    const spanDays = computeSpanDays(block.startDate, block.endDate);
+    const daysDetail = document.createElement('div');
+    daysDetail.className = 'settings-block-detail';
+    daysDetail.innerHTML = `<span>Span</span><strong>${spanDays ? `${spanDays} day${spanDays === 1 ? '' : 's'}` : '—'}</strong>`;
+    detailGrid.appendChild(daysDetail);
+
+    wrap.appendChild(detailGrid);
 
     const editForm = document.createElement('form');
     editForm.className = 'settings-block-edit';
@@ -164,6 +248,16 @@ export async function renderSettings(root) {
     weeksInput.required = true;
     weeksInput.className = 'input';
     weeksInput.value = block.weeks != null ? String(block.weeks) : '1';
+
+    const startInput = document.createElement('input');
+    startInput.type = 'date';
+    startInput.className = 'input';
+    startInput.value = block.startDate || '';
+
+    const endInput = document.createElement('input');
+    endInput.type = 'date';
+    endInput.className = 'input';
+    endInput.value = block.endDate || '';
 
     const colorInput = document.createElement('input');
     colorInput.type = 'color';
@@ -183,7 +277,7 @@ export async function renderSettings(root) {
       editForm.hidden = true;
     });
 
-    editForm.append(titleInput, weeksInput, colorInput, saveBtn, cancelBtn);
+    editForm.append(titleInput, startInput, endInput, weeksInput, colorInput, saveBtn, cancelBtn);
     editForm.addEventListener('submit', async event => {
       event.preventDefault();
       const titleValue = titleInput.value.trim();
@@ -191,11 +285,24 @@ export async function renderSettings(root) {
       if (!titleValue || !Number.isFinite(weeksValue) || weeksValue <= 0) {
         return;
       }
+      let startValue = startInput.value || null;
+      let endValue = endInput.value || null;
+      if (startValue && endValue) {
+        const startDate = new Date(startValue);
+        const endDate = new Date(endValue);
+        if (!Number.isNaN(startDate.getTime()) && !Number.isNaN(endDate.getTime()) && startDate > endDate) {
+          const swap = startValue;
+          startValue = endValue;
+          endValue = swap;
+        }
+      }
       const payload = {
         ...block,
         title: titleValue,
         weeks: weeksValue,
-        color: colorInput.value || null
+        color: colorInput.value || null,
+        startDate: startValue,
+        endDate: endValue
       };
       await upsertBlock(payload);
       invalidateBlockCatalog();
@@ -220,6 +327,18 @@ export async function renderSettings(root) {
   titleInput.placeholder = 'Block title';
   titleInput.className = 'input';
 
+  const startInput = document.createElement('input');
+  startInput.type = 'date';
+  startInput.className = 'input';
+  startInput.placeholder = 'Start date';
+  startInput.setAttribute('aria-label', 'Block start date');
+
+  const endInput = document.createElement('input');
+  endInput.type = 'date';
+  endInput.className = 'input';
+  endInput.placeholder = 'End date';
+  endInput.setAttribute('aria-label', 'Block end date');
+
   const weeksInput = document.createElement('input');
   weeksInput.type = 'number';
   weeksInput.min = '1';
@@ -236,9 +355,9 @@ export async function renderSettings(root) {
   const submitBtn = document.createElement('button');
   submitBtn.type = 'submit';
   submitBtn.className = 'btn';
-  submitBtn.textContent = 'Add block';
+  submitBtn.textContent = 'Add block (top)';
 
-  form.append(titleInput, weeksInput, colorInput, submitBtn);
+  form.append(titleInput, startInput, endInput, weeksInput, colorInput, submitBtn);
 
   form.addEventListener('submit', async event => {
     event.preventDefault();
@@ -247,12 +366,27 @@ export async function renderSettings(root) {
     if (!titleValue || !Number.isFinite(weeksValue) || weeksValue <= 0) {
       return;
     }
+    let startValue = startInput.value || null;
+    let endValue = endInput.value || null;
+    if (startValue && endValue) {
+      const startDate = new Date(startValue);
+      const endDate = new Date(endValue);
+      if (!Number.isNaN(startDate.getTime()) && !Number.isNaN(endDate.getTime()) && startDate > endDate) {
+        const swap = startValue;
+        startValue = endValue;
+        endValue = swap;
+      }
+    }
     await upsertBlock({
       title: titleValue,
       weeks: weeksValue,
-      color: colorInput.value || null
+      color: colorInput.value || null,
+      startDate: startValue,
+      endDate: endValue
     });
     titleInput.value = '';
+    startInput.value = '';
+    endInput.value = '';
     weeksInput.value = '1';
     colorInput.value = '#ffffff';
     invalidateBlockCatalog();

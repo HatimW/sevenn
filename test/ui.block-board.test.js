@@ -59,7 +59,7 @@ describe('block board rendering', () => {
     const data = sampleData();
     const { saveLectureMock } = setupBoardDeps(data);
     await renderBlockBoard(container, () => {});
-    const urgentHeaders = container.querySelectorAll('.block-board-urgent-header');
+    const urgentHeaders = container.querySelectorAll('.block-board-summary-header');
     assert.equal(urgentHeaders.length, 3);
     const markBtn = Array.from(container.querySelectorAll('.block-board-pass-actions button')).find(btn => btn.textContent?.includes('Mark done'));
     assert(markBtn);
@@ -73,7 +73,7 @@ describe('block board rendering', () => {
     await renderBlockBoard(container, () => {});
     assert.equal(saveLectureMock.mock.callCount(), 2);
 
-    const pushAllBtn = Array.from(container.querySelectorAll('.block-board-urgent-header .btn.tertiary')).find(btn => btn.textContent?.includes('Push all'));
+    const pushAllBtn = Array.from(container.querySelectorAll('.block-board-summary-header .btn.tertiary')).find(btn => btn.textContent?.toLowerCase().includes('push'));
     assert(pushAllBtn);
     pushAllBtn.click();
     await renderBlockBoard(container, () => {});
@@ -84,13 +84,13 @@ describe('block board rendering', () => {
     const data = sampleData();
     setupBoardDeps(data);
     await renderBlockBoard(container, () => {});
-    const densityBtn = Array.from(container.querySelectorAll('.block-board-block-controls .btn.secondary')).find(btn => btn.textContent?.toLowerCase().includes('density'));
+    const densityBtn = Array.from(container.querySelectorAll('.block-board-block-controls .btn.secondary')).find(btn => btn.textContent?.toLowerCase().includes('timeline'));
     assert(densityBtn);
     densityBtn.click();
     await renderBlockBoard(container, () => {});
     assert.equal(state.blockBoard.showDensity, false);
 
-    const collapseBtn = Array.from(container.querySelectorAll('.block-board-block-controls .btn.secondary')).find(btn => btn.textContent?.toLowerCase().includes('collapse'));
+    const collapseBtn = Array.from(container.querySelectorAll('.block-board-block-controls .btn.secondary')).find(btn => btn.textContent?.toLowerCase().includes('minimize'));
     assert(collapseBtn);
     collapseBtn.click();
     await renderBlockBoard(container, () => {});
