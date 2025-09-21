@@ -126,33 +126,83 @@ function collectDefaultBoardDays(now = Date.now()) {
   return Array.from({ length: DEFAULT_BOARD_DAYS }, (_, idx) => start + idx * DAY_MS);
 }
 
-function collectDaysForBlock(block, now = Date.now()) {
+function collectLectureDueRange(lectures) {
+  let start = null;
+  let end = null;
+  if (!Array.isArray(lectures)) return { start, end };
+  lectures.forEach(lecture => {
+    const passes = Array.isArray(lecture?.passes) ? lecture.passes : [];
+    passes.forEach(pass => {
+      const due = Number(pass?.due);
+      if (!Number.isFinite(due)) return;
+      const day = startOfDay(due);
+      if (start == null || day < start) start = day;
+      if (end == null || day > end) end = day;
+    });
+  });
+  return { start, end };
+}
+
+function collectDaysForBlock(block, lectures = [], now = Date.now()) {
   const startDate = parseBlockDate(block?.startDate);
   const endDate = parseBlockDate(block?.endDate);
-  if (startDate && endDate && endDate >= startDate) {
-    const startDay = startOfDay(startDate.getTime());
-    const endDay = startOfDay(endDate.getTime());
+  const dueRange = collectLectureDueRange(lectures);
+  const weeks = Number(block?.weeks);
+
+  let startDay = startDate ? startOfDay(startDate.getTime()) : null;
+  let endDay = endDate ? startOfDay(endDate.getTime()) : null;
+
+  if (Number.isFinite(weeks) && weeks > 0) {
+    const totalDays = Math.max(1, Math.round(weeks * 7));
+    if (startDay != null && endDay == null) {
+      endDay = startDay + (totalDays - 1) * DAY_MS;
+    } else if (endDay != null && startDay == null) {
+      startDay = endDay - (totalDays - 1) * DAY_MS;
+    }
+  }
+
+  if (dueRange.start != null) {
+    startDay = startDay == null ? dueRange.start : Math.min(startDay, dueRange.start);
+  }
+  if (dueRange.end != null) {
+    endDay = endDay == null ? dueRange.end : Math.max(endDay, dueRange.end);
+  }
+
+  if (startDay != null && endDay != null && endDay >= startDay) {
+    const spanDays = Math.floor((endDay - startDay) / DAY_MS) + 1;
+    if (spanDays < 3) {
+      const deficit = 3 - spanDays;
+      const padBefore = Math.ceil(deficit / 2);
+      const padAfter = deficit - padBefore;
+      startDay -= padBefore * DAY_MS;
+      endDay += padAfter * DAY_MS;
+    }
     const days = [];
     for (let ts = startDay; ts <= endDay; ts += DAY_MS) {
       days.push(ts);
     }
     return days;
   }
-  const weeks = Number(block?.weeks);
-  if (startDate && Number.isFinite(weeks) && weeks > 0) {
-    const totalDays = Math.max(1, Math.round(weeks * 7));
-    const startDay = startOfDay(startDate.getTime());
-    return Array.from({ length: totalDays }, (_, idx) => startDay + idx * DAY_MS);
-  }
+
   if (Number.isFinite(weeks) && weeks > 0) {
     const totalDays = Math.max(1, Math.round(weeks * 7));
-    const today = startOfDay(now);
-    return Array.from({ length: totalDays }, (_, idx) => today + idx * DAY_MS);
+    const anchor = dueRange.start != null ? dueRange.start : startOfDay(now);
+    return Array.from({ length: totalDays }, (_, idx) => anchor + idx * DAY_MS);
   }
+
+  if (dueRange.start != null && dueRange.end != null && dueRange.end >= dueRange.start) {
+    const days = [];
+    for (let ts = dueRange.start; ts <= dueRange.end; ts += DAY_MS) {
+      days.push(ts);
+    }
+    return days;
+  }
+
   if (startDate) {
-    const startDay = startOfDay(startDate.getTime());
-    return Array.from({ length: 7 }, (_, idx) => startDay + idx * DAY_MS);
+    const start = startOfDay(startDate.getTime());
+    return Array.from({ length: 7 }, (_, idx) => start + idx * DAY_MS);
   }
+
   return [];
 }
 
@@ -658,7 +708,7 @@ export async function renderBlockBoard(container, refresh) {
   });
   blocks.forEach(block => {
     const blockLectures = lecturesByBlock.get(String(block.blockId)) || [];
-    const blockDays = collectDaysForBlock(block);
+    const blockDays = collectDaysForBlock(block, blockLectures);
     const daysForBlock = blockDays.length ? blockDays : fallbackDays;
     renderBlockBoardBlock(blockList, block, blockLectures, daysForBlock, refreshBoard);
   });

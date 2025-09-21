@@ -731,7 +731,7 @@ export async function renderSettings(root) {
 
   const passDescription = document.createElement('p');
   passDescription.className = 'settings-pass-description';
-  passDescription.textContent = 'Adjust how many passes and which learning methods are suggested when you add a new lecture.';
+  passDescription.textContent = 'Configure the default pass count, timing, and pass functions applied to new lectures.';
   passDefaultsCard.appendChild(passDescription);
 
   const passForm = document.createElement('form');
@@ -747,7 +747,7 @@ export async function renderSettings(root) {
 
   const passCountField = document.createElement('label');
   passCountField.className = 'lecture-pass-count settings-pass-count';
-  passCountField.textContent = 'Default passes';
+  passCountField.textContent = 'Default pass count';
   const passCountInput = document.createElement('input');
   passCountInput.type = 'number';
   passCountInput.min = '0';
@@ -774,7 +774,7 @@ export async function renderSettings(root) {
 
   const passAdvancedHint = document.createElement('p');
   passAdvancedHint.className = 'lecture-pass-advanced-hint';
-  passAdvancedHint.textContent = 'Choose the learning method and timing for each default pass.';
+  passAdvancedHint.textContent = 'Tune the pass function and spacing for each default pass.';
   passAdvanced.appendChild(passAdvancedHint);
 
   const passList = document.createElement('div');
@@ -833,7 +833,7 @@ export async function renderSettings(root) {
       actionField.className = 'lecture-pass-field';
       const actionLabel = document.createElement('span');
       actionLabel.className = 'lecture-pass-field-label';
-      actionLabel.textContent = 'Learning method';
+      actionLabel.textContent = 'Pass function';
       actionField.appendChild(actionLabel);
       const select = document.createElement('select');
       select.className = 'input lecture-pass-action';

@@ -32,6 +32,7 @@ function buildBlockOrderMap(blocks) {
   blocks.forEach((block, index) => {
     if (!block || !block.blockId) return;
     order.set(block.blockId, index);
+    order.set(String(block.blockId), index);
   });
   return order;
 }
@@ -438,41 +439,114 @@ function renderEmptyState() {
 }
 
 
-function renderLectureRow(lecture, blockMap, onEdit, onDelete, now = Date.now()) {
+function computeLecturePassStats(lecture) {
+  const passes = Array.isArray(lecture?.passes) ? lecture.passes : [];
+  const scheduled = Array.isArray(lecture?.passPlan?.schedule) ? lecture.passPlan.schedule.length : 0;
+  const statusTotal = Number.isFinite(lecture?.status?.totalPasses) ? lecture.status.totalPasses : 0;
+  let planned = Math.max(scheduled, passes.length, statusTotal);
+  const completedFromPasses = passes.filter(pass => Number.isFinite(pass?.completedAt)).length;
+  const completedFromStatus = Number.isFinite(lecture?.status?.completedPasses)
+    ? lecture.status.completedPasses
+    : 0;
+  const completed = Math.max(completedFromPasses, completedFromStatus);
+  planned = Math.max(planned, completed);
+  const remaining = Math.max(0, planned - completed);
+  return { planned, completed, remaining };
+}
+
+function summarizeLectures(lectures) {
+  return (Array.isArray(lectures) ? lectures : []).reduce(
+    (acc, lecture) => {
+      const stats = computeLecturePassStats(lecture);
+      acc.totalPasses += stats.planned;
+      acc.completed += stats.completed;
+      return acc;
+    },
+    { totalPasses: 0, completed: 0 }
+  );
+}
+
+function formatPassTotals(summary) {
+  if (!summary || summary.totalPasses === 0) return '0 passes planned';
+  return `${summary.completed}/${summary.totalPasses} passes complete`;
+}
+
+function labelForWeekKey(weekKey) {
+  if (weekKey === '__no-week') return 'No week assigned';
+  return formatWeekLabel(weekKey);
+}
+
+function sortLecturesForDisplay(lectures) {
+  return (Array.isArray(lectures) ? lectures : []).slice().sort((a, b) => {
+    const posA = Number(a?.position);
+    const posB = Number(b?.position);
+    const posAValid = Number.isFinite(posA);
+    const posBValid = Number.isFinite(posB);
+    if (posAValid && posBValid && posA !== posB) return posA - posB;
+    if (posAValid && !posBValid) return -1;
+    if (!posAValid && posBValid) return 1;
+    const nameA = (a?.name || '').toLowerCase();
+    const nameB = (b?.name || '').toLowerCase();
+    if (nameA && nameB && nameA !== nameB) return nameA.localeCompare(nameB);
+    const idA = Number(a?.id);
+    const idB = Number(b?.id);
+    if (Number.isFinite(idA) && Number.isFinite(idB) && idA !== idB) return idA - idB;
+    return 0;
+  });
+}
+
+function resolveNextDueAt(lecture) {
+  if (Number.isFinite(lecture?.nextDueAt)) return lecture.nextDueAt;
+  const passes = Array.isArray(lecture?.passes) ? lecture.passes : [];
+  for (const pass of passes) {
+    if (!pass || Number.isFinite(pass?.completedAt)) continue;
+    if (Number.isFinite(pass?.due)) return pass.due;
+  }
+  return null;
+}
+
+function getLectureState(lecture, stats) {
+  if (lecture?.status?.state) return lecture.status.state;
+  const counts = stats || computeLecturePassStats(lecture);
+  if (!counts.planned) return 'unscheduled';
+  if (counts.completed >= counts.planned) return 'complete';
+  if (counts.completed > 0) return 'in-progress';
+  return 'pending';
+}
+
+function renderLectureWeekRow(lecture, onEdit, onDelete, now = Date.now()) {
   const row = document.createElement('tr');
   row.dataset.lectureRow = 'true';
   row.dataset.lectureId = String(lecture.id);
   row.dataset.blockId = String(lecture.blockId ?? '');
 
-  const lectureCell = document.createElement('td');
-  lectureCell.className = 'lecture-cell';
-  const block = blockMap.get(lecture.blockId);
+  const stats = computeLecturePassStats(lecture);
+  const stateLabel = getLectureState(lecture, stats);
+
+  const overviewCell = document.createElement('td');
+  overviewCell.className = 'lecture-overview';
 
   const header = document.createElement('div');
-  header.className = 'lecture-cell-header';
+  header.className = 'lecture-overview-header';
 
-  const blockBadge = document.createElement('span');
-  blockBadge.className = 'lecture-block';
-  blockBadge.textContent = block?.title || lecture.blockId || 'Unknown block';
-  if (block?.color) {
-    blockBadge.style.setProperty('--block-accent', block.color);
-    blockBadge.classList.add('has-accent');
-  }
-  header.appendChild(blockBadge);
-
-  const name = document.createElement('div');
+  const name = document.createElement('span');
   name.className = 'lecture-name';
   name.textContent = lecture.name || `Lecture ${lecture.id}`;
   header.appendChild(name);
 
-  lectureCell.appendChild(header);
+  const status = document.createElement('span');
+  status.className = 'lecture-status-pill';
+  status.dataset.status = stateLabel;
+  status.textContent = stateLabel;
+  header.appendChild(status);
 
-  const positionValue = lecture.position ?? lecture.id;
-  if (positionValue != null) {
-    const meta = document.createElement('div');
-    meta.className = 'lecture-position';
-    meta.textContent = `Position: ${positionValue}`;
-    lectureCell.appendChild(meta);
+  overviewCell.appendChild(header);
+
+  if (lecture.position != null) {
+    const position = document.createElement('div');
+    position.className = 'lecture-overview-position';
+    position.textContent = `Position: ${lecture.position}`;
+    overviewCell.appendChild(position);
   }
 
   const tags = Array.isArray(lecture.tags) ? lecture.tags.filter(Boolean) : [];
@@ -485,71 +559,39 @@ function renderLectureRow(lecture, blockMap, onEdit, onDelete, now = Date.now())
       chip.textContent = tag;
       tagList.appendChild(chip);
     });
-    lectureCell.appendChild(tagList);
+    overviewCell.appendChild(tagList);
   }
-
-  row.appendChild(lectureCell);
-
-  const scheduleCell = document.createElement('td');
-  scheduleCell.className = 'lecture-schedule';
-
-  const week = document.createElement('div');
-  week.className = 'lecture-week';
-  week.textContent = formatWeekLabel(lecture.week);
-  scheduleCell.appendChild(week);
-
-  const statusRow = document.createElement('div');
-  statusRow.className = 'lecture-status-row';
-  const statusBadge = document.createElement('span');
-  statusBadge.className = 'lecture-status-pill';
-  const statusLabel = lecture?.status?.state || 'pending';
-  statusBadge.textContent = statusLabel;
-  statusBadge.dataset.status = statusLabel;
-  statusRow.appendChild(statusBadge);
-  scheduleCell.appendChild(statusRow);
-
-  const nextDue = document.createElement('div');
-  nextDue.className = 'lecture-next-due';
-  nextDue.textContent = formatNextDueDescriptor(lecture.nextDueAt, now);
-  scheduleCell.appendChild(nextDue);
-
-  row.appendChild(scheduleCell);
-
-  const passesCell = document.createElement('td');
-  passesCell.className = 'lecture-passes';
 
   const summary = document.createElement('div');
-  summary.className = 'lecture-pass-summary';
+  summary.className = 'lecture-overview-summary';
   summary.textContent = formatPassSummary(lecture);
-  passesCell.appendChild(summary);
+  overviewCell.appendChild(summary);
 
-  const passList = buildPassDisplayList(lecture);
-  const chips = document.createElement('div');
-  chips.className = 'lecture-pass-chips';
-  if (passList.length) {
-    passList.forEach(info => {
-      chips.appendChild(createPassChipDisplay(info, now));
-    });
-  } else {
-    const empty = document.createElement('div');
-    empty.className = 'lecture-pass-empty';
-    empty.textContent = 'No passes scheduled';
-    chips.appendChild(empty);
-  }
-  passesCell.appendChild(chips);
+  row.appendChild(overviewCell);
 
-  const planText = formatPassPlan(lecture.passPlan);
-  if (planText) {
-    const plan = document.createElement('div');
-    plan.className = 'lecture-pass-plan';
-    plan.textContent = planText;
-    passesCell.appendChild(plan);
-  }
+  const plannedCell = document.createElement('td');
+  plannedCell.className = 'lecture-count-cell';
+  plannedCell.textContent = String(stats.planned);
+  row.appendChild(plannedCell);
 
-  row.appendChild(passesCell);
+  const completedCell = document.createElement('td');
+  completedCell.className = 'lecture-count-cell';
+  completedCell.textContent = String(stats.completed);
+  row.appendChild(completedCell);
+
+  const remainingCell = document.createElement('td');
+  remainingCell.className = 'lecture-count-cell';
+  remainingCell.textContent = String(stats.remaining);
+  row.appendChild(remainingCell);
+
+  const nextDueCell = document.createElement('td');
+  nextDueCell.className = 'lecture-next-cell';
+  nextDueCell.textContent = formatNextDueDescriptor(resolveNextDueAt(lecture), now);
+  row.appendChild(nextDueCell);
 
   const actions = document.createElement('td');
   actions.className = 'lecture-actions';
+
   const editBtn = document.createElement('button');
   editBtn.type = 'button';
   editBtn.className = 'btn secondary';
@@ -571,60 +613,173 @@ function renderLectureRow(lecture, blockMap, onEdit, onDelete, now = Date.now())
   return row;
 }
 
-function renderLectureTable(blocks, lectures, onEdit, onDelete) {
+function renderLectureTable(blocks, lectures, filters, onEdit, onDelete) {
   const card = document.createElement('section');
   card.className = 'card lectures-card';
 
-  const table = document.createElement('table');
-  table.className = 'table lectures-table';
+  const title = document.createElement('h2');
+  title.textContent = 'Lectures';
+  card.appendChild(title);
 
-  const thead = document.createElement('thead');
-  const headerRow = document.createElement('tr');
-  ['Lecture', 'Schedule', 'Pass plan', 'Actions'].forEach(label => {
-    const th = document.createElement('th');
-    th.textContent = label;
-    headerRow.appendChild(th);
-  });
-  thead.appendChild(headerRow);
-  table.appendChild(thead);
-
-  const tbody = document.createElement('tbody');
-  const blockMap = new Map(blocks.map(block => [block.blockId, block]));
-  const orderMap = buildBlockOrderMap(blocks);
-  const now = Date.now();
-  const sorted = lectures
-    .slice()
-    .sort((a, b) => {
-      const ao = orderMap.has(a.blockId) ? orderMap.get(a.blockId) : Number.POSITIVE_INFINITY;
-      const bo = orderMap.has(b.blockId) ? orderMap.get(b.blockId) : Number.POSITIVE_INFINITY;
-      if (ao !== bo) return ao - bo;
-      const aw = a.week ?? Number.POSITIVE_INFINITY;
-      const bw = b.week ?? Number.POSITIVE_INFINITY;
-      if (aw !== bw) return aw - bw;
-      const an = (a.name || '').toLowerCase();
-      const bn = (b.name || '').toLowerCase();
-      if (an !== bn) return an.localeCompare(bn);
-      return (a.id ?? 0) - (b.id ?? 0);
-    });
-
-  if (!sorted.length) {
+  if (!lectures.length) {
     card.appendChild(renderEmptyState());
     return card;
   }
 
-  sorted.forEach(lecture => {
-    const row = renderLectureRow(
-      { ...lecture, nextDueAt: lecture.nextDueAt ?? null, status: lecture.status, passPlan: lecture.passPlan },
-      blockMap,
-      onEdit,
-      onDelete,
-      now
-    );
-    tbody.appendChild(row);
+  const blockMap = new Map();
+  blocks.forEach(block => {
+    if (!block || block.blockId == null) return;
+    blockMap.set(String(block.blockId), block);
+  });
+  const orderMap = buildBlockOrderMap(blocks);
+  const blockFilter = String(filters?.blockId || '').trim();
+  const weekFilter = String(filters?.week || '').trim();
+  const now = Date.now();
+
+  const blockGroups = new Map();
+
+  lectures.forEach(lecture => {
+    if (!lecture) return;
+    const rawBlockId = lecture.blockId == null || lecture.blockId === '' ? '' : lecture.blockId;
+    const key = rawBlockId === '' ? '__no-block' : String(rawBlockId);
+    if (!blockGroups.has(key)) {
+      const blockInfo = blockMap.get(String(rawBlockId));
+      const fallbackTitle = rawBlockId === '' ? 'No block assigned' : `Block ${rawBlockId}`;
+      blockGroups.set(key, {
+        key,
+        blockId: rawBlockId,
+        block: blockInfo || { blockId: rawBlockId, title: blockInfo?.title || fallbackTitle, color: blockInfo?.color || null },
+        lectures: [],
+        weeks: new Map()
+      });
+    }
+    const group = blockGroups.get(key);
+    group.lectures.push(lecture);
+    const weekKey = lecture.week == null || lecture.week === '' ? '__no-week' : String(lecture.week);
+    if (!group.weeks.has(weekKey)) {
+      group.weeks.set(weekKey, []);
+    }
+    group.weeks.get(weekKey).push(lecture);
   });
 
-  table.appendChild(tbody);
-  card.appendChild(table);
+  const groupsContainer = document.createElement('div');
+  groupsContainer.className = 'lectures-groups';
+
+  const sortedGroups = Array.from(blockGroups.values()).sort((a, b) => {
+    const ao = orderMap.has(a.blockId) ? orderMap.get(a.blockId) : orderMap.get(String(a.blockId)) ?? Number.POSITIVE_INFINITY;
+    const bo = orderMap.has(b.blockId) ? orderMap.get(b.blockId) : orderMap.get(String(b.blockId)) ?? Number.POSITIVE_INFINITY;
+    if (ao !== bo) return ao - bo;
+    const nameA = (a.block?.title || a.block?.name || String(a.blockId || '') || '').toLowerCase();
+    const nameB = (b.block?.title || b.block?.name || String(b.blockId || '') || '').toLowerCase();
+    return nameA.localeCompare(nameB);
+  });
+
+  sortedGroups.forEach(group => {
+    const blockDetails = document.createElement('details');
+    blockDetails.className = 'lectures-block-group';
+    blockDetails.dataset.blockId = String(group.blockId ?? '');
+    const blockInfo = group.block || {};
+    if (blockInfo.color) {
+      blockDetails.style.setProperty('--block-accent', blockInfo.color);
+      blockDetails.classList.add('has-accent');
+    }
+
+    const blockSummary = document.createElement('summary');
+    blockSummary.className = 'lectures-block-summary';
+
+    const blockTitle = document.createElement('span');
+    blockTitle.className = 'lectures-block-name';
+    blockTitle.textContent = blockInfo.title || blockInfo.name || (group.blockId ? `Block ${group.blockId}` : 'No block assigned');
+    blockSummary.appendChild(blockTitle);
+
+    const blockStats = summarizeLectures(group.lectures);
+    const blockCounts = document.createElement('span');
+    blockCounts.className = 'lectures-block-counts';
+    const lectureCount = group.lectures.length;
+    const lectureLabel = `${lectureCount} lecture${lectureCount === 1 ? '' : 's'}`;
+    blockCounts.textContent = `${lectureLabel} • ${formatPassTotals(blockStats)}`;
+    blockSummary.appendChild(blockCounts);
+
+    blockDetails.appendChild(blockSummary);
+
+    const weekWrapper = document.createElement('div');
+    weekWrapper.className = 'lectures-week-groups';
+
+    const sortedWeeks = Array.from(group.weeks.entries()).sort((aEntry, bEntry) => {
+      const [aKey] = aEntry;
+      const [bKey] = bEntry;
+      if (aKey === '__no-week' && bKey === '__no-week') return 0;
+      if (aKey === '__no-week') return 1;
+      if (bKey === '__no-week') return -1;
+      const aNum = Number(aKey);
+      const bNum = Number(bKey);
+      if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return aNum - bNum;
+      if (Number.isFinite(aNum) && !Number.isFinite(bNum)) return -1;
+      if (!Number.isFinite(aNum) && Number.isFinite(bNum)) return 1;
+      return String(aKey).localeCompare(String(bKey));
+    });
+
+    sortedWeeks.forEach(([weekKey, weekLectures]) => {
+      const weekDetails = document.createElement('details');
+      weekDetails.className = 'lectures-week-group';
+      const normalizedWeek = weekKey === '__no-week' ? '' : weekKey;
+      weekDetails.dataset.week = normalizedWeek;
+      weekDetails.open = !weekFilter || weekFilter === normalizedWeek;
+
+      const weekSummary = document.createElement('summary');
+      weekSummary.className = 'lectures-week-summary';
+
+      const weekTitle = document.createElement('span');
+      weekTitle.className = 'lectures-week-title';
+      weekTitle.textContent = labelForWeekKey(weekKey);
+      weekSummary.appendChild(weekTitle);
+
+      const weekStats = summarizeLectures(weekLectures);
+      const weekCounts = document.createElement('span');
+      weekCounts.className = 'lectures-week-counts';
+      const weekLectureCount = weekLectures.length;
+      const weekLectureLabel = `${weekLectureCount} lecture${weekLectureCount === 1 ? '' : 's'}`;
+      weekCounts.textContent = `${weekLectureLabel} • ${formatPassTotals(weekStats)}`;
+      weekSummary.appendChild(weekCounts);
+
+      weekDetails.appendChild(weekSummary);
+
+      const weekBody = document.createElement('div');
+      weekBody.className = 'lectures-week-body';
+
+      const table = document.createElement('table');
+      table.className = 'lectures-week-table';
+
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+      ['Lecture', 'Planned passes', 'Completed', 'Remaining', 'Next due', 'Actions'].forEach(label => {
+        const th = document.createElement('th');
+        th.textContent = label;
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      sortLecturesForDisplay(weekLectures).forEach(entry => {
+        const row = renderLectureWeekRow(entry, onEdit, onDelete, now);
+        tbody.appendChild(row);
+      });
+      table.appendChild(tbody);
+
+      weekBody.appendChild(table);
+      weekDetails.appendChild(weekBody);
+      weekWrapper.appendChild(weekDetails);
+    });
+
+    const shouldOpenBlock = !blockFilter || blockFilter === String(group.blockId ?? '') || sortedGroups.length === 1;
+    blockDetails.open = shouldOpenBlock;
+
+    blockDetails.appendChild(weekWrapper);
+    groupsContainer.appendChild(blockDetails);
+  });
+
+  card.appendChild(groupsContainer);
   return card;
 }
 
@@ -936,7 +1091,7 @@ function openLectureDialog(options) {
 
   const advancedHint = document.createElement('p');
   advancedHint.className = 'lecture-pass-advanced-hint';
-  advancedHint.textContent = 'Tune the learning method and timing for each pass.';
+  advancedHint.textContent = 'Tune the pass function and timing for each pass.';
   advanced.appendChild(advancedHint);
 
   const passList = document.createElement('div');
@@ -1009,7 +1164,7 @@ function openLectureDialog(options) {
       actionField.className = 'lecture-pass-field';
       const actionLabel = document.createElement('span');
       actionLabel.className = 'lecture-pass-field-label';
-      actionLabel.textContent = 'Learning method';
+      actionLabel.textContent = 'Pass function';
       actionField.appendChild(actionLabel);
       const select = document.createElement('select');
       select.className = 'input lecture-pass-action';
@@ -1228,6 +1383,7 @@ export async function renderLectures(root, redraw) {
   const table = renderLectureTable(
     blocks,
     filtered,
+    filters,
     lecture => handleEdit(lecture, blocks, lectureLists, redraw),
     lecture => handleDelete(lecture, redraw)
   );

@@ -277,8 +277,8 @@ var Sevenn = (() => {
   };
   function normalizePassPlan(plan) {
     const source = plan && typeof plan === "object" ? plan : {};
-    const mergedSchedule = Array.isArray(source.schedule) && source.schedule.length ? source.schedule : DEFAULT_PASS_PLAN.schedule;
-    const normalizedSchedule = mergedSchedule.map((step, index) => {
+    const mergedSchedule = Array.isArray(source.schedule) ? source.schedule : DEFAULT_PASS_PLAN.schedule;
+    const normalizedSchedule = (Array.isArray(mergedSchedule) ? mergedSchedule : []).map((step, index) => {
       const order = toNumber(step?.order, index + 1);
       const offsetMinutes = toNumber(step?.offsetMinutes, DEFAULT_PASS_PLAN.schedule[index]?.offsetMinutes ?? 0);
       const anchor = typeof step?.anchor === "string" && step.anchor.trim() ? step.anchor.trim() : inferAnchor(offsetMinutes);
@@ -305,7 +305,7 @@ var Sevenn = (() => {
       const value = incomingAnchors[key];
       anchorOffsets[key] = toNumber(value, fallback);
     }
-    const passesSource = Array.isArray(source.passes) && source.passes.length ? source.passes : DEFAULT_PLANNER_DEFAULTS.passes;
+    const passesSource = Array.isArray(source.passes) ? source.passes : DEFAULT_PLANNER_DEFAULTS.passes;
     const normalizedPlan = normalizePassPlan({ schedule: passesSource });
     return {
       anchorOffsets,
@@ -485,8 +485,26 @@ var Sevenn = (() => {
     }
     return result;
   }
-  function clonePassPlan() {
-    return clone(DEFAULT_PASS_PLAN);
+  function clonePassPlan(plan = DEFAULT_PASS_PLAN) {
+    return clone(plan || DEFAULT_PASS_PLAN);
+  }
+  function plannerDefaultsToPassPlan(defaults) {
+    const normalized2 = normalizePlannerDefaults(defaults || {});
+    const schedule = (normalized2?.passes || []).map((step, index) => {
+      const order = toNumber(step?.order, index + 1);
+      const offsetMinutes = toNumber(
+        step?.offsetMinutes,
+        DEFAULT_PASS_PLAN.schedule[index]?.offsetMinutes ?? 0
+      );
+      const anchor = typeof step?.anchor === "string" && step.anchor.trim() ? step.anchor.trim() : inferAnchor(offsetMinutes);
+      const label = sanitizeLabel(step?.label, order);
+      const action = sanitizeAction(step?.action ?? DEFAULT_PASS_PLAN.schedule[index]?.action);
+      return { order, offsetMinutes, anchor, label, action };
+    }).sort((a, b) => a.order - b.order);
+    return {
+      id: normalized2?.id || "planner-defaults",
+      schedule
+    };
   }
 
   // js/storage/lecture-schema.js
@@ -2193,6 +2211,30 @@ var Sevenn = (() => {
     });
   }
 
+  // js/lectures/actions.js
+  var LECTURE_PASS_ACTIONS = [
+    "Notes",
+    "Read",
+    "Tape",
+    "Quiz",
+    "Flashcards",
+    "Summarize",
+    "Review",
+    "Active Recall",
+    "Anki",
+    "Practice Questions",
+    "Teach-Back",
+    "Whiteboard",
+    "Mind Map",
+    "Case Review",
+    "Group Study",
+    "Audio Review",
+    "Lecture Rewatch",
+    "Cheat Sheet",
+    "Sketch/Diagram",
+    "Blocks"
+  ];
+
   // js/ui/settings.js
   function createEmptyState() {
     const empty = document.createElement("div");
@@ -2201,6 +2243,166 @@ var Sevenn = (() => {
     return empty;
   }
   var DAY_MS = 24 * 60 * 60 * 1e3;
+  var DAY_MINUTES2 = 24 * 60;
+  var MAX_PASS_COUNT = 20;
+  var OFFSET_UNITS = [
+    { id: "minutes", label: "minutes", minutes: 1 },
+    { id: "hours", label: "hours", minutes: 60 },
+    { id: "days", label: "days", minutes: 60 * 24 },
+    { id: "weeks", label: "weeks", minutes: 60 * 24 * 7 }
+  ];
+  function formatOffset(minutes) {
+    if (!Number.isFinite(minutes)) return "0m";
+    const abs = Math.abs(minutes);
+    if (abs < 60) return `${Math.round(minutes)}m`;
+    const hours = minutes / 60;
+    if (Math.abs(hours) < 24) return `${Math.round(hours)}h`;
+    const days = minutes / (60 * 24);
+    if (Math.abs(days) < 7) return `${Math.round(days)}d`;
+    const weeks = minutes / (60 * 24 * 7);
+    if (Math.abs(weeks) < 4) return `${Math.round(weeks)}w`;
+    const months = minutes / (60 * 24 * 30);
+    return `${Math.round(months)}mo`;
+  }
+  function normalizeOffsetUnit(id) {
+    const fallback = OFFSET_UNITS[2];
+    if (typeof id !== "string") return fallback.id;
+    const match = OFFSET_UNITS.find((option) => option.id === id);
+    return match ? match.id : fallback.id;
+  }
+  function splitOffsetMinutes(minutes) {
+    const value = Number.isFinite(minutes) ? Math.max(0, Math.round(minutes)) : 0;
+    if (value === 0) {
+      return { value: 0, unit: "days" };
+    }
+    const preferred = [...OFFSET_UNITS].reverse().find((option) => value % option.minutes === 0);
+    if (preferred) {
+      return { value: Math.round(value / preferred.minutes), unit: preferred.id };
+    }
+    if (value < 60) {
+      return { value, unit: "minutes" };
+    }
+    if (value < 60 * 24) {
+      return { value: Math.round(value / 60), unit: "hours" };
+    }
+    return { value: Math.round(value / (60 * 24)), unit: "days" };
+  }
+  function combineOffsetValueUnit(value, unitId) {
+    const normalizedUnit = normalizeOffsetUnit(unitId);
+    const option = OFFSET_UNITS.find((entry) => entry.id === normalizedUnit) || OFFSET_UNITS[2];
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return 0;
+    }
+    return Math.max(0, Math.round(numeric * option.minutes));
+  }
+  function defaultActionForIndex(index) {
+    if (!Array.isArray(LECTURE_PASS_ACTIONS) || !LECTURE_PASS_ACTIONS.length) return "";
+    const normalized2 = index % LECTURE_PASS_ACTIONS.length;
+    return LECTURE_PASS_ACTIONS[Math.max(0, normalized2)];
+  }
+  function baseSchedule(plan) {
+    if (plan && Array.isArray(plan.schedule)) {
+      return plan.schedule;
+    }
+    return DEFAULT_PASS_PLAN.schedule;
+  }
+  function computeDefaultGap(schedule) {
+    if (!Array.isArray(schedule) || schedule.length < 2) return DAY_MINUTES2;
+    const deltas = [];
+    for (let i = 1; i < schedule.length; i += 1) {
+      const prev = Number(schedule[i - 1]?.offsetMinutes);
+      const current = Number(schedule[i]?.offsetMinutes);
+      if (Number.isFinite(prev) && Number.isFinite(current)) {
+        const delta = current - prev;
+        if (delta > 0) deltas.push(delta);
+      }
+    }
+    return deltas.length ? deltas[deltas.length - 1] : DAY_MINUTES2;
+  }
+  function fallbackAnchor(index) {
+    if (index === 0) return "today";
+    if (index === 1) return "tomorrow";
+    return "upcoming";
+  }
+  function buildScheduleTemplate(plan, count) {
+    const template = baseSchedule(plan);
+    const numericCount = Number(count);
+    const safeCount = Math.max(0, Number.isFinite(numericCount) ? Math.round(numericCount) : 0);
+    const defaultGap = computeDefaultGap(template);
+    const schedule = [];
+    for (let i = 0; i < safeCount; i += 1) {
+      const source = template[i] || {};
+      const previous = schedule[i - 1] || null;
+      const order = i + 1;
+      const offset = Number.isFinite(source.offsetMinutes) ? source.offsetMinutes : previous ? previous.offsetMinutes + defaultGap : i === 0 ? 0 : defaultGap * i;
+      const anchor = typeof source.anchor === "string" && source.anchor.trim() ? source.anchor.trim() : previous?.anchor || fallbackAnchor(i);
+      const label = typeof source.label === "string" && source.label.trim() ? source.label.trim() : `Pass ${order}`;
+      const action = typeof source.action === "string" && source.action.trim() ? source.action.trim() : defaultActionForIndex(i);
+      schedule.push({
+        order,
+        offsetMinutes: offset,
+        anchor,
+        label,
+        action
+      });
+    }
+    return schedule;
+  }
+  function adjustPassConfigs(current, count, plan) {
+    const template = buildScheduleTemplate(plan || { schedule: current }, count);
+    const byOrder = /* @__PURE__ */ new Map();
+    (Array.isArray(current) ? current : []).forEach((entry) => {
+      const order = Number(entry?.order);
+      if (Number.isFinite(order) && !byOrder.has(order)) {
+        byOrder.set(order, entry);
+      }
+    });
+    return template.map((step, index) => {
+      const existing = byOrder.get(step.order) || current[index] || {};
+      const action = typeof existing?.action === "string" && existing.action.trim() ? existing.action.trim() : step.action;
+      const offsetMinutes = Number.isFinite(existing?.offsetMinutes) ? Math.max(0, Math.round(existing.offsetMinutes)) : step.offsetMinutes;
+      const anchor = typeof existing?.anchor === "string" && existing.anchor.trim() ? existing.anchor.trim() : step.anchor;
+      const label = typeof existing?.label === "string" && existing.label.trim() ? existing.label.trim() : step.label;
+      return { ...step, action, offsetMinutes, anchor, label };
+    });
+  }
+  function clampPassCount(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.min(MAX_PASS_COUNT, Math.max(0, Math.round(parsed)));
+  }
+  function buildPassPlanPayload(passConfigs, existingPlan) {
+    const planId = existingPlan && typeof existingPlan.id === "string" && existingPlan.id.trim() ? existingPlan.id.trim() : "custom";
+    return {
+      id: planId,
+      schedule: passConfigs.map((config, index) => {
+        const order = index + 1;
+        const label = typeof config.label === "string" && config.label.trim() ? config.label.trim() : `Pass ${order}`;
+        const offset = Number.isFinite(config.offsetMinutes) ? Math.max(0, Math.round(config.offsetMinutes)) : index === 0 ? 0 : (passConfigs[index - 1]?.offsetMinutes ?? 0) + DAY_MINUTES2;
+        const anchor = typeof config.anchor === "string" && config.anchor.trim() ? config.anchor.trim() : fallbackAnchor(index);
+        const action = typeof config.action === "string" && config.action.trim() ? config.action.trim() : defaultActionForIndex(index);
+        return {
+          order,
+          label,
+          offsetMinutes: offset,
+          anchor,
+          action
+        };
+      })
+    };
+  }
+  function formatPassPlan(plan) {
+    if (!plan || !Array.isArray(plan.schedule) || !plan.schedule.length) {
+      return "No passes scheduled";
+    }
+    const steps = plan.schedule.slice().sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0)).map((step) => {
+      const action = typeof step?.action === "string" && step.action.trim() ? step.action.trim() : `Pass ${step?.order ?? ""}`;
+      const offset = formatOffset(step?.offsetMinutes ?? 0);
+      return `${action} \u2022 ${offset}`;
+    });
+    return `Plan: ${steps.join(", ")}`;
+  }
   function formatWeekCount(weeks) {
     if (!Number.isFinite(weeks) || weeks <= 0) return null;
     const rounded = Math.max(1, Math.round(weeks));
@@ -2274,6 +2476,7 @@ var Sevenn = (() => {
       ...DEFAULT_REVIEW_STEPS,
       ...settings?.reviewSteps || {}
     };
+    const plannerDefaults = settings?.plannerDefaults || DEFAULT_PLANNER_DEFAULTS;
     const blocksCard = document.createElement("section");
     blocksCard.className = "card";
     const bHeading = document.createElement("h2");
@@ -2619,6 +2822,230 @@ var Sevenn = (() => {
     });
     reviewCard.appendChild(reviewForm);
     layout.appendChild(reviewCard);
+    const passDefaultsCard = document.createElement("section");
+    passDefaultsCard.className = "card";
+    const passHeading = document.createElement("h2");
+    passHeading.textContent = "Lecture pass defaults";
+    passDefaultsCard.appendChild(passHeading);
+    const passDescription = document.createElement("p");
+    passDescription.className = "settings-pass-description";
+    passDescription.textContent = "Configure the default pass count, timing, and pass functions applied to new lectures.";
+    passDefaultsCard.appendChild(passDescription);
+    const passForm = document.createElement("form");
+    passForm.className = "settings-pass-form";
+    passDefaultsCard.appendChild(passForm);
+    let currentPlannerDefaults = plannerDefaults;
+    const defaultPlan = plannerDefaultsToPassPlan(currentPlannerDefaults);
+    let planTemplate = defaultPlan;
+    let passConfigs = Array.isArray(defaultPlan.schedule) ? defaultPlan.schedule.map((step) => ({ ...step })) : [];
+    const passCountField = document.createElement("label");
+    passCountField.className = "lecture-pass-count settings-pass-count";
+    passCountField.textContent = "Default pass count";
+    const passCountInput = document.createElement("input");
+    passCountInput.type = "number";
+    passCountInput.min = "0";
+    passCountInput.max = String(MAX_PASS_COUNT);
+    passCountInput.className = "input";
+    passCountInput.value = String(passConfigs.length);
+    passCountField.appendChild(passCountInput);
+    const passCountHelp = document.createElement("span");
+    passCountHelp.className = "lecture-pass-help";
+    passCountHelp.textContent = "Set the default number of spaced passes for new lectures.";
+    passCountField.appendChild(passCountHelp);
+    passForm.appendChild(passCountField);
+    const passSummary = document.createElement("div");
+    passSummary.className = "lecture-pass-summary-line settings-pass-summary";
+    passForm.appendChild(passSummary);
+    const passAdvanced = document.createElement("details");
+    passAdvanced.className = "lecture-pass-advanced settings-pass-advanced";
+    passAdvanced.open = true;
+    const passAdvancedSummary = document.createElement("summary");
+    passAdvancedSummary.textContent = `Pass details (${passConfigs.length})`;
+    passAdvanced.appendChild(passAdvancedSummary);
+    const passAdvancedHint = document.createElement("p");
+    passAdvancedHint.className = "lecture-pass-advanced-hint";
+    passAdvancedHint.textContent = "Tune the pass function and spacing for each default pass.";
+    passAdvanced.appendChild(passAdvancedHint);
+    const passList = document.createElement("div");
+    passList.className = "lecture-pass-editor settings-pass-editor";
+    passAdvanced.appendChild(passList);
+    passForm.appendChild(passAdvanced);
+    const passStatus = document.createElement("p");
+    passStatus.className = "settings-pass-status";
+    passStatus.hidden = true;
+    passForm.appendChild(passStatus);
+    const passSaveBtn = document.createElement("button");
+    passSaveBtn.type = "submit";
+    passSaveBtn.className = "btn";
+    passSaveBtn.textContent = "Save pass defaults";
+    passForm.appendChild(passSaveBtn);
+    function updatePassSummary() {
+      if (!passConfigs.length) {
+        passSummary.textContent = "No default passes scheduled.";
+      } else {
+        const previewPlan = buildPassPlanPayload(passConfigs, planTemplate);
+        const previewText = formatPassPlan(previewPlan);
+        const cleaned = previewText.startsWith("Plan: ") ? previewText.slice(6) : previewText;
+        passSummary.textContent = `${passConfigs.length} pass${passConfigs.length === 1 ? "" : "es"} \u2022 ${cleaned}`;
+      }
+      passAdvancedSummary.textContent = `Pass details (${passConfigs.length})`;
+    }
+    function renderPassEditor() {
+      passList.innerHTML = "";
+      if (!passConfigs.length) {
+        const empty = document.createElement("div");
+        empty.className = "lecture-pass-empty";
+        empty.textContent = "No passes planned. Increase the count above to build a default schedule.";
+        passList.appendChild(empty);
+        updatePassSummary();
+        return;
+      }
+      passConfigs.forEach((config, index) => {
+        const row = document.createElement("div");
+        row.className = "lecture-pass-row";
+        const label = document.createElement("div");
+        label.className = "lecture-pass-label";
+        label.textContent = `Pass ${index + 1}`;
+        row.appendChild(label);
+        const controls = document.createElement("div");
+        controls.className = "lecture-pass-controls";
+        const actionField = document.createElement("div");
+        actionField.className = "lecture-pass-field";
+        const actionLabel = document.createElement("span");
+        actionLabel.className = "lecture-pass-field-label";
+        actionLabel.textContent = "Pass function";
+        actionField.appendChild(actionLabel);
+        const select = document.createElement("select");
+        select.className = "input lecture-pass-action";
+        LECTURE_PASS_ACTIONS.forEach((action) => {
+          const option = document.createElement("option");
+          option.value = action;
+          option.textContent = action;
+          select.appendChild(option);
+        });
+        if (config.action && !LECTURE_PASS_ACTIONS.includes(config.action)) {
+          const custom = document.createElement("option");
+          custom.value = config.action;
+          custom.textContent = config.action;
+          select.appendChild(custom);
+        }
+        select.value = config.action || "";
+        select.addEventListener("change", (event) => {
+          const value = event.target.value;
+          passConfigs[index] = { ...passConfigs[index], action: value };
+          updatePassSummary();
+        });
+        actionField.appendChild(select);
+        controls.appendChild(actionField);
+        const offsetField = document.createElement("div");
+        offsetField.className = "lecture-pass-field lecture-pass-offset-field";
+        const offsetLabel = document.createElement("span");
+        offsetLabel.className = "lecture-pass-field-label";
+        offsetLabel.textContent = "Timing";
+        offsetField.appendChild(offsetLabel);
+        const offsetInputs = document.createElement("div");
+        offsetInputs.className = "lecture-pass-offset-inputs";
+        const split = splitOffsetMinutes(config.offsetMinutes ?? 0);
+        const offsetInput = document.createElement("input");
+        offsetInput.type = "number";
+        offsetInput.min = "0";
+        offsetInput.step = "1";
+        offsetInput.className = "input lecture-pass-offset-value";
+        offsetInput.value = String(split.value);
+        const unitSelect = document.createElement("select");
+        unitSelect.className = "input lecture-pass-offset-unit";
+        OFFSET_UNITS.forEach((option) => {
+          const opt = document.createElement("option");
+          opt.value = option.id;
+          opt.textContent = option.label;
+          unitSelect.appendChild(opt);
+        });
+        unitSelect.value = split.unit;
+        offsetInputs.appendChild(offsetInput);
+        offsetInputs.appendChild(unitSelect);
+        offsetField.appendChild(offsetInputs);
+        const preview = document.createElement("span");
+        preview.className = "lecture-pass-offset-preview";
+        preview.textContent = formatOffset(config.offsetMinutes ?? 0);
+        offsetField.appendChild(preview);
+        function commitOffset() {
+          const minutes = combineOffsetValueUnit(offsetInput.value, unitSelect.value);
+          passConfigs[index] = {
+            ...passConfigs[index],
+            offsetMinutes: minutes
+          };
+          preview.textContent = formatOffset(passConfigs[index].offsetMinutes ?? 0);
+          updatePassSummary();
+        }
+        offsetInput.addEventListener("change", () => {
+          const numeric = Number(offsetInput.value);
+          if (!Number.isFinite(numeric) || numeric < 0) {
+            offsetInput.value = "0";
+          }
+          commitOffset();
+        });
+        offsetInput.addEventListener("blur", () => {
+          const numeric = Math.max(0, Math.round(Number(offsetInput.value) || 0));
+          offsetInput.value = String(numeric);
+          commitOffset();
+        });
+        unitSelect.addEventListener("change", commitOffset);
+        controls.appendChild(offsetField);
+        row.appendChild(controls);
+        passList.appendChild(row);
+      });
+      updatePassSummary();
+    }
+    renderPassEditor();
+    passCountInput.addEventListener("change", () => {
+      const next = clampPassCount(passCountInput.value);
+      passCountInput.value = String(next);
+      const template = passConfigs.length ? { schedule: passConfigs.slice() } : planTemplate;
+      passConfigs = adjustPassConfigs(passConfigs, next, template);
+      renderPassEditor();
+    });
+    passForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      passStatus.textContent = "";
+      passStatus.hidden = true;
+      passStatus.classList.remove("is-error");
+      const anchorOffsets = {
+        ...DEFAULT_PLANNER_DEFAULTS.anchorOffsets || {},
+        ...currentPlannerDefaults?.anchorOffsets || {}
+      };
+      const payloadPlan = buildPassPlanPayload(passConfigs, planTemplate);
+      const payloadPasses = payloadPlan.schedule.map((step) => ({
+        order: step.order,
+        label: step.label,
+        offsetMinutes: step.offsetMinutes,
+        anchor: step.anchor,
+        action: step.action
+      }));
+      const originalText = passSaveBtn.textContent;
+      passSaveBtn.disabled = true;
+      passSaveBtn.textContent = "Saving\u2026";
+      try {
+        await saveSettings({ plannerDefaults: { anchorOffsets, passes: payloadPasses } });
+        const updated = await getSettings();
+        currentPlannerDefaults = updated?.plannerDefaults || DEFAULT_PLANNER_DEFAULTS;
+        const refreshedPlan = plannerDefaultsToPassPlan(currentPlannerDefaults);
+        planTemplate = refreshedPlan;
+        passConfigs = Array.isArray(refreshedPlan.schedule) ? refreshedPlan.schedule.map((step) => ({ ...step })) : [];
+        passCountInput.value = String(passConfigs.length);
+        renderPassEditor();
+        passStatus.textContent = "Pass defaults saved.";
+        passStatus.hidden = false;
+      } catch (err) {
+        console.warn("Failed to save pass defaults", err);
+        passStatus.textContent = "Failed to save pass defaults.";
+        passStatus.classList.add("is-error");
+        passStatus.hidden = false;
+      } finally {
+        passSaveBtn.disabled = false;
+        passSaveBtn.textContent = originalText;
+      }
+    });
+    layout.appendChild(passDefaultsCard);
     const dataCard = document.createElement("section");
     dataCard.className = "card";
     const dHeading = document.createElement("h2");
@@ -6535,30 +6962,6 @@ var Sevenn = (() => {
     return btn;
   }
 
-  // js/lectures/actions.js
-  var LECTURE_PASS_ACTIONS = [
-    "Notes",
-    "Read",
-    "Tape",
-    "Quiz",
-    "Flashcards",
-    "Summarize",
-    "Review",
-    "Active Recall",
-    "Anki",
-    "Practice Questions",
-    "Teach-Back",
-    "Whiteboard",
-    "Mind Map",
-    "Case Review",
-    "Group Study",
-    "Audio Review",
-    "Lecture Rewatch",
-    "Cheat Sheet",
-    "Sketch/Diagram",
-    "Blocks"
-  ];
-
   // js/ui/components/lectures.js
   function ensureLectureState() {
     if (!state.lectures) {
@@ -6584,6 +6987,7 @@ var Sevenn = (() => {
     blocks.forEach((block, index) => {
       if (!block || !block.blockId) return;
       order.set(block.blockId, index);
+      order.set(String(block.blockId), index);
     });
     return order;
   }
@@ -6597,7 +7001,7 @@ var Sevenn = (() => {
     if (!Number.isFinite(num)) return String(week);
     return num === 0 ? "0" : `Week ${num}`;
   }
-  function formatOffset(minutes) {
+  function formatOffset2(minutes) {
     if (!Number.isFinite(minutes)) return "0m";
     const abs = Math.abs(minutes);
     if (abs < 60) return `${Math.round(minutes)}m`;
@@ -6610,18 +7014,44 @@ var Sevenn = (() => {
     const months = minutes / (60 * 24 * 30);
     return `${Math.round(months)}mo`;
   }
-  var PASS_ACCENTS = [
-    "var(--pink)",
-    "var(--blue)",
-    "var(--green)",
-    "var(--orange)",
-    "var(--purple)",
-    "var(--teal)",
-    "var(--yellow)",
-    "var(--rose)",
-    "var(--indigo)",
-    "var(--cyan)"
+  var OFFSET_UNITS2 = [
+    { id: "minutes", label: "minutes", minutes: 1 },
+    { id: "hours", label: "hours", minutes: 60 },
+    { id: "days", label: "days", minutes: 60 * 24 },
+    { id: "weeks", label: "weeks", minutes: 60 * 24 * 7 }
   ];
+  function normalizeOffsetUnit2(id) {
+    const fallback = OFFSET_UNITS2[2];
+    if (typeof id !== "string") return fallback.id;
+    const match = OFFSET_UNITS2.find((option) => option.id === id);
+    return match ? match.id : fallback.id;
+  }
+  function splitOffsetMinutes2(minutes) {
+    const value = Number.isFinite(minutes) ? Math.max(0, Math.round(minutes)) : 0;
+    if (value === 0) {
+      return { value: 0, unit: "days" };
+    }
+    const preferred = [...OFFSET_UNITS2].reverse().find((option) => value % option.minutes === 0);
+    if (preferred) {
+      return { value: Math.round(value / preferred.minutes), unit: preferred.id };
+    }
+    if (value < 60) {
+      return { value, unit: "minutes" };
+    }
+    if (value < 60 * 24) {
+      return { value: Math.round(value / 60), unit: "hours" };
+    }
+    return { value: Math.round(value / (60 * 24)), unit: "days" };
+  }
+  function combineOffsetValueUnit2(value, unitId) {
+    const normalizedUnit = normalizeOffsetUnit2(unitId);
+    const option = OFFSET_UNITS2.find((entry) => entry.id === normalizedUnit) || OFFSET_UNITS2[2];
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return 0;
+    }
+    return Math.max(0, Math.round(numeric * option.minutes));
+  }
   var PASS_DUE_FORMAT = new Intl.DateTimeFormat(void 0, {
     month: "short",
     day: "numeric"
@@ -6630,102 +7060,21 @@ var Sevenn = (() => {
     hour: "numeric",
     minute: "2-digit"
   });
-  function passAccent(order = 1) {
-    if (!Number.isFinite(order)) return PASS_ACCENTS[0];
-    const idx = Math.max(0, Math.floor(order) - 1) % PASS_ACCENTS.length;
-    return PASS_ACCENTS[idx];
-  }
-  function formatPassDueTimestamp(due) {
-    if (!Number.isFinite(due)) return "";
-    const date = new Date(due);
-    return `${PASS_DUE_FORMAT.format(date)} \u2022 ${PASS_TIME_FORMAT.format(date)}`;
-  }
-  function buildPassDisplayList(lecture) {
-    const scheduleList = Array.isArray(lecture?.passPlan?.schedule) ? lecture.passPlan.schedule : [];
-    const scheduleByOrder = /* @__PURE__ */ new Map();
-    scheduleList.forEach((step, index) => {
-      const order = Number.isFinite(step?.order) ? step.order : index + 1;
-      scheduleByOrder.set(order, { ...step, order });
-    });
-    const passes = Array.isArray(lecture?.passes) ? lecture.passes : [];
-    const passByOrder = /* @__PURE__ */ new Map();
-    passes.forEach((pass) => {
-      const order = Number(pass?.order);
-      if (Number.isFinite(order)) {
-        passByOrder.set(order, pass);
-      }
-    });
-    const orders = /* @__PURE__ */ new Set([
-      ...scheduleByOrder.keys(),
-      ...passByOrder.keys()
-    ]);
-    if (!orders.size) {
-      const planLength = scheduleList.length;
-      for (let i = 1; i <= planLength; i += 1) {
-        orders.add(i);
-      }
-    }
-    return Array.from(orders).filter((order) => Number.isFinite(order)).sort((a, b) => a - b).map((order) => {
-      const schedule = scheduleByOrder.get(order) || {};
-      const pass = passByOrder.get(order) || {};
-      return {
-        order,
-        label: schedule.label || pass.label || `Pass ${order}`,
-        action: schedule.action || pass.action || "",
-        due: Number.isFinite(pass?.due) ? pass.due : null,
-        completedAt: Number.isFinite(pass?.completedAt) ? pass.completedAt : null
-      };
-    });
-  }
-  function createPassChipDisplay(info, now = Date.now()) {
-    const chip = document.createElement("div");
-    chip.className = "lecture-pass-chip";
-    chip.style.setProperty("--chip-accent", passAccent(info?.order));
-    chip.dataset.passOrder = String(info?.order ?? "");
-    if (Number.isFinite(info?.completedAt)) chip.classList.add("is-complete");
-    if (!Number.isFinite(info?.completedAt) && Number.isFinite(info?.due) && info.due < now) {
-      chip.classList.add("is-overdue");
-    }
-    const header = document.createElement("div");
-    header.className = "lecture-pass-chip-header";
-    const badge = document.createElement("span");
-    badge.className = "lecture-pass-chip-order";
-    badge.textContent = `P${info?.order ?? ""}`;
-    header.appendChild(badge);
-    const label = document.createElement("span");
-    label.className = "lecture-pass-chip-label";
-    label.textContent = info?.action || info?.label || `Pass ${info?.order ?? ""}`;
-    header.appendChild(label);
-    chip.appendChild(header);
-    const meta = document.createElement("div");
-    meta.className = "lecture-pass-chip-meta";
-    let metaText = "";
-    if (Number.isFinite(info?.completedAt)) {
-      metaText = "Completed";
-    } else if (Number.isFinite(info?.due)) {
-      metaText = formatPassDueTimestamp(info.due);
-    } else {
-      metaText = "Unscheduled";
-    }
-    meta.textContent = metaText;
-    chip.appendChild(meta);
-    return chip;
-  }
-  var MAX_PASS_COUNT = 20;
-  var DAY_MINUTES2 = 24 * 60;
-  function defaultActionForIndex(index) {
+  var MAX_PASS_COUNT2 = 20;
+  var DAY_MINUTES3 = 24 * 60;
+  function defaultActionForIndex2(index) {
     if (!Array.isArray(LECTURE_PASS_ACTIONS) || !LECTURE_PASS_ACTIONS.length) return "";
     const normalized2 = index % LECTURE_PASS_ACTIONS.length;
     return LECTURE_PASS_ACTIONS[Math.max(0, normalized2)];
   }
-  function baseSchedule(plan) {
-    if (plan && Array.isArray(plan.schedule) && plan.schedule.length) {
+  function baseSchedule2(plan) {
+    if (plan && Array.isArray(plan.schedule)) {
       return plan.schedule;
     }
     return DEFAULT_PASS_PLAN.schedule;
   }
-  function computeDefaultGap(schedule) {
-    if (!Array.isArray(schedule) || schedule.length < 2) return DAY_MINUTES2;
+  function computeDefaultGap2(schedule) {
+    if (!Array.isArray(schedule) || schedule.length < 2) return DAY_MINUTES3;
     const deltas = [];
     for (let i = 1; i < schedule.length; i += 1) {
       const prev = Number(schedule[i - 1]?.offsetMinutes);
@@ -6735,26 +7084,27 @@ var Sevenn = (() => {
         if (delta > 0) deltas.push(delta);
       }
     }
-    return deltas.length ? deltas[deltas.length - 1] : DAY_MINUTES2;
+    return deltas.length ? deltas[deltas.length - 1] : DAY_MINUTES3;
   }
-  function fallbackAnchor(index) {
+  function fallbackAnchor2(index) {
     if (index === 0) return "today";
     if (index === 1) return "tomorrow";
     return "upcoming";
   }
-  function buildScheduleTemplate(plan, count) {
-    const template = baseSchedule(plan);
-    const safeCount = Math.max(1, count);
-    const defaultGap = computeDefaultGap(template);
+  function buildScheduleTemplate2(plan, count) {
+    const template = baseSchedule2(plan);
+    const numericCount = Number(count);
+    const safeCount = Math.max(0, Number.isFinite(numericCount) ? Math.round(numericCount) : 0);
+    const defaultGap = computeDefaultGap2(template);
     const schedule = [];
     for (let i = 0; i < safeCount; i += 1) {
       const source = template[i] || {};
       const previous = schedule[i - 1] || null;
       const order = i + 1;
       const offset = Number.isFinite(source.offsetMinutes) ? source.offsetMinutes : previous ? previous.offsetMinutes + defaultGap : i === 0 ? 0 : defaultGap * i;
-      const anchor = typeof source.anchor === "string" && source.anchor.trim() ? source.anchor.trim() : previous?.anchor || fallbackAnchor(i);
+      const anchor = typeof source.anchor === "string" && source.anchor.trim() ? source.anchor.trim() : previous?.anchor || fallbackAnchor2(i);
       const label = typeof source.label === "string" && source.label.trim() ? source.label.trim() : `Pass ${order}`;
-      const action = typeof source.action === "string" && source.action.trim() ? source.action.trim() : defaultActionForIndex(i);
+      const action = typeof source.action === "string" && source.action.trim() ? source.action.trim() : defaultActionForIndex2(i);
       schedule.push({
         order,
         offsetMinutes: offset,
@@ -6765,29 +7115,39 @@ var Sevenn = (() => {
     }
     return schedule;
   }
-  function adjustPassConfigs(current, count, plan) {
-    const template = buildScheduleTemplate(plan || { schedule: current }, count);
+  function adjustPassConfigs2(current, count, plan) {
+    const template = buildScheduleTemplate2(plan || { schedule: current }, count);
+    const byOrder = /* @__PURE__ */ new Map();
+    (Array.isArray(current) ? current : []).forEach((entry) => {
+      const order = Number(entry?.order);
+      if (Number.isFinite(order) && !byOrder.has(order)) {
+        byOrder.set(order, entry);
+      }
+    });
     return template.map((step, index) => {
-      const existing = current[index];
-      const action = existing && typeof existing.action === "string" && existing.action.trim() ? existing.action.trim() : step.action;
-      return { ...step, action };
+      const existing = byOrder.get(step.order) || current[index] || {};
+      const action = typeof existing?.action === "string" && existing.action.trim() ? existing.action.trim() : step.action;
+      const offsetMinutes = Number.isFinite(existing?.offsetMinutes) ? Math.max(0, Math.round(existing.offsetMinutes)) : step.offsetMinutes;
+      const anchor = typeof existing?.anchor === "string" && existing.anchor.trim() ? existing.anchor.trim() : step.anchor;
+      const label = typeof existing?.label === "string" && existing.label.trim() ? existing.label.trim() : step.label;
+      return { ...step, action, offsetMinutes, anchor, label };
     });
   }
-  function clampPassCount(value) {
+  function clampPassCount2(value) {
     const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return 1;
-    return Math.min(MAX_PASS_COUNT, Math.max(1, Math.round(parsed)));
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.min(MAX_PASS_COUNT2, Math.max(0, Math.round(parsed)));
   }
-  function buildPassPlanPayload(passConfigs, existingPlan) {
+  function buildPassPlanPayload2(passConfigs, existingPlan) {
     const planId = existingPlan && typeof existingPlan.id === "string" && existingPlan.id.trim() ? existingPlan.id.trim() : "custom";
     return {
       id: planId,
       schedule: passConfigs.map((config, index) => {
         const order = index + 1;
         const label = typeof config.label === "string" && config.label.trim() ? config.label.trim() : `Pass ${order}`;
-        const offset = Number.isFinite(config.offsetMinutes) ? config.offsetMinutes : index === 0 ? 0 : (passConfigs[index - 1]?.offsetMinutes ?? 0) + DAY_MINUTES2;
-        const anchor = typeof config.anchor === "string" && config.anchor.trim() ? config.anchor.trim() : fallbackAnchor(index);
-        const action = typeof config.action === "string" && config.action.trim() ? config.action.trim() : defaultActionForIndex(index);
+        const offset = Number.isFinite(config.offsetMinutes) ? Math.max(0, Math.round(config.offsetMinutes)) : index === 0 ? 0 : (passConfigs[index - 1]?.offsetMinutes ?? 0) + DAY_MINUTES3;
+        const anchor = typeof config.anchor === "string" && config.anchor.trim() ? config.anchor.trim() : fallbackAnchor2(index);
+        const action = typeof config.action === "string" && config.action.trim() ? config.action.trim() : defaultActionForIndex2(index);
         return {
           order,
           label,
@@ -6798,14 +7158,14 @@ var Sevenn = (() => {
       })
     };
   }
-  function formatPassPlan(plan) {
+  function formatPassPlan2(plan) {
     if (!plan || !Array.isArray(plan.schedule) || !plan.schedule.length) {
-      return "No pass plan";
+      return "No passes scheduled";
     }
     const steps = plan.schedule.slice().sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0)).map((step) => {
       const action = typeof step?.action === "string" && step.action.trim() ? step.action.trim() : `Pass ${step?.order ?? ""}`;
-      const offset = formatOffset(step?.offsetMinutes ?? 0);
-      return `${action} (${offset})`;
+      const offset = formatOffset2(step?.offsetMinutes ?? 0);
+      return `${action} \u2022 ${offset}`;
     });
     return `Plan: ${steps.join(", ")}`;
   }
@@ -6853,35 +7213,98 @@ var Sevenn = (() => {
     empty.textContent = "No lectures found. Use \u201CAdd Lecture\u201D to create one.";
     return empty;
   }
-  function renderLectureRow(lecture, blockMap, onEdit, onDelete, now = Date.now()) {
+  function computeLecturePassStats(lecture) {
+    const passes = Array.isArray(lecture?.passes) ? lecture.passes : [];
+    const scheduled = Array.isArray(lecture?.passPlan?.schedule) ? lecture.passPlan.schedule.length : 0;
+    const statusTotal = Number.isFinite(lecture?.status?.totalPasses) ? lecture.status.totalPasses : 0;
+    let planned = Math.max(scheduled, passes.length, statusTotal);
+    const completedFromPasses = passes.filter((pass) => Number.isFinite(pass?.completedAt)).length;
+    const completedFromStatus = Number.isFinite(lecture?.status?.completedPasses) ? lecture.status.completedPasses : 0;
+    const completed = Math.max(completedFromPasses, completedFromStatus);
+    planned = Math.max(planned, completed);
+    const remaining = Math.max(0, planned - completed);
+    return { planned, completed, remaining };
+  }
+  function summarizeLectures(lectures) {
+    return (Array.isArray(lectures) ? lectures : []).reduce(
+      (acc, lecture) => {
+        const stats = computeLecturePassStats(lecture);
+        acc.totalPasses += stats.planned;
+        acc.completed += stats.completed;
+        return acc;
+      },
+      { totalPasses: 0, completed: 0 }
+    );
+  }
+  function formatPassTotals(summary) {
+    if (!summary || summary.totalPasses === 0) return "0 passes planned";
+    return `${summary.completed}/${summary.totalPasses} passes complete`;
+  }
+  function labelForWeekKey(weekKey) {
+    if (weekKey === "__no-week") return "No week assigned";
+    return formatWeekLabel3(weekKey);
+  }
+  function sortLecturesForDisplay(lectures) {
+    return (Array.isArray(lectures) ? lectures : []).slice().sort((a, b) => {
+      const posA = Number(a?.position);
+      const posB = Number(b?.position);
+      const posAValid = Number.isFinite(posA);
+      const posBValid = Number.isFinite(posB);
+      if (posAValid && posBValid && posA !== posB) return posA - posB;
+      if (posAValid && !posBValid) return -1;
+      if (!posAValid && posBValid) return 1;
+      const nameA = (a?.name || "").toLowerCase();
+      const nameB = (b?.name || "").toLowerCase();
+      if (nameA && nameB && nameA !== nameB) return nameA.localeCompare(nameB);
+      const idA = Number(a?.id);
+      const idB = Number(b?.id);
+      if (Number.isFinite(idA) && Number.isFinite(idB) && idA !== idB) return idA - idB;
+      return 0;
+    });
+  }
+  function resolveNextDueAt(lecture) {
+    if (Number.isFinite(lecture?.nextDueAt)) return lecture.nextDueAt;
+    const passes = Array.isArray(lecture?.passes) ? lecture.passes : [];
+    for (const pass of passes) {
+      if (!pass || Number.isFinite(pass?.completedAt)) continue;
+      if (Number.isFinite(pass?.due)) return pass.due;
+    }
+    return null;
+  }
+  function getLectureState(lecture, stats) {
+    if (lecture?.status?.state) return lecture.status.state;
+    const counts = stats || computeLecturePassStats(lecture);
+    if (!counts.planned) return "unscheduled";
+    if (counts.completed >= counts.planned) return "complete";
+    if (counts.completed > 0) return "in-progress";
+    return "pending";
+  }
+  function renderLectureWeekRow(lecture, onEdit, onDelete, now = Date.now()) {
     const row = document.createElement("tr");
     row.dataset.lectureRow = "true";
     row.dataset.lectureId = String(lecture.id);
     row.dataset.blockId = String(lecture.blockId ?? "");
-    const lectureCell = document.createElement("td");
-    lectureCell.className = "lecture-cell";
-    const block = blockMap.get(lecture.blockId);
+    const stats = computeLecturePassStats(lecture);
+    const stateLabel = getLectureState(lecture, stats);
+    const overviewCell = document.createElement("td");
+    overviewCell.className = "lecture-overview";
     const header = document.createElement("div");
-    header.className = "lecture-cell-header";
-    const blockBadge = document.createElement("span");
-    blockBadge.className = "lecture-block";
-    blockBadge.textContent = block?.title || lecture.blockId || "Unknown block";
-    if (block?.color) {
-      blockBadge.style.setProperty("--block-accent", block.color);
-      blockBadge.classList.add("has-accent");
-    }
-    header.appendChild(blockBadge);
-    const name = document.createElement("div");
+    header.className = "lecture-overview-header";
+    const name = document.createElement("span");
     name.className = "lecture-name";
     name.textContent = lecture.name || `Lecture ${lecture.id}`;
     header.appendChild(name);
-    lectureCell.appendChild(header);
-    const positionValue = lecture.position ?? lecture.id;
-    if (positionValue != null) {
-      const meta = document.createElement("div");
-      meta.className = "lecture-position";
-      meta.textContent = `Position: ${positionValue}`;
-      lectureCell.appendChild(meta);
+    const status = document.createElement("span");
+    status.className = "lecture-status-pill";
+    status.dataset.status = stateLabel;
+    status.textContent = stateLabel;
+    header.appendChild(status);
+    overviewCell.appendChild(header);
+    if (lecture.position != null) {
+      const position = document.createElement("div");
+      position.className = "lecture-overview-position";
+      position.textContent = `Position: ${lecture.position}`;
+      overviewCell.appendChild(position);
     }
     const tags = Array.isArray(lecture.tags) ? lecture.tags.filter(Boolean) : [];
     if (tags.length) {
@@ -6893,57 +7316,29 @@ var Sevenn = (() => {
         chip.textContent = tag;
         tagList.appendChild(chip);
       });
-      lectureCell.appendChild(tagList);
+      overviewCell.appendChild(tagList);
     }
-    row.appendChild(lectureCell);
-    const scheduleCell = document.createElement("td");
-    scheduleCell.className = "lecture-schedule";
-    const week = document.createElement("div");
-    week.className = "lecture-week";
-    week.textContent = formatWeekLabel3(lecture.week);
-    scheduleCell.appendChild(week);
-    const statusRow = document.createElement("div");
-    statusRow.className = "lecture-status-row";
-    const statusBadge = document.createElement("span");
-    statusBadge.className = "lecture-status-pill";
-    const statusLabel = lecture?.status?.state || "pending";
-    statusBadge.textContent = statusLabel;
-    statusBadge.dataset.status = statusLabel;
-    statusRow.appendChild(statusBadge);
-    scheduleCell.appendChild(statusRow);
-    const nextDue = document.createElement("div");
-    nextDue.className = "lecture-next-due";
-    nextDue.textContent = formatNextDueDescriptor(lecture.nextDueAt, now);
-    scheduleCell.appendChild(nextDue);
-    row.appendChild(scheduleCell);
-    const passesCell = document.createElement("td");
-    passesCell.className = "lecture-passes";
     const summary = document.createElement("div");
-    summary.className = "lecture-pass-summary";
+    summary.className = "lecture-overview-summary";
     summary.textContent = formatPassSummary(lecture);
-    passesCell.appendChild(summary);
-    const passList = buildPassDisplayList(lecture);
-    const chips = document.createElement("div");
-    chips.className = "lecture-pass-chips";
-    if (passList.length) {
-      passList.forEach((info) => {
-        chips.appendChild(createPassChipDisplay(info, now));
-      });
-    } else {
-      const empty = document.createElement("div");
-      empty.className = "lecture-pass-empty";
-      empty.textContent = "No passes scheduled";
-      chips.appendChild(empty);
-    }
-    passesCell.appendChild(chips);
-    const planText = formatPassPlan(lecture.passPlan);
-    if (planText) {
-      const plan = document.createElement("div");
-      plan.className = "lecture-pass-plan";
-      plan.textContent = planText;
-      passesCell.appendChild(plan);
-    }
-    row.appendChild(passesCell);
+    overviewCell.appendChild(summary);
+    row.appendChild(overviewCell);
+    const plannedCell = document.createElement("td");
+    plannedCell.className = "lecture-count-cell";
+    plannedCell.textContent = String(stats.planned);
+    row.appendChild(plannedCell);
+    const completedCell = document.createElement("td");
+    completedCell.className = "lecture-count-cell";
+    completedCell.textContent = String(stats.completed);
+    row.appendChild(completedCell);
+    const remainingCell = document.createElement("td");
+    remainingCell.className = "lecture-count-cell";
+    remainingCell.textContent = String(stats.remaining);
+    row.appendChild(remainingCell);
+    const nextDueCell = document.createElement("td");
+    nextDueCell.className = "lecture-next-cell";
+    nextDueCell.textContent = formatNextDueDescriptor(resolveNextDueAt(lecture), now);
+    row.appendChild(nextDueCell);
     const actions = document.createElement("td");
     actions.className = "lecture-actions";
     const editBtn = document.createElement("button");
@@ -6963,52 +7358,146 @@ var Sevenn = (() => {
     row.appendChild(actions);
     return row;
   }
-  function renderLectureTable(blocks, lectures, onEdit, onDelete) {
+  function renderLectureTable(blocks, lectures, filters, onEdit, onDelete) {
     const card = document.createElement("section");
     card.className = "card lectures-card";
-    const table = document.createElement("table");
-    table.className = "table lectures-table";
-    const thead = document.createElement("thead");
-    const headerRow = document.createElement("tr");
-    ["Lecture", "Schedule", "Pass plan", "Actions"].forEach((label) => {
-      const th = document.createElement("th");
-      th.textContent = label;
-      headerRow.appendChild(th);
-    });
-    thead.appendChild(headerRow);
-    table.appendChild(thead);
-    const tbody = document.createElement("tbody");
-    const blockMap = new Map(blocks.map((block) => [block.blockId, block]));
-    const orderMap = buildBlockOrderMap(blocks);
-    const now = Date.now();
-    const sorted = lectures.slice().sort((a, b) => {
-      const ao = orderMap.has(a.blockId) ? orderMap.get(a.blockId) : Number.POSITIVE_INFINITY;
-      const bo = orderMap.has(b.blockId) ? orderMap.get(b.blockId) : Number.POSITIVE_INFINITY;
-      if (ao !== bo) return ao - bo;
-      const aw = a.week ?? Number.POSITIVE_INFINITY;
-      const bw = b.week ?? Number.POSITIVE_INFINITY;
-      if (aw !== bw) return aw - bw;
-      const an = (a.name || "").toLowerCase();
-      const bn = (b.name || "").toLowerCase();
-      if (an !== bn) return an.localeCompare(bn);
-      return (a.id ?? 0) - (b.id ?? 0);
-    });
-    if (!sorted.length) {
+    const title = document.createElement("h2");
+    title.textContent = "Lectures";
+    card.appendChild(title);
+    if (!lectures.length) {
       card.appendChild(renderEmptyState());
       return card;
     }
-    sorted.forEach((lecture) => {
-      const row = renderLectureRow(
-        { ...lecture, nextDueAt: lecture.nextDueAt ?? null, status: lecture.status, passPlan: lecture.passPlan },
-        blockMap,
-        onEdit,
-        onDelete,
-        now
-      );
-      tbody.appendChild(row);
+    const blockMap = /* @__PURE__ */ new Map();
+    blocks.forEach((block) => {
+      if (!block || block.blockId == null) return;
+      blockMap.set(String(block.blockId), block);
     });
-    table.appendChild(tbody);
-    card.appendChild(table);
+    const orderMap = buildBlockOrderMap(blocks);
+    const blockFilter = String(filters?.blockId || "").trim();
+    const weekFilter = String(filters?.week || "").trim();
+    const now = Date.now();
+    const blockGroups = /* @__PURE__ */ new Map();
+    lectures.forEach((lecture) => {
+      if (!lecture) return;
+      const rawBlockId = lecture.blockId == null || lecture.blockId === "" ? "" : lecture.blockId;
+      const key = rawBlockId === "" ? "__no-block" : String(rawBlockId);
+      if (!blockGroups.has(key)) {
+        const blockInfo = blockMap.get(String(rawBlockId));
+        const fallbackTitle = rawBlockId === "" ? "No block assigned" : `Block ${rawBlockId}`;
+        blockGroups.set(key, {
+          key,
+          blockId: rawBlockId,
+          block: blockInfo || { blockId: rawBlockId, title: blockInfo?.title || fallbackTitle, color: blockInfo?.color || null },
+          lectures: [],
+          weeks: /* @__PURE__ */ new Map()
+        });
+      }
+      const group = blockGroups.get(key);
+      group.lectures.push(lecture);
+      const weekKey = lecture.week == null || lecture.week === "" ? "__no-week" : String(lecture.week);
+      if (!group.weeks.has(weekKey)) {
+        group.weeks.set(weekKey, []);
+      }
+      group.weeks.get(weekKey).push(lecture);
+    });
+    const groupsContainer = document.createElement("div");
+    groupsContainer.className = "lectures-groups";
+    const sortedGroups = Array.from(blockGroups.values()).sort((a, b) => {
+      const ao = orderMap.has(a.blockId) ? orderMap.get(a.blockId) : orderMap.get(String(a.blockId)) ?? Number.POSITIVE_INFINITY;
+      const bo = orderMap.has(b.blockId) ? orderMap.get(b.blockId) : orderMap.get(String(b.blockId)) ?? Number.POSITIVE_INFINITY;
+      if (ao !== bo) return ao - bo;
+      const nameA = (a.block?.title || a.block?.name || String(a.blockId || "") || "").toLowerCase();
+      const nameB = (b.block?.title || b.block?.name || String(b.blockId || "") || "").toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+    sortedGroups.forEach((group) => {
+      const blockDetails = document.createElement("details");
+      blockDetails.className = "lectures-block-group";
+      blockDetails.dataset.blockId = String(group.blockId ?? "");
+      const blockInfo = group.block || {};
+      if (blockInfo.color) {
+        blockDetails.style.setProperty("--block-accent", blockInfo.color);
+        blockDetails.classList.add("has-accent");
+      }
+      const blockSummary = document.createElement("summary");
+      blockSummary.className = "lectures-block-summary";
+      const blockTitle = document.createElement("span");
+      blockTitle.className = "lectures-block-name";
+      blockTitle.textContent = blockInfo.title || blockInfo.name || (group.blockId ? `Block ${group.blockId}` : "No block assigned");
+      blockSummary.appendChild(blockTitle);
+      const blockStats = summarizeLectures(group.lectures);
+      const blockCounts = document.createElement("span");
+      blockCounts.className = "lectures-block-counts";
+      const lectureCount = group.lectures.length;
+      const lectureLabel = `${lectureCount} lecture${lectureCount === 1 ? "" : "s"}`;
+      blockCounts.textContent = `${lectureLabel} \u2022 ${formatPassTotals(blockStats)}`;
+      blockSummary.appendChild(blockCounts);
+      blockDetails.appendChild(blockSummary);
+      const weekWrapper = document.createElement("div");
+      weekWrapper.className = "lectures-week-groups";
+      const sortedWeeks = Array.from(group.weeks.entries()).sort((aEntry, bEntry) => {
+        const [aKey] = aEntry;
+        const [bKey] = bEntry;
+        if (aKey === "__no-week" && bKey === "__no-week") return 0;
+        if (aKey === "__no-week") return 1;
+        if (bKey === "__no-week") return -1;
+        const aNum = Number(aKey);
+        const bNum = Number(bKey);
+        if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return aNum - bNum;
+        if (Number.isFinite(aNum) && !Number.isFinite(bNum)) return -1;
+        if (!Number.isFinite(aNum) && Number.isFinite(bNum)) return 1;
+        return String(aKey).localeCompare(String(bKey));
+      });
+      sortedWeeks.forEach(([weekKey, weekLectures]) => {
+        const weekDetails = document.createElement("details");
+        weekDetails.className = "lectures-week-group";
+        const normalizedWeek = weekKey === "__no-week" ? "" : weekKey;
+        weekDetails.dataset.week = normalizedWeek;
+        weekDetails.open = !weekFilter || weekFilter === normalizedWeek;
+        const weekSummary = document.createElement("summary");
+        weekSummary.className = "lectures-week-summary";
+        const weekTitle = document.createElement("span");
+        weekTitle.className = "lectures-week-title";
+        weekTitle.textContent = labelForWeekKey(weekKey);
+        weekSummary.appendChild(weekTitle);
+        const weekStats = summarizeLectures(weekLectures);
+        const weekCounts = document.createElement("span");
+        weekCounts.className = "lectures-week-counts";
+        const weekLectureCount = weekLectures.length;
+        const weekLectureLabel = `${weekLectureCount} lecture${weekLectureCount === 1 ? "" : "s"}`;
+        weekCounts.textContent = `${weekLectureLabel} \u2022 ${formatPassTotals(weekStats)}`;
+        weekSummary.appendChild(weekCounts);
+        weekDetails.appendChild(weekSummary);
+        const weekBody = document.createElement("div");
+        weekBody.className = "lectures-week-body";
+        const table = document.createElement("table");
+        table.className = "lectures-week-table";
+        const thead = document.createElement("thead");
+        const headerRow = document.createElement("tr");
+        ["Lecture", "Planned passes", "Completed", "Remaining", "Next due", "Actions"].forEach((label) => {
+          const th = document.createElement("th");
+          th.textContent = label;
+          headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        const tbody = document.createElement("tbody");
+        sortLecturesForDisplay(weekLectures).forEach((entry) => {
+          const row = renderLectureWeekRow(entry, onEdit, onDelete, now);
+          tbody.appendChild(row);
+        });
+        table.appendChild(tbody);
+        weekBody.appendChild(table);
+        weekDetails.appendChild(weekBody);
+        weekWrapper.appendChild(weekDetails);
+      });
+      const shouldOpenBlock = !blockFilter || blockFilter === String(group.blockId ?? "") || sortedGroups.length === 1;
+      blockDetails.open = shouldOpenBlock;
+      blockDetails.appendChild(weekWrapper);
+      groupsContainer.appendChild(blockDetails);
+    });
+    card.appendChild(groupsContainer);
     return card;
   }
   function uniqueStatusValues(lectures) {
@@ -7062,7 +7551,7 @@ var Sevenn = (() => {
       return true;
     });
   }
-  function buildToolbar(blocks, lectures, lectureLists, redraw) {
+  function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan) {
     const filters = ensureLectureState();
     const toolbar = document.createElement("div");
     toolbar.className = "lectures-toolbar";
@@ -7157,12 +7646,21 @@ var Sevenn = (() => {
     toolbar.appendChild(tagSearch);
     const addBtn = document.createElement("button");
     addBtn.type = "button";
-    addBtn.className = "btn";
+    addBtn.className = "btn primary add-lecture-btn";
     addBtn.dataset.action = "add-lecture";
-    addBtn.textContent = "Add Lecture";
     addBtn.disabled = !blocks.length;
+    const addIcon = document.createElement("span");
+    addIcon.className = "add-lecture-btn-icon";
+    addIcon.textContent = "+";
+    const addLabel = document.createElement("span");
+    addLabel.className = "add-lecture-btn-label";
+    addLabel.textContent = "Add lecture";
+    addBtn.append(addIcon, addLabel);
     addBtn.addEventListener("click", () => {
       const defaultBlockId = filters.blockId || (blocks[0]?.blockId || "");
+      const passPlanTemplate = clonePassPlan(
+        defaultPassPlan && Array.isArray(defaultPassPlan.schedule) ? defaultPassPlan : void 0
+      );
       openLectureDialog({
         mode: "create",
         blocks,
@@ -7171,7 +7669,7 @@ var Sevenn = (() => {
           blockId: defaultBlockId,
           name: "",
           week: "",
-          passPlan: clonePassPlan()
+          passPlan: passPlanTemplate
         },
         onSubmit: async (payload) => {
           await saveLecture(payload);
@@ -7220,6 +7718,7 @@ var Sevenn = (() => {
     const nameInput = document.createElement("input");
     nameInput.type = "text";
     nameInput.required = true;
+    nameInput.placeholder = "Lecture name";
     nameInput.className = "input";
     nameInput.dataset.field = "name";
     nameInput.value = defaults.name ?? "";
@@ -7229,29 +7728,56 @@ var Sevenn = (() => {
     weekField.textContent = "Week";
     const weekInput = document.createElement("input");
     weekInput.type = "number";
+    weekInput.min = "0";
     weekInput.className = "input";
+    weekInput.placeholder = "Week number (optional)";
     weekInput.dataset.field = "week";
     if (defaults.week != null && defaults.week !== "") {
       weekInput.value = defaults.week;
     }
     weekField.appendChild(weekInput);
     form.appendChild(weekField);
-    const initialSchedule = Array.isArray(defaults.passPlan?.schedule) ? defaults.passPlan.schedule : [];
-    const initialCount = Math.max(1, initialSchedule.length || DEFAULT_PASS_PLAN.schedule.length);
-    let passConfigs = adjustPassConfigs(initialSchedule, initialCount, defaults.passPlan);
+    const planTemplate = defaults.passPlan && Array.isArray(defaults.passPlan.schedule) ? defaults.passPlan : clonePassPlan();
+    const initialSchedule = Array.isArray(planTemplate.schedule) ? planTemplate.schedule : [];
+    const defaultFallbackCount = Array.isArray(DEFAULT_PASS_PLAN.schedule) ? DEFAULT_PASS_PLAN.schedule.length : 0;
+    const initialCount = clampPassCount2(
+      initialSchedule.length > 0 ? initialSchedule.length : defaults.passPlan ? 0 : defaultFallbackCount
+    );
+    let passConfigs = adjustPassConfigs2(initialSchedule, initialCount, planTemplate);
     const passCountField = document.createElement("label");
-    passCountField.textContent = "Number of passes";
+    passCountField.className = "lecture-pass-count";
+    passCountField.textContent = "Planned passes";
     const passCountInput = document.createElement("input");
     passCountInput.type = "number";
-    passCountInput.min = "1";
-    passCountInput.max = String(MAX_PASS_COUNT);
+    passCountInput.min = "0";
+    passCountInput.max = String(MAX_PASS_COUNT2);
     passCountInput.className = "input";
     passCountInput.value = String(passConfigs.length);
     passCountField.appendChild(passCountInput);
+    const passHelp = document.createElement("span");
+    passHelp.className = "lecture-pass-help";
+    passHelp.textContent = "Set how many times you want to revisit this lecture.";
+    passCountField.appendChild(passHelp);
     form.appendChild(passCountField);
+    const passSummary = document.createElement("div");
+    passSummary.className = "lecture-pass-summary-line";
+    form.appendChild(passSummary);
+    const advanced = document.createElement("details");
+    advanced.className = "lecture-pass-advanced";
+    if (mode === "edit") {
+      advanced.open = true;
+    }
+    const advancedSummary = document.createElement("summary");
+    advancedSummary.textContent = `Advanced pass settings (${passConfigs.length})`;
+    advanced.appendChild(advancedSummary);
+    const advancedHint = document.createElement("p");
+    advancedHint.className = "lecture-pass-advanced-hint";
+    advancedHint.textContent = "Tune the pass function and timing for each pass.";
+    advanced.appendChild(advancedHint);
     const passList = document.createElement("div");
     passList.className = "lecture-pass-editor";
-    form.appendChild(passList);
+    advanced.appendChild(passList);
+    form.appendChild(advanced);
     function updatePositionNote() {
       if (mode === "edit") {
         if (defaults.id != null) {
@@ -7276,15 +7802,42 @@ var Sevenn = (() => {
       }
       positionNote.textContent = `Next position in block: ${maxId + 1}`;
     }
+    function updatePassSummary() {
+      if (!passConfigs.length) {
+        passSummary.textContent = "No passes scheduled for this lecture.";
+      } else {
+        const planPreview = buildPassPlanPayload2(passConfigs, planTemplate);
+        const previewText = formatPassPlan2(planPreview);
+        const cleaned = previewText.startsWith("Plan: ") ? previewText.slice(6) : previewText;
+        passSummary.textContent = `${passConfigs.length} pass${passConfigs.length === 1 ? "" : "es"} \u2022 ${cleaned}`;
+      }
+      advancedSummary.textContent = `Advanced pass settings (${passConfigs.length})`;
+    }
     function renderPassEditor() {
       passList.innerHTML = "";
+      if (!passConfigs.length) {
+        const empty = document.createElement("div");
+        empty.className = "lecture-pass-empty";
+        empty.textContent = "No passes planned. Increase the pass count to build a schedule.";
+        passList.appendChild(empty);
+        updatePassSummary();
+        return;
+      }
       passConfigs.forEach((config, index) => {
         const row = document.createElement("div");
         row.className = "lecture-pass-row";
-        const label = document.createElement("span");
+        const label = document.createElement("div");
         label.className = "lecture-pass-label";
         label.textContent = `Pass ${index + 1}`;
         row.appendChild(label);
+        const controls = document.createElement("div");
+        controls.className = "lecture-pass-controls";
+        const actionField = document.createElement("div");
+        actionField.className = "lecture-pass-field";
+        const actionLabel = document.createElement("span");
+        actionLabel.className = "lecture-pass-field-label";
+        actionLabel.textContent = "Pass function";
+        actionField.appendChild(actionLabel);
         const select = document.createElement("select");
         select.className = "input lecture-pass-action";
         LECTURE_PASS_ACTIONS.forEach((action) => {
@@ -7303,20 +7856,74 @@ var Sevenn = (() => {
         select.addEventListener("change", (event) => {
           const value = event.target.value;
           passConfigs[index] = { ...passConfigs[index], action: value };
+          updatePassSummary();
         });
-        row.appendChild(select);
-        const timing = document.createElement("span");
-        timing.className = "lecture-pass-offset";
-        timing.textContent = `Timing: ${formatOffset(config.offsetMinutes ?? 0)}`;
-        row.appendChild(timing);
+        actionField.appendChild(select);
+        controls.appendChild(actionField);
+        const offsetField = document.createElement("div");
+        offsetField.className = "lecture-pass-field lecture-pass-offset-field";
+        const offsetLabel = document.createElement("span");
+        offsetLabel.className = "lecture-pass-field-label";
+        offsetLabel.textContent = "Timing";
+        offsetField.appendChild(offsetLabel);
+        const offsetInputs = document.createElement("div");
+        offsetInputs.className = "lecture-pass-offset-inputs";
+        const split = splitOffsetMinutes2(config.offsetMinutes ?? 0);
+        const offsetInput = document.createElement("input");
+        offsetInput.type = "number";
+        offsetInput.min = "0";
+        offsetInput.step = "1";
+        offsetInput.className = "input lecture-pass-offset-value";
+        offsetInput.value = String(split.value);
+        const unitSelect = document.createElement("select");
+        unitSelect.className = "input lecture-pass-offset-unit";
+        OFFSET_UNITS2.forEach((option) => {
+          const opt = document.createElement("option");
+          opt.value = option.id;
+          opt.textContent = option.label;
+          unitSelect.appendChild(opt);
+        });
+        unitSelect.value = split.unit;
+        offsetInputs.appendChild(offsetInput);
+        offsetInputs.appendChild(unitSelect);
+        offsetField.appendChild(offsetInputs);
+        const preview = document.createElement("span");
+        preview.className = "lecture-pass-offset-preview";
+        preview.textContent = formatOffset2(config.offsetMinutes ?? 0);
+        offsetField.appendChild(preview);
+        function commitOffset() {
+          const minutes = combineOffsetValueUnit2(offsetInput.value, unitSelect.value);
+          passConfigs[index] = {
+            ...passConfigs[index],
+            offsetMinutes: minutes
+          };
+          preview.textContent = formatOffset2(passConfigs[index].offsetMinutes ?? 0);
+          updatePassSummary();
+        }
+        offsetInput.addEventListener("change", () => {
+          const numeric = Number(offsetInput.value);
+          if (!Number.isFinite(numeric) || numeric < 0) {
+            offsetInput.value = "0";
+          }
+          commitOffset();
+        });
+        offsetInput.addEventListener("blur", () => {
+          const numeric = Math.max(0, Math.round(Number(offsetInput.value) || 0));
+          offsetInput.value = String(numeric);
+          commitOffset();
+        });
+        unitSelect.addEventListener("change", commitOffset);
+        controls.appendChild(offsetField);
+        row.appendChild(controls);
         passList.appendChild(row);
       });
+      updatePassSummary();
     }
     renderPassEditor();
     passCountInput.addEventListener("change", () => {
-      const next = clampPassCount(passCountInput.value);
+      const next = clampPassCount2(passCountInput.value);
       passCountInput.value = String(next);
-      passConfigs = adjustPassConfigs(passConfigs, next, defaults.passPlan);
+      passConfigs = adjustPassConfigs2(passConfigs, next, planTemplate);
       renderPassEditor();
     });
     if (mode !== "edit") {
@@ -7350,7 +7957,7 @@ var Sevenn = (() => {
       if (!blockId || !name || weekValue !== "" && Number.isNaN(week)) {
         return;
       }
-      const passPlan = buildPassPlanPayload(passConfigs, defaults.passPlan);
+      const passPlan = buildPassPlanPayload2(passConfigs, defaults.passPlan);
       const payload = {
         blockId,
         name,
@@ -7409,21 +8016,26 @@ var Sevenn = (() => {
     })();
   }
   async function renderLectures(root, redraw) {
-    const catalog = await loadBlockCatalog();
+    const [catalog, settings] = await Promise.all([
+      loadBlockCatalog(),
+      getSettings()
+    ]);
     const filters = ensureLectureState();
     const blocks = (catalog.blocks || []).map((block) => ({ ...block }));
     const allLectures = collectLectures(catalog);
     const lectureLists = catalog.lectureLists || {};
     const filtered = applyFilters(allLectures, filters);
+    const defaultPassPlan = plannerDefaultsToPassPlan(settings?.plannerDefaults);
     root.innerHTML = "";
     const layout = document.createElement("div");
     layout.className = "lectures-view";
     root.appendChild(layout);
-    const toolbar = buildToolbar(blocks, allLectures, lectureLists, redraw);
+    const toolbar = buildToolbar(blocks, allLectures, lectureLists, redraw, defaultPassPlan);
     layout.appendChild(toolbar);
     const table = renderLectureTable(
       blocks,
       filtered,
+      filters,
       (lecture) => handleEdit(lecture, blocks, lectureLists, redraw),
       (lecture) => handleDelete(lecture, redraw)
     );
@@ -9053,7 +9665,7 @@ var Sevenn = (() => {
     "var(--indigo)",
     "var(--cyan)"
   ];
-  var BOARD_DAYS = 14;
+  var DEFAULT_BOARD_DAYS = 14;
   var BLOCK_RANGE_FORMAT = new Intl.DateTimeFormat(void 0, {
     month: "short",
     day: "numeric",
@@ -9122,10 +9734,80 @@ var Sevenn = (() => {
     const timePart = PASS_TIME_FORMAT2.format(date);
     return `${datePart} \u2022 ${timePart}`;
   }
-  function collectBoardDays(now = Date.now()) {
+  function collectDefaultBoardDays(now = Date.now()) {
     const today = startOfDay2(now);
     const start = today - 2 * DAY_MS2;
-    return Array.from({ length: BOARD_DAYS }, (_, idx) => start + idx * DAY_MS2);
+    return Array.from({ length: DEFAULT_BOARD_DAYS }, (_, idx) => start + idx * DAY_MS2);
+  }
+  function collectLectureDueRange(lectures) {
+    let start = null;
+    let end = null;
+    if (!Array.isArray(lectures)) return { start, end };
+    lectures.forEach((lecture) => {
+      const passes = Array.isArray(lecture?.passes) ? lecture.passes : [];
+      passes.forEach((pass) => {
+        const due = Number(pass?.due);
+        if (!Number.isFinite(due)) return;
+        const day = startOfDay2(due);
+        if (start == null || day < start) start = day;
+        if (end == null || day > end) end = day;
+      });
+    });
+    return { start, end };
+  }
+  function collectDaysForBlock(block, lectures = [], now = Date.now()) {
+    const startDate = parseBlockDate2(block?.startDate);
+    const endDate = parseBlockDate2(block?.endDate);
+    const dueRange = collectLectureDueRange(lectures);
+    const weeks = Number(block?.weeks);
+    let startDay = startDate ? startOfDay2(startDate.getTime()) : null;
+    let endDay = endDate ? startOfDay2(endDate.getTime()) : null;
+    if (Number.isFinite(weeks) && weeks > 0) {
+      const totalDays = Math.max(1, Math.round(weeks * 7));
+      if (startDay != null && endDay == null) {
+        endDay = startDay + (totalDays - 1) * DAY_MS2;
+      } else if (endDay != null && startDay == null) {
+        startDay = endDay - (totalDays - 1) * DAY_MS2;
+      }
+    }
+    if (dueRange.start != null) {
+      startDay = startDay == null ? dueRange.start : Math.min(startDay, dueRange.start);
+    }
+    if (dueRange.end != null) {
+      endDay = endDay == null ? dueRange.end : Math.max(endDay, dueRange.end);
+    }
+    if (startDay != null && endDay != null && endDay >= startDay) {
+      const spanDays = Math.floor((endDay - startDay) / DAY_MS2) + 1;
+      if (spanDays < 3) {
+        const deficit = 3 - spanDays;
+        const padBefore = Math.ceil(deficit / 2);
+        const padAfter = deficit - padBefore;
+        startDay -= padBefore * DAY_MS2;
+        endDay += padAfter * DAY_MS2;
+      }
+      const days = [];
+      for (let ts = startDay; ts <= endDay; ts += DAY_MS2) {
+        days.push(ts);
+      }
+      return days;
+    }
+    if (Number.isFinite(weeks) && weeks > 0) {
+      const totalDays = Math.max(1, Math.round(weeks * 7));
+      const anchor = dueRange.start != null ? dueRange.start : startOfDay2(now);
+      return Array.from({ length: totalDays }, (_, idx) => anchor + idx * DAY_MS2);
+    }
+    if (dueRange.start != null && dueRange.end != null && dueRange.end >= dueRange.start) {
+      const days = [];
+      for (let ts = dueRange.start; ts <= dueRange.end; ts += DAY_MS2) {
+        days.push(ts);
+      }
+      return days;
+    }
+    if (startDate) {
+      const start = startOfDay2(startDate.getTime());
+      return Array.from({ length: 7 }, (_, idx) => start + idx * DAY_MS2);
+    }
+    return [];
   }
   function buildPassElement(entry, onComplete, onDelay) {
     const chip = document.createElement("div");
@@ -9530,7 +10212,7 @@ var Sevenn = (() => {
     container.classList.add("block-board-container");
     const { blocks } = await loadCatalog();
     const lectures = await fetchLectures();
-    const days = collectBoardDays();
+    const fallbackDays = collectDefaultBoardDays();
     const queues = groupLectureQueues(lectures);
     const urgentHost = document.createElement("div");
     renderUrgentQueues(urgentHost, queues, {
@@ -9576,7 +10258,9 @@ var Sevenn = (() => {
     });
     blocks.forEach((block) => {
       const blockLectures = lecturesByBlock.get(String(block.blockId)) || [];
-      renderBlockBoardBlock(blockList, block, blockLectures, days, refreshBoard);
+      const blockDays = collectDaysForBlock(block, blockLectures);
+      const daysForBlock = blockDays.length ? blockDays : fallbackDays;
+      renderBlockBoardBlock(blockList, block, blockLectures, daysForBlock, refreshBoard);
     });
     container.appendChild(blockList);
   }
