@@ -54,6 +54,9 @@ function buildNormalizedLecture(blockId, input, existing, now) {
   const status = input?.status
     ? { ...(existing?.status || {}), ...input.status }
     : existing?.status;
+  const plannerDefaults = input?.plannerDefaults
+    ? { ...(existing?.plannerDefaults || {}), ...input.plannerDefaults }
+    : existing?.plannerDefaults;
   const nextDueAt = input?.nextDueAt !== undefined
     ? input.nextDueAt
     : existing?.nextDueAt;
@@ -67,6 +70,7 @@ function buildNormalizedLecture(blockId, input, existing, now) {
     tags,
     passes,
     passPlan,
+    plannerDefaults,
     status,
     nextDueAt
   };

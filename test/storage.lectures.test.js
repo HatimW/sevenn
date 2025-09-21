@@ -108,8 +108,16 @@ test('lecture migration moves embedded data into dedicated store', async () => {
   assert.deepEqual(intro.passPlan, DEFAULT_PASS_PLAN, 'default pass plan applied');
   assert.deepEqual(intro.status, DEFAULT_LECTURE_STATUS, 'default status applied');
   assert.ok(Array.isArray(intro.passes), 'passes array initialized');
+  assert.equal(intro.passes.length, DEFAULT_PASS_PLAN.schedule.length, 'passes match plan count');
+  intro.passes.forEach(pass => {
+    assert.ok(pass.label, 'pass label defined');
+    assert.ok(Number.isFinite(pass.due), 'pass due scheduled');
+    assert.equal(pass.completedAt, null, 'pass completion defaults to null');
+    assert.ok(Array.isArray(pass.attachments), 'pass attachments array');
+  });
+  assert.ok(intro.plannerDefaults, 'planner defaults stored');
   assert.ok(Array.isArray(intro.tags), 'tags array initialized');
-  assert.equal(intro.nextDueAt, null, 'nextDueAt defaults to null');
+  assert.ok(Number.isFinite(intro.nextDueAt), 'nextDueAt scheduled');
 
   db.close();
 });

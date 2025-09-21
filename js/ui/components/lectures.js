@@ -101,8 +101,14 @@ function formatNextDue(nextDueAt, now = Date.now()) {
 }
 
 function formatPassSummary(lecture) {
-  const total = Array.isArray(lecture?.passPlan?.schedule) ? lecture.passPlan.schedule.length : 0;
-  const completed = lecture?.status?.completedPasses ?? (Array.isArray(lecture?.passes) ? lecture.passes.length : 0);
+  const total = Array.isArray(lecture?.passes)
+    ? lecture.passes.length
+    : Array.isArray(lecture?.passPlan?.schedule)
+      ? lecture.passPlan.schedule.length
+      : 0;
+  const completed = Array.isArray(lecture?.passes)
+    ? lecture.passes.filter(pass => Number.isFinite(pass?.completedAt)).length
+    : lecture?.status?.completedPasses ?? 0;
   const stateLabel = lecture?.status?.state ? lecture.status.state : 'pending';
   return `${completed}/${total} passes • ${stateLabel}`;
 }

@@ -21,6 +21,7 @@ export {
 import { exportJSON, importJSON, exportAnkiCSV } from './export.js';
 import { DEFAULT_REVIEW_STEPS } from '../review/constants.js';
 import { normalizeReviewSteps } from '../review/settings.js';
+import { DEFAULT_PLANNER_DEFAULTS, normalizePlannerDefaults } from '../lectures/scheduler.js';
 
 let dbPromise;
 
@@ -31,7 +32,13 @@ const MAP_CONFIG_BACKUP_KEY = 'sevenn-map-config-backup';
 const DATA_BACKUP_KEY = 'sevenn-backup-snapshot';
 const DATA_BACKUP_STORES = ['items', 'blocks', 'exams', 'settings', 'exam_sessions', 'study_sessions', 'lectures'];
 
-const DEFAULT_APP_SETTINGS = { id: 'app', dailyCount: 20, theme: 'dark', reviewSteps: { ...DEFAULT_REVIEW_STEPS } };
+const DEFAULT_APP_SETTINGS = {
+  id: 'app',
+  dailyCount: 20,
+  theme: 'dark',
+  reviewSteps: { ...DEFAULT_REVIEW_STEPS },
+  plannerDefaults: normalizePlannerDefaults(DEFAULT_PLANNER_DEFAULTS)
+};
 
 let backupTimer = null;
 
@@ -186,6 +193,7 @@ export async function getSettings() {
   if (!settings) return { ...DEFAULT_APP_SETTINGS };
   const merged = { ...DEFAULT_APP_SETTINGS, ...settings };
   merged.reviewSteps = normalizeReviewSteps(settings.reviewSteps || merged.reviewSteps);
+  merged.plannerDefaults = normalizePlannerDefaults(settings.plannerDefaults || merged.plannerDefaults);
   return merged;
 }
 
@@ -197,7 +205,25 @@ export async function saveSettings(patch) {
     ...(current.reviewSteps || {}),
     ...(patch.reviewSteps || {})
   });
-  const next = { ...current, ...patch, id: 'app', reviewSteps: mergedSteps };
+  const basePlanner = current.plannerDefaults || DEFAULT_APP_SETTINGS.plannerDefaults;
+  const patchPlanner = patch?.plannerDefaults || {};
+  const mergedPlannerDefaults = normalizePlannerDefaults({
+    anchorOffsets: {
+      ...(DEFAULT_APP_SETTINGS.plannerDefaults?.anchorOffsets || {}),
+      ...(basePlanner?.anchorOffsets || {}),
+      ...(patchPlanner.anchorOffsets || {})
+    },
+    passes: Array.isArray(patchPlanner.passes) && patchPlanner.passes.length
+      ? patchPlanner.passes
+      : basePlanner?.passes || DEFAULT_APP_SETTINGS.plannerDefaults?.passes
+  });
+  const next = {
+    ...current,
+    ...patch,
+    id: 'app',
+    reviewSteps: mergedSteps,
+    plannerDefaults: mergedPlannerDefaults
+  };
   await prom(s.put(next));
   scheduleBackup();
 }

@@ -1,18 +1,19 @@
+import {
+  DEFAULT_PASS_PLAN,
+  normalizePassPlan,
+  normalizeLecturePasses,
+  calculateNextDue,
+  deriveLectureStatus,
+  normalizePlannerDefaults
+} from '../lectures/scheduler.js';
+export { DEFAULT_PASS_PLAN } from '../lectures/scheduler.js';
+
 const KEY_SEPARATOR = '|';
 
 function deepClone(value) {
   if (value == null) return value;
   return JSON.parse(JSON.stringify(value));
 }
-
-export const DEFAULT_PASS_PLAN = {
-  id: 'default',
-  schedule: [
-    { order: 1, offsetMinutes: 0 },
-    { order: 2, offsetMinutes: 1440 },
-    { order: 3, offsetMinutes: 4320 }
-  ]
-};
 
 export const DEFAULT_LECTURE_STATUS = {
   state: 'pending',
@@ -47,14 +48,23 @@ export function normalizeLectureRecord(blockId, lecture, now = Date.now()) {
   const tags = Array.isArray(lecture.tags)
     ? lecture.tags.filter(tag => typeof tag === 'string' && tag.trim()).map(tag => tag.trim())
     : [];
-  const passes = Array.isArray(lecture.passes) ? deepClone(lecture.passes) : [];
   const passPlan = lecture.passPlan
-    ? { ...cloneDefaultPassPlan(), ...lecture.passPlan }
-    : cloneDefaultPassPlan();
-  const status = lecture.status
+    ? normalizePassPlan({ ...cloneDefaultPassPlan(), ...lecture.passPlan })
+    : normalizePassPlan(cloneDefaultPassPlan());
+
+  const plannerDefaults = normalizePlannerDefaults(lecture.plannerDefaults || {});
+  const passes = normalizeLecturePasses({
+    plan: passPlan,
+    passes: lecture.passes,
+    plannerDefaults,
+    now
+  });
+
+  const statusBase = lecture.status
     ? { ...cloneDefaultStatus(), ...lecture.status }
     : cloneDefaultStatus();
-  const nextDueAt = lecture.nextDueAt ?? null;
+  const status = deriveLectureStatus(passes, statusBase);
+  const nextDueAt = calculateNextDue(passes);
   const createdAt = typeof lecture.createdAt === 'number' ? lecture.createdAt : now;
   const updatedAt = now;
 
@@ -67,6 +77,7 @@ export function normalizeLectureRecord(blockId, lecture, now = Date.now()) {
     tags,
     passes,
     passPlan,
+    plannerDefaults,
     status,
     nextDueAt,
     createdAt,
