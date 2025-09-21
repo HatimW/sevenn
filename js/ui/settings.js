@@ -10,6 +10,8 @@ import {
 import { loadBlockCatalog, invalidateBlockCatalog } from '../storage/block-catalog.js';
 import { confirmModal } from './components/confirm.js';
 import { DEFAULT_REVIEW_STEPS, REVIEW_RATINGS } from '../review/constants.js';
+import { DEFAULT_PASS_PLAN, DEFAULT_PLANNER_DEFAULTS, plannerDefaultsToPassPlan } from '../lectures/scheduler.js';
+import { LECTURE_PASS_ACTIONS } from '../lectures/actions.js';
 
 function createEmptyState() {
   const empty = document.createElement('div');
@@ -19,6 +21,217 @@ function createEmptyState() {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const DAY_MINUTES = 24 * 60;
+const MAX_PASS_COUNT = 20;
+
+const OFFSET_UNITS = [
+  { id: 'minutes', label: 'minutes', minutes: 1 },
+  { id: 'hours', label: 'hours', minutes: 60 },
+  { id: 'days', label: 'days', minutes: 60 * 24 },
+  { id: 'weeks', label: 'weeks', minutes: 60 * 24 * 7 }
+];
+
+function formatOffset(minutes) {
+  if (!Number.isFinite(minutes)) return '0m';
+  const abs = Math.abs(minutes);
+  if (abs < 60) return `${Math.round(minutes)}m`;
+  const hours = minutes / 60;
+  if (Math.abs(hours) < 24) return `${Math.round(hours)}h`;
+  const days = minutes / (60 * 24);
+  if (Math.abs(days) < 7) return `${Math.round(days)}d`;
+  const weeks = minutes / (60 * 24 * 7);
+  if (Math.abs(weeks) < 4) return `${Math.round(weeks)}w`;
+  const months = minutes / (60 * 24 * 30);
+  return `${Math.round(months)}mo`;
+}
+
+function normalizeOffsetUnit(id) {
+  const fallback = OFFSET_UNITS[2];
+  if (typeof id !== 'string') return fallback.id;
+  const match = OFFSET_UNITS.find(option => option.id === id);
+  return match ? match.id : fallback.id;
+}
+
+function splitOffsetMinutes(minutes) {
+  const value = Number.isFinite(minutes) ? Math.max(0, Math.round(minutes)) : 0;
+  if (value === 0) {
+    return { value: 0, unit: 'days' };
+  }
+  const preferred = [...OFFSET_UNITS].reverse().find(option => value % option.minutes === 0);
+  if (preferred) {
+    return { value: Math.round(value / preferred.minutes), unit: preferred.id };
+  }
+  if (value < 60) {
+    return { value, unit: 'minutes' };
+  }
+  if (value < 60 * 24) {
+    return { value: Math.round(value / 60), unit: 'hours' };
+  }
+  return { value: Math.round(value / (60 * 24)), unit: 'days' };
+}
+
+function combineOffsetValueUnit(value, unitId) {
+  const normalizedUnit = normalizeOffsetUnit(unitId);
+  const option = OFFSET_UNITS.find(entry => entry.id === normalizedUnit) || OFFSET_UNITS[2];
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 0;
+  }
+  return Math.max(0, Math.round(numeric * option.minutes));
+}
+
+function defaultActionForIndex(index) {
+  if (!Array.isArray(LECTURE_PASS_ACTIONS) || !LECTURE_PASS_ACTIONS.length) return '';
+  const normalized = index % LECTURE_PASS_ACTIONS.length;
+  return LECTURE_PASS_ACTIONS[Math.max(0, normalized)];
+}
+
+function baseSchedule(plan) {
+  if (plan && Array.isArray(plan.schedule)) {
+    return plan.schedule;
+  }
+  return DEFAULT_PASS_PLAN.schedule;
+}
+
+function computeDefaultGap(schedule) {
+  if (!Array.isArray(schedule) || schedule.length < 2) return DAY_MINUTES;
+  const deltas = [];
+  for (let i = 1; i < schedule.length; i += 1) {
+    const prev = Number(schedule[i - 1]?.offsetMinutes);
+    const current = Number(schedule[i]?.offsetMinutes);
+    if (Number.isFinite(prev) && Number.isFinite(current)) {
+      const delta = current - prev;
+      if (delta > 0) deltas.push(delta);
+    }
+  }
+  return deltas.length ? deltas[deltas.length - 1] : DAY_MINUTES;
+}
+
+function fallbackAnchor(index) {
+  if (index === 0) return 'today';
+  if (index === 1) return 'tomorrow';
+  return 'upcoming';
+}
+
+function buildScheduleTemplate(plan, count) {
+  const template = baseSchedule(plan);
+  const numericCount = Number(count);
+  const safeCount = Math.max(0, Number.isFinite(numericCount) ? Math.round(numericCount) : 0);
+  const defaultGap = computeDefaultGap(template);
+  const schedule = [];
+  for (let i = 0; i < safeCount; i += 1) {
+    const source = template[i] || {};
+    const previous = schedule[i - 1] || null;
+    const order = i + 1;
+    const offset = Number.isFinite(source.offsetMinutes)
+      ? source.offsetMinutes
+      : previous
+        ? previous.offsetMinutes + defaultGap
+        : i === 0
+          ? 0
+          : defaultGap * i;
+    const anchor = typeof source.anchor === 'string' && source.anchor.trim()
+      ? source.anchor.trim()
+      : previous?.anchor || fallbackAnchor(i);
+    const label = typeof source.label === 'string' && source.label.trim()
+      ? source.label.trim()
+      : `Pass ${order}`;
+    const action = typeof source.action === 'string' && source.action.trim()
+      ? source.action.trim()
+      : defaultActionForIndex(i);
+    schedule.push({
+      order,
+      offsetMinutes: offset,
+      anchor,
+      label,
+      action
+    });
+  }
+  return schedule;
+}
+
+function adjustPassConfigs(current, count, plan) {
+  const template = buildScheduleTemplate(plan || { schedule: current }, count);
+  const byOrder = new Map();
+  (Array.isArray(current) ? current : []).forEach(entry => {
+    const order = Number(entry?.order);
+    if (Number.isFinite(order) && !byOrder.has(order)) {
+      byOrder.set(order, entry);
+    }
+  });
+  return template.map((step, index) => {
+    const existing = byOrder.get(step.order) || current[index] || {};
+    const action = typeof existing?.action === 'string' && existing.action.trim()
+      ? existing.action.trim()
+      : step.action;
+    const offsetMinutes = Number.isFinite(existing?.offsetMinutes)
+      ? Math.max(0, Math.round(existing.offsetMinutes))
+      : step.offsetMinutes;
+    const anchor = typeof existing?.anchor === 'string' && existing.anchor.trim()
+      ? existing.anchor.trim()
+      : step.anchor;
+    const label = typeof existing?.label === 'string' && existing.label.trim()
+      ? existing.label.trim()
+      : step.label;
+    return { ...step, action, offsetMinutes, anchor, label };
+  });
+}
+
+function clampPassCount(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.min(MAX_PASS_COUNT, Math.max(0, Math.round(parsed)));
+}
+
+function buildPassPlanPayload(passConfigs, existingPlan) {
+  const planId = existingPlan && typeof existingPlan.id === 'string' && existingPlan.id.trim()
+    ? existingPlan.id.trim()
+    : 'custom';
+  return {
+    id: planId,
+    schedule: passConfigs.map((config, index) => {
+      const order = index + 1;
+      const label = typeof config.label === 'string' && config.label.trim()
+        ? config.label.trim()
+        : `Pass ${order}`;
+      const offset = Number.isFinite(config.offsetMinutes)
+        ? Math.max(0, Math.round(config.offsetMinutes))
+        : index === 0
+          ? 0
+          : (passConfigs[index - 1]?.offsetMinutes ?? 0) + DAY_MINUTES;
+      const anchor = typeof config.anchor === 'string' && config.anchor.trim()
+        ? config.anchor.trim()
+        : fallbackAnchor(index);
+      const action = typeof config.action === 'string' && config.action.trim()
+        ? config.action.trim()
+        : defaultActionForIndex(index);
+      return {
+        order,
+        label,
+        offsetMinutes: offset,
+        anchor,
+        action
+      };
+    })
+  };
+}
+
+function formatPassPlan(plan) {
+  if (!plan || !Array.isArray(plan.schedule) || !plan.schedule.length) {
+    return 'No passes scheduled';
+  }
+  const steps = plan.schedule
+    .slice()
+    .sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0))
+    .map(step => {
+      const action = typeof step?.action === 'string' && step.action.trim()
+        ? step.action.trim()
+        : `Pass ${step?.order ?? ''}`;
+      const offset = formatOffset(step?.offsetMinutes ?? 0);
+      return `${action} • ${offset}`;
+    });
+  return `Plan: ${steps.join(', ')}`;
+}
 
 function formatWeekCount(weeks) {
   if (!Number.isFinite(weeks) || weeks <= 0) return null;
@@ -105,6 +318,7 @@ export async function renderSettings(root) {
     ...DEFAULT_REVIEW_STEPS,
     ...(settings?.reviewSteps || {})
   };
+  const plannerDefaults = settings?.plannerDefaults || DEFAULT_PLANNER_DEFAULTS;
 
   const blocksCard = document.createElement('section');
   blocksCard.className = 'card';
@@ -508,6 +722,268 @@ export async function renderSettings(root) {
 
   reviewCard.appendChild(reviewForm);
   layout.appendChild(reviewCard);
+
+  const passDefaultsCard = document.createElement('section');
+  passDefaultsCard.className = 'card';
+  const passHeading = document.createElement('h2');
+  passHeading.textContent = 'Lecture pass defaults';
+  passDefaultsCard.appendChild(passHeading);
+
+  const passDescription = document.createElement('p');
+  passDescription.className = 'settings-pass-description';
+  passDescription.textContent = 'Adjust how many passes and which learning methods are suggested when you add a new lecture.';
+  passDefaultsCard.appendChild(passDescription);
+
+  const passForm = document.createElement('form');
+  passForm.className = 'settings-pass-form';
+  passDefaultsCard.appendChild(passForm);
+
+  let currentPlannerDefaults = plannerDefaults;
+  const defaultPlan = plannerDefaultsToPassPlan(currentPlannerDefaults);
+  let planTemplate = defaultPlan;
+  let passConfigs = Array.isArray(defaultPlan.schedule)
+    ? defaultPlan.schedule.map(step => ({ ...step }))
+    : [];
+
+  const passCountField = document.createElement('label');
+  passCountField.className = 'lecture-pass-count settings-pass-count';
+  passCountField.textContent = 'Default passes';
+  const passCountInput = document.createElement('input');
+  passCountInput.type = 'number';
+  passCountInput.min = '0';
+  passCountInput.max = String(MAX_PASS_COUNT);
+  passCountInput.className = 'input';
+  passCountInput.value = String(passConfigs.length);
+  passCountField.appendChild(passCountInput);
+  const passCountHelp = document.createElement('span');
+  passCountHelp.className = 'lecture-pass-help';
+  passCountHelp.textContent = 'Set the default number of spaced passes for new lectures.';
+  passCountField.appendChild(passCountHelp);
+  passForm.appendChild(passCountField);
+
+  const passSummary = document.createElement('div');
+  passSummary.className = 'lecture-pass-summary-line settings-pass-summary';
+  passForm.appendChild(passSummary);
+
+  const passAdvanced = document.createElement('details');
+  passAdvanced.className = 'lecture-pass-advanced settings-pass-advanced';
+  passAdvanced.open = true;
+  const passAdvancedSummary = document.createElement('summary');
+  passAdvancedSummary.textContent = `Pass details (${passConfigs.length})`;
+  passAdvanced.appendChild(passAdvancedSummary);
+
+  const passAdvancedHint = document.createElement('p');
+  passAdvancedHint.className = 'lecture-pass-advanced-hint';
+  passAdvancedHint.textContent = 'Choose the learning method and timing for each default pass.';
+  passAdvanced.appendChild(passAdvancedHint);
+
+  const passList = document.createElement('div');
+  passList.className = 'lecture-pass-editor settings-pass-editor';
+  passAdvanced.appendChild(passList);
+  passForm.appendChild(passAdvanced);
+
+  const passStatus = document.createElement('p');
+  passStatus.className = 'settings-pass-status';
+  passStatus.hidden = true;
+  passForm.appendChild(passStatus);
+
+  const passSaveBtn = document.createElement('button');
+  passSaveBtn.type = 'submit';
+  passSaveBtn.className = 'btn';
+  passSaveBtn.textContent = 'Save pass defaults';
+  passForm.appendChild(passSaveBtn);
+
+  function updatePassSummary() {
+    if (!passConfigs.length) {
+      passSummary.textContent = 'No default passes scheduled.';
+    } else {
+      const previewPlan = buildPassPlanPayload(passConfigs, planTemplate);
+      const previewText = formatPassPlan(previewPlan);
+      const cleaned = previewText.startsWith('Plan: ')
+        ? previewText.slice(6)
+        : previewText;
+      passSummary.textContent = `${passConfigs.length} pass${passConfigs.length === 1 ? '' : 'es'} • ${cleaned}`;
+    }
+    passAdvancedSummary.textContent = `Pass details (${passConfigs.length})`;
+  }
+
+  function renderPassEditor() {
+    passList.innerHTML = '';
+    if (!passConfigs.length) {
+      const empty = document.createElement('div');
+      empty.className = 'lecture-pass-empty';
+      empty.textContent = 'No passes planned. Increase the count above to build a default schedule.';
+      passList.appendChild(empty);
+      updatePassSummary();
+      return;
+    }
+    passConfigs.forEach((config, index) => {
+      const row = document.createElement('div');
+      row.className = 'lecture-pass-row';
+
+      const label = document.createElement('div');
+      label.className = 'lecture-pass-label';
+      label.textContent = `Pass ${index + 1}`;
+      row.appendChild(label);
+
+      const controls = document.createElement('div');
+      controls.className = 'lecture-pass-controls';
+
+      const actionField = document.createElement('div');
+      actionField.className = 'lecture-pass-field';
+      const actionLabel = document.createElement('span');
+      actionLabel.className = 'lecture-pass-field-label';
+      actionLabel.textContent = 'Learning method';
+      actionField.appendChild(actionLabel);
+      const select = document.createElement('select');
+      select.className = 'input lecture-pass-action';
+      LECTURE_PASS_ACTIONS.forEach(action => {
+        const option = document.createElement('option');
+        option.value = action;
+        option.textContent = action;
+        select.appendChild(option);
+      });
+      if (config.action && !LECTURE_PASS_ACTIONS.includes(config.action)) {
+        const custom = document.createElement('option');
+        custom.value = config.action;
+        custom.textContent = config.action;
+        select.appendChild(custom);
+      }
+      select.value = config.action || '';
+      select.addEventListener('change', event => {
+        const value = event.target.value;
+        passConfigs[index] = { ...passConfigs[index], action: value };
+        updatePassSummary();
+      });
+      actionField.appendChild(select);
+      controls.appendChild(actionField);
+
+      const offsetField = document.createElement('div');
+      offsetField.className = 'lecture-pass-field lecture-pass-offset-field';
+      const offsetLabel = document.createElement('span');
+      offsetLabel.className = 'lecture-pass-field-label';
+      offsetLabel.textContent = 'Timing';
+      offsetField.appendChild(offsetLabel);
+
+      const offsetInputs = document.createElement('div');
+      offsetInputs.className = 'lecture-pass-offset-inputs';
+      const split = splitOffsetMinutes(config.offsetMinutes ?? 0);
+      const offsetInput = document.createElement('input');
+      offsetInput.type = 'number';
+      offsetInput.min = '0';
+      offsetInput.step = '1';
+      offsetInput.className = 'input lecture-pass-offset-value';
+      offsetInput.value = String(split.value);
+      const unitSelect = document.createElement('select');
+      unitSelect.className = 'input lecture-pass-offset-unit';
+      OFFSET_UNITS.forEach(option => {
+        const opt = document.createElement('option');
+        opt.value = option.id;
+        opt.textContent = option.label;
+        unitSelect.appendChild(opt);
+      });
+      unitSelect.value = split.unit;
+      offsetInputs.appendChild(offsetInput);
+      offsetInputs.appendChild(unitSelect);
+      offsetField.appendChild(offsetInputs);
+
+      const preview = document.createElement('span');
+      preview.className = 'lecture-pass-offset-preview';
+      preview.textContent = formatOffset(config.offsetMinutes ?? 0);
+      offsetField.appendChild(preview);
+
+      function commitOffset() {
+        const minutes = combineOffsetValueUnit(offsetInput.value, unitSelect.value);
+        passConfigs[index] = {
+          ...passConfigs[index],
+          offsetMinutes: minutes
+        };
+        preview.textContent = formatOffset(passConfigs[index].offsetMinutes ?? 0);
+        updatePassSummary();
+      }
+
+      offsetInput.addEventListener('change', () => {
+        const numeric = Number(offsetInput.value);
+        if (!Number.isFinite(numeric) || numeric < 0) {
+          offsetInput.value = '0';
+        }
+        commitOffset();
+      });
+      offsetInput.addEventListener('blur', () => {
+        const numeric = Math.max(0, Math.round(Number(offsetInput.value) || 0));
+        offsetInput.value = String(numeric);
+        commitOffset();
+      });
+      unitSelect.addEventListener('change', commitOffset);
+
+      controls.appendChild(offsetField);
+      row.appendChild(controls);
+      passList.appendChild(row);
+    });
+
+    updatePassSummary();
+  }
+
+  renderPassEditor();
+
+  passCountInput.addEventListener('change', () => {
+    const next = clampPassCount(passCountInput.value);
+    passCountInput.value = String(next);
+    const template = passConfigs.length
+      ? { schedule: passConfigs.slice() }
+      : planTemplate;
+    passConfigs = adjustPassConfigs(passConfigs, next, template);
+    renderPassEditor();
+  });
+
+  passForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    passStatus.textContent = '';
+    passStatus.hidden = true;
+    passStatus.classList.remove('is-error');
+
+    const anchorOffsets = {
+      ...(DEFAULT_PLANNER_DEFAULTS.anchorOffsets || {}),
+      ...(currentPlannerDefaults?.anchorOffsets || {})
+    };
+    const payloadPlan = buildPassPlanPayload(passConfigs, planTemplate);
+    const payloadPasses = payloadPlan.schedule.map(step => ({
+      order: step.order,
+      label: step.label,
+      offsetMinutes: step.offsetMinutes,
+      anchor: step.anchor,
+      action: step.action
+    }));
+
+    const originalText = passSaveBtn.textContent;
+    passSaveBtn.disabled = true;
+    passSaveBtn.textContent = 'Saving…';
+
+    try {
+      await saveSettings({ plannerDefaults: { anchorOffsets, passes: payloadPasses } });
+      const updated = await getSettings();
+      currentPlannerDefaults = updated?.plannerDefaults || DEFAULT_PLANNER_DEFAULTS;
+      const refreshedPlan = plannerDefaultsToPassPlan(currentPlannerDefaults);
+      planTemplate = refreshedPlan;
+      passConfigs = Array.isArray(refreshedPlan.schedule)
+        ? refreshedPlan.schedule.map(step => ({ ...step }))
+        : [];
+      passCountInput.value = String(passConfigs.length);
+      renderPassEditor();
+      passStatus.textContent = 'Pass defaults saved.';
+      passStatus.hidden = false;
+    } catch (err) {
+      console.warn('Failed to save pass defaults', err);
+      passStatus.textContent = 'Failed to save pass defaults.';
+      passStatus.classList.add('is-error');
+      passStatus.hidden = false;
+    } finally {
+      passSaveBtn.disabled = false;
+      passSaveBtn.textContent = originalText;
+    }
+  });
+
+  layout.appendChild(passDefaultsCard);
 
   const dataCard = document.createElement('section');
   dataCard.className = 'card';

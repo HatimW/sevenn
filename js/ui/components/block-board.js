@@ -32,7 +32,7 @@ const PASS_COLORS = [
   'var(--indigo)',
   'var(--cyan)'
 ];
-const BOARD_DAYS = 14;
+const DEFAULT_BOARD_DAYS = 14;
 
 const BLOCK_RANGE_FORMAT = new Intl.DateTimeFormat(undefined, {
   month: 'short',
@@ -120,10 +120,40 @@ function formatPassDueLabel(due) {
   return `${datePart} • ${timePart}`;
 }
 
-function collectBoardDays(now = Date.now()) {
+function collectDefaultBoardDays(now = Date.now()) {
   const today = startOfDay(now);
   const start = today - 2 * DAY_MS;
-  return Array.from({ length: BOARD_DAYS }, (_, idx) => start + idx * DAY_MS);
+  return Array.from({ length: DEFAULT_BOARD_DAYS }, (_, idx) => start + idx * DAY_MS);
+}
+
+function collectDaysForBlock(block, now = Date.now()) {
+  const startDate = parseBlockDate(block?.startDate);
+  const endDate = parseBlockDate(block?.endDate);
+  if (startDate && endDate && endDate >= startDate) {
+    const startDay = startOfDay(startDate.getTime());
+    const endDay = startOfDay(endDate.getTime());
+    const days = [];
+    for (let ts = startDay; ts <= endDay; ts += DAY_MS) {
+      days.push(ts);
+    }
+    return days;
+  }
+  const weeks = Number(block?.weeks);
+  if (startDate && Number.isFinite(weeks) && weeks > 0) {
+    const totalDays = Math.max(1, Math.round(weeks * 7));
+    const startDay = startOfDay(startDate.getTime());
+    return Array.from({ length: totalDays }, (_, idx) => startDay + idx * DAY_MS);
+  }
+  if (Number.isFinite(weeks) && weeks > 0) {
+    const totalDays = Math.max(1, Math.round(weeks * 7));
+    const today = startOfDay(now);
+    return Array.from({ length: totalDays }, (_, idx) => today + idx * DAY_MS);
+  }
+  if (startDate) {
+    const startDay = startOfDay(startDate.getTime());
+    return Array.from({ length: 7 }, (_, idx) => startDay + idx * DAY_MS);
+  }
+  return [];
 }
 
 function buildPassElement(entry, onComplete, onDelay) {
@@ -577,7 +607,7 @@ export async function renderBlockBoard(container, refresh) {
 
   const { blocks } = await loadCatalog();
   const lectures = await fetchLectures();
-  const days = collectBoardDays();
+  const fallbackDays = collectDefaultBoardDays();
 
   const queues = groupLectureQueues(lectures);
 
@@ -628,7 +658,9 @@ export async function renderBlockBoard(container, refresh) {
   });
   blocks.forEach(block => {
     const blockLectures = lecturesByBlock.get(String(block.blockId)) || [];
-    renderBlockBoardBlock(blockList, block, blockLectures, days, refreshBoard);
+    const blockDays = collectDaysForBlock(block);
+    const daysForBlock = blockDays.length ? blockDays : fallbackDays;
+    renderBlockBoardBlock(blockList, block, blockLectures, daysForBlock, refreshBoard);
   });
   container.appendChild(blockList);
 }
