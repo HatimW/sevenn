@@ -3,7 +3,13 @@ import { loadBlockCatalog, invalidateBlockCatalog } from '../../storage/block-ca
 import { saveLecture, deleteLecture, getSettings } from '../../storage/storage.js';
 import { confirmModal } from './confirm.js';
 import { debounce } from '../../utils.js';
-import { DEFAULT_PASS_PLAN, clonePassPlan, plannerDefaultsToPassPlan } from '../../lectures/scheduler.js';
+import {
+  DEFAULT_PASS_PLAN,
+  clonePassPlan,
+  plannerDefaultsToPassPlan,
+  deriveLectureStatus,
+  calculateNextDue
+} from '../../lectures/scheduler.js';
 import { LECTURE_PASS_ACTIONS } from '../../lectures/actions.js';
 
 function ensureLectureState() {
@@ -47,6 +53,59 @@ function formatWeekLabel(week) {
   const num = Number(week);
   if (!Number.isFinite(num)) return String(week);
   return num === 0 ? '0' : `Week ${num}`;
+}
+
+function collectBlockWeekOptions(blockId, blocks = [], lectureLists = {}) {
+  if (!blockId) return [];
+  const normalizedId = String(blockId);
+  const blockInfo = blocks.find(block => String(block?.blockId) === normalizedId) || null;
+  const result = new Set();
+  const weeksValue = Number(blockInfo?.weeks);
+  if (Number.isFinite(weeksValue) && weeksValue > 0) {
+    const total = Math.max(1, Math.round(weeksValue));
+    for (let i = 1; i <= total; i += 1) {
+      result.add(i);
+    }
+  }
+  const list = Array.isArray(lectureLists?.[normalizedId]) ? lectureLists[normalizedId] : [];
+  list.forEach(entry => {
+    const weekNum = Number(entry?.week);
+    if (Number.isFinite(weekNum) && weekNum >= 0) {
+      result.add(weekNum);
+    }
+  });
+  return Array.from(result).sort((a, b) => a - b);
+}
+
+function populateWeekSelect(select, blockId, blocks, lectureLists, options = {}) {
+  if (!select) return;
+  const {
+    selectedValue = '',
+    includeBlank = true,
+    blankLabel = 'No week'
+  } = options;
+  const normalizedValue = normalizeWeekValue(selectedValue);
+  select.innerHTML = '';
+  if (includeBlank) {
+    const blank = document.createElement('option');
+    blank.value = '';
+    blank.textContent = blankLabel;
+    select.appendChild(blank);
+  }
+  const weeks = collectBlockWeekOptions(blockId, blocks, lectureLists);
+  weeks.forEach(week => {
+    const option = document.createElement('option');
+    option.value = String(week);
+    option.textContent = formatWeekLabel(week);
+    select.appendChild(option);
+  });
+  if (normalizedValue && !weeks.some(week => String(week) === normalizedValue)) {
+    const custom = document.createElement('option');
+    custom.value = normalizedValue;
+    custom.textContent = formatWeekLabel(normalizedValue);
+    select.appendChild(custom);
+  }
+  select.value = normalizedValue;
 }
 
 function formatOffset(minutes) {
@@ -200,7 +259,8 @@ function buildPassDisplayList(lecture) {
     });
 }
 
-function createPassChipDisplay(info, now = Date.now()) {
+function createPassChipDisplay(info, now = Date.now(), options = {}) {
+  const { onOpen, onToggle } = options || {};
   const chip = document.createElement('div');
   chip.className = 'lecture-pass-chip';
   chip.style.setProperty('--chip-accent', passAccent(info?.order));
@@ -212,34 +272,88 @@ function createPassChipDisplay(info, now = Date.now()) {
     chip.classList.add('is-overdue');
   }
 
+  const check = document.createElement('label');
+  check.className = 'lecture-pass-chip-check';
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.className = 'lecture-pass-chip-checkbox';
+  checkbox.checked = Number.isFinite(info?.completedAt);
+  const faux = document.createElement('span');
+  faux.className = 'lecture-pass-chip-checkmark';
+  faux.textContent = '✓';
+  check.append(checkbox, faux);
+  chip.appendChild(check);
+
+  const body = document.createElement('div');
+  body.className = 'lecture-pass-chip-body';
+  chip.appendChild(body);
+
   const header = document.createElement('div');
   header.className = 'lecture-pass-chip-header';
   const badge = document.createElement('span');
   badge.className = 'lecture-pass-chip-order';
   badge.textContent = `P${info?.order ?? ''}`;
-  header.appendChild(badge);
   const label = document.createElement('span');
   label.className = 'lecture-pass-chip-label';
   label.textContent = info?.action || info?.label || `Pass ${info?.order ?? ''}`;
-  header.appendChild(label);
-  chip.appendChild(header);
+  header.append(badge, label);
+  body.appendChild(header);
 
   const functionLine = document.createElement('div');
   functionLine.className = 'lecture-pass-chip-function';
   functionLine.textContent = info?.action || info?.label || '';
-  chip.appendChild(functionLine);
+  body.appendChild(functionLine);
 
   const timing = document.createElement('div');
   timing.className = 'lecture-pass-chip-due';
   timing.textContent = Number.isFinite(info?.due)
     ? formatPassDueTimestamp(info.due)
     : 'No scheduled date';
-  chip.appendChild(timing);
+  body.appendChild(timing);
 
   const countdown = document.createElement('div');
   countdown.className = 'lecture-pass-chip-countdown';
   countdown.textContent = describePassCountdown(info?.due, now);
-  chip.appendChild(countdown);
+  body.appendChild(countdown);
+
+  let busy = false;
+  checkbox.addEventListener('change', async event => {
+    if (typeof onToggle !== 'function') return;
+    if (busy) {
+      event.preventDefault();
+      checkbox.checked = !checkbox.checked;
+      return;
+    }
+    const desired = checkbox.checked;
+    busy = true;
+    chip.classList.add('is-pending');
+    try {
+      await onToggle(desired);
+    } catch (err) {
+      console.error(err);
+      checkbox.checked = !desired;
+    }
+    chip.classList.remove('is-pending');
+    busy = false;
+  });
+
+  chip.addEventListener('click', event => {
+    if (event.target instanceof Element && event.target.closest('.lecture-pass-chip-check')) {
+      return;
+    }
+    if (typeof onOpen === 'function') {
+      onOpen();
+    }
+  });
+
+  chip.addEventListener('keydown', event => {
+    if (event.target !== chip) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      if (typeof onOpen === 'function') onOpen();
+    }
+  });
+
   return chip;
 }
 
@@ -537,7 +651,7 @@ function getLectureState(lecture, stats) {
   return 'pending';
 }
 
-function renderLectureWeekRow(lecture, onEdit, onDelete, onEditPass, now = Date.now()) {
+function renderLectureWeekRow(lecture, onEdit, onDelete, onEditPass, onTogglePass, now = Date.now()) {
   const row = document.createElement('tr');
   row.dataset.lectureRow = 'true';
   row.dataset.lectureId = String(lecture.id);
@@ -614,13 +728,9 @@ function renderLectureWeekRow(lecture, onEdit, onDelete, onEditPass, now = Date.
     passScroller.appendChild(empty);
   } else {
     passList.forEach(info => {
-      const chip = createPassChipDisplay(info, now);
-      chip.addEventListener('click', () => onEditPass(lecture, info));
-      chip.addEventListener('keydown', event => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onEditPass(lecture, info);
-        }
+      const chip = createPassChipDisplay(info, now, {
+        onOpen: () => onEditPass(lecture, info),
+        onToggle: checked => onTogglePass?.(lecture, info, checked)
       });
       passScroller.appendChild(chip);
     });
@@ -657,7 +767,7 @@ function renderLectureWeekRow(lecture, onEdit, onDelete, onEditPass, now = Date.
   return row;
 }
 
-function renderLectureTable(blocks, lectures, filters, onEdit, onDelete, onEditPass) {
+function renderLectureTable(blocks, lectures, filters, onEdit, onDelete, onEditPass, onTogglePass) {
   const card = document.createElement('section');
   card.className = 'card lectures-card';
 
@@ -812,7 +922,7 @@ function renderLectureTable(blocks, lectures, filters, onEdit, onDelete, onEditP
 
       const tbody = document.createElement('tbody');
       sortLecturesForDisplay(weekLectures).forEach(entry => {
-        const row = renderLectureWeekRow(entry, onEdit, onDelete, onEditPass, now);
+        const row = renderLectureWeekRow(entry, onEdit, onDelete, onEditPass, onTogglePass, now);
         tbody.appendChild(row);
       });
       table.appendChild(tbody);
@@ -901,6 +1011,14 @@ function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan) {
   toolbar.setAttribute('role', 'toolbar');
   toolbar.setAttribute('aria-label', 'Lecture filters');
 
+  const filterGroup = document.createElement('div');
+  filterGroup.className = 'lectures-toolbar-filters';
+  toolbar.appendChild(filterGroup);
+
+  const actionsGroup = document.createElement('div');
+  actionsGroup.className = 'lectures-toolbar-actions';
+  toolbar.appendChild(actionsGroup);
+
   const search = document.createElement('input');
   search.type = 'search';
   search.className = 'input lectures-search';
@@ -913,7 +1031,7 @@ function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan) {
   search.addEventListener('input', e => {
     debouncedSearch(e.target.value);
   });
-  toolbar.appendChild(search);
+  filterGroup.appendChild(search);
 
   const blockSelect = document.createElement('select');
   blockSelect.className = 'input lectures-filter';
@@ -934,7 +1052,7 @@ function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan) {
     setLecturesState({ blockId: blockSelect.value });
     redraw();
   });
-  toolbar.appendChild(blockSelect);
+  filterGroup.appendChild(blockSelect);
 
   const weekSelect = document.createElement('select');
   weekSelect.className = 'input lectures-filter';
@@ -954,7 +1072,7 @@ function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan) {
     setLecturesState({ week: weekSelect.value });
     redraw();
   });
-  toolbar.appendChild(weekSelect);
+  filterGroup.appendChild(weekSelect);
 
   const statuses = uniqueStatusValues(lectures);
   if (statuses.length) {
@@ -976,7 +1094,7 @@ function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan) {
       setLecturesState({ status: statusSelect.value });
       redraw();
     });
-    toolbar.appendChild(statusSelect);
+    filterGroup.appendChild(statusSelect);
   }
 
   const tagSearch = document.createElement('input');
@@ -991,13 +1109,66 @@ function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan) {
   tagSearch.addEventListener('input', e => {
     debouncedTag(e.target.value);
   });
-  toolbar.appendChild(tagSearch);
+  filterGroup.appendChild(tagSearch);
+
+  const addBlockSelect = document.createElement('select');
+  addBlockSelect.className = 'input lectures-add-select';
+  addBlockSelect.setAttribute('aria-label', 'Select block for new lecture');
+  const addBlockPlaceholder = document.createElement('option');
+  addBlockPlaceholder.value = '';
+  addBlockPlaceholder.textContent = 'Select block';
+  addBlockSelect.appendChild(addBlockPlaceholder);
+  blocks.forEach(block => {
+    if (!block || !block.blockId) return;
+    const option = document.createElement('option');
+    option.value = block.blockId;
+    option.textContent = block.title || block.blockId;
+    addBlockSelect.appendChild(option);
+  });
+  const defaultAddBlock = blocks.find(block => block.blockId === filters.blockId)?.blockId
+    || (blocks[0]?.blockId ?? '');
+  if (defaultAddBlock) {
+    addBlockSelect.value = defaultAddBlock;
+  }
+  actionsGroup.appendChild(addBlockSelect);
+
+  const addWeekSelect = document.createElement('select');
+  addWeekSelect.className = 'input lectures-add-select';
+  addWeekSelect.setAttribute('aria-label', 'Select week for new lecture');
+  actionsGroup.appendChild(addWeekSelect);
+
+  let addWeekValue = normalizeWeekValue(filters.week);
+  const updateAddWeekSelect = () => {
+    const blockId = addBlockSelect.value;
+    const blankLabel = blockId ? 'No week' : 'Select block first';
+    populateWeekSelect(addWeekSelect, blockId, blocks, lectureLists, {
+      selectedValue: addWeekValue,
+      blankLabel
+    });
+    addWeekSelect.disabled = !blockId;
+    addWeekValue = addWeekSelect.value;
+  };
+
+  updateAddWeekSelect();
+
+  addBlockSelect.addEventListener('change', () => {
+    if (filters.blockId && filters.blockId === addBlockSelect.value) {
+      addWeekValue = normalizeWeekValue(filters.week);
+    } else {
+      addWeekValue = '';
+    }
+    updateAddWeekSelect();
+    syncAddButtonState();
+  });
+
+  addWeekSelect.addEventListener('change', () => {
+    addWeekValue = addWeekSelect.value;
+  });
 
   const addBtn = document.createElement('button');
   addBtn.type = 'button';
   addBtn.className = 'btn primary add-lecture-btn';
   addBtn.dataset.action = 'add-lecture';
-  addBtn.disabled = !blocks.length;
   const addIcon = document.createElement('span');
   addIcon.className = 'add-lecture-btn-icon';
   addIcon.textContent = '+';
@@ -1005,19 +1176,31 @@ function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan) {
   addLabel.className = 'add-lecture-btn-label';
   addLabel.textContent = 'Add lecture';
   addBtn.append(addIcon, addLabel);
+  actionsGroup.appendChild(addBtn);
+
+  const syncAddButtonState = () => {
+    addBtn.disabled = !blocks.length || !addBlockSelect.value;
+  };
+
+  syncAddButtonState();
+
   addBtn.addEventListener('click', () => {
-    const defaultBlockId = filters.blockId || (blocks[0]?.blockId || '');
+    const selectedBlockId = addBlockSelect.value || (blocks[0]?.blockId || '');
+    if (!selectedBlockId) return;
     const passPlanTemplate = clonePassPlan(
       defaultPassPlan && Array.isArray(defaultPassPlan.schedule) ? defaultPassPlan : undefined
     );
+    const rawWeek = addWeekSelect.disabled ? '' : addWeekSelect.value;
+    const numericWeek = rawWeek === '' ? '' : Number(rawWeek);
+    const selectedWeek = rawWeek === '' || Number.isNaN(numericWeek) ? '' : numericWeek;
     openLectureDialog({
       mode: 'create',
       blocks,
       lectureLists,
       defaults: {
-        blockId: defaultBlockId,
+        blockId: selectedBlockId,
         name: '',
-        week: '',
+        week: selectedWeek === '' ? '' : selectedWeek,
         passPlan: passPlanTemplate
       },
       onSubmit: async payload => {
@@ -1027,7 +1210,6 @@ function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan) {
       }
     });
   });
-  toolbar.appendChild(addBtn);
 
   return toolbar;
 }
@@ -1082,17 +1264,27 @@ function openLectureDialog(options) {
 
   const weekField = document.createElement('label');
   weekField.textContent = 'Week';
-  const weekInput = document.createElement('input');
-  weekInput.type = 'number';
-  weekInput.min = '0';
-  weekInput.className = 'input';
-  weekInput.placeholder = 'Week number (optional)';
-  weekInput.dataset.field = 'week';
-  if (defaults.week != null && defaults.week !== '') {
-    weekInput.value = defaults.week;
-  }
-  weekField.appendChild(weekInput);
+  const weekSelect = document.createElement('select');
+  weekSelect.className = 'input';
+  weekSelect.dataset.field = 'week';
+  weekField.appendChild(weekSelect);
   form.appendChild(weekField);
+
+  let dialogWeekValue = normalizeWeekValue(defaults.week);
+  const updateDialogWeekOptions = () => {
+    const blockId = blockSelect.value;
+    populateWeekSelect(weekSelect, blockId, blocks, lectureLists, {
+      selectedValue: dialogWeekValue,
+      blankLabel: 'No week'
+    });
+    dialogWeekValue = weekSelect.value;
+  };
+
+  updateDialogWeekOptions();
+
+  weekSelect.addEventListener('change', () => {
+    dialogWeekValue = weekSelect.value;
+  });
 
   const planTemplate = defaults.passPlan && Array.isArray(defaults.passPlan.schedule)
     ? defaults.passPlan
@@ -1316,6 +1508,8 @@ function openLectureDialog(options) {
 
   if (mode !== 'edit') {
     blockSelect.addEventListener('change', () => {
+      dialogWeekValue = '';
+      updateDialogWeekOptions();
       updatePositionNote();
     });
   }
@@ -1343,7 +1537,7 @@ function openLectureDialog(options) {
     event.preventDefault();
     const blockId = blockSelect.value.trim();
     const name = nameInput.value.trim();
-    const weekValue = weekInput.value;
+    const weekValue = weekSelect.value;
     const week = weekValue === '' ? null : Number(weekValue);
     if (!blockId || !name || (weekValue !== '' && Number.isNaN(week))) {
       return;
@@ -1489,6 +1683,33 @@ function cloneLecturePasses(lecture) {
   return Array.isArray(lecture?.passes)
     ? lecture.passes.map(pass => ({ ...pass }))
     : [];
+}
+
+async function togglePassCompletion(lecture, order, completed, redraw) {
+  if (!lecture || lecture.blockId == null || lecture.id == null) return;
+  const targetOrder = Number(order);
+  if (!Number.isFinite(targetOrder)) return;
+  const passes = cloneLecturePasses(lecture);
+  const index = passes.findIndex(pass => Number(pass?.order) === targetOrder);
+  if (index < 0) return;
+  const next = { ...passes[index] };
+  if (completed) {
+    next.completedAt = Number.isFinite(next.completedAt) ? next.completedAt : Date.now();
+  } else {
+    next.completedAt = null;
+  }
+  passes[index] = next;
+  const status = deriveLectureStatus(passes, lecture.status);
+  const nextDueAt = calculateNextDue(passes);
+  await saveLecture({
+    blockId: lecture.blockId,
+    id: lecture.id,
+    passes,
+    status,
+    nextDueAt
+  });
+  await invalidateBlockCatalog();
+  await redraw();
 }
 
 function normalizeSchedule(plan) {
@@ -1838,6 +2059,11 @@ function handlePassEdit(lecture, passInfo, redraw) {
   });
 }
 
+async function handlePassToggle(lecture, passInfo, checked, redraw) {
+  if (!lecture || !passInfo) return;
+  await togglePassCompletion(lecture, passInfo.order, checked, redraw);
+}
+
 export async function renderLectures(root, redraw) {
   const [catalog, settings] = await Promise.all([
     loadBlockCatalog(),
@@ -1864,7 +2090,8 @@ export async function renderLectures(root, redraw) {
     filters,
     lecture => handleEdit(lecture, blocks, lectureLists, redraw),
     lecture => handleDelete(lecture, redraw),
-    (lecture, pass) => handlePassEdit(lecture, pass, redraw)
+    (lecture, pass) => handlePassEdit(lecture, pass, redraw),
+    (lecture, pass, checked) => handlePassToggle(lecture, pass, checked, redraw)
   );
   layout.appendChild(table);
 }

@@ -468,7 +468,10 @@ function buildDayAssignments(blockLectures, days) {
   days.forEach(day => {
     if (!assignments.has(day)) assignments.set(day, []);
   });
-  if (!assignments.has('unscheduled')) assignments.set('unscheduled', []);
+  const unscheduled = assignments.get('unscheduled');
+  if (!unscheduled || !unscheduled.length) {
+    assignments.delete('unscheduled');
+  }
   return assignments;
 }
 
@@ -567,6 +570,14 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
   wrapper.appendChild(header);
 
   const assignments = buildDayAssignments(blockLectures, days);
+  const unscheduledEntries = assignments.get('unscheduled') || [];
+  assignments.delete('unscheduled');
+
+  const blockEntries = [];
+  assignments.forEach(entries => {
+    entries.forEach(entry => blockEntries.push(entry));
+  });
+  unscheduledEntries.forEach(entry => blockEntries.push(entry));
 
   if (boardState.showDensity) {
     const dayStats = days.map(day => {
@@ -613,28 +624,29 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
     return;
   }
 
+  if (unscheduledEntries.length) {
+    const backlog = document.createElement('div');
+    backlog.className = 'block-board-backlog';
+    const backlogTitle = document.createElement('h3');
+    backlogTitle.className = 'block-board-backlog-title';
+    backlogTitle.textContent = 'Needs a date';
+    backlog.appendChild(backlogTitle);
+    const backlogHint = document.createElement('p');
+    backlogHint.className = 'block-board-backlog-hint';
+    backlogHint.textContent = 'Drag a pass onto a day to schedule it.';
+    backlog.appendChild(backlogHint);
+    const backlogList = document.createElement('div');
+    backlogList.className = 'block-board-backlog-list';
+    unscheduledEntries.forEach(entry => {
+      const card = createPassCard(entry);
+      backlogList.appendChild(card);
+    });
+    backlog.appendChild(backlogList);
+    wrapper.appendChild(backlog);
+  }
+
   const board = document.createElement('div');
   board.className = 'block-board-grid';
-
-  const unscheduled = document.createElement('div');
-  unscheduled.className = 'block-board-unscheduled';
-  const unscheduledHeader = document.createElement('div');
-  unscheduledHeader.className = 'block-board-day-header';
-  unscheduledHeader.textContent = 'Unscheduled';
-  unscheduled.appendChild(unscheduledHeader);
-  const unscheduledList = document.createElement('div');
-  unscheduledList.className = 'block-board-day-list';
-  (assignments.get('unscheduled') || []).forEach(entry => {
-    const card = createPassCard(entry);
-    unscheduledList.appendChild(card);
-  });
-  unscheduled.appendChild(unscheduledList);
-  board.appendChild(unscheduled);
-
-  const blockEntries = [];
-  assignments.forEach(entries => {
-    entries.forEach(entry => blockEntries.push(entry));
-  });
 
   days.forEach(day => {
     const column = createDayColumn(day);
