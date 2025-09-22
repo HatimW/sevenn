@@ -522,59 +522,27 @@ function createPassCard(entry, onDrag) {
   card.dataset.lectureId = entry?.lecture?.id ?? '';
   card.dataset.passOrder = entry?.pass?.order ?? '';
   card.dataset.passDue = Number.isFinite(entry?.pass?.due) ? String(entry.pass.due) : '';
-
-  const lectureName = entry?.lecture?.name || 'Lecture';
   const title = document.createElement('div');
-  title.className = 'block-board-pass-title card-title';
-  const titleInner = document.createElement('span');
-  titleInner.className = 'block-board-pass-title-inner';
-  titleInner.textContent = lectureName;
-  title.appendChild(titleInner);
+  title.className = 'card-title';
+  title.textContent = entry?.lecture?.name || 'Lecture';
   card.appendChild(title);
 
-  const scheduleMarquee = () => {
-    const container = title;
-    const inner = titleInner;
-    if (!container || !inner) return;
-    const available = container.clientWidth;
-    const content = inner.scrollWidth;
-    if (available > 0 && content > available) {
-      container.classList.add('is-animated');
-      container.style.setProperty('--marquee-distance', `${content - available + 16}px`);
-    } else {
-      container.classList.remove('is-animated');
-      container.style.removeProperty('--marquee-distance');
-    }
-  };
-
-  if (typeof requestAnimationFrame === 'function') {
-    requestAnimationFrame(scheduleMarquee);
-  } else {
-    setTimeout(scheduleMarquee, 0);
-  }
-
+  const meta = document.createElement('div');
+  meta.className = 'card-meta';
   const metaParts = [];
   if (entry?.pass?.label) metaParts.push(entry.pass.label);
   else if (entry?.pass?.order != null) metaParts.push(`Pass ${entry.pass.order}`);
   if (entry?.pass?.action) metaParts.push(entry.pass.action);
-
-  const footer = document.createElement('div');
-  footer.className = 'block-board-pass-footer';
-
-  const meta = document.createElement('span');
-  meta.className = 'block-board-pass-meta';
   meta.textContent = metaParts.length ? metaParts.join(' • ') : 'Pass';
-  footer.appendChild(meta);
+  card.appendChild(meta);
 
-  const due = document.createElement('span');
-  due.className = 'block-board-pass-due';
+  const due = document.createElement('div');
+  due.className = 'card-due';
   const dueText = Number.isFinite(entry?.pass?.due)
     ? formatPassDueLabel(entry.pass.due)
     : 'Unscheduled';
   due.textContent = dueText;
-  footer.appendChild(due);
-
-  card.appendChild(footer);
+  card.appendChild(due);
 
   card.addEventListener('dragstart', (event) => {
     if (!event.dataTransfer) return;
