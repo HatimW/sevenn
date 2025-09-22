@@ -52,11 +52,17 @@ export function setBuilder(patch){ Object.assign(state.builder, patch); }
 export function setBlockBoardState(patch) {
   if (!patch) return;
   if (!state.blockBoard) {
-    state.blockBoard = { collapsedBlocks: [], hiddenTimelines: [] };
+    state.blockBoard = { collapsedBlocks: [], hiddenTimelines: [], autoCollapsed: [], autoHidden: [] };
   }
   const current = state.blockBoard;
   if (!Array.isArray(current.hiddenTimelines)) {
     current.hiddenTimelines = [];
+  }
+  if (!Array.isArray(current.autoCollapsed)) {
+    current.autoCollapsed = [];
+  }
+  if (!Array.isArray(current.autoHidden)) {
+    current.autoHidden = [];
   }
   if (Array.isArray(patch.collapsedBlocks)) {
     const unique = Array.from(new Set(patch.collapsedBlocks.map(id => String(id))));
@@ -65,6 +71,14 @@ export function setBlockBoardState(patch) {
   if (Array.isArray(patch.hiddenTimelines)) {
     const uniqueHidden = Array.from(new Set(patch.hiddenTimelines.map(id => String(id))));
     current.hiddenTimelines = uniqueHidden;
+  }
+  if (Array.isArray(patch.autoCollapsed)) {
+    const autoSet = Array.from(new Set(patch.autoCollapsed.map(id => String(id))));
+    current.autoCollapsed = autoSet;
+  }
+  if (Array.isArray(patch.autoHidden)) {
+    const autoHiddenSet = Array.from(new Set(patch.autoHidden.map(id => String(id))));
+    current.autoHidden = autoHiddenSet;
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'showDensity')) {
     const show = Boolean(patch.showDensity);
