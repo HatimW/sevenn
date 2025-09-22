@@ -1,3 +1,5 @@
+import { cropImageFile, readFileAsDataUrl } from './media-upload.js';
+
 const allowedTags = new Set([
   'a','b','strong','i','em','u','s','strike','del','mark','span','font','p','div','br','ul','ol','li','img','sub','sup','blockquote','code','pre','hr','video','audio','source','iframe'
 ]);
@@ -177,6 +179,59 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   toolbar.setAttribute('aria-label', 'Text formatting toolbar');
   wrapper.appendChild(toolbar);
 
+  const imageFileInput = document.createElement('input');
+  imageFileInput.type = 'file';
+  imageFileInput.accept = 'image/*';
+  imageFileInput.style.display = 'none';
+  wrapper.appendChild(imageFileInput);
+
+  const mediaFileInput = document.createElement('input');
+  mediaFileInput.type = 'file';
+  mediaFileInput.accept = 'video/*,audio/*';
+  mediaFileInput.style.display = 'none';
+  wrapper.appendChild(mediaFileInput);
+
+  async function insertCroppedImageFile(file) {
+    try {
+      const result = await cropImageFile(file);
+      if (!result) return;
+      const altText = result.altText || (file.name || '').replace(/\.[^.]+$/, '');
+      const safeAlt = altText ? escapeHtml(altText) : '';
+      const altAttr = safeAlt ? ` alt="${safeAlt}"` : '';
+      const html = `<img src="${result.dataUrl}" width="${result.width}" height="${result.height}"${altAttr}>`;
+      insertHtml(html);
+    } catch (err) {
+      console.error('Failed to upload image', err);
+    }
+  }
+
+  async function insertMediaFile(file) {
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      if (!dataUrl) return;
+      const isAudio = file.type?.startsWith('audio/');
+      if (isAudio) {
+        insertHtml(`<audio controls preload="metadata" src="${dataUrl}"></audio>`);
+      } else {
+        insertHtml(`<video controls preload="metadata" src="${dataUrl}" width="640"></video>`);
+      }
+    } catch (err) {
+      console.error('Failed to add media file', err);
+    }
+  }
+
+  imageFileInput.addEventListener('change', () => {
+    const file = imageFileInput.files?.[0];
+    if (file) insertCroppedImageFile(file);
+    imageFileInput.value = '';
+  });
+
+  mediaFileInput.addEventListener('change', () => {
+    const file = mediaFileInput.files?.[0];
+    if (file) insertMediaFile(file);
+    mediaFileInput.value = '';
+  });
+
   const editable = document.createElement('div');
   editable.className = 'rich-editor-area input';
   editable.contentEditable = 'true';
@@ -281,6 +336,11 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
         }
       }
     }, { requireSelection });
+  }
+
+  function insertHtml(html) {
+    if (!html) return;
+    runCommand(() => document.execCommand('insertHTML', false, html));
   }
 
   function selectionWithinEditor({ allowCollapsed = true } = {}){
@@ -547,41 +607,42 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   });
   mediaGroup.appendChild(linkBtn);
 
-  const imageBtn = createToolbarButton('🖼', 'Insert image', () => {
-    const url = prompt('Enter image URL');
-    if (!url) return;
-    exec('insertImage', url, { styleWithCss: false });
+  const imageBtn = createToolbarButton('🖼', 'Upload image (Shift+Click for URL)', (event) => {
+    if (event.shiftKey) {
+      const url = prompt('Enter image URL');
+      if (!url) return;
+      exec('insertImage', url, { styleWithCss: false });
+      return;
+    }
+    imageFileInput.click();
   });
   mediaGroup.appendChild(imageBtn);
 
-  const mediaBtn = createToolbarButton('🎬', 'Insert media', () => {
-    const url = prompt('Enter media URL');
-    if (!url) return;
-    const typePrompt = prompt('Media type (video/audio/embed)', 'video');
-    const kind = (typePrompt || 'video').toLowerCase();
-    const safeUrl = escapeHtml(url);
-    let html = '';
-    if (kind.startsWith('a')) {
-      html = `<audio controls src="${safeUrl}"></audio>`;
-    } else if (kind.startsWith('e') || kind.startsWith('i')) {
-      html = `<iframe src="${safeUrl}" title="Embedded media" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
-    } else {
-      html = `<video controls src="${safeUrl}"></video>`;
+  const mediaBtn = createToolbarButton('🎬', 'Upload media (Shift+Click for URL)', (event) => {
+    if (event.shiftKey) {
+      const url = prompt('Enter media URL');
+      if (!url) return;
+      const typePrompt = prompt('Media type (video/audio/embed)', 'video');
+      const kind = (typePrompt || 'video').toLowerCase();
+      const safeUrl = escapeHtml(url);
+      let html = '';
+      if (kind.startsWith('a')) {
+        html = `<audio controls src="${safeUrl}"></audio>`;
+      } else if (kind.startsWith('e') || kind.startsWith('i')) {
+        html = `<iframe src="${safeUrl}" title="Embedded media" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+      } else {
+        html = `<video controls src="${safeUrl}"></video>`;
+      }
+      insertHtml(html);
+      return;
     }
-    runCommand(() => document.execCommand('insertHTML', false, html));
+    mediaFileInput.click();
   });
   mediaGroup.appendChild(mediaBtn);
 
   const clearBtn = createToolbarButton('⌫', 'Clear formatting', () => exec('removeFormat', null, { requireSelection: true, styleWithCss: false }));
   const utilityGroup = createGroup('rich-editor-utility-group');
   utilityGroup.appendChild(clearBtn);
-
-  editable.addEventListener('keydown', (e) => {
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      if (e.shiftKey) exec('outdent'); else exec('indent');
-    }
-  });
 
   let settingValue = false;
   editable.addEventListener('input', () => {

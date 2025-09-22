@@ -3791,6 +3791,372 @@ var Sevenn = (() => {
     };
   }
 
+  // js/ui/components/media-upload.js
+  var DEFAULT_FRAME_WIDTH = 520;
+  function clamp(value, min, max) {
+    if (Number.isNaN(value)) return min;
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+  }
+  function sanitizeAspectRatio(ratio) {
+    if (!Number.isFinite(ratio) || ratio <= 0) return 1;
+    return clamp(ratio, 0.25, 4);
+  }
+  function toDataUrl(canvas, mimeType, quality) {
+    try {
+      return canvas.toDataURL(mimeType, quality);
+    } catch (err) {
+      console.error("Failed to export canvas", err);
+      return canvas.toDataURL();
+    }
+  }
+  function cropImageFile(file) {
+    if (!(file instanceof File) || !file.type?.startsWith("image/")) {
+      return Promise.reject(new Error("File must be an image."));
+    }
+    return new Promise((resolve, reject) => {
+      const objectUrl = URL.createObjectURL(file);
+      const image = new Image();
+      image.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        try {
+          openCropDialog({ image, file }).then(resolve).catch(reject);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      image.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error("Failed to load image file."));
+      };
+      image.src = objectUrl;
+    });
+  }
+  function openCropDialog({ image, file }) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.className = "media-cropper-overlay";
+      overlay.setAttribute("role", "dialog");
+      overlay.setAttribute("aria-modal", "true");
+      const dialog = document.createElement("div");
+      dialog.className = "media-cropper-dialog";
+      overlay.appendChild(dialog);
+      const header = document.createElement("header");
+      header.className = "media-cropper-header";
+      const title = document.createElement("h3");
+      title.textContent = "Upload image";
+      header.appendChild(title);
+      const closeBtn = document.createElement("button");
+      closeBtn.type = "button";
+      closeBtn.className = "icon-btn ghost media-cropper-close";
+      closeBtn.title = "Cancel";
+      closeBtn.textContent = "\u2715";
+      header.appendChild(closeBtn);
+      dialog.appendChild(header);
+      const body = document.createElement("div");
+      body.className = "media-cropper-body";
+      dialog.appendChild(body);
+      const preview = document.createElement("div");
+      preview.className = "media-cropper-preview";
+      const canvas = document.createElement("canvas");
+      canvas.width = DEFAULT_FRAME_WIDTH;
+      canvas.height = Math.round(DEFAULT_FRAME_WIDTH * 0.75);
+      preview.appendChild(canvas);
+      body.appendChild(preview);
+      const controls = document.createElement("div");
+      controls.className = "media-cropper-controls";
+      body.appendChild(controls);
+      const ratioRow = document.createElement("div");
+      ratioRow.className = "media-cropper-row";
+      const ratioLabel = document.createElement("label");
+      ratioLabel.textContent = "Aspect ratio";
+      const ratioSelect = document.createElement("select");
+      ratioSelect.className = "media-cropper-select";
+      const naturalRatio = sanitizeAspectRatio(image.naturalWidth / image.naturalHeight || 1);
+      const ratioOptions = [
+        { value: "original", label: "Original", ratio: naturalRatio },
+        { value: "1:1", label: "Square", ratio: 1 },
+        { value: "4:3", label: "4 : 3", ratio: 4 / 3 },
+        { value: "3:4", label: "3 : 4", ratio: 3 / 4 },
+        { value: "16:9", label: "16 : 9", ratio: 16 / 9 }
+      ];
+      ratioOptions.forEach((opt) => {
+        const option = document.createElement("option");
+        option.value = opt.value;
+        option.textContent = opt.label;
+        ratioSelect.appendChild(option);
+      });
+      ratioSelect.value = "original";
+      ratioLabel.appendChild(ratioSelect);
+      ratioRow.appendChild(ratioLabel);
+      controls.appendChild(ratioRow);
+      const zoomRow = document.createElement("div");
+      zoomRow.className = "media-cropper-row media-cropper-zoom";
+      const zoomLabel = document.createElement("span");
+      zoomLabel.textContent = "Zoom";
+      zoomRow.appendChild(zoomLabel);
+      const zoomRange = document.createElement("input");
+      zoomRange.type = "range";
+      zoomRange.min = "1";
+      zoomRange.max = "3";
+      zoomRange.step = "0.01";
+      zoomRange.value = "1";
+      zoomRange.className = "media-cropper-zoom-range";
+      zoomRow.appendChild(zoomRange);
+      const zoomValue = document.createElement("span");
+      zoomValue.className = "media-cropper-zoom-value";
+      zoomValue.textContent = "100%";
+      zoomRow.appendChild(zoomValue);
+      controls.appendChild(zoomRow);
+      const sizeRow = document.createElement("div");
+      sizeRow.className = "media-cropper-row";
+      const widthLabel = document.createElement("label");
+      widthLabel.textContent = "Output width";
+      const widthInput = document.createElement("input");
+      widthInput.type = "number";
+      widthInput.min = "64";
+      widthInput.max = String(Math.max(64, Math.round(image.naturalWidth) || 1024));
+      widthInput.value = String(Math.min(960, Math.round(image.naturalWidth) || 960));
+      widthInput.className = "media-cropper-size-input";
+      widthLabel.appendChild(widthInput);
+      sizeRow.appendChild(widthLabel);
+      const dimensions = document.createElement("span");
+      dimensions.className = "media-cropper-dimensions";
+      dimensions.textContent = "\xD7";
+      sizeRow.appendChild(dimensions);
+      controls.appendChild(sizeRow);
+      const altRow = document.createElement("div");
+      altRow.className = "media-cropper-row";
+      const altLabel = document.createElement("label");
+      altLabel.textContent = "Alt text";
+      const altInput = document.createElement("input");
+      altInput.type = "text";
+      altInput.placeholder = "Describe the image";
+      altInput.value = (file.name || "").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+      altInput.className = "media-cropper-alt-input";
+      altLabel.appendChild(altInput);
+      altRow.appendChild(altLabel);
+      controls.appendChild(altRow);
+      const actions = document.createElement("div");
+      actions.className = "media-cropper-actions";
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "btn subtle";
+      cancelBtn.textContent = "Cancel";
+      const confirmBtn = document.createElement("button");
+      confirmBtn.type = "button";
+      confirmBtn.className = "btn";
+      confirmBtn.textContent = "Insert image";
+      actions.appendChild(cancelBtn);
+      actions.appendChild(confirmBtn);
+      dialog.appendChild(actions);
+      document.body.appendChild(overlay);
+      const ctx = canvas.getContext("2d");
+      ctx.imageSmoothingQuality = "high";
+      let aspectRatio = naturalRatio;
+      let frameWidth = DEFAULT_FRAME_WIDTH;
+      let frameHeight = Math.max(120, Math.round(frameWidth / aspectRatio));
+      let minZoom = 1;
+      let zoom = 1;
+      let offsetX = 0;
+      let offsetY = 0;
+      let dragging = false;
+      let dragStartX = 0;
+      let dragStartY = 0;
+      let dragOffsetX = 0;
+      let dragOffsetY = 0;
+      function focusDefault() {
+        requestAnimationFrame(() => {
+          altInput.focus({ preventScroll: true });
+        });
+      }
+      function updateCanvasSize() {
+        frameHeight = Math.max(120, Math.round(frameWidth / aspectRatio));
+        canvas.width = frameWidth;
+        canvas.height = frameHeight;
+        updateZoomBounds();
+      }
+      function updateZoomBounds() {
+        const widthRatio = frameWidth / (image.naturalWidth || image.width || 1);
+        const heightRatio = frameHeight / (image.naturalHeight || image.height || 1);
+        const nextMin = sanitizeAspectRatio(Math.max(widthRatio, heightRatio));
+        minZoom = nextMin;
+        if (!Number.isFinite(zoom) || zoom < minZoom) {
+          zoom = minZoom;
+        }
+        zoomRange.min = String(Math.max(0.1, minZoom));
+        zoomRange.max = String(Math.max(minZoom * 4, minZoom + 0.5));
+        if (Number(zoomRange.value) < minZoom) {
+          zoomRange.value = String(minZoom);
+        }
+        render();
+      }
+      function clampOffsets() {
+        const scaledWidth = (image.naturalWidth || image.width || frameWidth) * zoom;
+        const scaledHeight = (image.naturalHeight || image.height || frameHeight) * zoom;
+        const maxOffsetX = Math.max(0, (scaledWidth - frameWidth) / 2);
+        const maxOffsetY = Math.max(0, (scaledHeight - frameHeight) / 2);
+        offsetX = clamp(offsetX, -maxOffsetX, maxOffsetX);
+        offsetY = clamp(offsetY, -maxOffsetY, maxOffsetY);
+      }
+      function getOutputWidth() {
+        const raw = Number(widthInput.value);
+        const maxWidth = Math.max(64, Math.round(image.naturalWidth) || 1024);
+        if (!Number.isFinite(raw)) return Math.min(maxWidth, 960);
+        return clamp(Math.round(raw), 64, maxWidth);
+      }
+      function updateMeta() {
+        const zoomPercent = Math.round(zoom / minZoom * 100);
+        zoomValue.textContent = `${zoomPercent}%`;
+        const outWidth = getOutputWidth();
+        const outHeight = Math.max(1, Math.round(outWidth / aspectRatio));
+        dimensions.textContent = `${outWidth} \xD7 ${outHeight}`;
+      }
+      function render() {
+        clampOffsets();
+        ctx.fillStyle = "rgba(15, 23, 42, 0.88)";
+        ctx.fillRect(0, 0, frameWidth, frameHeight);
+        const drawWidth = (image.naturalWidth || image.width || frameWidth) * zoom;
+        const drawHeight = (image.naturalHeight || image.height || frameHeight) * zoom;
+        const originX = (frameWidth - drawWidth) / 2 + offsetX;
+        const originY = (frameHeight - drawHeight) / 2 + offsetY;
+        ctx.save();
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(image, originX, originY, drawWidth, drawHeight);
+        ctx.restore();
+        ctx.strokeStyle = "rgba(148, 163, 184, 0.65)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(0.5, 0.5, frameWidth - 1, frameHeight - 1);
+        updateMeta();
+      }
+      function closeDialog(result) {
+        window.removeEventListener("keydown", onKeyDown, true);
+        overlay.remove();
+        resolve(result || null);
+      }
+      function onKeyDown(event) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeDialog(null);
+        }
+      }
+      ratioSelect.addEventListener("change", () => {
+        const selected = ratioOptions.find((opt) => opt.value === ratioSelect.value);
+        aspectRatio = sanitizeAspectRatio(selected ? selected.ratio : naturalRatio);
+        updateCanvasSize();
+        render();
+      });
+      zoomRange.addEventListener("input", () => {
+        const next = Number(zoomRange.value);
+        if (!Number.isFinite(next)) return;
+        const previous = zoom;
+        zoom = Math.max(minZoom, next);
+        if (previous > 0) {
+          const scale = zoom / previous;
+          offsetX *= scale;
+          offsetY *= scale;
+        }
+        render();
+      });
+      widthInput.addEventListener("input", () => updateMeta());
+      let activePointerId = null;
+      canvas.style.touchAction = "none";
+      canvas.addEventListener("pointerdown", (event) => {
+        activePointerId = event.pointerId;
+        dragging = true;
+        dragStartX = event.clientX;
+        dragStartY = event.clientY;
+        dragOffsetX = offsetX;
+        dragOffsetY = offsetY;
+        canvas.classList.add("dragging");
+        try {
+          canvas.setPointerCapture(event.pointerId);
+        } catch (err) {
+        }
+      });
+      const handlePointerEnd = (event) => {
+        if (activePointerId !== null && event.pointerId !== activePointerId) return;
+        dragging = false;
+        canvas.classList.remove("dragging");
+        try {
+          canvas.releasePointerCapture(event.pointerId);
+        } catch (err) {
+        }
+        activePointerId = null;
+      };
+      canvas.addEventListener("pointerup", handlePointerEnd);
+      canvas.addEventListener("pointerleave", handlePointerEnd);
+      canvas.addEventListener("pointermove", (event) => {
+        if (!dragging) return;
+        const dx = event.clientX - dragStartX;
+        const dy = event.clientY - dragStartY;
+        offsetX = dragOffsetX + dx;
+        offsetY = dragOffsetY + dy;
+        render();
+      });
+      cancelBtn.addEventListener("click", () => closeDialog(null));
+      closeBtn.addEventListener("click", () => closeDialog(null));
+      confirmBtn.addEventListener("click", () => {
+        const exportCanvas = document.createElement("canvas");
+        const outWidth = getOutputWidth();
+        const outHeight = Math.max(1, Math.round(outWidth / aspectRatio));
+        exportCanvas.width = outWidth;
+        exportCanvas.height = outHeight;
+        const exportCtx = exportCanvas.getContext("2d");
+        exportCtx.imageSmoothingEnabled = true;
+        exportCtx.imageSmoothingQuality = "high";
+        const drawWidth = (image.naturalWidth || image.width || outWidth) * zoom;
+        const drawHeight = (image.naturalHeight || image.height || outHeight) * zoom;
+        const originX = (frameWidth - drawWidth) / 2 + offsetX;
+        const originY = (frameHeight - drawHeight) / 2 + offsetY;
+        const cropX = clamp(-originX / zoom, 0, image.naturalWidth || image.width || outWidth);
+        const cropY = clamp(-originY / zoom, 0, image.naturalHeight || image.height || outHeight);
+        const cropWidth = Math.min(frameWidth / zoom, image.naturalWidth || image.width || outWidth);
+        const cropHeight = Math.min(frameHeight / zoom, image.naturalHeight || image.height || outHeight);
+        exportCtx.drawImage(
+          image,
+          cropX,
+          cropY,
+          cropWidth,
+          cropHeight,
+          0,
+          0,
+          exportCanvas.width,
+          exportCanvas.height
+        );
+        const mime = /^image\/jpe?g$/i.test(file.type) ? "image/jpeg" : "image/png";
+        const quality = mime === "image/jpeg" ? 0.92 : void 0;
+        const dataUrl = toDataUrl(exportCanvas, mime, quality);
+        const altText = altInput.value.trim();
+        closeDialog({
+          dataUrl,
+          width: exportCanvas.width,
+          height: exportCanvas.height,
+          mimeType: mime,
+          altText
+        });
+      });
+      window.addEventListener("keydown", onKeyDown, true);
+      updateCanvasSize();
+      render();
+      focusDefault();
+    });
+  }
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error("Failed to read file."));
+      try {
+        reader.readAsDataURL(file);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
   // js/ui/components/rich-text.js
   var allowedTags = /* @__PURE__ */ new Set([
     "a",
@@ -3974,6 +4340,53 @@ var Sevenn = (() => {
     toolbar.setAttribute("role", "toolbar");
     toolbar.setAttribute("aria-label", "Text formatting toolbar");
     wrapper.appendChild(toolbar);
+    const imageFileInput = document.createElement("input");
+    imageFileInput.type = "file";
+    imageFileInput.accept = "image/*";
+    imageFileInput.style.display = "none";
+    wrapper.appendChild(imageFileInput);
+    const mediaFileInput = document.createElement("input");
+    mediaFileInput.type = "file";
+    mediaFileInput.accept = "video/*,audio/*";
+    mediaFileInput.style.display = "none";
+    wrapper.appendChild(mediaFileInput);
+    async function insertCroppedImageFile(file) {
+      try {
+        const result = await cropImageFile(file);
+        if (!result) return;
+        const altText = result.altText || (file.name || "").replace(/\.[^.]+$/, "");
+        const safeAlt = altText ? escapeHtml2(altText) : "";
+        const altAttr = safeAlt ? ` alt="${safeAlt}"` : "";
+        const html = `<img src="${result.dataUrl}" width="${result.width}" height="${result.height}"${altAttr}>`;
+        insertHtml(html);
+      } catch (err) {
+        console.error("Failed to upload image", err);
+      }
+    }
+    async function insertMediaFile(file) {
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        if (!dataUrl) return;
+        const isAudio = file.type?.startsWith("audio/");
+        if (isAudio) {
+          insertHtml(`<audio controls preload="metadata" src="${dataUrl}"></audio>`);
+        } else {
+          insertHtml(`<video controls preload="metadata" src="${dataUrl}" width="640"></video>`);
+        }
+      } catch (err) {
+        console.error("Failed to add media file", err);
+      }
+    }
+    imageFileInput.addEventListener("change", () => {
+      const file = imageFileInput.files?.[0];
+      if (file) insertCroppedImageFile(file);
+      imageFileInput.value = "";
+    });
+    mediaFileInput.addEventListener("change", () => {
+      const file = mediaFileInput.files?.[0];
+      if (file) insertMediaFile(file);
+      mediaFileInput.value = "";
+    });
     const editable = document.createElement("div");
     editable.className = "rich-editor-area input";
     editable.contentEditable = "true";
@@ -4063,6 +4476,10 @@ var Sevenn = (() => {
           }
         }
       }, { requireSelection });
+    }
+    function insertHtml(html) {
+      if (!html) return;
+      runCommand(() => document.execCommand("insertHTML", false, html));
     }
     function selectionWithinEditor({ allowCollapsed = true } = {}) {
       const selection = window.getSelection();
@@ -4306,39 +4723,40 @@ var Sevenn = (() => {
       exec("createLink", url, { requireSelection: true });
     });
     mediaGroup.appendChild(linkBtn);
-    const imageBtn = createToolbarButton("\u{1F5BC}", "Insert image", () => {
-      const url = prompt("Enter image URL");
-      if (!url) return;
-      exec("insertImage", url, { styleWithCss: false });
+    const imageBtn = createToolbarButton("\u{1F5BC}", "Upload image (Shift+Click for URL)", (event) => {
+      if (event.shiftKey) {
+        const url = prompt("Enter image URL");
+        if (!url) return;
+        exec("insertImage", url, { styleWithCss: false });
+        return;
+      }
+      imageFileInput.click();
     });
     mediaGroup.appendChild(imageBtn);
-    const mediaBtn = createToolbarButton("\u{1F3AC}", "Insert media", () => {
-      const url = prompt("Enter media URL");
-      if (!url) return;
-      const typePrompt = prompt("Media type (video/audio/embed)", "video");
-      const kind = (typePrompt || "video").toLowerCase();
-      const safeUrl = escapeHtml2(url);
-      let html = "";
-      if (kind.startsWith("a")) {
-        html = `<audio controls src="${safeUrl}"></audio>`;
-      } else if (kind.startsWith("e") || kind.startsWith("i")) {
-        html = `<iframe src="${safeUrl}" title="Embedded media" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
-      } else {
-        html = `<video controls src="${safeUrl}"></video>`;
+    const mediaBtn = createToolbarButton("\u{1F3AC}", "Upload media (Shift+Click for URL)", (event) => {
+      if (event.shiftKey) {
+        const url = prompt("Enter media URL");
+        if (!url) return;
+        const typePrompt = prompt("Media type (video/audio/embed)", "video");
+        const kind = (typePrompt || "video").toLowerCase();
+        const safeUrl = escapeHtml2(url);
+        let html = "";
+        if (kind.startsWith("a")) {
+          html = `<audio controls src="${safeUrl}"></audio>`;
+        } else if (kind.startsWith("e") || kind.startsWith("i")) {
+          html = `<iframe src="${safeUrl}" title="Embedded media" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+        } else {
+          html = `<video controls src="${safeUrl}"></video>`;
+        }
+        insertHtml(html);
+        return;
       }
-      runCommand(() => document.execCommand("insertHTML", false, html));
+      mediaFileInput.click();
     });
     mediaGroup.appendChild(mediaBtn);
     const clearBtn = createToolbarButton("\u232B", "Clear formatting", () => exec("removeFormat", null, { requireSelection: true, styleWithCss: false }));
     const utilityGroup = createGroup("rich-editor-utility-group");
     utilityGroup.appendChild(clearBtn);
-    editable.addEventListener("keydown", (e) => {
-      if (e.key === "Tab") {
-        e.preventDefault();
-        if (e.shiftKey) exec("outdent");
-        else exec("indent");
-      }
-    });
     let settingValue = false;
     editable.addEventListener("input", () => {
       if (settingValue) return;
@@ -4604,13 +5022,15 @@ var Sevenn = (() => {
     }));
     const blockMap = new Map(blocks.map((b) => [b.blockId, b]));
     const blockSet = new Set(existing?.blocks || []);
-    const weekSet = /* @__PURE__ */ new Set();
+    const manualWeeks = new Set(
+      Array.isArray(existing?.weeks) ? existing.weeks.filter((value) => Number.isFinite(Number(value))).map((value) => Number(value)) : []
+    );
     const lectSet = /* @__PURE__ */ new Set();
     existing?.lectures?.forEach((l) => {
-      blockSet.add(l.blockId);
-      const weekKey = l.week == null || l.week === "" ? UNSCHEDULED_KEY : l.week;
-      weekSet.add(`${l.blockId}|${weekKey}`);
-      lectSet.add(`${l.blockId}|${l.id}`);
+      if (l.blockId != null) blockSet.add(l.blockId);
+      if (l.blockId != null && l.id != null) {
+        lectSet.add(`${l.blockId}|${l.id}`);
+      }
     });
     const blockWrap = document.createElement("section");
     blockWrap.className = "editor-tags";
@@ -4618,9 +5038,30 @@ var Sevenn = (() => {
     blockTitle.className = "editor-tags-title";
     blockTitle.textContent = "Curriculum tags";
     blockWrap.appendChild(blockTitle);
+    const blockDescription = document.createElement("p");
+    blockDescription.className = "editor-tags-description";
+    blockDescription.textContent = "Pick the lectures that relate to this entry. Block and week tags update automatically as you choose lectures.";
+    blockWrap.appendChild(blockDescription);
     const blockChipRow = document.createElement("div");
     blockChipRow.className = "editor-chip-row";
     blockWrap.appendChild(blockChipRow);
+    const manualWeeksBox = document.createElement("div");
+    manualWeeksBox.className = "editor-manual-weeks";
+    const manualWeeksHeader = document.createElement("div");
+    manualWeeksHeader.className = "editor-manual-weeks-header";
+    const manualWeeksTitle = document.createElement("span");
+    manualWeeksTitle.textContent = "Additional week tags";
+    manualWeeksHeader.appendChild(manualWeeksTitle);
+    const addWeekBtn = document.createElement("button");
+    addWeekBtn.type = "button";
+    addWeekBtn.className = "btn subtle";
+    addWeekBtn.textContent = "Add week tag";
+    manualWeeksHeader.appendChild(addWeekBtn);
+    manualWeeksBox.appendChild(manualWeeksHeader);
+    const manualWeekList = document.createElement("div");
+    manualWeekList.className = "editor-manual-weeks-list";
+    manualWeeksBox.appendChild(manualWeekList);
+    blockWrap.appendChild(manualWeeksBox);
     const blockPanels = document.createElement("div");
     blockPanels.className = "editor-block-panels";
     blockWrap.appendChild(blockPanels);
@@ -4633,14 +5074,85 @@ var Sevenn = (() => {
       setToggleState(chip, active);
       return chip;
     }
-    function pruneBlock(blockId) {
-      for (const key of Array.from(weekSet)) {
-        if (key.startsWith(`${blockId}|`)) weekSet.delete(key);
-      }
-      for (const key of Array.from(lectSet)) {
-        if (key.startsWith(`${blockId}|`)) lectSet.delete(key);
+    function blockHasSelectedLectures(blockId) {
+      const block = blockMap.get(blockId);
+      if (!block?.lectures) return false;
+      return block.lectures.some((l) => lectSet.has(`${blockId}|${l.id}`));
+    }
+    function collectSelectedWeekKeys() {
+      const selected = /* @__PURE__ */ new Set();
+      lectSet.forEach((key) => {
+        const [blockId, lectureId] = key.split("|");
+        const lecId = Number(lectureId);
+        if (!blockId || !Number.isFinite(lecId)) return;
+        const block = blockMap.get(blockId);
+        const lecture = block?.lectures?.find((le) => le.id === lecId);
+        if (!lecture) return;
+        const weekValue = lecture.week == null || lecture.week === "" ? UNSCHEDULED_KEY : lecture.week;
+        selected.add(`${blockId}|${weekValue}`);
+      });
+      return selected;
+    }
+    function collectWeekNumbers() {
+      const numbers = new Set(manualWeeks);
+      lectSet.forEach((key) => {
+        const [blockId, lectureId] = key.split("|");
+        const lecId = Number(lectureId);
+        if (!blockId || !Number.isFinite(lecId)) return;
+        const block = blockMap.get(blockId);
+        const lecture = block?.lectures?.find((le) => le.id === lecId);
+        if (!lecture) return;
+        const weekValue = Number(lecture.week);
+        if (Number.isFinite(weekValue)) numbers.add(weekValue);
+      });
+      return numbers;
+    }
+    function renderManualWeekTags() {
+      manualWeekList.innerHTML = "";
+      if (!manualWeeks.size) {
+        const empty = document.createElement("span");
+        empty.className = "editor-manual-weeks-empty";
+        empty.textContent = "No extra week tags yet.";
+        manualWeekList.appendChild(empty);
+        manualWeeksBox.classList.add("empty");
+      } else {
+        manualWeeksBox.classList.remove("empty");
+        Array.from(manualWeeks).sort((a, b) => a - b).forEach((weekNum) => {
+          const chip = document.createElement("div");
+          chip.className = "editor-manual-week-chip";
+          const label = document.createElement("span");
+          label.textContent = `Week ${weekNum}`;
+          chip.appendChild(label);
+          const removeBtn = document.createElement("button");
+          removeBtn.type = "button";
+          removeBtn.className = "icon-btn ghost";
+          removeBtn.title = "Remove week tag";
+          removeBtn.setAttribute("aria-label", `Remove week ${weekNum}`);
+          removeBtn.textContent = "\u2715";
+          removeBtn.addEventListener("click", () => {
+            manualWeeks.delete(weekNum);
+            markDirty();
+            renderManualWeekTags();
+            renderBlockPanels();
+          });
+          chip.appendChild(removeBtn);
+          manualWeekList.appendChild(chip);
+        });
       }
     }
+    addWeekBtn.addEventListener("click", () => {
+      const value = prompt("Enter a week number to tag (1-52)");
+      if (!value) return;
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return;
+      const clamped = Math.max(1, Math.round(parsed));
+      if (!manualWeeks.has(clamped)) {
+        manualWeeks.add(clamped);
+        markDirty();
+      }
+      renderManualWeekTags();
+      renderBlockPanels();
+    });
     function renderBlockChips() {
       blockChipRow.innerHTML = "";
       if (!blocks.length) {
@@ -4651,11 +5163,13 @@ var Sevenn = (() => {
         return;
       }
       blocks.forEach((b) => {
-        const chip = createTagChip(b.title || b.blockId, "block", blockSet.has(b.blockId));
+        const isSelected = blockSet.has(b.blockId);
+        const hasLectures = blockHasSelectedLectures(b.blockId);
+        const chip = createTagChip(b.title || b.blockId, "block", isSelected || hasLectures);
+        chip.dataset.manual = isSelected ? "true" : "false";
         chip.addEventListener("click", () => {
           if (blockSet.has(b.blockId)) {
             blockSet.delete(b.blockId);
-            pruneBlock(b.blockId);
           } else {
             blockSet.add(b.blockId);
           }
@@ -4668,23 +5182,29 @@ var Sevenn = (() => {
     }
     function renderBlockPanels() {
       blockPanels.innerHTML = "";
-      if (!blockSet.size) {
+      if (!blocks.length) {
         const empty = document.createElement("div");
         empty.className = "editor-tags-empty";
-        empty.textContent = "Choose a block to pick weeks and lectures.";
+        empty.textContent = "No curriculum blocks have been created yet.";
         blockPanels.appendChild(empty);
         return;
       }
-      Array.from(blockSet).forEach((blockId) => {
-        const block = blockMap.get(blockId);
+      const selectedWeekKeys = collectSelectedWeekKeys();
+      blocks.forEach((block) => {
         if (!block) return;
-        const panel = document.createElement("div");
+        const blockId = block.blockId;
+        const panel = document.createElement("section");
         panel.className = "editor-block-panel";
+        if (blockSet.has(blockId) || blockHasSelectedLectures(blockId)) {
+          panel.classList.add("active");
+        }
         const header = document.createElement("div");
         header.className = "editor-block-panel-header";
+        const titleWrap = document.createElement("div");
+        titleWrap.className = "editor-block-panel-title";
         const title = document.createElement("h4");
         title.textContent = block.title || blockId;
-        header.appendChild(title);
+        titleWrap.appendChild(title);
         const meta = document.createElement("span");
         meta.className = "editor-block-meta";
         const lectureCount = block.lectures?.length || 0;
@@ -4693,7 +5213,15 @@ var Sevenn = (() => {
         if (weekTotal) metaParts.push(`${weekTotal} week${weekTotal === 1 ? "" : "s"}`);
         if (lectureCount) metaParts.push(`${lectureCount} lecture${lectureCount === 1 ? "" : "s"}`);
         meta.textContent = metaParts.join(" \u2022 ") || "No weeks defined yet";
-        header.appendChild(meta);
+        titleWrap.appendChild(meta);
+        header.appendChild(titleWrap);
+        const selectedCount = (block.lectures || []).reduce((count, l) => lectSet.has(`${blockId}|${l.id}`) ? count + 1 : count, 0);
+        if (selectedCount) {
+          const badge = document.createElement("span");
+          badge.className = "editor-block-selected-count";
+          badge.textContent = `${selectedCount} selected`;
+          header.appendChild(badge);
+        }
         panel.appendChild(header);
         const weekList = document.createElement("div");
         weekList.className = "editor-week-list";
@@ -4709,12 +5237,13 @@ var Sevenn = (() => {
         const weekGroups = sortedWeeks.map((weekNumber) => ({
           key: `${blockId}|${weekNumber}`,
           label: `Week ${weekNumber}`,
-          lectures: (block.lectures || []).filter((l) => l.week === weekNumber)
+          lectures: (block.lectures || []).filter((l) => l.week === weekNumber),
+          weekNumber
         }));
         if (unscheduledLectures.length) {
           weekGroups.push({
             key: `${blockId}|${UNSCHEDULED_KEY}`,
-            label: "No week",
+            label: "Unscheduled",
             lectures: unscheduledLectures,
             unscheduled: true
           });
@@ -4726,35 +5255,42 @@ var Sevenn = (() => {
           weekList.appendChild(noWeeks);
         } else {
           weekGroups.forEach((group) => {
-            const { key: weekKey, label, lectures, unscheduled } = group;
+            const { key: weekKey, label, lectures, weekNumber, unscheduled } = group;
             const section = document.createElement("div");
             section.className = "editor-week-section";
-            if (weekSet.has(weekKey)) section.classList.add("active");
-            const weekChip = createTagChip(label, "week", weekSet.has(weekKey));
-            weekChip.addEventListener("click", () => {
-              const wasActive = weekSet.has(weekKey);
-              if (wasActive) {
-                weekSet.delete(weekKey);
-                section.classList.remove("active");
-                lectureWrap.classList.add("collapsed");
-                lectures.forEach((l) => {
-                  const key = `${blockId}|${l.id}`;
-                  lectSet.delete(key);
-                  const chip = lectureWrap.querySelector(`[data-lecture='${key}']`);
-                  if (chip) setToggleState(chip, false);
-                });
-              } else {
-                weekSet.add(weekKey);
-                section.classList.add("active");
-                lectureWrap.classList.remove("collapsed");
-              }
-              setToggleState(weekChip, weekSet.has(weekKey));
-              markDirty();
-            });
-            section.appendChild(weekChip);
+            const hasLectureSelection = (lectures || []).some((l) => lectSet.has(`${blockId}|${l.id}`));
+            const isManualWeek = Number.isFinite(weekNumber) && manualWeeks.has(Number(weekNumber));
+            if (hasLectureSelection || isManualWeek) {
+              section.classList.add("active");
+            }
+            if (selectedWeekKeys.has(weekKey)) {
+              section.classList.add("active");
+            }
+            const weekHeader = document.createElement("div");
+            weekHeader.className = "editor-week-header";
+            const weekLabel = document.createElement("span");
+            weekLabel.textContent = label;
+            weekHeader.appendChild(weekLabel);
+            const countLabel = document.createElement("span");
+            countLabel.className = "editor-week-count";
+            const total = lectures?.length || 0;
+            if (total) {
+              countLabel.textContent = `${total} lecture${total === 1 ? "" : "s"}`;
+            } else if (unscheduled) {
+              countLabel.textContent = "No unscheduled lectures yet";
+            } else {
+              countLabel.textContent = "No lectures yet";
+            }
+            weekHeader.appendChild(countLabel);
+            if (Number.isFinite(weekNumber) && manualWeeks.has(Number(weekNumber))) {
+              const badge = document.createElement("span");
+              badge.className = "editor-week-manual";
+              badge.textContent = "Tagged";
+              weekHeader.appendChild(badge);
+            }
+            section.appendChild(weekHeader);
             const lectureWrap = document.createElement("div");
             lectureWrap.className = "editor-lecture-list";
-            if (!weekSet.has(weekKey)) lectureWrap.classList.add("collapsed");
             if (!lectures.length) {
               const empty = document.createElement("div");
               empty.className = "editor-tags-empty subtle";
@@ -4768,18 +5304,12 @@ var Sevenn = (() => {
                 lectureChip.addEventListener("click", () => {
                   if (lectSet.has(key)) {
                     lectSet.delete(key);
-                    setToggleState(lectureChip, false);
                   } else {
                     lectSet.add(key);
-                    setToggleState(lectureChip, true);
-                    if (!weekSet.has(weekKey)) {
-                      weekSet.add(weekKey);
-                      section.classList.add("active");
-                      setToggleState(weekChip, true);
-                      lectureWrap.classList.remove("collapsed");
-                    }
                   }
                   markDirty();
+                  renderBlockChips();
+                  renderBlockPanels();
                 });
                 lectureWrap.appendChild(lectureChip);
               });
@@ -4792,6 +5322,7 @@ var Sevenn = (() => {
         blockPanels.appendChild(panel);
       });
     }
+    renderManualWeekTags();
     renderBlockChips();
     renderBlockPanels();
     form.appendChild(blockWrap);
@@ -4827,17 +5358,14 @@ var Sevenn = (() => {
         body: editor.getValue()
       })).filter((ex) => ex.title || ex.body);
       item.facts = [];
-      item.blocks = Array.from(blockSet);
-      const weekNums = /* @__PURE__ */ new Set();
-      for (const key of weekSet) {
-        const parts = key.split("|");
-        const raw = parts[1];
-        const numeric = Number(raw);
-        if (Number.isFinite(numeric)) {
-          weekNums.add(numeric);
-        }
-      }
-      item.weeks = Array.from(weekNums);
+      const blockTags = new Set(blockSet);
+      lectSet.forEach((key) => {
+        const [blockId] = key.split("|");
+        if (blockId) blockTags.add(blockId);
+      });
+      item.blocks = Array.from(blockTags);
+      const weekNums = collectWeekNumbers();
+      item.weeks = Array.from(weekNums).sort((a, b) => a - b);
       const lectures = [];
       for (const key of lectSet) {
         const [blockId, lecIdStr] = key.split("|");
@@ -15064,8 +15592,8 @@ var Sevenn = (() => {
     const limit = mapState.sizeLimit || 0;
     const maxX = Math.max(0, limit - width);
     const maxY = Math.max(0, limit - height);
-    const nextX = clamp(pos.x - width / 2, 0, maxX);
-    const nextY = clamp(pos.y - height / 2, 0, maxY);
+    const nextX = clamp2(pos.x - width / 2, 0, maxX);
+    const nextY = clamp2(pos.y - height / 2, 0, maxY);
     if (Number.isFinite(nextX)) mapState.viewBox.x = nextX;
     if (Number.isFinite(nextY)) mapState.viewBox.y = nextY;
     if (mapState.updateViewBox) {
@@ -16254,8 +16782,8 @@ var Sevenn = (() => {
     let y = clientY - containerRect.top - offsetY;
     const maxX = Math.max(0, width - boxWidth);
     const maxY = Math.max(0, height - boxHeight);
-    x = clamp(x, 0, maxX);
-    y = clamp(y, 0, maxY);
+    x = clamp2(x, 0, maxX);
+    y = clamp2(y, 0, maxY);
     mapState.toolboxPos = { x, y };
     mapState.toolboxEl.style.left = `${x}px`;
     mapState.toolboxEl.style.top = `${y}px`;
@@ -16282,8 +16810,8 @@ var Sevenn = (() => {
     if (!width || !height) return;
     const maxX = Math.max(0, width - boxRect.width);
     const maxY = Math.max(0, height - boxRect.height);
-    const x = clamp(mapState.toolboxPos.x, 0, maxX);
-    const y = clamp(mapState.toolboxPos.y, 0, maxY);
+    const x = clamp2(mapState.toolboxPos.x, 0, maxX);
+    const y = clamp2(mapState.toolboxPos.y, 0, maxY);
     mapState.toolboxPos = { x, y };
     box.style.left = `${x}px`;
     box.style.top = `${y}px`;
@@ -16464,8 +16992,8 @@ var Sevenn = (() => {
     const rawY = pointer.y - rect.top + 14;
     const maxX = rect.width - tooltip.offsetWidth - 12;
     const maxY = rect.height - tooltip.offsetHeight - 12;
-    const clampedX = clamp(rawX, 12, Math.max(12, maxX));
-    const clampedY = clamp(rawY, 12, Math.max(12, maxY));
+    const clampedX = clamp2(rawX, 12, Math.max(12, maxX));
+    const clampedY = clamp2(rawY, 12, Math.max(12, maxY));
     tooltip.style.left = `${clampedX}px`;
     tooltip.style.top = `${clampedY}px`;
   }
@@ -16479,9 +17007,9 @@ var Sevenn = (() => {
     const defaultSize = Number.isFinite(mapState.defaultViewSize) ? mapState.defaultViewSize : w;
     const zoomInRatio = defaultSize / w;
     const zoomOutRatio = w / defaultSize;
-    const nodeScale = clamp(Math.pow(zoomInRatio, 0.5), 0.65, 2.6);
-    const labelScale = clamp(Math.pow(zoomOutRatio, 0.4), 1.2, 3.2);
-    const lineScale = clamp(Math.pow(zoomInRatio, 0.33), 0.7, 2.4);
+    const nodeScale = clamp2(Math.pow(zoomInRatio, 0.5), 0.65, 2.6);
+    const labelScale = clamp2(Math.pow(zoomOutRatio, 0.4), 1.2, 3.2);
+    const lineScale = clamp2(Math.pow(zoomInRatio, 0.33), 0.7, 2.4);
     mapState.currentScales = { nodeScale, labelScale, lineScale };
     mapState.elements.forEach((entry, id) => {
       updateNodeGeometry(id, entry);
@@ -16590,7 +17118,7 @@ var Sevenn = (() => {
     }
     syncLineDecoration(line);
   }
-  function clamp(value, min, max) {
+  function clamp2(value, min, max) {
     return Math.min(Math.max(value, min), max);
   }
   function updateLineStrokeWidth(line) {
