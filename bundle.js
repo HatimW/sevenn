@@ -194,6 +194,18 @@
   // js/lectures/scheduler.js
   var DAY_MINUTES = 24 * 60;
   var MINUTE_MS = 60 * 1e3;
+  var DEFAULT_PASS_COLORS = [
+    "#ef4444",
+    "#facc15",
+    "#fb923c",
+    "#22c55e",
+    "#3b82f6",
+    "#a855f7",
+    "#14b8a6",
+    "#ec4899",
+    "#6366f1",
+    "#0ea5e9"
+  ];
   function clone(value) {
     if (value == null) return value;
     return JSON.parse(JSON.stringify(value));
@@ -258,7 +270,8 @@
       label: entry.label,
       offsetMinutes: entry.offsetMinutes,
       anchor: entry.anchor
-    }))
+    })),
+    passColors: DEFAULT_PASS_COLORS
   };
   function normalizePassPlan(plan) {
     const source = plan && typeof plan === "object" ? plan : {};
@@ -292,6 +305,15 @@
     }
     const passesSource = Array.isArray(source.passes) ? source.passes : DEFAULT_PLANNER_DEFAULTS.passes;
     const normalizedPlan = normalizePassPlan({ schedule: passesSource });
+    const paletteSource = Array.isArray(source.passColors) && source.passColors.length ? source.passColors : DEFAULT_PASS_COLORS;
+    const passColors = paletteSource.map((color, index) => {
+      if (typeof color === "string") {
+        const trimmed = color.trim();
+        if (trimmed) return trimmed;
+      }
+      return DEFAULT_PASS_COLORS[index % DEFAULT_PASS_COLORS.length];
+    });
+    const palette2 = passColors.length ? passColors : DEFAULT_PASS_COLORS.slice();
     return {
       anchorOffsets,
       passes: normalizedPlan.schedule.map((step) => ({
@@ -300,7 +322,8 @@
         offsetMinutes: step.offsetMinutes,
         anchor: step.anchor,
         action: step.action
-      }))
+      })),
+      passColors: palette2
     };
   }
   function sanitizeAttachments(raw) {
@@ -1702,7 +1725,8 @@
         ...basePlanner?.anchorOffsets || {},
         ...patchPlanner.anchorOffsets || {}
       },
-      passes: Array.isArray(patchPlanner.passes) && patchPlanner.passes.length ? patchPlanner.passes : basePlanner?.passes || DEFAULT_APP_SETTINGS.plannerDefaults?.passes
+      passes: Array.isArray(patchPlanner.passes) && patchPlanner.passes.length ? patchPlanner.passes : basePlanner?.passes || DEFAULT_APP_SETTINGS.plannerDefaults?.passes,
+      passColors: Array.isArray(patchPlanner.passColors) && patchPlanner.passColors.length ? patchPlanner.passColors : basePlanner?.passColors || DEFAULT_APP_SETTINGS.plannerDefaults?.passColors
     });
     const next = {
       ...current,
@@ -2340,6 +2364,32 @@
     "Blocks"
   ];
 
+  // js/ui/components/pass-colors.js
+  var palette = DEFAULT_PASS_COLORS.slice();
+  function normalizePalette(colors = []) {
+    if (!Array.isArray(colors) || !colors.length) {
+      return DEFAULT_PASS_COLORS.slice();
+    }
+    return colors.map((color, index) => {
+      if (typeof color === "string") {
+        const trimmed = color.trim();
+        if (trimmed) return trimmed;
+      }
+      return DEFAULT_PASS_COLORS[index % DEFAULT_PASS_COLORS.length];
+    });
+  }
+  function setPassColorPalette(colors) {
+    palette = normalizePalette(colors);
+  }
+  function passColorForOrder(order = 1) {
+    const list = palette.length ? palette : DEFAULT_PASS_COLORS;
+    if (!Number.isFinite(order)) {
+      return list[0] || DEFAULT_PASS_COLORS[0];
+    }
+    const index = Math.max(0, Math.floor(order) - 1) % list.length;
+    return list[index];
+  }
+
   // js/ui/settings.js
   function createEmptyState() {
     const empty = document.createElement("div");
@@ -2943,6 +2993,27 @@
     const defaultPlan = plannerDefaultsToPassPlan(currentPlannerDefaults);
     let planTemplate = defaultPlan;
     let passConfigs = Array.isArray(defaultPlan.schedule) ? defaultPlan.schedule.map((step) => ({ ...step })) : [];
+    let passColors = Array.isArray(currentPlannerDefaults?.passColors) && currentPlannerDefaults.passColors.length ? currentPlannerDefaults.passColors.slice() : DEFAULT_PASS_COLORS.slice();
+    function ensurePassColorCount(count) {
+      const normalized2 = Math.max(0, Number.isFinite(count) ? Math.round(count) : 0);
+      const next = [];
+      for (let i = 0; i < normalized2; i += 1) {
+        const existing = passColors[i];
+        if (typeof existing === "string" && existing.trim()) {
+          next.push(existing.trim());
+        } else {
+          next.push(DEFAULT_PASS_COLORS[i % DEFAULT_PASS_COLORS.length]);
+        }
+      }
+      passColors = next;
+    }
+    function resolvedPassColor(index) {
+      if (typeof passColors[index] === "string" && passColors[index].trim()) {
+        return passColors[index].trim();
+      }
+      return DEFAULT_PASS_COLORS[index % DEFAULT_PASS_COLORS.length];
+    }
+    ensurePassColorCount(passConfigs.length);
     const passCountField = document.createElement("label");
     passCountField.className = "lecture-pass-count settings-pass-count";
     passCountField.textContent = "Default pass count";
@@ -2958,6 +3029,28 @@
     passCountHelp.textContent = "Set the default number of spaced passes for new lectures.";
     passCountField.appendChild(passCountHelp);
     passForm.appendChild(passCountField);
+    const passColorSection = document.createElement("div");
+    passColorSection.className = "settings-pass-colors";
+    const passColorTitle = document.createElement("h3");
+    passColorTitle.className = "settings-pass-colors-title";
+    passColorTitle.textContent = "Pass colors";
+    passColorSection.appendChild(passColorTitle);
+    const passColorHint = document.createElement("p");
+    passColorHint.className = "settings-pass-colors-hint";
+    passColorHint.textContent = "Choose the accent color used for pass chips and timeline bars.";
+    passColorSection.appendChild(passColorHint);
+    const passColorList = document.createElement("div");
+    passColorList.className = "settings-pass-color-list";
+    passColorSection.appendChild(passColorList);
+    const passColorActions = document.createElement("div");
+    passColorActions.className = "settings-pass-color-actions";
+    const passColorReset = document.createElement("button");
+    passColorReset.type = "button";
+    passColorReset.className = "settings-pass-colors-reset";
+    passColorReset.textContent = "Reset to defaults";
+    passColorActions.appendChild(passColorReset);
+    passColorSection.appendChild(passColorActions);
+    passForm.appendChild(passColorSection);
     const passSummary = document.createElement("div");
     passSummary.className = "lecture-pass-summary-line settings-pass-summary";
     passForm.appendChild(passSummary);
@@ -2995,6 +3088,43 @@
       }
       passAdvancedSummary.textContent = `Pass details (${passConfigs.length})`;
     }
+    function renderPassColorInputs() {
+      passColorList.innerHTML = "";
+      ensurePassColorCount(passConfigs.length);
+      if (!passColors.length) {
+        passColorReset.disabled = true;
+        const empty = document.createElement("p");
+        empty.className = "settings-pass-colors-empty";
+        empty.textContent = "Increase the pass count above to configure colors.";
+        passColorList.appendChild(empty);
+        return;
+      }
+      passColorReset.disabled = false;
+      passColors = passColors.map((_, index) => resolvedPassColor(index));
+      passColors.forEach((color, index) => {
+        const row = document.createElement("div");
+        row.className = "settings-pass-color";
+        const label = document.createElement("span");
+        label.className = "settings-pass-color-label";
+        label.textContent = `Pass ${index + 1}`;
+        const swatch = document.createElement("span");
+        swatch.className = "settings-pass-color-swatch";
+        swatch.style.setProperty("--swatch-color", color);
+        const input = document.createElement("input");
+        input.className = "input settings-pass-color-input";
+        input.type = "text";
+        input.value = color;
+        input.placeholder = DEFAULT_PASS_COLORS[index % DEFAULT_PASS_COLORS.length];
+        input.addEventListener("input", (event) => {
+          const next = event.target.value.trim();
+          const value = next || DEFAULT_PASS_COLORS[index % DEFAULT_PASS_COLORS.length];
+          passColors[index] = value;
+          swatch.style.setProperty("--swatch-color", value);
+        });
+        row.append(label, swatch, input);
+        passColorList.appendChild(row);
+      });
+    }
     function renderPassEditor() {
       passList.innerHTML = "";
       if (!passConfigs.length) {
@@ -3003,6 +3133,7 @@
         empty.textContent = "No passes planned. Increase the count above to build a default schedule.";
         passList.appendChild(empty);
         updatePassSummary();
+        renderPassColorInputs();
         return;
       }
       passConfigs.forEach((config, index) => {
@@ -3100,13 +3231,20 @@
         passList.appendChild(row);
       });
       updatePassSummary();
+      renderPassColorInputs();
     }
     renderPassEditor();
+    passColorReset.addEventListener("click", () => {
+      passColors = DEFAULT_PASS_COLORS.slice(0, passConfigs.length || DEFAULT_PASS_COLORS.length);
+      ensurePassColorCount(passConfigs.length);
+      renderPassColorInputs();
+    });
     passCountInput.addEventListener("change", () => {
       const next = clampPassCount(passCountInput.value);
       passCountInput.value = String(next);
       const template = passConfigs.length ? { schedule: passConfigs.slice() } : planTemplate;
       passConfigs = adjustPassConfigs(passConfigs, next, template);
+      ensurePassColorCount(next);
       renderPassEditor();
     });
     passForm.addEventListener("submit", async (event) => {
@@ -3129,13 +3267,21 @@
       const originalText = passSaveBtn.textContent;
       passSaveBtn.disabled = true;
       passSaveBtn.textContent = "Saving\u2026";
+      const palette2 = passColors.map((color, index) => {
+        if (typeof color === "string") {
+          const trimmed = color.trim();
+          if (trimmed) return trimmed;
+        }
+        return DEFAULT_PASS_COLORS[index % DEFAULT_PASS_COLORS.length];
+      });
       try {
-        await saveSettings({ plannerDefaults: { anchorOffsets, passes: payloadPasses } });
+        await saveSettings({ plannerDefaults: { anchorOffsets, passes: payloadPasses, passColors: palette2 } });
         const updated = await getSettings();
         currentPlannerDefaults = updated?.plannerDefaults || DEFAULT_PLANNER_DEFAULTS;
         const refreshedPlan = plannerDefaultsToPassPlan(currentPlannerDefaults);
         planTemplate = refreshedPlan;
         passConfigs = Array.isArray(refreshedPlan.schedule) ? refreshedPlan.schedule.map((step) => ({ ...step })) : [];
+        passColors = Array.isArray(currentPlannerDefaults?.passColors) && currentPlannerDefaults.passColors.length ? currentPlannerDefaults.passColors.slice() : DEFAULT_PASS_COLORS.slice();
         passCountInput.value = String(passConfigs.length);
         renderPassEditor();
         passStatus.textContent = "Pass defaults saved.";
@@ -5311,13 +5457,13 @@
     return colors.slice(0, Math.max(1, limit));
   }
   function buildGradient(colors) {
-    const palette = colors && colors.length ? colors : ["var(--accent)"];
-    if (palette.length === 1) {
-      const single = palette[0];
+    const palette2 = colors && colors.length ? colors : ["var(--accent)"];
+    if (palette2.length === 1) {
+      const single = palette2[0];
       return `linear-gradient(135deg, ${single} 0%, color-mix(in srgb, ${single} 38%, transparent) 100%)`;
     }
-    const stops = palette.map((color, idx) => {
-      const pct = palette.length === 1 ? 0 : Math.round(idx / (palette.length - 1) * 100);
+    const stops = palette2.map((color, idx) => {
+      const pct = palette2.length === 1 ? 0 : Math.round(idx / (palette2.length - 1) * 100);
       return `${color} ${pct}%`;
     });
     return `linear-gradient(135deg, ${stops.join(", ")})`;
@@ -5817,13 +5963,13 @@
       tile.type = "button";
       tile.className = "deck-tile";
       tile.setAttribute("aria-label", `${lecture.title} (${lecture.cards.length} cards)`);
-      const palette = lecture.palette || getLecturePalette(lecture.cards);
-      lecture.palette = palette;
-      const accent = palette.accent;
+      const palette2 = lecture.palette || getLecturePalette(lecture.cards);
+      lecture.palette = palette2;
+      const accent = palette2.accent;
       const stack = document.createElement("div");
       stack.className = "deck-stack";
       stack.style.setProperty("--deck-accent", accent);
-      stack.style.setProperty("--deck-gradient", palette.gradient);
+      stack.style.setProperty("--deck-gradient", palette2.gradient);
       const preview = lecture.cards.slice(0, 4);
       stack.style.setProperty("--spread", preview.length > 0 ? (preview.length - 1) / 2 : 0);
       if (!preview.length) {
@@ -5842,7 +5988,7 @@
         });
       }
       tile.style.setProperty("--deck-accent", accent);
-      tile.style.setProperty("--deck-gradient", palette.gradient);
+      tile.style.setProperty("--deck-gradient", palette2.gradient);
       tile.appendChild(stack);
       const info = document.createElement("div");
       info.className = "deck-info";
@@ -7952,18 +8098,6 @@
     const months = minutes / (60 * 24 * 30);
     return `${Math.round(months)}mo`;
   }
-  var PASS_ACCENTS = [
-    "var(--pink)",
-    "var(--blue)",
-    "var(--green)",
-    "var(--orange)",
-    "var(--purple)",
-    "var(--teal)",
-    "var(--yellow)",
-    "var(--rose)",
-    "var(--indigo)",
-    "var(--cyan)"
-  ];
   var OFFSET_UNITS2 = [
     { id: "minutes", label: "minutes", minutes: 1 },
     { id: "hours", label: "hours", minutes: 60 },
@@ -8032,9 +8166,7 @@
     return date.getTime();
   }
   function passAccent(order = 1) {
-    if (!Number.isFinite(order)) return PASS_ACCENTS[0];
-    const idx = Math.max(0, Math.floor(order) - 1) % PASS_ACCENTS.length;
-    return PASS_ACCENTS[idx];
+    return passColorForOrder(order);
   }
   function formatPassDueTimestamp(due) {
     if (!Number.isFinite(due)) return "";
@@ -9707,6 +9839,7 @@
       loadBlockCatalog(),
       getSettings()
     ]);
+    setPassColorPalette(settings?.plannerDefaults?.passColors);
     const filters = ensureLectureState();
     const blocks = (catalog.blocks || []).map((block) => ({ ...block }));
     const allLectures = collectLectures(catalog);
@@ -11421,19 +11554,8 @@
   var loadCatalog = loadBlockCatalog;
   var fetchLectures2 = listAllLectures;
   var persistLecture = saveLecture;
+  var fetchSettings = getSettings;
   var DAY_MS2 = 24 * 60 * 60 * 1e3;
-  var PASS_COLORS = [
-    "var(--pink)",
-    "var(--blue)",
-    "var(--green)",
-    "var(--orange)",
-    "var(--purple)",
-    "var(--teal)",
-    "var(--yellow)",
-    "var(--rose)",
-    "var(--indigo)",
-    "var(--cyan)"
-  ];
   var DEFAULT_BOARD_DAYS = 14;
   var SHIFT_OFFSET_UNITS = [
     { id: "minutes", label: "minutes", minutes: 1 },
@@ -11441,9 +11563,9 @@
     { id: "days", label: "days", minutes: 60 * 24 },
     { id: "weeks", label: "weeks", minutes: 60 * 24 * 7 }
   ];
-  var TIMELINE_BASE_UNIT_HEIGHT = 8;
+  var TIMELINE_BASE_UNIT_HEIGHT = 20;
   var TIMELINE_MAX_BAR_HEIGHT = 200;
-  var TIMELINE_MIN_SEGMENT_HEIGHT = 3;
+  var TIMELINE_MIN_SEGMENT_HEIGHT = 12;
   var BLOCK_RANGE_FORMAT = new Intl.DateTimeFormat(void 0, {
     month: "short",
     day: "numeric",
@@ -11473,9 +11595,7 @@
     return state.blockBoard;
   }
   function passColor(order = 1) {
-    if (!Number.isFinite(order)) return PASS_COLORS[0];
-    const idx = Math.max(0, Math.floor(order) - 1) % PASS_COLORS.length;
-    return PASS_COLORS[idx];
+    return passColorForOrder(order);
   }
   function startOfDay2(timestamp) {
     const date = new Date(timestamp);
@@ -12149,7 +12269,7 @@
         bar.title = tooltip;
         const count = entries.length;
         if (count > 0) {
-          const gap = 2;
+          const gap = 0;
           let segmentHeight = TIMELINE_BASE_UNIT_HEIGHT;
           const gapTotal = gap * Math.max(0, count - 1);
           let totalHeight = segmentHeight * count + gapTotal;
@@ -12229,7 +12349,18 @@
     container.innerHTML = "";
     container.classList.add("block-board-container");
     const boardState = ensureBoardState();
-    const { blocks } = await loadCatalog();
+    const [catalog, lectures] = await Promise.all([
+      loadCatalog(),
+      fetchLectures2()
+    ]);
+    let settings = null;
+    try {
+      settings = await fetchSettings();
+    } catch (err) {
+      settings = null;
+    }
+    const { blocks } = catalog;
+    setPassColorPalette(settings?.plannerDefaults?.passColors);
     if ((!Array.isArray(boardState.collapsedBlocks) || boardState.collapsedBlocks.length === 0) && Array.isArray(blocks)) {
       const activeBlockId = findActiveBlockId(blocks);
       if (activeBlockId) {
@@ -12240,7 +12371,6 @@
         }
       }
     }
-    const lectures = await fetchLectures2();
     const fallbackDays = collectDefaultBoardDays();
     const queues = groupLectureQueues(lectures);
     const urgentHost = document.createElement("div");
@@ -12924,11 +13054,11 @@
     return isCorrect ? "correct-answer" : "";
   }
   function renderPalette(sidebar, sess, render) {
-    const palette = document.createElement("div");
-    palette.className = "exam-palette";
+    const palette2 = document.createElement("div");
+    palette2.className = "exam-palette";
     const title = document.createElement("h3");
     title.textContent = "Question Map";
-    palette.appendChild(title);
+    palette2.appendChild(title);
     const grid = document.createElement("div");
     grid.className = "exam-palette-grid";
     const answers = sess.mode === "review" ? sess.result.answers || {} : sess.answers || {};
@@ -12954,8 +13084,8 @@
       });
       grid.appendChild(btn);
     });
-    palette.appendChild(grid);
-    sidebar.appendChild(palette);
+    palette2.appendChild(grid);
+    sidebar.appendChild(palette2);
   }
   function renderExamRunner(root, render) {
     const sess = state.examSession;
@@ -14341,24 +14471,24 @@
     if (!activeTab || !activeTab.manualMode) {
       return null;
     }
-    const palette = document.createElement("div");
-    palette.className = "map-palette";
+    const palette2 = document.createElement("div");
+    palette2.className = "map-palette";
     const title = document.createElement("h3");
     title.textContent = "Concept library";
-    palette.appendChild(title);
+    palette2.appendChild(title);
     const description = document.createElement("p");
     description.className = "map-palette-hint";
     description.textContent = "Drag terms onto the canvas to add them to this map.";
-    palette.appendChild(description);
+    palette2.appendChild(description);
     const searchInput = document.createElement("input");
     searchInput.type = "search";
     searchInput.className = "input map-palette-search";
     searchInput.placeholder = "Filter terms";
     searchInput.value = mapState.paletteSearch || "";
-    palette.appendChild(searchInput);
+    palette2.appendChild(searchInput);
     const list = document.createElement("div");
     list.className = "map-palette-list";
-    palette.appendChild(list);
+    palette2.appendChild(list);
     const manualSet = new Set(Array.isArray(activeTab.manualIds) ? activeTab.manualIds : []);
     const itemMap = mapState.itemMap || {};
     function renderList() {
@@ -14427,8 +14557,8 @@
       });
     }
     activeWrap.appendChild(activeList);
-    palette.appendChild(activeWrap);
-    return palette;
+    palette2.appendChild(activeWrap);
+    return palette2;
   }
   function handleSearchSubmit(rawQuery) {
     const query = (rawQuery || "").trim();

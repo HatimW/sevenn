@@ -17,6 +17,7 @@ import {
   calculateNextDue
 } from '../../lectures/scheduler.js';
 import { LECTURE_PASS_ACTIONS } from '../../lectures/actions.js';
+import { passColorForOrder, setPassColorPalette } from './pass-colors.js';
 
 function ensureLectureState() {
   if (!state.lectures) {
@@ -304,19 +305,6 @@ function formatOffset(minutes) {
   return `${Math.round(months)}mo`;
 }
 
-const PASS_ACCENTS = [
-  'var(--pink)',
-  'var(--blue)',
-  'var(--green)',
-  'var(--orange)',
-  'var(--purple)',
-  'var(--teal)',
-  'var(--yellow)',
-  'var(--rose)',
-  'var(--indigo)',
-  'var(--cyan)'
-];
-
 const OFFSET_UNITS = [
   { id: 'minutes', label: 'minutes', minutes: 1 },
   { id: 'hours', label: 'hours', minutes: 60 },
@@ -393,9 +381,7 @@ function parseDateInputValue(value) {
 }
 
 function passAccent(order = 1) {
-  if (!Number.isFinite(order)) return PASS_ACCENTS[0];
-  const idx = Math.max(0, Math.floor(order) - 1) % PASS_ACCENTS.length;
-  return PASS_ACCENTS[idx];
+  return passColorForOrder(order);
 }
 
 function formatPassDueTimestamp(due) {
@@ -2399,6 +2385,7 @@ export async function renderLectures(root, redraw) {
     loadBlockCatalog(),
     getSettings()
   ]);
+  setPassColorPalette(settings?.plannerDefaults?.passColors);
   const filters = ensureLectureState();
   const blocks = (catalog.blocks || []).map(block => ({ ...block }));
   const allLectures = collectLectures(catalog);

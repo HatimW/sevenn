@@ -12,6 +12,7 @@ import { confirmModal } from './components/confirm.js';
 import { DEFAULT_REVIEW_STEPS, REVIEW_RATINGS } from '../review/constants.js';
 import { DEFAULT_PASS_PLAN, DEFAULT_PLANNER_DEFAULTS, plannerDefaultsToPassPlan } from '../lectures/scheduler.js';
 import { LECTURE_PASS_ACTIONS } from '../lectures/actions.js';
+import { DEFAULT_PASS_COLORS } from './components/pass-colors.js';
 
 function createEmptyState() {
   const empty = document.createElement('div');
@@ -744,6 +745,32 @@ export async function renderSettings(root) {
   let passConfigs = Array.isArray(defaultPlan.schedule)
     ? defaultPlan.schedule.map(step => ({ ...step }))
     : [];
+  let passColors = Array.isArray(currentPlannerDefaults?.passColors) && currentPlannerDefaults.passColors.length
+    ? currentPlannerDefaults.passColors.slice()
+    : DEFAULT_PASS_COLORS.slice();
+
+  function ensurePassColorCount(count) {
+    const normalized = Math.max(0, Number.isFinite(count) ? Math.round(count) : 0);
+    const next = [];
+    for (let i = 0; i < normalized; i += 1) {
+      const existing = passColors[i];
+      if (typeof existing === 'string' && existing.trim()) {
+        next.push(existing.trim());
+      } else {
+        next.push(DEFAULT_PASS_COLORS[i % DEFAULT_PASS_COLORS.length]);
+      }
+    }
+    passColors = next;
+  }
+
+  function resolvedPassColor(index) {
+    if (typeof passColors[index] === 'string' && passColors[index].trim()) {
+      return passColors[index].trim();
+    }
+    return DEFAULT_PASS_COLORS[index % DEFAULT_PASS_COLORS.length];
+  }
+
+  ensurePassColorCount(passConfigs.length);
 
   const passCountField = document.createElement('label');
   passCountField.className = 'lecture-pass-count settings-pass-count';
@@ -760,6 +787,29 @@ export async function renderSettings(root) {
   passCountHelp.textContent = 'Set the default number of spaced passes for new lectures.';
   passCountField.appendChild(passCountHelp);
   passForm.appendChild(passCountField);
+
+  const passColorSection = document.createElement('div');
+  passColorSection.className = 'settings-pass-colors';
+  const passColorTitle = document.createElement('h3');
+  passColorTitle.className = 'settings-pass-colors-title';
+  passColorTitle.textContent = 'Pass colors';
+  passColorSection.appendChild(passColorTitle);
+  const passColorHint = document.createElement('p');
+  passColorHint.className = 'settings-pass-colors-hint';
+  passColorHint.textContent = 'Choose the accent color used for pass chips and timeline bars.';
+  passColorSection.appendChild(passColorHint);
+  const passColorList = document.createElement('div');
+  passColorList.className = 'settings-pass-color-list';
+  passColorSection.appendChild(passColorList);
+  const passColorActions = document.createElement('div');
+  passColorActions.className = 'settings-pass-color-actions';
+  const passColorReset = document.createElement('button');
+  passColorReset.type = 'button';
+  passColorReset.className = 'settings-pass-colors-reset';
+  passColorReset.textContent = 'Reset to defaults';
+  passColorActions.appendChild(passColorReset);
+  passColorSection.appendChild(passColorActions);
+  passForm.appendChild(passColorSection);
 
   const passSummary = document.createElement('div');
   passSummary.className = 'lecture-pass-summary-line settings-pass-summary';
@@ -807,6 +857,44 @@ export async function renderSettings(root) {
     passAdvancedSummary.textContent = `Pass details (${passConfigs.length})`;
   }
 
+  function renderPassColorInputs() {
+    passColorList.innerHTML = '';
+    ensurePassColorCount(passConfigs.length);
+    if (!passColors.length) {
+      passColorReset.disabled = true;
+      const empty = document.createElement('p');
+      empty.className = 'settings-pass-colors-empty';
+      empty.textContent = 'Increase the pass count above to configure colors.';
+      passColorList.appendChild(empty);
+      return;
+    }
+    passColorReset.disabled = false;
+    passColors = passColors.map((_, index) => resolvedPassColor(index));
+    passColors.forEach((color, index) => {
+      const row = document.createElement('div');
+      row.className = 'settings-pass-color';
+      const label = document.createElement('span');
+      label.className = 'settings-pass-color-label';
+      label.textContent = `Pass ${index + 1}`;
+      const swatch = document.createElement('span');
+      swatch.className = 'settings-pass-color-swatch';
+      swatch.style.setProperty('--swatch-color', color);
+      const input = document.createElement('input');
+      input.className = 'input settings-pass-color-input';
+      input.type = 'text';
+      input.value = color;
+      input.placeholder = DEFAULT_PASS_COLORS[index % DEFAULT_PASS_COLORS.length];
+      input.addEventListener('input', event => {
+        const next = event.target.value.trim();
+        const value = next || DEFAULT_PASS_COLORS[index % DEFAULT_PASS_COLORS.length];
+        passColors[index] = value;
+        swatch.style.setProperty('--swatch-color', value);
+      });
+      row.append(label, swatch, input);
+      passColorList.appendChild(row);
+    });
+  }
+
   function renderPassEditor() {
     passList.innerHTML = '';
     if (!passConfigs.length) {
@@ -815,6 +903,7 @@ export async function renderSettings(root) {
       empty.textContent = 'No passes planned. Increase the count above to build a default schedule.';
       passList.appendChild(empty);
       updatePassSummary();
+      renderPassColorInputs();
       return;
     }
     passConfigs.forEach((config, index) => {
@@ -922,9 +1011,16 @@ export async function renderSettings(root) {
     });
 
     updatePassSummary();
+    renderPassColorInputs();
   }
 
   renderPassEditor();
+
+  passColorReset.addEventListener('click', () => {
+    passColors = DEFAULT_PASS_COLORS.slice(0, passConfigs.length || DEFAULT_PASS_COLORS.length);
+    ensurePassColorCount(passConfigs.length);
+    renderPassColorInputs();
+  });
 
   passCountInput.addEventListener('change', () => {
     const next = clampPassCount(passCountInput.value);
@@ -933,6 +1029,7 @@ export async function renderSettings(root) {
       ? { schedule: passConfigs.slice() }
       : planTemplate;
     passConfigs = adjustPassConfigs(passConfigs, next, template);
+    ensurePassColorCount(next);
     renderPassEditor();
   });
 
@@ -959,8 +1056,16 @@ export async function renderSettings(root) {
     passSaveBtn.disabled = true;
     passSaveBtn.textContent = 'Saving…';
 
+    const palette = passColors.map((color, index) => {
+      if (typeof color === 'string') {
+        const trimmed = color.trim();
+        if (trimmed) return trimmed;
+      }
+      return DEFAULT_PASS_COLORS[index % DEFAULT_PASS_COLORS.length];
+    });
+
     try {
-      await saveSettings({ plannerDefaults: { anchorOffsets, passes: payloadPasses } });
+      await saveSettings({ plannerDefaults: { anchorOffsets, passes: payloadPasses, passColors: palette } });
       const updated = await getSettings();
       currentPlannerDefaults = updated?.plannerDefaults || DEFAULT_PLANNER_DEFAULTS;
       const refreshedPlan = plannerDefaultsToPassPlan(currentPlannerDefaults);
@@ -968,6 +1073,9 @@ export async function renderSettings(root) {
       passConfigs = Array.isArray(refreshedPlan.schedule)
         ? refreshedPlan.schedule.map(step => ({ ...step }))
         : [];
+      passColors = Array.isArray(currentPlannerDefaults?.passColors) && currentPlannerDefaults.passColors.length
+        ? currentPlannerDefaults.passColors.slice()
+        : DEFAULT_PASS_COLORS.slice();
       passCountInput.value = String(passConfigs.length);
       renderPassEditor();
       passStatus.textContent = 'Pass defaults saved.';
