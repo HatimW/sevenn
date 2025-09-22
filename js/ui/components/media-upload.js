@@ -32,7 +32,7 @@ export function cropImageFile(file) {
     image.onload = () => {
       URL.revokeObjectURL(objectUrl);
       try {
-        openCropDialog({ image, file }).then(resolve).catch(reject);
+        openCropDialog({ image, file }, { mimeType: file.type }).then(resolve).catch(reject);
       } catch (err) {
         reject(err);
       }
@@ -45,7 +45,47 @@ export function cropImageFile(file) {
   });
 }
 
-function openCropDialog({ image, file }) {
+function inferMimeFromDataUrl(src) {
+  if (typeof src !== 'string') return '';
+  const match = src.match(/^data:([^;,]+)[;,]/i);
+  return match ? match[1] : '';
+}
+
+export function editImageSource(src, { altText = '', width, height, mimeType } = {}) {
+  if (!src) {
+    return Promise.reject(new Error('Image source is required.'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const options = {
+        initialAlt: altText,
+        initialWidth: typeof width === 'number' && width > 0 ? width : undefined,
+        initialHeight: typeof height === 'number' && height > 0 ? height : undefined,
+        mimeType: mimeType || inferMimeFromDataUrl(src) || 'image/png'
+      };
+      try {
+        openCropDialog({ image, file: null }, options).then(resolve).catch(reject);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    image.onerror = () => {
+      reject(new Error('Failed to load image.'));
+    };
+    try {
+      if (!/^data:/i.test(src) && !/^blob:/i.test(src)) {
+        image.crossOrigin = 'anonymous';
+      }
+      image.src = src;
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+function openCropDialog({ image, file }, options = {}) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'media-cropper-overlay';
@@ -69,9 +109,9 @@ function openCropDialog({ image, file }) {
     header.appendChild(closeBtn);
     dialog.appendChild(header);
 
-    const body = document.createElement('div');
-    body.className = 'media-cropper-body';
-    dialog.appendChild(body);
+  const body = document.createElement('div');
+  body.className = 'media-cropper-body';
+  dialog.appendChild(body);
 
     const preview = document.createElement('div');
     preview.className = 'media-cropper-preview';
@@ -92,8 +132,8 @@ function openCropDialog({ image, file }) {
     const ratioSelect = document.createElement('select');
     ratioSelect.className = 'media-cropper-select';
     const naturalRatio = sanitizeAspectRatio(image.naturalWidth / image.naturalHeight || 1);
-    const ratioOptions = [
-      { value: 'original', label: 'Original', ratio: naturalRatio },
+  const ratioOptions = [
+    { value: 'original', label: 'Original', ratio: naturalRatio },
       { value: '1:1', label: 'Square', ratio: 1 },
       { value: '4:3', label: '4 : 3', ratio: 4 / 3 },
       { value: '3:4', label: '3 : 4', ratio: 3 / 4 },
@@ -129,17 +169,20 @@ function openCropDialog({ image, file }) {
     zoomRow.appendChild(zoomValue);
     controls.appendChild(zoomRow);
 
-    const sizeRow = document.createElement('div');
-    sizeRow.className = 'media-cropper-row';
-    const widthLabel = document.createElement('label');
-    widthLabel.textContent = 'Output width';
-    const widthInput = document.createElement('input');
-    widthInput.type = 'number';
-    widthInput.min = '64';
-    widthInput.max = String(Math.max(64, Math.round(image.naturalWidth) || 1024));
-    widthInput.value = String(Math.min(960, Math.round(image.naturalWidth) || 960));
-    widthInput.className = 'media-cropper-size-input';
-    widthLabel.appendChild(widthInput);
+  const sizeRow = document.createElement('div');
+  sizeRow.className = 'media-cropper-row';
+  const widthLabel = document.createElement('label');
+  widthLabel.textContent = 'Output width';
+  const widthInput = document.createElement('input');
+  widthInput.type = 'number';
+  widthInput.min = '64';
+  const naturalWidth = Math.round(image.naturalWidth) || Math.round(image.width) || 1024;
+  widthInput.max = String(Math.max(64, naturalWidth));
+  const presetWidth = Math.round(options.initialWidth || 0);
+  const defaultWidth = Math.min(960, naturalWidth || 960);
+  widthInput.value = String(presetWidth > 0 ? Math.min(Math.max(64, presetWidth), Math.max(64, naturalWidth)) : defaultWidth);
+  widthInput.className = 'media-cropper-size-input';
+  widthLabel.appendChild(widthInput);
     sizeRow.appendChild(widthLabel);
     const dimensions = document.createElement('span');
     dimensions.className = 'media-cropper-dimensions';
@@ -151,10 +194,13 @@ function openCropDialog({ image, file }) {
     altRow.className = 'media-cropper-row';
     const altLabel = document.createElement('label');
     altLabel.textContent = 'Alt text';
-    const altInput = document.createElement('input');
-    altInput.type = 'text';
-    altInput.placeholder = 'Describe the image';
-    altInput.value = (file.name || '').replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+  const altInput = document.createElement('input');
+  altInput.type = 'text';
+  altInput.placeholder = 'Describe the image';
+  const defaultAlt = options.initialAlt != null && options.initialAlt !== ''
+    ? options.initialAlt
+    : (file?.name || '').replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+  altInput.value = defaultAlt;
     altInput.className = 'media-cropper-alt-input';
     altLabel.appendChild(altInput);
     altRow.appendChild(altLabel);
@@ -180,7 +226,8 @@ function openCropDialog({ image, file }) {
     ctx.imageSmoothingQuality = 'high';
 
     let aspectRatio = naturalRatio;
-    let frameWidth = DEFAULT_FRAME_WIDTH;
+    let frameWidth = Math.min(DEFAULT_FRAME_WIDTH, presetWidth > 0 ? presetWidth : naturalWidth || DEFAULT_FRAME_WIDTH);
+    if (!Number.isFinite(frameWidth) || frameWidth <= 0) frameWidth = DEFAULT_FRAME_WIDTH;
     let frameHeight = Math.max(120, Math.round(frameWidth / aspectRatio));
     let minZoom = 1;
     let zoom = 1;
@@ -232,7 +279,7 @@ function openCropDialog({ image, file }) {
 
     function getOutputWidth() {
       const raw = Number(widthInput.value);
-      const maxWidth = Math.max(64, Math.round(image.naturalWidth) || 1024);
+      const maxWidth = Math.max(64, naturalWidth);
       if (!Number.isFinite(raw)) return Math.min(maxWidth, 960);
       return clamp(Math.round(raw), 64, maxWidth);
     }
@@ -375,7 +422,8 @@ function openCropDialog({ image, file }) {
         exportCanvas.height
       );
 
-      const mime = /^image\/jpe?g$/i.test(file.type) ? 'image/jpeg' : 'image/png';
+      const preferredMime = options.mimeType || file?.type || '';
+      const mime = /^image\/jpe?g$/i.test(preferredMime) ? 'image/jpeg' : /^image\/png$/i.test(preferredMime) ? 'image/png' : 'image/png';
       const quality = mime === 'image/jpeg' ? 0.92 : undefined;
       const dataUrl = toDataUrl(exportCanvas, mime, quality);
       const altText = altInput.value.trim();

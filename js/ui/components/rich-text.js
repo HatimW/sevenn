@@ -1,4 +1,4 @@
-import { cropImageFile, readFileAsDataUrl } from './media-upload.js';
+import { cropImageFile, readFileAsDataUrl, editImageSource } from './media-upload.js';
 
 const allowedTags = new Set([
   'a','b','strong','i','em','u','s','strike','del','mark','span','font','p','div','br','ul','ol','li','img','sub','sup','blockquote','code','pre','hr','video','audio','source','iframe'
@@ -191,15 +191,32 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   mediaFileInput.style.display = 'none';
   wrapper.appendChild(mediaFileInput);
 
-  async function insertCroppedImageFile(file) {
+  let pendingImageTarget = null;
+  let activeImageEditor = null;
+
+  async function insertCroppedImageFile(file, targetImage = null) {
     try {
       const result = await cropImageFile(file);
       if (!result) return;
       const altText = result.altText || (file.name || '').replace(/\.[^.]+$/, '');
-      const safeAlt = altText ? escapeHtml(altText) : '';
-      const altAttr = safeAlt ? ` alt="${safeAlt}"` : '';
-      const html = `<img src="${result.dataUrl}" width="${result.width}" height="${result.height}"${altAttr}>`;
-      insertHtml(html);
+      if (targetImage && wrapper.contains(targetImage)) {
+        targetImage.src = result.dataUrl;
+        if (altText) {
+          targetImage.setAttribute('alt', altText);
+        } else {
+          targetImage.removeAttribute('alt');
+        }
+        setImageSize(targetImage, result.width, result.height);
+        triggerEditorChange();
+        if (activeImageEditor && activeImageEditor.image === targetImage && typeof activeImageEditor.update === 'function') {
+          requestAnimationFrame(() => activeImageEditor.update());
+        }
+      } else {
+        const safeAlt = altText ? escapeHtml(altText) : '';
+        const altAttr = safeAlt ? ` alt="${safeAlt}"` : '';
+        const html = `<img src="${result.dataUrl}" width="${result.width}" height="${result.height}"${altAttr}>`;
+        insertHtml(html);
+      }
     } catch (err) {
       console.error('Failed to upload image', err);
     }
@@ -222,7 +239,9 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
 
   imageFileInput.addEventListener('change', () => {
     const file = imageFileInput.files?.[0];
-    if (file) insertCroppedImageFile(file);
+    const target = pendingImageTarget;
+    pendingImageTarget = null;
+    if (file) insertCroppedImageFile(file, target);
     imageFileInput.value = '';
   });
 
@@ -240,6 +259,267 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   if (ariaLabel) editable.setAttribute('aria-label', ariaLabel);
   if (ariaLabelledBy) editable.setAttribute('aria-labelledby', ariaLabelledBy);
   wrapper.appendChild(editable);
+
+  function triggerEditorChange(){
+    editable.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function setImageSize(image, width, height){
+    if (!(image instanceof HTMLImageElement)) return;
+    const MIN_SIZE = 32;
+    const MAX_SIZE = 4096;
+    const widthValue = Number.isFinite(width) ? Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(width))) : null;
+    const heightValue = Number.isFinite(height) ? Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(height))) : null;
+    if (widthValue) {
+      image.style.width = `${widthValue}px`;
+      image.setAttribute('width', String(widthValue));
+    } else {
+      image.style.removeProperty('width');
+      image.removeAttribute('width');
+    }
+    if (heightValue) {
+      image.style.height = `${heightValue}px`;
+      image.setAttribute('height', String(heightValue));
+    } else {
+      image.style.removeProperty('height');
+      image.removeAttribute('height');
+    }
+  }
+
+  function destroyActiveImageEditor(){
+    if (activeImageEditor && typeof activeImageEditor.destroy === 'function') {
+      activeImageEditor.destroy();
+    }
+    activeImageEditor = null;
+  }
+
+  function beginImageEditing(image){
+    if (!(image instanceof HTMLImageElement)) return;
+    if (!wrapper.contains(image)) return;
+    if (activeImageEditor && activeImageEditor.image === image) {
+      if (typeof activeImageEditor.update === 'function') {
+        requestAnimationFrame(() => activeImageEditor.update());
+      }
+      return;
+    }
+    destroyActiveImageEditor();
+    activeImageEditor = createImageEditor(image);
+    if (activeImageEditor && typeof activeImageEditor.update === 'function') {
+      requestAnimationFrame(() => activeImageEditor.update());
+    }
+  }
+
+  function createImageEditor(image){
+    const overlay = document.createElement('div');
+    overlay.className = 'rich-editor-image-overlay';
+    overlay.setAttribute('aria-hidden', 'true');
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'rich-editor-image-toolbar';
+
+    const cropBtn = document.createElement('button');
+    cropBtn.type = 'button';
+    cropBtn.className = 'rich-editor-image-tool';
+    cropBtn.textContent = 'Crop';
+
+    const replaceBtn = document.createElement('button');
+    replaceBtn.type = 'button';
+    replaceBtn.className = 'rich-editor-image-tool';
+    replaceBtn.textContent = 'Replace';
+
+    const doneBtn = document.createElement('button');
+    doneBtn.type = 'button';
+    doneBtn.className = 'rich-editor-image-tool rich-editor-image-tool--primary';
+    doneBtn.textContent = 'Done';
+
+    toolbar.append(cropBtn, replaceBtn, doneBtn);
+    overlay.appendChild(toolbar);
+
+    const handleDefs = [
+      { name: 'se', axis: 'both', label: 'Resize from corner' },
+      { name: 'e', axis: 'x', label: 'Resize width' },
+      { name: 's', axis: 'y', label: 'Resize height' }
+    ];
+
+    let resizeState = null;
+
+    const onPointerMove = (event) => {
+      if (!resizeState) return;
+      event.preventDefault();
+      const dx = event.clientX - resizeState.startX;
+      const dy = event.clientY - resizeState.startY;
+      let nextWidth = resizeState.startWidth;
+      let nextHeight = resizeState.startHeight;
+      if (resizeState.axis === 'both' || resizeState.axis === 'x') {
+        nextWidth = resizeState.startWidth + dx;
+      }
+      if (resizeState.axis === 'both' || resizeState.axis === 'y') {
+        nextHeight = resizeState.startHeight + dy;
+      }
+      if (resizeState.keepRatio && resizeState.ratio > 0) {
+        if (resizeState.axis === 'x') {
+          nextHeight = nextWidth / resizeState.ratio;
+        } else if (resizeState.axis === 'y') {
+          nextWidth = nextHeight * resizeState.ratio;
+        } else {
+          if (Math.abs(dx) >= Math.abs(dy)) {
+            nextHeight = nextWidth / resizeState.ratio;
+          } else {
+            nextWidth = nextHeight * resizeState.ratio;
+          }
+        }
+      }
+      setImageSize(image, nextWidth, nextHeight);
+      requestAnimationFrame(() => update());
+    };
+
+    const stopResize = () => {
+      if (!resizeState) return;
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+      if (resizeState.handle && resizeState.pointerId != null) {
+        try {
+          resizeState.handle.releasePointerCapture(resizeState.pointerId);
+        } catch (err) {
+          // ignore
+        }
+      }
+      overlay.classList.remove('is-resizing');
+      resizeState = null;
+      triggerEditorChange();
+      requestAnimationFrame(() => update());
+    };
+
+    handleDefs.forEach(def => {
+      const handle = document.createElement('button');
+      handle.type = 'button';
+      handle.className = `rich-editor-image-handle rich-editor-image-handle--${def.name}`;
+      handle.setAttribute('aria-label', def.label);
+      handle.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = image.getBoundingClientRect();
+        resizeState = {
+          axis: def.axis,
+          startX: event.clientX,
+          startY: event.clientY,
+          startWidth: rect.width,
+          startHeight: rect.height,
+          ratio: rect.height > 0 ? rect.width / rect.height : 1,
+          keepRatio: event.shiftKey,
+          pointerId: event.pointerId,
+          handle
+        };
+        overlay.classList.add('is-resizing');
+        try {
+          handle.setPointerCapture(event.pointerId);
+        } catch (err) {
+          // ignore unsupported pointer capture
+        }
+        window.addEventListener('pointermove', onPointerMove);
+        window.addEventListener('pointerup', stopResize);
+        window.addEventListener('pointercancel', stopResize);
+      });
+      overlay.appendChild(handle);
+    });
+
+    wrapper.appendChild(overlay);
+    image.classList.add('rich-editor-image-active');
+
+    const update = () => {
+      if (!document.body.contains(image)) {
+        destroy();
+        return;
+      }
+      const rect = image.getBoundingClientRect();
+      const wrapperRect = wrapper.getBoundingClientRect();
+      overlay.style.width = `${rect.width}px`;
+      overlay.style.height = `${rect.height}px`;
+      overlay.style.left = `${rect.left - wrapperRect.left}px`;
+      overlay.style.top = `${rect.top - wrapperRect.top}px`;
+    };
+
+    const onScroll = () => update();
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        destroy();
+      }
+    };
+
+    const handleOutside = (event) => {
+      if (event.target === image) return;
+      if (overlay.contains(event.target)) return;
+      destroy();
+    };
+
+    const resizeObserver = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => update())
+      : null;
+    if (resizeObserver) {
+      try {
+        resizeObserver.observe(image);
+      } catch (err) {
+        // ignore
+      }
+    }
+
+    const destroy = () => {
+      if (resizeObserver) resizeObserver.disconnect();
+      document.removeEventListener('scroll', onScroll, true);
+      editable.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', update);
+      document.removeEventListener('mousedown', handleOutside, true);
+      document.removeEventListener('keydown', onKeyDown, true);
+      stopResize();
+      overlay.remove();
+      image.classList.remove('rich-editor-image-active');
+      if (pendingImageTarget === image) pendingImageTarget = null;
+    };
+
+    cropBtn.addEventListener('click', async () => {
+      try {
+        const currentWidth = Number(image.getAttribute('width')) || Math.round(image.getBoundingClientRect().width);
+        const currentHeight = Number(image.getAttribute('height')) || Math.round(image.getBoundingClientRect().height);
+        const alt = image.getAttribute('alt') || '';
+        const result = await editImageSource(image.src, { altText: alt, width: currentWidth, height: currentHeight });
+        if (!result) return;
+        image.src = result.dataUrl;
+        if (result.altText) {
+          image.setAttribute('alt', result.altText);
+        } else {
+          image.removeAttribute('alt');
+        }
+        setImageSize(image, result.width, result.height);
+        triggerEditorChange();
+        requestAnimationFrame(() => update());
+      } catch (err) {
+        console.error('Failed to edit image', err);
+      }
+    });
+
+    replaceBtn.addEventListener('click', () => {
+      pendingImageTarget = image;
+      imageFileInput.click();
+    });
+
+    doneBtn.addEventListener('click', () => {
+      destroyActiveImageEditor();
+    });
+
+    document.addEventListener('scroll', onScroll, true);
+    editable.addEventListener('scroll', onScroll);
+    window.addEventListener('resize', update);
+    document.addEventListener('mousedown', handleOutside, true);
+    document.addEventListener('keydown', onKeyDown, true);
+
+    return {
+      image,
+      update,
+      destroy
+    };
+  }
 
   const commandButtons = [];
 
@@ -651,6 +931,14 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
     updateInlineState();
   });
 
+  editable.addEventListener('dblclick', (event) => {
+    const target = event.target;
+    if (target instanceof HTMLImageElement) {
+      event.preventDefault();
+      beginImageEditing(target);
+    }
+  });
+
   ['keyup','mouseup','focus'].forEach(event => {
     editable.addEventListener(event, () => updateInlineState());
   });
@@ -662,6 +950,7 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   const selectionHandler = () => {
     if (!document.body.contains(wrapper)) {
       document.removeEventListener('selectionchange', selectionHandler);
+      destroyActiveImageEditor();
       return;
     }
     captureSelectionRange();
@@ -679,6 +968,7 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
     },
     setValue(val){
       settingValue = true;
+      destroyActiveImageEditor();
       editable.innerHTML = normalizeInput(val);
       settingValue = false;
       updateInlineState();

@@ -3823,7 +3823,7 @@ var Sevenn = (() => {
       image.onload = () => {
         URL.revokeObjectURL(objectUrl);
         try {
-          openCropDialog({ image, file }).then(resolve).catch(reject);
+          openCropDialog({ image, file }, { mimeType: file.type }).then(resolve).catch(reject);
         } catch (err) {
           reject(err);
         }
@@ -3835,7 +3835,44 @@ var Sevenn = (() => {
       image.src = objectUrl;
     });
   }
-  function openCropDialog({ image, file }) {
+  function inferMimeFromDataUrl(src) {
+    if (typeof src !== "string") return "";
+    const match = src.match(/^data:([^;,]+)[;,]/i);
+    return match ? match[1] : "";
+  }
+  function editImageSource(src, { altText = "", width, height, mimeType } = {}) {
+    if (!src) {
+      return Promise.reject(new Error("Image source is required."));
+    }
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        const options = {
+          initialAlt: altText,
+          initialWidth: typeof width === "number" && width > 0 ? width : void 0,
+          initialHeight: typeof height === "number" && height > 0 ? height : void 0,
+          mimeType: mimeType || inferMimeFromDataUrl(src) || "image/png"
+        };
+        try {
+          openCropDialog({ image, file: null }, options).then(resolve).catch(reject);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      image.onerror = () => {
+        reject(new Error("Failed to load image."));
+      };
+      try {
+        if (!/^data:/i.test(src) && !/^blob:/i.test(src)) {
+          image.crossOrigin = "anonymous";
+        }
+        image.src = src;
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+  function openCropDialog({ image, file }, options = {}) {
     return new Promise((resolve) => {
       const overlay = document.createElement("div");
       overlay.className = "media-cropper-overlay";
@@ -3918,8 +3955,11 @@ var Sevenn = (() => {
       const widthInput = document.createElement("input");
       widthInput.type = "number";
       widthInput.min = "64";
-      widthInput.max = String(Math.max(64, Math.round(image.naturalWidth) || 1024));
-      widthInput.value = String(Math.min(960, Math.round(image.naturalWidth) || 960));
+      const naturalWidth = Math.round(image.naturalWidth) || Math.round(image.width) || 1024;
+      widthInput.max = String(Math.max(64, naturalWidth));
+      const presetWidth = Math.round(options.initialWidth || 0);
+      const defaultWidth = Math.min(960, naturalWidth || 960);
+      widthInput.value = String(presetWidth > 0 ? Math.min(Math.max(64, presetWidth), Math.max(64, naturalWidth)) : defaultWidth);
       widthInput.className = "media-cropper-size-input";
       widthLabel.appendChild(widthInput);
       sizeRow.appendChild(widthLabel);
@@ -3935,7 +3975,8 @@ var Sevenn = (() => {
       const altInput = document.createElement("input");
       altInput.type = "text";
       altInput.placeholder = "Describe the image";
-      altInput.value = (file.name || "").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+      const defaultAlt = options.initialAlt != null && options.initialAlt !== "" ? options.initialAlt : (file?.name || "").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+      altInput.value = defaultAlt;
       altInput.className = "media-cropper-alt-input";
       altLabel.appendChild(altInput);
       altRow.appendChild(altLabel);
@@ -3957,7 +3998,8 @@ var Sevenn = (() => {
       const ctx = canvas.getContext("2d");
       ctx.imageSmoothingQuality = "high";
       let aspectRatio = naturalRatio;
-      let frameWidth = DEFAULT_FRAME_WIDTH;
+      let frameWidth = Math.min(DEFAULT_FRAME_WIDTH, presetWidth > 0 ? presetWidth : naturalWidth || DEFAULT_FRAME_WIDTH);
+      if (!Number.isFinite(frameWidth) || frameWidth <= 0) frameWidth = DEFAULT_FRAME_WIDTH;
       let frameHeight = Math.max(120, Math.round(frameWidth / aspectRatio));
       let minZoom = 1;
       let zoom = 1;
@@ -4004,7 +4046,7 @@ var Sevenn = (() => {
       }
       function getOutputWidth() {
         const raw = Number(widthInput.value);
-        const maxWidth = Math.max(64, Math.round(image.naturalWidth) || 1024);
+        const maxWidth = Math.max(64, naturalWidth);
         if (!Number.isFinite(raw)) return Math.min(maxWidth, 960);
         return clamp(Math.round(raw), 64, maxWidth);
       }
@@ -4128,7 +4170,8 @@ var Sevenn = (() => {
           exportCanvas.width,
           exportCanvas.height
         );
-        const mime = /^image\/jpe?g$/i.test(file.type) ? "image/jpeg" : "image/png";
+        const preferredMime = options.mimeType || file?.type || "";
+        const mime = /^image\/jpe?g$/i.test(preferredMime) ? "image/jpeg" : /^image\/png$/i.test(preferredMime) ? "image/png" : "image/png";
         const quality = mime === "image/jpeg" ? 0.92 : void 0;
         const dataUrl = toDataUrl(exportCanvas, mime, quality);
         const altText = altInput.value.trim();
@@ -4352,15 +4395,31 @@ var Sevenn = (() => {
     mediaFileInput.accept = "video/*,audio/*";
     mediaFileInput.style.display = "none";
     wrapper.appendChild(mediaFileInput);
-    async function insertCroppedImageFile(file) {
+    let pendingImageTarget = null;
+    let activeImageEditor = null;
+    async function insertCroppedImageFile(file, targetImage = null) {
       try {
         const result = await cropImageFile(file);
         if (!result) return;
         const altText = result.altText || (file.name || "").replace(/\.[^.]+$/, "");
-        const safeAlt = altText ? escapeHtml2(altText) : "";
-        const altAttr = safeAlt ? ` alt="${safeAlt}"` : "";
-        const html = `<img src="${result.dataUrl}" width="${result.width}" height="${result.height}"${altAttr}>`;
-        insertHtml(html);
+        if (targetImage && wrapper.contains(targetImage)) {
+          targetImage.src = result.dataUrl;
+          if (altText) {
+            targetImage.setAttribute("alt", altText);
+          } else {
+            targetImage.removeAttribute("alt");
+          }
+          setImageSize(targetImage, result.width, result.height);
+          triggerEditorChange();
+          if (activeImageEditor && activeImageEditor.image === targetImage && typeof activeImageEditor.update === "function") {
+            requestAnimationFrame(() => activeImageEditor.update());
+          }
+        } else {
+          const safeAlt = altText ? escapeHtml2(altText) : "";
+          const altAttr = safeAlt ? ` alt="${safeAlt}"` : "";
+          const html = `<img src="${result.dataUrl}" width="${result.width}" height="${result.height}"${altAttr}>`;
+          insertHtml(html);
+        }
       } catch (err) {
         console.error("Failed to upload image", err);
       }
@@ -4381,7 +4440,9 @@ var Sevenn = (() => {
     }
     imageFileInput.addEventListener("change", () => {
       const file = imageFileInput.files?.[0];
-      if (file) insertCroppedImageFile(file);
+      const target = pendingImageTarget;
+      pendingImageTarget = null;
+      if (file) insertCroppedImageFile(file, target);
       imageFileInput.value = "";
     });
     mediaFileInput.addEventListener("change", () => {
@@ -4397,6 +4458,236 @@ var Sevenn = (() => {
     if (ariaLabel) editable.setAttribute("aria-label", ariaLabel);
     if (ariaLabelledBy) editable.setAttribute("aria-labelledby", ariaLabelledBy);
     wrapper.appendChild(editable);
+    function triggerEditorChange() {
+      editable.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    function setImageSize(image, width, height) {
+      if (!(image instanceof HTMLImageElement)) return;
+      const MIN_SIZE = 32;
+      const MAX_SIZE = 4096;
+      const widthValue = Number.isFinite(width) ? Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(width))) : null;
+      const heightValue = Number.isFinite(height) ? Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(height))) : null;
+      if (widthValue) {
+        image.style.width = `${widthValue}px`;
+        image.setAttribute("width", String(widthValue));
+      } else {
+        image.style.removeProperty("width");
+        image.removeAttribute("width");
+      }
+      if (heightValue) {
+        image.style.height = `${heightValue}px`;
+        image.setAttribute("height", String(heightValue));
+      } else {
+        image.style.removeProperty("height");
+        image.removeAttribute("height");
+      }
+    }
+    function destroyActiveImageEditor() {
+      if (activeImageEditor && typeof activeImageEditor.destroy === "function") {
+        activeImageEditor.destroy();
+      }
+      activeImageEditor = null;
+    }
+    function beginImageEditing(image) {
+      if (!(image instanceof HTMLImageElement)) return;
+      if (!wrapper.contains(image)) return;
+      if (activeImageEditor && activeImageEditor.image === image) {
+        if (typeof activeImageEditor.update === "function") {
+          requestAnimationFrame(() => activeImageEditor.update());
+        }
+        return;
+      }
+      destroyActiveImageEditor();
+      activeImageEditor = createImageEditor(image);
+      if (activeImageEditor && typeof activeImageEditor.update === "function") {
+        requestAnimationFrame(() => activeImageEditor.update());
+      }
+    }
+    function createImageEditor(image) {
+      const overlay = document.createElement("div");
+      overlay.className = "rich-editor-image-overlay";
+      overlay.setAttribute("aria-hidden", "true");
+      const toolbar2 = document.createElement("div");
+      toolbar2.className = "rich-editor-image-toolbar";
+      const cropBtn = document.createElement("button");
+      cropBtn.type = "button";
+      cropBtn.className = "rich-editor-image-tool";
+      cropBtn.textContent = "Crop";
+      const replaceBtn = document.createElement("button");
+      replaceBtn.type = "button";
+      replaceBtn.className = "rich-editor-image-tool";
+      replaceBtn.textContent = "Replace";
+      const doneBtn = document.createElement("button");
+      doneBtn.type = "button";
+      doneBtn.className = "rich-editor-image-tool rich-editor-image-tool--primary";
+      doneBtn.textContent = "Done";
+      toolbar2.append(cropBtn, replaceBtn, doneBtn);
+      overlay.appendChild(toolbar2);
+      const handleDefs = [
+        { name: "se", axis: "both", label: "Resize from corner" },
+        { name: "e", axis: "x", label: "Resize width" },
+        { name: "s", axis: "y", label: "Resize height" }
+      ];
+      let resizeState = null;
+      const onPointerMove = (event) => {
+        if (!resizeState) return;
+        event.preventDefault();
+        const dx = event.clientX - resizeState.startX;
+        const dy = event.clientY - resizeState.startY;
+        let nextWidth = resizeState.startWidth;
+        let nextHeight = resizeState.startHeight;
+        if (resizeState.axis === "both" || resizeState.axis === "x") {
+          nextWidth = resizeState.startWidth + dx;
+        }
+        if (resizeState.axis === "both" || resizeState.axis === "y") {
+          nextHeight = resizeState.startHeight + dy;
+        }
+        if (resizeState.keepRatio && resizeState.ratio > 0) {
+          if (resizeState.axis === "x") {
+            nextHeight = nextWidth / resizeState.ratio;
+          } else if (resizeState.axis === "y") {
+            nextWidth = nextHeight * resizeState.ratio;
+          } else {
+            if (Math.abs(dx) >= Math.abs(dy)) {
+              nextHeight = nextWidth / resizeState.ratio;
+            } else {
+              nextWidth = nextHeight * resizeState.ratio;
+            }
+          }
+        }
+        setImageSize(image, nextWidth, nextHeight);
+        requestAnimationFrame(() => update());
+      };
+      const stopResize = () => {
+        if (!resizeState) return;
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", stopResize);
+        window.removeEventListener("pointercancel", stopResize);
+        if (resizeState.handle && resizeState.pointerId != null) {
+          try {
+            resizeState.handle.releasePointerCapture(resizeState.pointerId);
+          } catch (err) {
+          }
+        }
+        overlay.classList.remove("is-resizing");
+        resizeState = null;
+        triggerEditorChange();
+        requestAnimationFrame(() => update());
+      };
+      handleDefs.forEach((def) => {
+        const handle = document.createElement("button");
+        handle.type = "button";
+        handle.className = `rich-editor-image-handle rich-editor-image-handle--${def.name}`;
+        handle.setAttribute("aria-label", def.label);
+        handle.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const rect = image.getBoundingClientRect();
+          resizeState = {
+            axis: def.axis,
+            startX: event.clientX,
+            startY: event.clientY,
+            startWidth: rect.width,
+            startHeight: rect.height,
+            ratio: rect.height > 0 ? rect.width / rect.height : 1,
+            keepRatio: event.shiftKey,
+            pointerId: event.pointerId,
+            handle
+          };
+          overlay.classList.add("is-resizing");
+          try {
+            handle.setPointerCapture(event.pointerId);
+          } catch (err) {
+          }
+          window.addEventListener("pointermove", onPointerMove);
+          window.addEventListener("pointerup", stopResize);
+          window.addEventListener("pointercancel", stopResize);
+        });
+        overlay.appendChild(handle);
+      });
+      wrapper.appendChild(overlay);
+      image.classList.add("rich-editor-image-active");
+      const update = () => {
+        if (!document.body.contains(image)) {
+          destroy();
+          return;
+        }
+        const rect = image.getBoundingClientRect();
+        const wrapperRect = wrapper.getBoundingClientRect();
+        overlay.style.width = `${rect.width}px`;
+        overlay.style.height = `${rect.height}px`;
+        overlay.style.left = `${rect.left - wrapperRect.left}px`;
+        overlay.style.top = `${rect.top - wrapperRect.top}px`;
+      };
+      const onScroll = () => update();
+      const onKeyDown = (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          destroy();
+        }
+      };
+      const handleOutside = (event) => {
+        if (event.target === image) return;
+        if (overlay.contains(event.target)) return;
+        destroy();
+      };
+      const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => update()) : null;
+      if (resizeObserver) {
+        try {
+          resizeObserver.observe(image);
+        } catch (err) {
+        }
+      }
+      const destroy = () => {
+        if (resizeObserver) resizeObserver.disconnect();
+        document.removeEventListener("scroll", onScroll, true);
+        editable.removeEventListener("scroll", onScroll);
+        window.removeEventListener("resize", update);
+        document.removeEventListener("mousedown", handleOutside, true);
+        document.removeEventListener("keydown", onKeyDown, true);
+        stopResize();
+        overlay.remove();
+        image.classList.remove("rich-editor-image-active");
+        if (pendingImageTarget === image) pendingImageTarget = null;
+      };
+      cropBtn.addEventListener("click", async () => {
+        try {
+          const currentWidth = Number(image.getAttribute("width")) || Math.round(image.getBoundingClientRect().width);
+          const currentHeight = Number(image.getAttribute("height")) || Math.round(image.getBoundingClientRect().height);
+          const alt = image.getAttribute("alt") || "";
+          const result = await editImageSource(image.src, { altText: alt, width: currentWidth, height: currentHeight });
+          if (!result) return;
+          image.src = result.dataUrl;
+          if (result.altText) {
+            image.setAttribute("alt", result.altText);
+          } else {
+            image.removeAttribute("alt");
+          }
+          setImageSize(image, result.width, result.height);
+          triggerEditorChange();
+          requestAnimationFrame(() => update());
+        } catch (err) {
+          console.error("Failed to edit image", err);
+        }
+      });
+      replaceBtn.addEventListener("click", () => {
+        pendingImageTarget = image;
+        imageFileInput.click();
+      });
+      doneBtn.addEventListener("click", () => {
+        destroyActiveImageEditor();
+      });
+      document.addEventListener("scroll", onScroll, true);
+      editable.addEventListener("scroll", onScroll);
+      window.addEventListener("resize", update);
+      document.addEventListener("mousedown", handleOutside, true);
+      document.addEventListener("keydown", onKeyDown, true);
+      return {
+        image,
+        update,
+        destroy
+      };
+    }
     const commandButtons = [];
     function focusEditor() {
       editable.focus({ preventScroll: false });
@@ -4765,6 +5056,13 @@ var Sevenn = (() => {
       if (typeof onChange === "function") onChange();
       updateInlineState();
     });
+    editable.addEventListener("dblclick", (event) => {
+      const target = event.target;
+      if (target instanceof HTMLImageElement) {
+        event.preventDefault();
+        beginImageEditing(target);
+      }
+    });
     ["keyup", "mouseup", "focus"].forEach((event) => {
       editable.addEventListener(event, () => updateInlineState());
     });
@@ -4774,6 +5072,7 @@ var Sevenn = (() => {
     const selectionHandler = () => {
       if (!document.body.contains(wrapper)) {
         document.removeEventListener("selectionchange", selectionHandler);
+        destroyActiveImageEditor();
         return;
       }
       captureSelectionRange();
@@ -4789,6 +5088,7 @@ var Sevenn = (() => {
       },
       setValue(val) {
         settingValue = true;
+        destroyActiveImageEditor();
         editable.innerHTML = normalizeInput(val);
         settingValue = false;
         updateInlineState();
@@ -5031,15 +5331,33 @@ var Sevenn = (() => {
       lectures: (catalog.lectureLists?.[block.blockId] || []).map((lecture) => ({ ...lecture }))
     }));
     const blockMap = new Map(blocks.map((b) => [b.blockId, b]));
-    const blockSet = new Set(existing?.blocks || []);
+    const blockSet = new Set(Array.isArray(existing?.blocks) ? existing.blocks : []);
     const manualWeeks = new Set(
       Array.isArray(existing?.weeks) ? existing.weeks.filter((value) => Number.isFinite(Number(value))).map((value) => Number(value)) : []
     );
     const lectSet = /* @__PURE__ */ new Set();
+    const lectureBlockCounts = /* @__PURE__ */ new Map();
+    function incrementBlockCount(blockId) {
+      if (!blockId) return;
+      const key = String(blockId);
+      const next = (lectureBlockCounts.get(key) || 0) + 1;
+      lectureBlockCounts.set(key, next);
+    }
+    function decrementBlockCount(blockId) {
+      if (!blockId) return;
+      const key = String(blockId);
+      const prev = lectureBlockCounts.get(key) || 0;
+      if (prev <= 1) {
+        lectureBlockCounts.delete(key);
+      } else {
+        lectureBlockCounts.set(key, prev - 1);
+      }
+    }
     existing?.lectures?.forEach((l) => {
-      if (l.blockId != null) blockSet.add(l.blockId);
       if (l.blockId != null && l.id != null) {
-        lectSet.add(`${l.blockId}|${l.id}`);
+        const key = `${l.blockId}|${l.id}`;
+        lectSet.add(key);
+        incrementBlockCount(l.blockId);
       }
     });
     const blockWrap = document.createElement("section");
@@ -5071,10 +5389,40 @@ var Sevenn = (() => {
     const manualWeekList = document.createElement("div");
     manualWeekList.className = "editor-manual-weeks-list";
     manualWeeksBox.appendChild(manualWeekList);
-    blockWrap.appendChild(manualWeeksBox);
-    const blockPanels = document.createElement("div");
-    blockPanels.className = "editor-block-panels";
-    blockWrap.appendChild(blockPanels);
+    const blockBrowser = document.createElement("div");
+    blockBrowser.className = "editor-curriculum-browser";
+    blockWrap.appendChild(blockBrowser);
+    const blockColumn = document.createElement("div");
+    blockColumn.className = "editor-curriculum-column editor-block-column";
+    const blockColumnHeading = document.createElement("h4");
+    blockColumnHeading.className = "editor-column-heading";
+    blockColumnHeading.textContent = "Blocks";
+    blockColumn.appendChild(blockColumnHeading);
+    const blockListEl = document.createElement("div");
+    blockListEl.className = "editor-block-list";
+    blockColumn.appendChild(blockListEl);
+    blockBrowser.appendChild(blockColumn);
+    const weekColumn = document.createElement("div");
+    weekColumn.className = "editor-curriculum-column editor-week-column";
+    const weekHeading = document.createElement("h4");
+    weekHeading.className = "editor-column-heading";
+    weekHeading.textContent = "Weeks";
+    weekColumn.appendChild(weekHeading);
+    const weekListEl = document.createElement("div");
+    weekListEl.className = "editor-week-browser";
+    weekColumn.appendChild(weekListEl);
+    weekColumn.appendChild(manualWeeksBox);
+    blockBrowser.appendChild(weekColumn);
+    const lectureColumn = document.createElement("div");
+    lectureColumn.className = "editor-curriculum-column editor-lecture-column";
+    const lectureHeading = document.createElement("h4");
+    lectureHeading.className = "editor-column-heading";
+    lectureHeading.textContent = "Lectures";
+    lectureColumn.appendChild(lectureHeading);
+    const lectureListEl = document.createElement("div");
+    lectureListEl.className = "editor-lecture-browser";
+    lectureColumn.appendChild(lectureListEl);
+    blockBrowser.appendChild(lectureColumn);
     const UNSCHEDULED_KEY = "__unscheduled";
     function createTagChip(label, variant, active = false) {
       const chip = document.createElement("button");
@@ -5085,9 +5433,8 @@ var Sevenn = (() => {
       return chip;
     }
     function blockHasSelectedLectures(blockId) {
-      const block = blockMap.get(blockId);
-      if (!block?.lectures) return false;
-      return block.lectures.some((l) => lectSet.has(`${blockId}|${l.id}`));
+      if (!blockId) return false;
+      return lectureBlockCounts.has(String(blockId));
     }
     function collectSelectedWeekKeys() {
       const selected = /* @__PURE__ */ new Set();
@@ -5143,7 +5490,7 @@ var Sevenn = (() => {
             manualWeeks.delete(weekNum);
             markDirty();
             renderManualWeekTags();
-            renderBlockPanels();
+            renderWeekList();
           });
           chip.appendChild(removeBtn);
           manualWeekList.appendChild(chip);
@@ -5161,180 +5508,295 @@ var Sevenn = (() => {
         markDirty();
       }
       renderManualWeekTags();
-      renderBlockPanels();
+      renderWeekList();
     });
-    function renderBlockChips() {
-      blockChipRow.innerHTML = "";
-      if (!blocks.length) {
-        const empty = document.createElement("div");
-        empty.className = "editor-tags-empty";
-        empty.textContent = "No curriculum blocks have been created yet.";
-        blockChipRow.appendChild(empty);
+    let activeBlockId = null;
+    let activeWeekKey = null;
+    function weekGroupsForBlock(block) {
+      if (!block) return [];
+      const weekNumbers = /* @__PURE__ */ new Set();
+      if (Number.isFinite(block.weeks)) {
+        for (let i = 1; i <= block.weeks; i++) weekNumbers.add(i);
+      }
+      (block.lectures || []).forEach((l) => {
+        if (typeof l.week === "number") weekNumbers.add(l.week);
+      });
+      const sortedWeeks = Array.from(weekNumbers).sort((a, b) => a - b);
+      const groups = sortedWeeks.map((weekNumber) => ({
+        key: `${block.blockId}|${weekNumber}`,
+        label: `Week ${weekNumber}`,
+        lectures: (block.lectures || []).filter((l) => l.week === weekNumber),
+        weekNumber
+      }));
+      const unscheduledLectures = (block.lectures || []).filter((l) => l.week == null || l.week === "");
+      if (unscheduledLectures.length) {
+        groups.push({
+          key: `${block.blockId}|${UNSCHEDULED_KEY}`,
+          label: "Unscheduled",
+          lectures: unscheduledLectures,
+          unscheduled: true
+        });
+      }
+      return groups;
+    }
+    function ensureActiveBlock2() {
+      if (activeBlockId && blockMap.has(activeBlockId)) return;
+      for (const key of lectSet) {
+        const [blockId] = key.split("|");
+        if (blockId && blockMap.has(blockId)) {
+          activeBlockId = blockId;
+          return;
+        }
+      }
+      for (const id of blockSet) {
+        if (blockMap.has(id)) {
+          activeBlockId = id;
+          return;
+        }
+      }
+      activeBlockId = blocks[0]?.blockId || null;
+    }
+    function ensureActiveWeek() {
+      if (!activeBlockId || !blockMap.has(activeBlockId)) {
+        activeWeekKey = null;
         return;
       }
-      blocks.forEach((b) => {
-        const isSelected = blockSet.has(b.blockId);
-        const hasLectures = blockHasSelectedLectures(b.blockId);
-        const chip = createTagChip(b.title || b.blockId, "block", isSelected || hasLectures);
-        chip.dataset.manual = isSelected ? "true" : "false";
+      const block = blockMap.get(activeBlockId);
+      const groups = weekGroupsForBlock(block);
+      if (activeWeekKey && groups.some((group) => group.key === activeWeekKey)) return;
+      const selected = collectSelectedWeekKeys();
+      for (const key of selected) {
+        if (key.startsWith(`${activeBlockId}|`)) {
+          activeWeekKey = key;
+          return;
+        }
+      }
+      activeWeekKey = groups.length ? groups[0].key : null;
+    }
+    function renderBlockChips() {
+      blockChipRow.innerHTML = "";
+      const taggedBlocks = Array.from(blockSet).filter((id) => blockMap.has(id));
+      if (!taggedBlocks.length) {
+        const hint = document.createElement("div");
+        hint.className = "editor-tags-empty subtle";
+        hint.textContent = "Use the Tag button to add manual block tags.";
+        blockChipRow.appendChild(hint);
+        return;
+      }
+      taggedBlocks.sort((a, b) => {
+        const aTitle = blockMap.get(a)?.title || String(a);
+        const bTitle = blockMap.get(b)?.title || String(b);
+        return aTitle.localeCompare(bTitle);
+      });
+      taggedBlocks.forEach((blockId) => {
+        const title = blockMap.get(blockId)?.title || blockId;
+        const chip = createTagChip(title, "block", true);
         chip.addEventListener("click", () => {
-          if (blockSet.has(b.blockId)) {
-            blockSet.delete(b.blockId);
-          } else {
-            blockSet.add(b.blockId);
-          }
+          blockSet.delete(blockId);
           markDirty();
           renderBlockChips();
-          renderBlockPanels();
+          renderBlockList();
         });
         blockChipRow.appendChild(chip);
       });
     }
-    function renderBlockPanels() {
-      blockPanels.innerHTML = "";
+    function renderBlockList() {
+      blockListEl.innerHTML = "";
       if (!blocks.length) {
         const empty = document.createElement("div");
         empty.className = "editor-tags-empty";
         empty.textContent = "No curriculum blocks have been created yet.";
-        blockPanels.appendChild(empty);
+        blockListEl.appendChild(empty);
         return;
       }
-      const selectedWeekKeys = collectSelectedWeekKeys();
+      ensureActiveBlock2();
+      ensureActiveWeek();
       blocks.forEach((block) => {
         if (!block) return;
         const blockId = block.blockId;
-        const panel = document.createElement("section");
-        panel.className = "editor-block-panel";
-        if (blockSet.has(blockId) || blockHasSelectedLectures(blockId)) {
-          panel.classList.add("active");
-        }
-        const header = document.createElement("div");
-        header.className = "editor-block-panel-header";
-        const titleWrap = document.createElement("div");
-        titleWrap.className = "editor-block-panel-title";
-        const title = document.createElement("h4");
-        title.textContent = block.title || blockId;
-        titleWrap.appendChild(title);
-        const meta = document.createElement("span");
-        meta.className = "editor-block-meta";
-        const lectureCount = block.lectures?.length || 0;
-        const weekTotal = block.weeks || new Set((block.lectures || []).map((l) => l.week)).size;
-        const metaParts = [];
-        if (weekTotal) metaParts.push(`${weekTotal} week${weekTotal === 1 ? "" : "s"}`);
-        if (lectureCount) metaParts.push(`${lectureCount} lecture${lectureCount === 1 ? "" : "s"}`);
-        meta.textContent = metaParts.join(" \u2022 ") || "No weeks defined yet";
-        titleWrap.appendChild(meta);
-        header.appendChild(titleWrap);
-        const selectedCount = (block.lectures || []).reduce((count, l) => lectSet.has(`${blockId}|${l.id}`) ? count + 1 : count, 0);
-        if (selectedCount) {
+        const row = document.createElement("div");
+        row.className = "editor-block-row";
+        if (blockSet.has(blockId)) row.classList.add("tagged");
+        if (blockHasSelectedLectures(blockId)) row.classList.add("has-lectures");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "editor-block-button";
+        if (blockId === activeBlockId) button.classList.add("active");
+        const label = document.createElement("span");
+        label.className = "editor-block-label";
+        label.textContent = block.title || blockId;
+        button.appendChild(label);
+        const count = lectureBlockCounts.get(String(blockId)) || 0;
+        if (count) {
           const badge = document.createElement("span");
-          badge.className = "editor-block-selected-count";
-          badge.textContent = `${selectedCount} selected`;
-          header.appendChild(badge);
+          badge.className = "editor-block-count";
+          badge.textContent = `${count}`;
+          badge.setAttribute("aria-label", `${count} selected lecture${count === 1 ? "" : "s"}`);
+          button.appendChild(badge);
         }
-        panel.appendChild(header);
-        const weekList = document.createElement("div");
-        weekList.className = "editor-week-list";
-        const weekNumbers = /* @__PURE__ */ new Set();
-        if (block.weeks) {
-          for (let i = 1; i <= block.weeks; i++) weekNumbers.add(i);
-        }
-        (block.lectures || []).forEach((l) => {
-          if (typeof l.week === "number") weekNumbers.add(l.week);
+        button.addEventListener("click", () => {
+          activeBlockId = blockId;
+          activeWeekKey = null;
+          ensureActiveWeek();
+          renderBlockList();
+          renderWeekList();
+          renderLectureList();
         });
-        const sortedWeeks = Array.from(weekNumbers).sort((a, b) => a - b);
-        const unscheduledLectures = (block.lectures || []).filter((l) => l.week == null || l.week === "");
-        const weekGroups = sortedWeeks.map((weekNumber) => ({
-          key: `${blockId}|${weekNumber}`,
-          label: `Week ${weekNumber}`,
-          lectures: (block.lectures || []).filter((l) => l.week === weekNumber),
-          weekNumber
-        }));
-        if (unscheduledLectures.length) {
-          weekGroups.push({
-            key: `${blockId}|${UNSCHEDULED_KEY}`,
-            label: "Unscheduled",
-            lectures: unscheduledLectures,
-            unscheduled: true
-          });
+        row.appendChild(button);
+        const tagToggle = document.createElement("button");
+        tagToggle.type = "button";
+        tagToggle.className = "editor-block-tag-toggle";
+        const isTagged = blockSet.has(blockId);
+        tagToggle.textContent = isTagged ? "Tagged" : "Tag block";
+        tagToggle.setAttribute("aria-label", isTagged ? `Remove manual tag for ${block.title || blockId}` : `Tag ${block.title || blockId}`);
+        if (isTagged) tagToggle.classList.add("active");
+        tagToggle.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (blockSet.has(blockId)) {
+            blockSet.delete(blockId);
+          } else {
+            blockSet.add(blockId);
+          }
+          markDirty();
+          renderBlockChips();
+          renderBlockList();
+        });
+        row.appendChild(tagToggle);
+        blockListEl.appendChild(row);
+      });
+    }
+    function renderWeekList() {
+      weekListEl.innerHTML = "";
+      if (!blocks.length) {
+        const empty = document.createElement("div");
+        empty.className = "editor-tags-empty subtle";
+        empty.textContent = "Add blocks to browse weeks.";
+        weekListEl.appendChild(empty);
+        return;
+      }
+      ensureActiveBlock2();
+      if (!activeBlockId || !blockMap.has(activeBlockId)) {
+        const prompt2 = document.createElement("div");
+        prompt2.className = "editor-tags-empty subtle";
+        prompt2.textContent = "Select a block to view weeks.";
+        weekListEl.appendChild(prompt2);
+        return;
+      }
+      const block = blockMap.get(activeBlockId);
+      const groups = weekGroupsForBlock(block);
+      ensureActiveWeek();
+      const selectedWeekKeys = collectSelectedWeekKeys();
+      if (!groups.length) {
+        const empty = document.createElement("div");
+        empty.className = "editor-tags-empty subtle";
+        empty.textContent = "Add weeks or lectures to this block to start tagging.";
+        weekListEl.appendChild(empty);
+        return;
+      }
+      groups.forEach((group) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "editor-week-button";
+        if (group.key === activeWeekKey) btn.classList.add("active");
+        if (selectedWeekKeys.has(group.key)) btn.classList.add("has-selection");
+        if (Number.isFinite(group.weekNumber) && manualWeeks.has(Number(group.weekNumber))) {
+          btn.classList.add("manual");
         }
-        if (!weekGroups.length) {
-          const noWeeks = document.createElement("div");
-          noWeeks.className = "editor-tags-empty subtle";
-          noWeeks.textContent = "Add weeks or lectures to this block to start tagging.";
-          weekList.appendChild(noWeeks);
+        const label = document.createElement("span");
+        label.className = "editor-week-label";
+        label.textContent = group.label;
+        btn.appendChild(label);
+        const meta = document.createElement("span");
+        meta.className = "editor-week-meta";
+        const total = group.lectures?.length || 0;
+        if (total) {
+          meta.textContent = `${total} lecture${total === 1 ? "" : "s"}`;
+        } else if (group.unscheduled) {
+          meta.textContent = "No unscheduled lectures";
         } else {
-          weekGroups.forEach((group) => {
-            const { key: weekKey, label, lectures, weekNumber, unscheduled } = group;
-            const section = document.createElement("div");
-            section.className = "editor-week-section";
-            const hasLectureSelection = (lectures || []).some((l) => lectSet.has(`${blockId}|${l.id}`));
-            const isManualWeek = Number.isFinite(weekNumber) && manualWeeks.has(Number(weekNumber));
-            if (hasLectureSelection || isManualWeek) {
-              section.classList.add("active");
-            }
-            if (selectedWeekKeys.has(weekKey)) {
-              section.classList.add("active");
-            }
-            const weekHeader = document.createElement("div");
-            weekHeader.className = "editor-week-header";
-            const weekLabel = document.createElement("span");
-            weekLabel.textContent = label;
-            weekHeader.appendChild(weekLabel);
-            const countLabel = document.createElement("span");
-            countLabel.className = "editor-week-count";
-            const total = lectures?.length || 0;
-            if (total) {
-              countLabel.textContent = `${total} lecture${total === 1 ? "" : "s"}`;
-            } else if (unscheduled) {
-              countLabel.textContent = "No unscheduled lectures yet";
-            } else {
-              countLabel.textContent = "No lectures yet";
-            }
-            weekHeader.appendChild(countLabel);
-            if (Number.isFinite(weekNumber) && manualWeeks.has(Number(weekNumber))) {
-              const badge = document.createElement("span");
-              badge.className = "editor-week-manual";
-              badge.textContent = "Tagged";
-              weekHeader.appendChild(badge);
-            }
-            section.appendChild(weekHeader);
-            const lectureWrap = document.createElement("div");
-            lectureWrap.className = "editor-lecture-list";
-            if (!lectures.length) {
-              const empty = document.createElement("div");
-              empty.className = "editor-tags-empty subtle";
-              empty.textContent = unscheduled ? "No unscheduled lectures yet." : "No lectures linked to this week yet.";
-              lectureWrap.appendChild(empty);
-            } else {
-              lectures.forEach((l) => {
-                const key = `${blockId}|${l.id}`;
-                const lectureChip = createTagChip(l.name || `Lecture ${l.id}`, "lecture", lectSet.has(key));
-                lectureChip.dataset.lecture = key;
-                lectureChip.addEventListener("click", () => {
-                  if (lectSet.has(key)) {
-                    lectSet.delete(key);
-                  } else {
-                    lectSet.add(key);
-                  }
-                  markDirty();
-                  renderBlockChips();
-                  renderBlockPanels();
-                });
-                lectureWrap.appendChild(lectureChip);
-              });
-            }
-            section.appendChild(lectureWrap);
-            weekList.appendChild(section);
-          });
+          meta.textContent = "No lectures yet";
         }
-        panel.appendChild(weekList);
-        blockPanels.appendChild(panel);
+        btn.appendChild(meta);
+        btn.addEventListener("click", () => {
+          activeWeekKey = group.key;
+          renderWeekList();
+          renderLectureList();
+        });
+        weekListEl.appendChild(btn);
+      });
+    }
+    function renderLectureList() {
+      lectureListEl.innerHTML = "";
+      if (!blocks.length) {
+        const empty = document.createElement("div");
+        empty.className = "editor-tags-empty subtle";
+        empty.textContent = "Add blocks and lectures to start tagging.";
+        lectureListEl.appendChild(empty);
+        return;
+      }
+      ensureActiveBlock2();
+      ensureActiveWeek();
+      if (!activeBlockId || !blockMap.has(activeBlockId)) {
+        const prompt2 = document.createElement("div");
+        prompt2.className = "editor-tags-empty subtle";
+        prompt2.textContent = "Select a block to choose lectures.";
+        lectureListEl.appendChild(prompt2);
+        return;
+      }
+      if (!activeWeekKey) {
+        const prompt2 = document.createElement("div");
+        prompt2.className = "editor-tags-empty subtle";
+        prompt2.textContent = "Pick a week to see its lectures.";
+        lectureListEl.appendChild(prompt2);
+        return;
+      }
+      const [blockId] = activeWeekKey.split("|");
+      const block = blockMap.get(blockId);
+      const groups = weekGroupsForBlock(block);
+      const current = groups.find((group) => group.key === activeWeekKey);
+      if (!current) {
+        const empty = document.createElement("div");
+        empty.className = "editor-tags-empty subtle";
+        empty.textContent = "No lectures available for this week yet.";
+        lectureListEl.appendChild(empty);
+        return;
+      }
+      if (!current.lectures.length) {
+        const empty = document.createElement("div");
+        empty.className = "editor-tags-empty subtle";
+        empty.textContent = current.unscheduled ? "No unscheduled lectures yet." : "No lectures linked to this week yet.";
+        lectureListEl.appendChild(empty);
+        return;
+      }
+      current.lectures.forEach((lecture) => {
+        const key = `${blockId}|${lecture.id}`;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "editor-lecture-button";
+        btn.textContent = lecture.name || `Lecture ${lecture.id}`;
+        if (lectSet.has(key)) btn.classList.add("active");
+        btn.addEventListener("click", () => {
+          if (lectSet.has(key)) {
+            lectSet.delete(key);
+            decrementBlockCount(blockId);
+          } else {
+            lectSet.add(key);
+            incrementBlockCount(blockId);
+          }
+          markDirty();
+          renderBlockChips();
+          renderBlockList();
+          renderWeekList();
+          renderLectureList();
+        });
+        lectureListEl.appendChild(btn);
       });
     }
     renderManualWeekTags();
     renderBlockChips();
-    renderBlockPanels();
+    renderBlockList();
+    renderWeekList();
+    renderLectureList();
     form.appendChild(blockWrap);
     const actionBar = document.createElement("div");
     actionBar.className = "editor-actions";
@@ -5839,6 +6301,22 @@ var Sevenn = (() => {
     const { blocks } = await loadBlockCatalog();
     const blockTitle = (id) => blocks.find((b) => b.blockId === id)?.title || id;
     const orderMap = new Map(blocks.map((b, i) => [b.blockId, i]));
+    const blockWeekMap = /* @__PURE__ */ new Map();
+    const allWeeks = /* @__PURE__ */ new Set();
+    blocks.forEach((block) => {
+      if (!block) return;
+      const weeks = /* @__PURE__ */ new Set();
+      if (Number.isFinite(block.weeks)) {
+        for (let i = 1; i <= block.weeks; i++) weeks.add(i);
+      }
+      (block.lectures || []).forEach((lecture) => {
+        if (typeof lecture.week === "number") weeks.add(lecture.week);
+      });
+      const sortedWeeks = Array.from(weeks).sort((a, b) => a - b);
+      blockWeekMap.set(block.blockId, sortedWeeks);
+      sortedWeeks.forEach((weekNumber) => allWeeks.add(weekNumber));
+    });
+    const sortedAllWeeks = Array.from(allWeeks).sort((a, b) => a - b);
     const groups = /* @__PURE__ */ new Map();
     items.forEach((it) => {
       let block = "_";
@@ -5903,6 +6381,105 @@ var Sevenn = (() => {
         currentSortDirection = dir;
       }
     }
+    const filterControls = document.createElement("div");
+    filterControls.className = "entry-filter-controls";
+    const currentBlockFilter = typeof state.filters?.block === "string" ? state.filters.block : "";
+    const currentWeekFilter = state.filters?.week ?? "";
+    const blockFilterLabel = document.createElement("label");
+    blockFilterLabel.className = "entry-filter-select";
+    blockFilterLabel.textContent = "Block";
+    const blockFilterSelect = document.createElement("select");
+    blockFilterSelect.className = "entry-filter-block";
+    blockFilterSelect.setAttribute("aria-label", "Filter entries by block");
+    const blockOptions = [
+      { value: "", label: "All blocks" },
+      { value: "__unlabeled", label: "Unlabeled" }
+    ];
+    blocks.forEach((block) => {
+      if (!block) return;
+      blockOptions.push({ value: block.blockId, label: blockTitle(block.blockId) });
+    });
+    blockOptions.forEach((opt) => {
+      const option = document.createElement("option");
+      option.value = opt.value;
+      option.textContent = opt.label;
+      blockFilterSelect.appendChild(option);
+    });
+    if (blockOptions.some((opt) => opt.value === currentBlockFilter)) {
+      blockFilterSelect.value = currentBlockFilter;
+    } else {
+      blockFilterSelect.value = "";
+    }
+    blockFilterLabel.appendChild(blockFilterSelect);
+    filterControls.appendChild(blockFilterLabel);
+    const weekFilterLabel = document.createElement("label");
+    weekFilterLabel.className = "entry-filter-select";
+    weekFilterLabel.textContent = "Week";
+    const weekFilterSelect = document.createElement("select");
+    weekFilterSelect.className = "entry-filter-week";
+    weekFilterSelect.setAttribute("aria-label", "Filter entries by week");
+    weekFilterLabel.appendChild(weekFilterSelect);
+    filterControls.appendChild(weekFilterLabel);
+    function populateWeekFilter() {
+      const selectedBlock = blockFilterSelect.value;
+      weekFilterSelect.innerHTML = "";
+      const defaultOption = document.createElement("option");
+      defaultOption.value = "";
+      defaultOption.textContent = "All weeks";
+      weekFilterSelect.appendChild(defaultOption);
+      if (selectedBlock === "__unlabeled") {
+        weekFilterSelect.disabled = true;
+        return;
+      }
+      weekFilterSelect.disabled = false;
+      const weeks = selectedBlock && blockWeekMap.has(selectedBlock) ? blockWeekMap.get(selectedBlock) : sortedAllWeeks;
+      if (!weeks.length) {
+        const none = document.createElement("option");
+        none.value = "";
+        none.textContent = selectedBlock ? "No weeks available" : "No weeks defined";
+        none.disabled = true;
+        weekFilterSelect.appendChild(none);
+        return;
+      }
+      weeks.forEach((weekNumber) => {
+        const option = document.createElement("option");
+        option.value = String(weekNumber);
+        option.textContent = `Week ${weekNumber}`;
+        weekFilterSelect.appendChild(option);
+      });
+    }
+    toolbar.appendChild(filterControls);
+    populateWeekFilter();
+    const normalizedWeekFilter = currentWeekFilter === "" || currentWeekFilter == null ? "" : String(currentWeekFilter);
+    if (normalizedWeekFilter && weekFilterSelect.querySelector(`option[value="${normalizedWeekFilter}"]`)) {
+      weekFilterSelect.value = normalizedWeekFilter;
+    } else {
+      weekFilterSelect.value = "";
+    }
+    blockFilterSelect.addEventListener("change", () => {
+      populateWeekFilter();
+      weekFilterSelect.value = "";
+      const nextBlock = blockFilterSelect.value || "";
+      const patch = { block: nextBlock, week: "" };
+      const currentBlockValue = state.filters.block || "";
+      const currentWeekValue = state.filters.week || "";
+      if (currentBlockValue !== patch.block || currentWeekValue !== patch.week) {
+        setFilters(patch);
+        onChange && onChange();
+      }
+    });
+    weekFilterSelect.addEventListener("change", () => {
+      if (weekFilterSelect.disabled) return;
+      const raw = weekFilterSelect.value;
+      const normalized2 = raw ? Number(raw) : "";
+      if (normalized2 !== "" && !Number.isFinite(normalized2)) return;
+      const currentValue = state.filters.week ?? "";
+      const normalizedCurrent = currentValue === "" ? "" : Number(currentValue);
+      if (normalized2 === "" && currentValue === "") return;
+      if (normalized2 !== "" && String(normalizedCurrent) === String(normalized2)) return;
+      setFilters({ week: normalized2 });
+      onChange && onChange();
+    });
     const sortControls = document.createElement("div");
     sortControls.className = "sort-controls";
     const sortLabel = document.createElement("label");
