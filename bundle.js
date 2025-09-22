@@ -5380,11 +5380,6 @@ var Sevenn = (() => {
     const manualWeeksTitle = document.createElement("span");
     manualWeeksTitle.textContent = "Additional week tags";
     manualWeeksHeader.appendChild(manualWeeksTitle);
-    const addWeekBtn = document.createElement("button");
-    addWeekBtn.type = "button";
-    addWeekBtn.className = "btn subtle";
-    addWeekBtn.textContent = "Add week tag";
-    manualWeeksHeader.appendChild(addWeekBtn);
     manualWeeksBox.appendChild(manualWeeksHeader);
     const manualWeekList = document.createElement("div");
     manualWeekList.className = "editor-manual-weeks-list";
@@ -5497,19 +5492,6 @@ var Sevenn = (() => {
         });
       }
     }
-    addWeekBtn.addEventListener("click", () => {
-      const value = prompt("Enter a week number to tag (1-52)");
-      if (!value) return;
-      const parsed = Number(value);
-      if (!Number.isFinite(parsed)) return;
-      const clamped = Math.max(1, Math.round(parsed));
-      if (!manualWeeks.has(clamped)) {
-        manualWeeks.add(clamped);
-        markDirty();
-      }
-      renderManualWeekTags();
-      renderWeekList();
-    });
     let activeBlockId = null;
     let activeWeekKey = null;
     function weekGroupsForBlock(block) {
@@ -5579,7 +5561,7 @@ var Sevenn = (() => {
       if (!taggedBlocks.length) {
         const hint = document.createElement("div");
         hint.className = "editor-tags-empty subtle";
-        hint.textContent = "Use the Tag button to add manual block tags.";
+        hint.textContent = "Block tags update automatically as you choose lectures.";
         blockChipRow.appendChild(hint);
         return;
       }
@@ -5616,12 +5598,11 @@ var Sevenn = (() => {
         const blockId = block.blockId;
         const row = document.createElement("div");
         row.className = "editor-block-row";
-        if (blockSet.has(blockId)) row.classList.add("tagged");
         if (blockHasSelectedLectures(blockId)) row.classList.add("has-lectures");
         const button = document.createElement("button");
         button.type = "button";
         button.className = "editor-block-button";
-        if (blockId === activeBlockId) button.classList.add("active");
+        setToggleState(button, blockId === activeBlockId);
         const label = document.createElement("span");
         label.className = "editor-block-label";
         label.textContent = block.title || blockId;
@@ -5643,25 +5624,6 @@ var Sevenn = (() => {
           renderLectureList();
         });
         row.appendChild(button);
-        const tagToggle = document.createElement("button");
-        tagToggle.type = "button";
-        tagToggle.className = "editor-block-tag-toggle";
-        const isTagged = blockSet.has(blockId);
-        tagToggle.textContent = isTagged ? "Tagged" : "Tag block";
-        tagToggle.setAttribute("aria-label", isTagged ? `Remove manual tag for ${block.title || blockId}` : `Tag ${block.title || blockId}`);
-        if (isTagged) tagToggle.classList.add("active");
-        tagToggle.addEventListener("click", (event) => {
-          event.stopPropagation();
-          if (blockSet.has(blockId)) {
-            blockSet.delete(blockId);
-          } else {
-            blockSet.add(blockId);
-          }
-          markDirty();
-          renderBlockChips();
-          renderBlockList();
-        });
-        row.appendChild(tagToggle);
         blockListEl.appendChild(row);
       });
     }
@@ -5697,7 +5659,7 @@ var Sevenn = (() => {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "editor-week-button";
-        if (group.key === activeWeekKey) btn.classList.add("active");
+        setToggleState(btn, group.key === activeWeekKey);
         if (selectedWeekKeys.has(group.key)) btn.classList.add("has-selection");
         if (Number.isFinite(group.weekNumber) && manualWeeks.has(Number(group.weekNumber))) {
           btn.classList.add("manual");
@@ -5774,7 +5736,7 @@ var Sevenn = (() => {
         btn.type = "button";
         btn.className = "editor-lecture-button";
         btn.textContent = lecture.name || `Lecture ${lecture.id}`;
-        if (lectSet.has(key)) btn.classList.add("active");
+        setToggleState(btn, lectSet.has(key));
         btn.addEventListener("click", () => {
           if (lectSet.has(key)) {
             lectSet.delete(key);

@@ -32,6 +32,8 @@
   --pad-lg: 24px;
   --pad-sm: 10px;
   --shadow-lg: 0 24px 60px rgba(2, 6, 23, 0.55);
+  --pill-gradient: linear-gradient(135deg, rgba(224, 242, 254, 0.95), rgba(233, 213, 255, 0.9));
+  --pill-shadow: 0 18px 32px rgba(2, 6, 23, 0.42);
 }
 
 * {
@@ -1341,6 +1343,15 @@ input[type="checkbox"]:checked::after {
   margin-top: var(--pad);
 }
 
+@media (min-width: 1080px) {
+  .editor-curriculum-browser {
+    grid-template-columns:
+      minmax(240px, 1fr)
+      minmax(240px, 1fr)
+      minmax(320px, 2fr);
+  }
+}
+
 .editor-curriculum-column {
   display: flex;
   flex-direction: column;
@@ -1369,9 +1380,15 @@ input[type="checkbox"]:checked::after {
 }
 
 .editor-lecture-browser {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 720px) {
+  .editor-lecture-browser {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .editor-block-row {
@@ -1380,44 +1397,63 @@ input[type="checkbox"]:checked::after {
   gap: 10px;
 }
 
-.editor-block-button {
-  flex: 1;
-  display: flex;
-  justify-content: space-between;
+.editor-block-button,
+.editor-week-button,
+.editor-lecture-button {
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  width: 100%;
+  border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(8, 13, 23, 0.5);
+  background: rgba(15, 23, 42, 0.65);
   color: var(--text-muted);
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.15s ease;
+  transition:
+    background 0.25s ease,
+    border-color 0.25s ease,
+    color 0.25s ease,
+    box-shadow 0.25s ease,
+    transform 0.2s ease;
+  text-align: left;
 }
 
 .editor-block-button:hover,
-.editor-block-button:focus-visible {
-  background: rgba(30, 64, 175, 0.35);
-  border-color: rgba(56, 189, 248, 0.45);
+.editor-week-button:hover,
+.editor-lecture-button:hover,
+.editor-block-button:focus-visible,
+.editor-week-button:focus-visible,
+.editor-lecture-button:focus-visible {
+  background: rgba(148, 163, 184, 0.18);
+  border-color: rgba(148, 163, 184, 0.35);
   color: var(--text);
   outline: none;
 }
 
-.editor-block-button.active {
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.9), rgba(129, 140, 248, 0.85));
-  color: #020617;
+.editor-block-button[data-active="true"],
+.editor-week-button[data-active="true"],
+.editor-lecture-button[data-active="true"] {
+  background: var(--pill-gradient);
+  color: #031327;
   border-color: transparent;
-  box-shadow: 0 18px 32px rgba(2, 6, 23, 0.42);
+  box-shadow: var(--pill-shadow);
+  transform: translateY(-1px);
 }
 
-.editor-block-row.has-lectures .editor-block-button {
-  border-color: rgba(56, 189, 248, 0.45);
-  color: var(--text);
+.editor-week-button {
+  font-size: 0.9rem;
 }
 
-.editor-block-row.tagged .editor-block-button {
-  box-shadow: inset 0 0 0 1px rgba(192, 132, 252, 0.4);
+.editor-lecture-button {
+  font-size: 0.85rem;
+  line-height: 1.3;
+  padding: 9px 14px;
+  justify-content: flex-start;
+  gap: 8px;
+  white-space: normal;
 }
 
 .editor-block-label {
@@ -1438,65 +1474,18 @@ input[type="checkbox"]:checked::after {
   color: var(--text);
 }
 
-.editor-block-button.active .editor-block-count {
-  background: rgba(15, 23, 42, 0.18);
-  color: #020617;
-}
-
-.editor-block-tag-toggle {
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  background: rgba(15, 23, 42, 0.6);
-  color: var(--text-muted);
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
-}
-
-.editor-block-tag-toggle:hover,
-.editor-block-tag-toggle:focus-visible {
-  color: var(--text);
-  border-color: rgba(192, 132, 252, 0.55);
-  outline: none;
-}
-
-.editor-block-tag-toggle.active {
-  background: linear-gradient(135deg, rgba(192, 132, 252, 0.92), rgba(56, 189, 248, 0.9));
-  color: #020617;
-  border-color: transparent;
-  box-shadow: 0 12px 24px rgba(2, 6, 23, 0.35);
-}
-
-.editor-week-button {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(8, 13, 23, 0.5);
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
-}
-
-.editor-week-button:hover,
-.editor-week-button:focus-visible {
-  background: rgba(30, 64, 175, 0.35);
+.editor-block-row.has-lectures .editor-block-button {
   border-color: rgba(56, 189, 248, 0.45);
   color: var(--text);
-  outline: none;
 }
 
-.editor-week-button.active {
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.8), rgba(129, 140, 248, 0.75));
-  color: #020617;
-  border-color: transparent;
-  box-shadow: 0 12px 24px rgba(2, 6, 23, 0.32);
+.editor-block-button[data-active="true"] .editor-block-count,
+.editor-block-button[data-active="true"] .editor-block-label {
+  color: inherit;
+}
+
+.editor-block-button[data-active="true"] .editor-block-count {
+  background: rgba(15, 23, 42, 0.12);
 }
 
 .editor-week-button.has-selection {
@@ -1515,32 +1504,6 @@ input[type="checkbox"]:checked::after {
 .editor-week-meta {
   font-size: 0.75rem;
   color: rgba(148, 163, 184, 0.7);
-}
-
-.editor-lecture-button {
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(8, 13, 23, 0.5);
-  color: var(--text-muted);
-  font-size: 0.82rem;
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.15s ease;
-}
-
-.editor-lecture-button:hover,
-.editor-lecture-button:focus-visible {
-  background: rgba(30, 64, 175, 0.35);
-  border-color: rgba(56, 189, 248, 0.45);
-  color: var(--text);
-  outline: none;
-}
-
-.editor-lecture-button.active {
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.9), rgba(192, 132, 252, 0.88));
-  color: #020617;
-  border-color: transparent;
-  box-shadow: 0 10px 22px rgba(2, 6, 23, 0.32);
 }
 
 .editor-week-header {
