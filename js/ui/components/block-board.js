@@ -556,12 +556,17 @@ function createPassCard(entry, onDrag) {
     if (!container || !inner) return;
     const available = container.clientWidth;
     const content = inner.scrollWidth;
-    if (available > 0 && content > available) {
+    const overflow = Math.round(content - available);
+    if (available > 0 && overflow > 8) {
+      const distance = overflow + 24;
+      const duration = Math.min(22, Math.max(8, distance / 24));
       container.classList.add('is-animated');
-      container.style.setProperty('--marquee-distance', `${content - available + 16}px`);
+      container.style.setProperty('--marquee-distance', `${distance}px`);
+      container.style.setProperty('--marquee-duration', `${duration}s`);
     } else {
       container.classList.remove('is-animated');
       container.style.removeProperty('--marquee-distance');
+      container.style.removeProperty('--marquee-duration');
     }
   };
 
@@ -623,6 +628,31 @@ function createDayColumn(dayTs) {
     column.classList.remove('dropping');
   });
   return column;
+}
+
+function scrollGridToToday(grid) {
+  if (!grid) return;
+  const todayColumn = grid.querySelector('.block-board-day-column.today');
+  if (!todayColumn) return;
+  if (grid.scrollWidth <= grid.clientWidth + 1) return;
+  const apply = () => {
+    const columnRect = todayColumn.getBoundingClientRect();
+    const gridRect = grid.getBoundingClientRect();
+    const relativeLeft = columnRect.left - gridRect.left + grid.scrollLeft;
+    const halfWidth = Math.max(0, (grid.clientWidth - todayColumn.clientWidth) / 2);
+    const maxScroll = Math.max(0, grid.scrollWidth - grid.clientWidth);
+    const target = Math.max(0, Math.min(maxScroll, relativeLeft - halfWidth));
+    if (typeof grid.scrollTo === 'function') {
+      grid.scrollTo({ left: target, behavior: 'auto' });
+    } else {
+      grid.scrollLeft = target;
+    }
+  };
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(apply);
+  } else {
+    setTimeout(apply, 0);
+  }
 }
 
 function sortPassEntries(entries) {
@@ -737,7 +767,7 @@ function attachDropHandlers(column, blockEntries, refresh) {
   });
 }
 
-function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
+function renderBlockBoardBlock(container, block, blockLectures, days, refresh, gridScrollState = new Map()) {
   const boardState = ensureBoardState();
   const wrapper = document.createElement('section');
   wrapper.className = 'block-board-block';
@@ -962,6 +992,12 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
   });
 
   wrapper.appendChild(board);
+
+  const blockId = String(block?.blockId ?? '');
+  if (blockId && !gridScrollState.has(blockId)) {
+    scrollGridToToday(board);
+  }
+
   container.appendChild(wrapper);
 }
 
@@ -1091,6 +1127,15 @@ export async function renderBlockBoard(container, refresh) {
   });
   container.appendChild(urgentHost);
 
+  const previousGridScroll = new Map();
+  const gridEntries = Array.isArray(scrollSnapshot?.gridScroll) ? scrollSnapshot.gridScroll : [];
+  gridEntries.forEach(entry => {
+    if (!entry) return;
+    const blockId = entry?.blockId;
+    if (blockId == null) return;
+    previousGridScroll.set(String(blockId), Number(entry?.left) || 0);
+  });
+
   const blockList = document.createElement('div');
   blockList.className = 'block-board-list';
   const refreshBoard = async () => {
@@ -1106,7 +1151,7 @@ export async function renderBlockBoard(container, refresh) {
     const blockLectures = lecturesByBlock.get(String(block.blockId)) || [];
     const blockDays = collectDaysForBlock(block, blockLectures);
     const daysForBlock = blockDays.length ? blockDays : fallbackDays;
-    renderBlockBoardBlock(blockList, block, blockLectures, daysForBlock, refreshBoard);
+    renderBlockBoardBlock(blockList, block, blockLectures, daysForBlock, refreshBoard, previousGridScroll);
   });
   container.appendChild(blockList);
   restoreBoardScrollState(container, scrollSnapshot);
@@ -1124,10 +1169,19 @@ function captureBoardScrollState(container) {
       dayScroll.push({ key: `${blockId}::${day}`, top: list.scrollTop });
     }
   });
+  const gridScroll = [];
+  container.querySelectorAll('.block-board-block').forEach(blockEl => {
+    const blockId = blockEl?.dataset?.blockId ?? '';
+    if (!blockId) return;
+    const grid = blockEl.querySelector('.block-board-grid');
+    if (!grid) return;
+    gridScroll.push({ blockId, left: grid.scrollLeft });
+  });
   const snapshot = {
     containerTop: container.scrollTop,
     containerLeft: container.scrollLeft,
     dayScroll,
+    gridScroll,
     windowX: typeof window !== 'undefined' ? window.scrollX : null,
     windowY: typeof window !== 'undefined' ? window.scrollY : null
   };
@@ -1175,6 +1229,22 @@ function restoreBoardScrollState(container, snapshot) {
           const list = column.querySelector('.block-board-day-list');
           if (list) list.scrollTop = dayScrollMap.get(key) ?? 0;
         });
+      });
+    }
+    const gridEntries = Array.isArray(snapshot.gridScroll) ? snapshot.gridScroll : [];
+    if (gridEntries.length) {
+      const gridScrollMap = new Map(gridEntries.map(entry => [String(entry.blockId ?? ''), Number(entry.left) || 0]));
+      container.querySelectorAll('.block-board-block').forEach(blockEl => {
+        const blockId = blockEl?.dataset?.blockId ?? '';
+        if (!blockId || !gridScrollMap.has(blockId)) return;
+        const grid = blockEl.querySelector('.block-board-grid');
+        if (!grid) return;
+        const target = gridScrollMap.get(blockId);
+        if (typeof grid.scrollTo === 'function') {
+          grid.scrollTo({ left: target, behavior: 'auto' });
+        } else {
+          grid.scrollLeft = target;
+        }
       });
     }
   };
