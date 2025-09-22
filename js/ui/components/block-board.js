@@ -803,6 +803,7 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
         column.classList.add('is-today');
       }
       const date = new Date(day);
+
       const isoDate = Number.isFinite(day) ? date.toISOString().slice(0, 10) : '';
       const tooltip = isoDate ? `${isoDate} • ${entries.length} due` : `${date.toLocaleDateString()} • ${entries.length} due`;
       column.setAttribute('data-count', String(entries.length));
@@ -810,6 +811,7 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
       const bar = document.createElement('div');
       bar.className = 'block-board-timeline-bar';
       bar.title = tooltip;
+
       const count = entries.length;
       if (count > 0) {
         const gap = 2;
@@ -840,12 +842,14 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
       const label = document.createElement('div');
       label.className = 'block-board-timeline-day';
       label.textContent = date.getDate();
+
       label.setAttribute('aria-hidden', 'true');
       column.appendChild(label);
 
       if (tooltip) {
         column.setAttribute('aria-label', tooltip);
       }
+
 
       track.appendChild(column);
     });

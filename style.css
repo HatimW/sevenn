@@ -6225,6 +6225,7 @@ body.map-toolbox-dragging {
 .block-board-timeline {
   display: flex;
   flex-direction: column;
+
   gap: 1rem;
   padding: 1rem 1.1rem;
   border-radius: var(--radius-lg);
@@ -6252,6 +6253,7 @@ body.map-toolbox-dragging {
 }
 
 .block-board-timeline-track {
+
   position: relative;
   display: flex;
   align-items: flex-end;
@@ -6327,6 +6329,7 @@ body.map-toolbox-dragging {
   position: absolute;
   inset: 0;
   border-radius: inherit;
+
   background: rgba(15, 23, 42, 0.4);
 }
 
