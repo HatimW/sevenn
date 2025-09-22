@@ -67,17 +67,21 @@ describe('block board rendering', () => {
     await renderBlockBoard(container, () => {});
     assert.equal(saveLectureMock.mock.callCount(), 1);
 
-    const delayBtn = Array.from(container.querySelectorAll('.block-board-pass-actions button')).find(btn => btn.textContent?.includes('+1 day'));
-    assert(delayBtn);
-    delayBtn.click();
-    await renderBlockBoard(container, () => {});
+    const pushBtn = Array.from(container.querySelectorAll('.block-board-pass-actions button')).find(btn => btn.textContent?.includes('Push'));
+    assert(pushBtn);
+    pushBtn.click();
+    await Promise.resolve();
+    const modal = document.querySelector('.block-board-shift-card');
+    assert(modal);
+    const confirm = modal.querySelector('.block-board-shift-actions .btn:not(.secondary)');
+    assert(confirm);
+    confirm.click();
+    await Promise.resolve();
+    await Promise.resolve();
     assert.equal(saveLectureMock.mock.callCount(), 2);
 
-    const pushAllBtn = Array.from(container.querySelectorAll('.block-board-summary-header .btn.tertiary')).find(btn => btn.textContent?.toLowerCase().includes('push'));
-    assert(pushAllBtn);
-    pushAllBtn.click();
-    await renderBlockBoard(container, () => {});
-    assert.equal(saveLectureMock.mock.callCount(), 3);
+    const pushAllBtn = Array.from(container.querySelectorAll('.block-board-summary-header .btn')).find(btn => btn.textContent?.toLowerCase().includes('push to tomorrow'));
+    assert.equal(pushAllBtn, undefined);
   });
 
   it('persists density and collapse state', async () => {
