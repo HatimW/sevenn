@@ -30,7 +30,7 @@ describe('block board rendering', () => {
     global.Node = dom.window.Node;
     container = document.createElement('div');
     document.body.appendChild(container);
-    state.blockBoard = { collapsedBlocks: [], showDensity: true };
+    state.blockBoard = { collapsedBlocks: [], hiddenTimelines: [] };
   });
 
   afterEach(() => {
@@ -88,7 +88,7 @@ describe('block board rendering', () => {
     assert(densityBtn);
     densityBtn.click();
     await renderBlockBoard(container, () => {});
-    assert.equal(state.blockBoard.showDensity, false);
+    assert(state.blockBoard.hiddenTimelines.includes('b1'));
 
     const collapseBtn = Array.from(container.querySelectorAll('.block-board-block-controls .btn.secondary')).find(btn => btn.textContent?.toLowerCase().includes('minimize'));
     assert(collapseBtn);

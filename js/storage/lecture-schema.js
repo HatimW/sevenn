@@ -45,6 +45,20 @@ export function normalizeLectureRecord(blockId, lecture, now = Date.now()) {
     const parsed = Number(weekRaw);
     if (!Number.isNaN(parsed)) week = parsed;
   }
+  const startRaw = lecture.startAt;
+  let startAt = null;
+  if (Number.isFinite(startRaw)) {
+    startAt = startRaw;
+  } else if (typeof startRaw === 'string' && startRaw.trim()) {
+    const parsedStart = Number(startRaw);
+    if (!Number.isNaN(parsedStart)) {
+      startAt = parsedStart;
+    }
+  }
+  if (!Number.isFinite(startAt)) {
+    startAt = Number.isFinite(lecture.createdAt) ? lecture.createdAt : now;
+  }
+
   const tags = Array.isArray(lecture.tags)
     ? lecture.tags.filter(tag => typeof tag === 'string' && tag.trim()).map(tag => tag.trim())
     : [];
@@ -57,6 +71,7 @@ export function normalizeLectureRecord(blockId, lecture, now = Date.now()) {
     plan: passPlan,
     passes: lecture.passes,
     plannerDefaults,
+    startAt,
     now
   });
 
@@ -80,6 +95,7 @@ export function normalizeLectureRecord(blockId, lecture, now = Date.now()) {
     plannerDefaults,
     status,
     nextDueAt,
+    startAt,
     createdAt,
     updatedAt
   };

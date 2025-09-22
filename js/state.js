@@ -14,7 +14,7 @@ export const state = {
   filters: { types:["disease","drug","concept"], block:"", week:"", onlyFav:false, sort:"updated" },
   lectures: { query: '', blockId: '', week: '', status: '', tag: '' },
   entryLayout: { mode: 'list', columns: 3, scale: 1, controlsVisible: false },
-  blockBoard: { collapsedBlocks: [], showDensity: true },
+  blockBoard: { collapsedBlocks: [], hiddenTimelines: [] },
   builder: {
     blocks:[],
     weeks:[],
@@ -52,15 +52,27 @@ export function setBuilder(patch){ Object.assign(state.builder, patch); }
 export function setBlockBoardState(patch) {
   if (!patch) return;
   if (!state.blockBoard) {
-    state.blockBoard = { collapsedBlocks: [], showDensity: true };
+    state.blockBoard = { collapsedBlocks: [], hiddenTimelines: [] };
   }
   const current = state.blockBoard;
+  if (!Array.isArray(current.hiddenTimelines)) {
+    current.hiddenTimelines = [];
+  }
   if (Array.isArray(patch.collapsedBlocks)) {
     const unique = Array.from(new Set(patch.collapsedBlocks.map(id => String(id))));
     current.collapsedBlocks = unique;
   }
+  if (Array.isArray(patch.hiddenTimelines)) {
+    const uniqueHidden = Array.from(new Set(patch.hiddenTimelines.map(id => String(id))));
+    current.hiddenTimelines = uniqueHidden;
+  }
   if (Object.prototype.hasOwnProperty.call(patch, 'showDensity')) {
-    current.showDensity = Boolean(patch.showDensity);
+    const show = Boolean(patch.showDensity);
+    if (show) {
+      current.hiddenTimelines = current.hiddenTimelines.filter(id => id !== '__all__');
+    } else if (!current.hiddenTimelines.includes('__all__')) {
+      current.hiddenTimelines = [...current.hiddenTimelines, '__all__'];
+    }
   }
 }
 export function setLecturesState(patch) {

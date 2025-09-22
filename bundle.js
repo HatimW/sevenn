@@ -44,7 +44,7 @@ var Sevenn = (() => {
     filters: { types: ["disease", "drug", "concept"], block: "", week: "", onlyFav: false, sort: "updated" },
     lectures: { query: "", blockId: "", week: "", status: "", tag: "" },
     entryLayout: { mode: "list", columns: 3, scale: 1, controlsVisible: false },
-    blockBoard: { collapsedBlocks: [], showDensity: true },
+    blockBoard: { collapsedBlocks: [], hiddenTimelines: [] },
     builder: {
       blocks: [],
       weeks: [],
@@ -88,15 +88,27 @@ var Sevenn = (() => {
   function setBlockBoardState(patch) {
     if (!patch) return;
     if (!state.blockBoard) {
-      state.blockBoard = { collapsedBlocks: [], showDensity: true };
+      state.blockBoard = { collapsedBlocks: [], hiddenTimelines: [] };
     }
     const current = state.blockBoard;
+    if (!Array.isArray(current.hiddenTimelines)) {
+      current.hiddenTimelines = [];
+    }
     if (Array.isArray(patch.collapsedBlocks)) {
       const unique = Array.from(new Set(patch.collapsedBlocks.map((id) => String(id))));
       current.collapsedBlocks = unique;
     }
+    if (Array.isArray(patch.hiddenTimelines)) {
+      const uniqueHidden = Array.from(new Set(patch.hiddenTimelines.map((id) => String(id))));
+      current.hiddenTimelines = uniqueHidden;
+    }
     if (Object.prototype.hasOwnProperty.call(patch, "showDensity")) {
-      current.showDensity = Boolean(patch.showDensity);
+      const show = Boolean(patch.showDensity);
+      if (show) {
+        current.hiddenTimelines = current.hiddenTimelines.filter((id) => id !== "__all__");
+      } else if (!current.hiddenTimelines.includes("__all__")) {
+        current.hiddenTimelines = [...current.hiddenTimelines, "__all__"];
+      }
     }
   }
   function setLecturesState(patch) {
@@ -539,6 +551,19 @@ var Sevenn = (() => {
       const parsed = Number(weekRaw);
       if (!Number.isNaN(parsed)) week = parsed;
     }
+    const startRaw = lecture.startAt;
+    let startAt = null;
+    if (Number.isFinite(startRaw)) {
+      startAt = startRaw;
+    } else if (typeof startRaw === "string" && startRaw.trim()) {
+      const parsedStart = Number(startRaw);
+      if (!Number.isNaN(parsedStart)) {
+        startAt = parsedStart;
+      }
+    }
+    if (!Number.isFinite(startAt)) {
+      startAt = Number.isFinite(lecture.createdAt) ? lecture.createdAt : now;
+    }
     const tags = Array.isArray(lecture.tags) ? lecture.tags.filter((tag) => typeof tag === "string" && tag.trim()).map((tag) => tag.trim()) : [];
     const passPlan = lecture.passPlan ? normalizePassPlan({ ...cloneDefaultPassPlan(), ...lecture.passPlan }) : normalizePassPlan(cloneDefaultPassPlan());
     const plannerDefaults = normalizePlannerDefaults(lecture.plannerDefaults || {});
@@ -546,6 +571,7 @@ var Sevenn = (() => {
       plan: passPlan,
       passes: lecture.passes,
       plannerDefaults,
+      startAt,
       now
     });
     const statusBase = lecture.status ? { ...cloneDefaultStatus(), ...lecture.status } : cloneDefaultStatus();
@@ -565,6 +591,7 @@ var Sevenn = (() => {
       plannerDefaults,
       status,
       nextDueAt,
+      startAt,
       createdAt,
       updatedAt
     };
@@ -6999,7 +7026,7 @@ var Sevenn = (() => {
     if (week == null || week === "") return "\u2014";
     const num = Number(week);
     if (!Number.isFinite(num)) return String(week);
-    return num === 0 ? "0" : `Week ${num}`;
+    return `Week ${num}`;
   }
   function collectBlockWeekOptions(blockId, blocks = [], lectureLists = {}) {
     if (!blockId) return [];
@@ -7123,6 +7150,27 @@ var Sevenn = (() => {
     hour: "numeric",
     minute: "2-digit"
   });
+  function formatDateForInput(timestamp = Date.now()) {
+    if (!Number.isFinite(timestamp)) return "";
+    const date = new Date(timestamp);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+  function parseDateInputValue(value) {
+    if (typeof value !== "string" || !value) return null;
+    const [yearStr, monthStr, dayStr] = value.split("-");
+    const year = Number(yearStr);
+    const month = Number(monthStr) - 1;
+    const day = Number(dayStr);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+      return null;
+    }
+    const date = new Date(year, month, day, 0, 0, 0, 0);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.getTime();
+  }
   function passAccent(order = 1) {
     if (!Number.isFinite(order)) return PASS_ACCENTS[0];
     const idx = Math.max(0, Math.floor(order) - 1) % PASS_ACCENTS.length;
@@ -7505,6 +7553,10 @@ var Sevenn = (() => {
     status.textContent = stateLabel;
     header.appendChild(status);
     overviewCell.appendChild(header);
+    const nextDueLine = document.createElement("div");
+    nextDueLine.className = "lecture-next-indicator";
+    nextDueLine.textContent = formatNextDueDescriptor(resolveNextDueAt(lecture), now);
+    overviewCell.appendChild(nextDueLine);
     if (lecture.position != null) {
       const position = document.createElement("div");
       position.className = "lecture-overview-position";
@@ -7556,10 +7608,6 @@ var Sevenn = (() => {
     }
     passesCell.appendChild(passScroller);
     row.appendChild(passesCell);
-    const nextDueCell = document.createElement("td");
-    nextDueCell.className = "lecture-next-cell";
-    nextDueCell.textContent = formatNextDueDescriptor(resolveNextDueAt(lecture), now);
-    row.appendChild(nextDueCell);
     const actions = document.createElement("td");
     actions.className = "lecture-actions";
     const editBtn = document.createElement("button");
@@ -7699,7 +7747,6 @@ var Sevenn = (() => {
         [
           { label: "Lecture", className: "lectures-col-lecture" },
           { label: "Passes", className: "lectures-col-passes" },
-          { label: "Next due", className: "lectures-col-next" },
           { label: "Actions", className: "lectures-col-actions" }
         ].forEach((column) => {
           const th = document.createElement("th");
@@ -7957,7 +8004,8 @@ var Sevenn = (() => {
           blockId: selectedBlockId,
           name: "",
           week: selectedWeek === "" ? "" : selectedWeek,
-          passPlan: passPlanTemplate
+          passPlan: passPlanTemplate,
+          startAt: Date.now()
         },
         onSubmit: async (payload) => {
           await saveLecture(payload);
@@ -7979,7 +8027,17 @@ var Sevenn = (() => {
     card.appendChild(title);
     const form = document.createElement("form");
     form.className = "lecture-form";
+    const basicsSection = document.createElement("section");
+    basicsSection.className = "lecture-form-section";
+    const basicsTitle = document.createElement("h3");
+    basicsTitle.className = "lecture-form-section-title";
+    basicsTitle.textContent = "Lecture details";
+    basicsSection.appendChild(basicsTitle);
+    const basicsGrid = document.createElement("div");
+    basicsGrid.className = "lecture-form-grid";
+    basicsSection.appendChild(basicsGrid);
     const blockField = document.createElement("label");
+    blockField.className = "lecture-form-field";
     blockField.textContent = "Block";
     const blockSelect = document.createElement("select");
     blockSelect.className = "input";
@@ -7996,11 +8054,10 @@ var Sevenn = (() => {
       blockSelect.disabled = true;
     }
     blockField.appendChild(blockSelect);
-    const positionNote = document.createElement("div");
-    positionNote.className = "lecture-position-note";
-    blockField.appendChild(positionNote);
-    form.appendChild(blockField);
+    basicsGrid.appendChild(blockField);
     const nameField = document.createElement("label");
+    nameField.className = "lecture-form-field";
+    nameField.dataset.span = "full";
     nameField.textContent = "Name";
     const nameInput = document.createElement("input");
     nameInput.type = "text";
@@ -8010,14 +8067,32 @@ var Sevenn = (() => {
     nameInput.dataset.field = "name";
     nameInput.value = defaults.name ?? "";
     nameField.appendChild(nameInput);
-    form.appendChild(nameField);
+    basicsGrid.appendChild(nameField);
     const weekField = document.createElement("label");
+    weekField.className = "lecture-form-field";
     weekField.textContent = "Week";
     const weekSelect = document.createElement("select");
     weekSelect.className = "input";
     weekSelect.dataset.field = "week";
     weekField.appendChild(weekSelect);
-    form.appendChild(weekField);
+    basicsGrid.appendChild(weekField);
+    const defaultStartAt = Number.isFinite(defaults.startAt) ? defaults.startAt : Date.now();
+    const startField = document.createElement("label");
+    startField.className = "lecture-form-field";
+    startField.textContent = "First pass date";
+    const startInput = document.createElement("input");
+    startInput.type = "date";
+    startInput.required = true;
+    startInput.className = "input";
+    const startValue = formatDateForInput(defaultStartAt);
+    startInput.value = startValue || formatDateForInput(Date.now());
+    startField.appendChild(startInput);
+    const startHint = document.createElement("span");
+    startHint.className = "lecture-field-hint";
+    startHint.textContent = "Controls when pass 1 begins.";
+    startField.appendChild(startHint);
+    basicsGrid.appendChild(startField);
+    form.appendChild(basicsSection);
     let dialogWeekValue = normalizeWeekValue(defaults.week);
     const updateDialogWeekOptions = () => {
       const blockId = blockSelect.value;
@@ -8038,6 +8113,12 @@ var Sevenn = (() => {
       initialSchedule.length > 0 ? initialSchedule.length : defaults.passPlan ? 0 : defaultFallbackCount
     );
     let passConfigs = adjustPassConfigs2(initialSchedule, initialCount, planTemplate);
+    const planningSection = document.createElement("section");
+    planningSection.className = "lecture-form-section";
+    const planningTitle = document.createElement("h3");
+    planningTitle.className = "lecture-form-section-title";
+    planningTitle.textContent = "Pass planning";
+    planningSection.appendChild(planningTitle);
     const passCountField = document.createElement("label");
     passCountField.className = "lecture-pass-count";
     passCountField.textContent = "Planned passes";
@@ -8052,10 +8133,10 @@ var Sevenn = (() => {
     passHelp.className = "lecture-pass-help";
     passHelp.textContent = "Set how many times you want to revisit this lecture.";
     passCountField.appendChild(passHelp);
-    form.appendChild(passCountField);
+    planningSection.appendChild(passCountField);
     const passSummary = document.createElement("div");
     passSummary.className = "lecture-pass-summary-line";
-    form.appendChild(passSummary);
+    planningSection.appendChild(passSummary);
     const advanced = document.createElement("details");
     advanced.className = "lecture-pass-advanced";
     if (mode === "edit") {
@@ -8071,31 +8152,8 @@ var Sevenn = (() => {
     const passList = document.createElement("div");
     passList.className = "lecture-pass-editor";
     advanced.appendChild(passList);
-    form.appendChild(advanced);
-    function updatePositionNote() {
-      if (mode === "edit") {
-        if (defaults.id != null) {
-          positionNote.textContent = `Position: ${defaults.id}`;
-        } else {
-          positionNote.textContent = "";
-        }
-        return;
-      }
-      const activeBlock = blockSelect.value.trim();
-      if (!activeBlock) {
-        positionNote.textContent = "";
-        return;
-      }
-      const list = Array.isArray(lectureLists[activeBlock]) ? lectureLists[activeBlock] : [];
-      let maxId = 0;
-      for (const entry of list) {
-        const value = Number(entry?.id);
-        if (Number.isFinite(value) && value > maxId) {
-          maxId = value;
-        }
-      }
-      positionNote.textContent = `Next position in block: ${maxId + 1}`;
-    }
+    planningSection.appendChild(advanced);
+    form.appendChild(planningSection);
     function updatePassSummary() {
       if (!passConfigs.length) {
         passSummary.textContent = "No passes scheduled for this lecture.";
@@ -8224,10 +8282,8 @@ var Sevenn = (() => {
       blockSelect.addEventListener("change", () => {
         dialogWeekValue = "";
         updateDialogWeekOptions();
-        updatePositionNote();
       });
     }
-    updatePositionNote();
     const actions = document.createElement("div");
     actions.className = "row lecture-dialog-actions";
     const submitBtn = document.createElement("button");
@@ -8250,6 +8306,10 @@ var Sevenn = (() => {
       const name = nameInput.value.trim();
       const weekValue = weekSelect.value;
       const week = weekValue === "" ? null : Number(weekValue);
+      let startAt = parseDateInputValue(startInput.value);
+      if (!Number.isFinite(startAt)) {
+        startAt = Date.now();
+      }
       if (!blockId || !name || weekValue !== "" && Number.isNaN(week)) {
         return;
       }
@@ -8258,7 +8318,8 @@ var Sevenn = (() => {
         blockId,
         name,
         week,
-        passPlan
+        passPlan,
+        startAt
       };
       if (mode === "edit") {
         payload.id = defaults.id;
@@ -8288,7 +8349,8 @@ var Sevenn = (() => {
         id: lecture.id,
         name: lecture.name || "",
         week: lecture.week ?? "",
-        passPlan: lecture.passPlan
+        passPlan: lecture.passPlan,
+        startAt: lecture.startAt
       },
       onSubmit: async (payload) => {
         await saveLecture({
@@ -8296,7 +8358,8 @@ var Sevenn = (() => {
           id: lecture.id,
           name: payload.name,
           week: payload.week,
-          passPlan: payload.passPlan
+          passPlan: payload.passPlan,
+          startAt: payload.startAt
         });
         await invalidateBlockCatalog();
         await redraw();
@@ -10361,7 +10424,16 @@ var Sevenn = (() => {
   });
   function ensureBoardState() {
     if (!state.blockBoard) {
-      state.blockBoard = { collapsedBlocks: [], showDensity: true };
+      state.blockBoard = { collapsedBlocks: [], hiddenTimelines: [] };
+    }
+    if (!Array.isArray(state.blockBoard.collapsedBlocks)) {
+      state.blockBoard.collapsedBlocks = [];
+    }
+    if (!Array.isArray(state.blockBoard.hiddenTimelines)) {
+      state.blockBoard.hiddenTimelines = [];
+      if (state.blockBoard.showDensity === false && !state.blockBoard.hiddenTimelines.includes("__all__")) {
+        state.blockBoard.hiddenTimelines.push("__all__");
+      }
     }
     return state.blockBoard;
   }
@@ -10806,15 +10878,26 @@ var Sevenn = (() => {
       refresh();
     });
     controls.appendChild(collapseBtn);
-    const densityBtn = document.createElement("button");
-    densityBtn.type = "button";
-    densityBtn.className = "btn secondary";
-    densityBtn.textContent = boardState.showDensity ? "Hide timeline" : "Show timeline";
-    densityBtn.addEventListener("click", () => {
-      setBlockBoardState({ showDensity: !ensureBoardState().showDensity });
+    const hiddenTimelineSet = new Set((boardState.hiddenTimelines || []).map((id) => String(id)));
+    const blockKey = String(block?.blockId ?? "");
+    const timelineHidden = hiddenTimelineSet.has("__all__") || hiddenTimelineSet.has(blockKey);
+    const timelineBtn = document.createElement("button");
+    timelineBtn.type = "button";
+    timelineBtn.className = "btn secondary";
+    timelineBtn.textContent = timelineHidden ? "Show timeline" : "Hide timeline";
+    timelineBtn.addEventListener("click", () => {
+      const current = ensureBoardState();
+      const nextHidden = new Set((current.hiddenTimelines || []).map((id) => String(id)));
+      nextHidden.delete("__all__");
+      if (timelineHidden) {
+        nextHidden.delete(blockKey);
+      } else {
+        nextHidden.add(blockKey);
+      }
+      setBlockBoardState({ hiddenTimelines: Array.from(nextHidden) });
       refresh();
     });
-    controls.appendChild(densityBtn);
+    controls.appendChild(timelineBtn);
     header.appendChild(controls);
     wrapper.appendChild(header);
     const assignments = buildDayAssignments(blockLectures, days);
@@ -10825,7 +10908,7 @@ var Sevenn = (() => {
       entries.forEach((entry) => blockEntries.push(entry));
     });
     unscheduledEntries.forEach((entry) => blockEntries.push(entry));
-    if (boardState.showDensity) {
+    if (!timelineHidden) {
       const dayStats = days.map((day) => {
         const entries = assignments.get(day) || [];
         const breakdown = /* @__PURE__ */ new Map();
