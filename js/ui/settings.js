@@ -991,17 +991,30 @@ export async function renderSettings(root) {
   dHeading.textContent = 'Data';
   dataCard.appendChild(dHeading);
 
+  async function triggerExportDownload(options = {}) {
+    const { prefix = 'sevenn-export', withTimestamp = false } = options;
+    const dump = await exportJSON();
+    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const suffix = withTimestamp ? `-${timestamp}` : '';
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${prefix}${suffix}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const exportBtn = document.createElement('button');
   exportBtn.className = 'btn';
   exportBtn.textContent = 'Export DB';
   exportBtn.addEventListener('click', async () => {
-    const dump = await exportJSON();
-    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'sevenn-export.json';
-    a.click();
-    URL.revokeObjectURL(a.href);
+    try {
+      await triggerExportDownload();
+    } catch (err) {
+      console.error('Failed to export database', err);
+      alert('Export failed');
+    }
   });
   dataCard.appendChild(exportBtn);
 
@@ -1013,13 +1026,32 @@ export async function renderSettings(root) {
     const file = importInput.files[0];
     if (!file) return;
     try {
+      const confirmBackup = window.confirm(
+        'Importing will replace your current data. Would you like to download a backup first?'
+      );
+      if (confirmBackup) {
+        try {
+          await triggerExportDownload({ prefix: 'sevenn-backup', withTimestamp: true });
+        } catch (err) {
+          console.error('Failed to create backup prior to import', err);
+          alert('Backup failed. Import cancelled.');
+          importInput.value = '';
+          return;
+        }
+      }
       const text = await file.text();
       const json = JSON.parse(text);
       const res = await importJSON(json);
-      alert(res.message);
+      if (!res?.ok) {
+        alert(res?.message || 'Import failed');
+        return;
+      }
+      alert(res.message || 'Import complete');
       location.reload();
     } catch (e) {
       alert('Import failed');
+    } finally {
+      importInput.value = '';
     }
   });
 

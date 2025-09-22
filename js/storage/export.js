@@ -1,5 +1,16 @@
 import { openDB } from './idb.js';
-import { buildTokens } from '../search.js';
+import { buildTokens, buildSearchMeta } from '../search.js';
+
+const MAP_CONFIG_KEY = 'map-config';
+const TRANSACTION_STORES = [
+  'items',
+  'blocks',
+  'exams',
+  'settings',
+  'exam_sessions',
+  'study_sessions',
+  'lectures'
+];
 
 function prom(req){
   return new Promise((resolve,reject)=>{
@@ -10,46 +21,128 @@ function prom(req){
 
 export async function exportJSON(){
   const db = await openDB();
-  const tx = db.transaction(['items','blocks','exams','settings']);
-  const items = await prom(tx.objectStore('items').getAll());
-  const blocks = await prom(tx.objectStore('blocks').getAll());
-  const exams = await prom(tx.objectStore('exams').getAll());
-  const settingsArr = await prom(tx.objectStore('settings').getAll());
-  const settings = settingsArr.find(s => s.id === 'app') || { id:'app', dailyCount:20, theme:'dark' };
-  return { items, blocks, exams, settings };
+  const tx = db.transaction(TRANSACTION_STORES);
+  const itemsStore = tx.objectStore('items');
+  const blocksStore = tx.objectStore('blocks');
+  const examsStore = tx.objectStore('exams');
+  const settingsStore = tx.objectStore('settings');
+  const examSessionsStore = tx.objectStore('exam_sessions');
+  const studySessionsStore = tx.objectStore('study_sessions');
+  const lecturesStore = tx.objectStore('lectures');
+
+  const [
+    items = [],
+    blocks = [],
+    exams = [],
+    settingsArr = [],
+    examSessions = [],
+    studySessions = [],
+    lectures = []
+  ] = await Promise.all([
+    prom(itemsStore.getAll()),
+    prom(blocksStore.getAll()),
+    prom(examsStore.getAll()),
+    prom(settingsStore.getAll()),
+    prom(examSessionsStore.getAll()),
+    prom(studySessionsStore.getAll()),
+    prom(lecturesStore.getAll())
+  ]);
+
+  const settings = settingsArr.find(s => s?.id === 'app') || { id:'app', dailyCount:20, theme:'dark' };
+  const mapConfigEntry = settingsArr.find(s => s?.id === MAP_CONFIG_KEY);
+  const mapConfig = mapConfigEntry && typeof mapConfigEntry === 'object' ? mapConfigEntry.config : null;
+  const additionalSettings = settingsArr.filter(entry => {
+    if (!entry || typeof entry !== 'object') return false;
+    if (!entry.id || entry.id === 'app' || entry.id === MAP_CONFIG_KEY) return false;
+    return true;
+  });
+
+  return {
+    items,
+    blocks,
+    exams,
+    lectures,
+    examSessions,
+    studySessions,
+    settings,
+    mapConfig,
+    settingsEntries: additionalSettings
+  };
 }
 
 export async function importJSON(dbDump){
   try {
     const db = await openDB();
-    const tx = db.transaction(['items','blocks','exams','settings'],'readwrite');
+    const tx = db.transaction(TRANSACTION_STORES,'readwrite');
     const items = tx.objectStore('items');
     const blocks = tx.objectStore('blocks');
     const exams = tx.objectStore('exams');
     const settings = tx.objectStore('settings');
+    const examSessions = tx.objectStore('exam_sessions');
+    const studySessions = tx.objectStore('study_sessions');
+    const lectures = tx.objectStore('lectures');
 
     await Promise.all([
       prom(items.clear()),
       prom(blocks.clear()),
       prom(exams.clear()),
-      prom(settings.clear())
+      prom(settings.clear()),
+      prom(examSessions.clear()),
+      prom(studySessions.clear()),
+      prom(lectures.clear())
     ]);
 
-    if (dbDump.settings) await prom(settings.put({ ...dbDump.settings, id:'app' }));
-    if (Array.isArray(dbDump.blocks)) {
+    const additionalSettings = Array.isArray(dbDump?.settingsEntries)
+      ? dbDump.settingsEntries.filter(entry => entry && typeof entry === 'object' && entry.id && entry.id !== 'app')
+      : [];
+
+    if (dbDump?.settings && typeof dbDump.settings === 'object') {
+      await prom(settings.put({ ...dbDump.settings, id:'app' }));
+    } else {
+      await prom(settings.put({ id:'app', dailyCount:20, theme:'dark' }));
+    }
+    if (dbDump?.mapConfig && typeof dbDump.mapConfig === 'object') {
+      await prom(settings.put({ id: MAP_CONFIG_KEY, config: dbDump.mapConfig }));
+    }
+    for (const entry of additionalSettings) {
+      await prom(settings.put(entry));
+    }
+    if (Array.isArray(dbDump?.blocks)) {
       for (const b of dbDump.blocks) {
+        if (!b || typeof b !== 'object') continue;
         await prom(blocks.put(b));
       }
     }
-    if (Array.isArray(dbDump.items)) {
+    if (Array.isArray(dbDump?.items)) {
       for (const it of dbDump.items) {
+        if (!it || typeof it !== 'object') continue;
         it.tokens = buildTokens(it);
+        it.searchMeta = buildSearchMeta(it);
         await prom(items.put(it));
       }
     }
-    if (Array.isArray(dbDump.exams)) {
+    if (Array.isArray(dbDump?.exams)) {
       for (const ex of dbDump.exams) {
+        if (!ex || typeof ex !== 'object') continue;
         await prom(exams.put(ex));
+      }
+    }
+    if (Array.isArray(dbDump?.lectures)) {
+      for (const lecture of dbDump.lectures) {
+        if (!lecture || typeof lecture !== 'object') continue;
+        await prom(lectures.put(lecture));
+      }
+    }
+    if (Array.isArray(dbDump?.examSessions)) {
+      for (const session of dbDump.examSessions) {
+        if (!session || typeof session !== 'object') continue;
+        await prom(examSessions.put(session));
+      }
+    }
+    if (Array.isArray(dbDump?.studySessions)) {
+      for (const session of dbDump.studySessions) {
+        if (!session || typeof session !== 'object') continue;
+        await prom(studySessions.put(session));
       }
     }
 

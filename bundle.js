@@ -1224,6 +1224,16 @@ var Sevenn = (() => {
   }
 
   // js/storage/export.js
+  var MAP_CONFIG_KEY = "map-config";
+  var TRANSACTION_STORES = [
+    "items",
+    "blocks",
+    "exams",
+    "settings",
+    "exam_sessions",
+    "study_sessions",
+    "lectures"
+  ];
   function prom2(req) {
     return new Promise((resolve, reject) => {
       req.onsuccess = () => resolve(req.result);
@@ -1232,43 +1242,119 @@ var Sevenn = (() => {
   }
   async function exportJSON() {
     const db = await openDB();
-    const tx = db.transaction(["items", "blocks", "exams", "settings"]);
-    const items = await prom2(tx.objectStore("items").getAll());
-    const blocks = await prom2(tx.objectStore("blocks").getAll());
-    const exams = await prom2(tx.objectStore("exams").getAll());
-    const settingsArr = await prom2(tx.objectStore("settings").getAll());
-    const settings = settingsArr.find((s) => s.id === "app") || { id: "app", dailyCount: 20, theme: "dark" };
-    return { items, blocks, exams, settings };
+    const tx = db.transaction(TRANSACTION_STORES);
+    const itemsStore = tx.objectStore("items");
+    const blocksStore = tx.objectStore("blocks");
+    const examsStore = tx.objectStore("exams");
+    const settingsStore = tx.objectStore("settings");
+    const examSessionsStore = tx.objectStore("exam_sessions");
+    const studySessionsStore = tx.objectStore("study_sessions");
+    const lecturesStore = tx.objectStore("lectures");
+    const [
+      items = [],
+      blocks = [],
+      exams = [],
+      settingsArr = [],
+      examSessions = [],
+      studySessions = [],
+      lectures = []
+    ] = await Promise.all([
+      prom2(itemsStore.getAll()),
+      prom2(blocksStore.getAll()),
+      prom2(examsStore.getAll()),
+      prom2(settingsStore.getAll()),
+      prom2(examSessionsStore.getAll()),
+      prom2(studySessionsStore.getAll()),
+      prom2(lecturesStore.getAll())
+    ]);
+    const settings = settingsArr.find((s) => s?.id === "app") || { id: "app", dailyCount: 20, theme: "dark" };
+    const mapConfigEntry = settingsArr.find((s) => s?.id === MAP_CONFIG_KEY);
+    const mapConfig = mapConfigEntry && typeof mapConfigEntry === "object" ? mapConfigEntry.config : null;
+    const additionalSettings = settingsArr.filter((entry) => {
+      if (!entry || typeof entry !== "object") return false;
+      if (!entry.id || entry.id === "app" || entry.id === MAP_CONFIG_KEY) return false;
+      return true;
+    });
+    return {
+      items,
+      blocks,
+      exams,
+      lectures,
+      examSessions,
+      studySessions,
+      settings,
+      mapConfig,
+      settingsEntries: additionalSettings
+    };
   }
   async function importJSON(dbDump) {
     try {
       const db = await openDB();
-      const tx = db.transaction(["items", "blocks", "exams", "settings"], "readwrite");
+      const tx = db.transaction(TRANSACTION_STORES, "readwrite");
       const items = tx.objectStore("items");
       const blocks = tx.objectStore("blocks");
       const exams = tx.objectStore("exams");
       const settings = tx.objectStore("settings");
+      const examSessions = tx.objectStore("exam_sessions");
+      const studySessions = tx.objectStore("study_sessions");
+      const lectures = tx.objectStore("lectures");
       await Promise.all([
         prom2(items.clear()),
         prom2(blocks.clear()),
         prom2(exams.clear()),
-        prom2(settings.clear())
+        prom2(settings.clear()),
+        prom2(examSessions.clear()),
+        prom2(studySessions.clear()),
+        prom2(lectures.clear())
       ]);
-      if (dbDump.settings) await prom2(settings.put({ ...dbDump.settings, id: "app" }));
-      if (Array.isArray(dbDump.blocks)) {
+      const additionalSettings = Array.isArray(dbDump?.settingsEntries) ? dbDump.settingsEntries.filter((entry) => entry && typeof entry === "object" && entry.id && entry.id !== "app") : [];
+      if (dbDump?.settings && typeof dbDump.settings === "object") {
+        await prom2(settings.put({ ...dbDump.settings, id: "app" }));
+      } else {
+        await prom2(settings.put({ id: "app", dailyCount: 20, theme: "dark" }));
+      }
+      if (dbDump?.mapConfig && typeof dbDump.mapConfig === "object") {
+        await prom2(settings.put({ id: MAP_CONFIG_KEY, config: dbDump.mapConfig }));
+      }
+      for (const entry of additionalSettings) {
+        await prom2(settings.put(entry));
+      }
+      if (Array.isArray(dbDump?.blocks)) {
         for (const b of dbDump.blocks) {
+          if (!b || typeof b !== "object") continue;
           await prom2(blocks.put(b));
         }
       }
-      if (Array.isArray(dbDump.items)) {
+      if (Array.isArray(dbDump?.items)) {
         for (const it of dbDump.items) {
+          if (!it || typeof it !== "object") continue;
           it.tokens = buildTokens(it);
+          it.searchMeta = buildSearchMeta(it);
           await prom2(items.put(it));
         }
       }
-      if (Array.isArray(dbDump.exams)) {
+      if (Array.isArray(dbDump?.exams)) {
         for (const ex of dbDump.exams) {
+          if (!ex || typeof ex !== "object") continue;
           await prom2(exams.put(ex));
+        }
+      }
+      if (Array.isArray(dbDump?.lectures)) {
+        for (const lecture of dbDump.lectures) {
+          if (!lecture || typeof lecture !== "object") continue;
+          await prom2(lectures.put(lecture));
+        }
+      }
+      if (Array.isArray(dbDump?.examSessions)) {
+        for (const session of dbDump.examSessions) {
+          if (!session || typeof session !== "object") continue;
+          await prom2(examSessions.put(session));
+        }
+      }
+      if (Array.isArray(dbDump?.studySessions)) {
+        for (const session of dbDump.studySessions) {
+          if (!session || typeof session !== "object") continue;
+          await prom2(studySessions.put(session));
         }
       }
       await new Promise((resolve, reject) => {
@@ -1452,7 +1538,7 @@ var Sevenn = (() => {
   var dbPromise;
   var DEFAULT_KINDS = ["disease", "drug", "concept"];
   var RESULT_BATCH_SIZE = 50;
-  var MAP_CONFIG_KEY = "map-config";
+  var MAP_CONFIG_KEY2 = "map-config";
   var MAP_CONFIG_BACKUP_KEY = "sevenn-map-config-backup";
   var DATA_BACKUP_KEY = "sevenn-backup-snapshot";
   var DATA_BACKUP_STORES = ["items", "blocks", "exams", "settings", "exam_sessions", "study_sessions", "lectures"];
@@ -1642,7 +1728,7 @@ var Sevenn = (() => {
   async function getMapConfig() {
     try {
       const s = await store("settings", "readwrite");
-      const existing = await prom3(s.get(MAP_CONFIG_KEY));
+      const existing = await prom3(s.get(MAP_CONFIG_KEY2));
       if (existing && existing.config) {
         const config = cloneConfig(existing.config);
         writeMapConfigBackup(config);
@@ -1651,13 +1737,13 @@ var Sevenn = (() => {
       const backup = readMapConfigBackup();
       if (backup) {
         const payload = cloneConfig(backup);
-        await prom3(s.put({ id: MAP_CONFIG_KEY, config: payload }));
+        await prom3(s.put({ id: MAP_CONFIG_KEY2, config: payload }));
         writeMapConfigBackup(payload);
         scheduleBackup();
         return payload;
       }
       const fallback = cloneConfig(DEFAULT_MAP_CONFIG);
-      await prom3(s.put({ id: MAP_CONFIG_KEY, config: fallback }));
+      await prom3(s.put({ id: MAP_CONFIG_KEY2, config: fallback }));
       writeMapConfigBackup(fallback);
       scheduleBackup();
       return fallback;
@@ -1673,7 +1759,7 @@ var Sevenn = (() => {
   async function saveMapConfig(config) {
     const payload = config ? cloneConfig(config) : cloneConfig(DEFAULT_MAP_CONFIG);
     const s = await store("settings", "readwrite");
-    await prom3(s.put({ id: MAP_CONFIG_KEY, config: payload }));
+    await prom3(s.put({ id: MAP_CONFIG_KEY2, config: payload }));
     writeMapConfigBackup(payload);
     scheduleBackup();
   }
@@ -3078,17 +3164,29 @@ var Sevenn = (() => {
     const dHeading = document.createElement("h2");
     dHeading.textContent = "Data";
     dataCard.appendChild(dHeading);
+    async function triggerExportDownload(options = {}) {
+      const { prefix = "sevenn-export", withTimestamp = false } = options;
+      const dump = await exportJSON();
+      const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+      const suffix = withTimestamp ? `-${timestamp}` : "";
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${prefix}${suffix}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
     const exportBtn = document.createElement("button");
     exportBtn.className = "btn";
     exportBtn.textContent = "Export DB";
     exportBtn.addEventListener("click", async () => {
-      const dump = await exportJSON();
-      const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "sevenn-export.json";
-      a.click();
-      URL.revokeObjectURL(a.href);
+      try {
+        await triggerExportDownload();
+      } catch (err) {
+        console.error("Failed to export database", err);
+        alert("Export failed");
+      }
     });
     dataCard.appendChild(exportBtn);
     const importInput = document.createElement("input");
@@ -3099,13 +3197,32 @@ var Sevenn = (() => {
       const file = importInput.files[0];
       if (!file) return;
       try {
+        const confirmBackup = window.confirm(
+          "Importing will replace your current data. Would you like to download a backup first?"
+        );
+        if (confirmBackup) {
+          try {
+            await triggerExportDownload({ prefix: "sevenn-backup", withTimestamp: true });
+          } catch (err) {
+            console.error("Failed to create backup prior to import", err);
+            alert("Backup failed. Import cancelled.");
+            importInput.value = "";
+            return;
+          }
+        }
         const text = await file.text();
         const json = JSON.parse(text);
         const res = await importJSON(json);
-        alert(res.message);
+        if (!res?.ok) {
+          alert(res?.message || "Import failed");
+          return;
+        }
+        alert(res.message || "Import complete");
         location.reload();
       } catch (e) {
         alert("Import failed");
+      } finally {
+        importInput.value = "";
       }
     });
     const importBtn = document.createElement("button");
