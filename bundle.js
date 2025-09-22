@@ -1,4 +1,31 @@
-(() => {
+var Sevenn = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // js/main.js
+  var main_exports = {};
+  __export(main_exports, {
+    render: () => renderApp,
+    renderApp: () => renderApp,
+    resolveListKind: () => resolveListKind,
+    tabs: () => tabs
+  });
+
   // js/state.js
   var state = {
     tab: "Block Board",
@@ -14,7 +41,7 @@
       Settings: ""
     },
     query: "",
-    filters: { types: ["disease", "drug", "concept"], block: "", week: "", onlyFav: false, sort: "updated" },
+    filters: { types: ["disease", "drug", "concept"], block: "", week: "", onlyFav: false, sort: "updated-desc" },
     lectures: { query: "", blockId: "", week: "", status: "", tag: "" },
     entryLayout: { mode: "list", columns: 3, scale: 1, controlsVisible: false },
     blockBoard: { collapsedBlocks: [], hiddenTimelines: [] },
@@ -54,6 +81,9 @@
   }
   function setQuery(q) {
     state.query = q;
+  }
+  function setFilters(patch) {
+    Object.assign(state.filters, patch);
   }
   function setBuilder(patch) {
     Object.assign(state.builder, patch);
@@ -2017,6 +2047,34 @@
   function titleOf(item) {
     return item.name || item.concept || "";
   }
+  var DEFAULT_SORT = { mode: "updated", direction: "desc" };
+  function normalizeSort(sort) {
+    const raw = typeof sort === "string" ? sort.toLowerCase() : "";
+    switch (raw) {
+      case "updated-asc":
+        return { mode: "updated", direction: "asc" };
+      case "updated-desc":
+      case "updated":
+        return { mode: "updated", direction: "desc" };
+      case "created-asc":
+        return { mode: "created", direction: "asc" };
+      case "created-desc":
+      case "created":
+        return { mode: "created", direction: "desc" };
+      case "lecture-asc":
+        return { mode: "lecture", direction: "asc" };
+      case "lecture-desc":
+      case "lecture":
+        return { mode: "lecture", direction: "desc" };
+      case "name-desc":
+        return { mode: "name", direction: "desc" };
+      case "name":
+      case "name-asc":
+        return { mode: "name", direction: "asc" };
+      default:
+        return { ...DEFAULT_SORT };
+    }
+  }
   function normalizeFilter(filter = {}) {
     const rawTypes = Array.isArray(filter.types) ? filter.types.filter((t) => typeof t === "string" && t) : [];
     const types = rawTypes.length ? Array.from(new Set(rawTypes)) : DEFAULT_KINDS;
@@ -2038,7 +2096,7 @@
       week,
       onlyFav,
       tokens: tokens.length ? tokens : null,
-      sort: filter.sort === "name" ? "name" : "updated"
+      sort: normalizeSort(filter.sort)
     };
   }
   async function getKeySet(storeRef, indexName, value) {
@@ -2101,11 +2159,65 @@
         results.push(item);
       }
     }
-    if (normalized2.sort === "name") {
-      results.sort((a, b) => titleOf(a).localeCompare(titleOf(b)));
-    } else {
-      results.sort((a, b) => b.updatedAt - a.updatedAt);
+    let lectureDateIndex = null;
+    if (normalized2.sort.mode === "lecture") {
+      const lectures = await listAllLectures();
+      lectureDateIndex = /* @__PURE__ */ new Map();
+      (lectures || []).forEach((lecture) => {
+        if (!lecture || lecture.blockId == null || lecture.id == null) return;
+        const key = lectureKey(lecture.blockId, lecture.id);
+        const created = typeof lecture.createdAt === "number" ? lecture.createdAt : 0;
+        lectureDateIndex.set(key, created);
+      });
     }
+    const lectureSortCache = /* @__PURE__ */ new Map();
+    function lectureTimestamp(item) {
+      if (!lectureDateIndex) return 0;
+      const cacheKey = item?.id ?? null;
+      if (cacheKey != null && lectureSortCache.has(cacheKey)) {
+        return lectureSortCache.get(cacheKey);
+      }
+      const links = Array.isArray(item?.lectures) ? item.lectures : [];
+      let latest = 0;
+      for (const link of links) {
+        if (!link || link.blockId == null || link.id == null) continue;
+        const key = lectureKey(link.blockId, link.id);
+        const created = lectureDateIndex.get(key);
+        if (typeof created === "number" && created > latest) {
+          latest = created;
+        }
+      }
+      if (cacheKey != null) lectureSortCache.set(cacheKey, latest);
+      return latest;
+    }
+    results.sort((a, b) => {
+      let cmp = 0;
+      switch (normalized2.sort.mode) {
+        case "name":
+          cmp = titleOf(a).localeCompare(titleOf(b));
+          break;
+        case "created": {
+          const av = typeof a.createdAt === "number" ? a.createdAt : 0;
+          const bv = typeof b.createdAt === "number" ? b.createdAt : 0;
+          cmp = av - bv;
+          break;
+        }
+        case "lecture":
+          cmp = lectureTimestamp(a) - lectureTimestamp(b);
+          break;
+        case "updated":
+        default: {
+          const av = typeof a.updatedAt === "number" ? a.updatedAt : 0;
+          const bv = typeof b.updatedAt === "number" ? b.updatedAt : 0;
+          cmp = av - bv;
+          break;
+        }
+      }
+      if (cmp === 0 && normalized2.sort.mode !== "name") {
+        cmp = titleOf(a).localeCompare(titleOf(b));
+      }
+      return normalized2.sort.direction === "asc" ? cmp : -cmp;
+    });
     return results;
   }
   function findItemsByFilter(filter) {
@@ -4891,7 +5003,7 @@
   }
 
   // js/ui/components/cardlist.js
-  var kindColors = { disease: "var(--pink)", drug: "var(--blue)", concept: "var(--green)" };
+  var kindColors = { disease: "var(--purple)", drug: "var(--green)", concept: "var(--blue)" };
   var fieldDefs = {
     disease: [
       ["etiology", "Etiology", "\u{1F9EC}"],
@@ -4939,6 +5051,7 @@
   var expanded = /* @__PURE__ */ new Set();
   var collapsedBlocks = /* @__PURE__ */ new Set();
   var collapsedWeeks = /* @__PURE__ */ new Set();
+  var activeBlockKey = null;
   function createItemCard(item, onChange) {
     const card = document.createElement("div");
     card.className = `item-card card--${item.kind}`;
@@ -5203,6 +5316,79 @@
     const layoutState = state.entryLayout;
     const toolbar = document.createElement("div");
     toolbar.className = "entry-layout-toolbar";
+    const rawSort = state.filters?.sort;
+    const sortOptions = ["updated", "created", "lecture", "name"];
+    let currentSortField = "updated";
+    let currentSortDirection = "desc";
+    if (typeof rawSort === "string" && rawSort) {
+      const parts = rawSort.split("-");
+      if (parts.length === 1) {
+        currentSortField = sortOptions.includes(parts[0]) ? parts[0] : "updated";
+      } else {
+        const [fieldPart, dirPart] = parts;
+        currentSortField = sortOptions.includes(fieldPart) ? fieldPart : "updated";
+        currentSortDirection = dirPart === "asc" ? "asc" : "desc";
+      }
+    } else if (rawSort && typeof rawSort === "object") {
+      const mode = rawSort.mode;
+      const dir = rawSort.direction;
+      if (typeof mode === "string" && sortOptions.includes(mode)) {
+        currentSortField = mode;
+      }
+      if (dir === "asc" || dir === "desc") {
+        currentSortDirection = dir;
+      }
+    }
+    const sortControls = document.createElement("div");
+    sortControls.className = "sort-controls";
+    const sortLabel = document.createElement("label");
+    sortLabel.className = "sort-select";
+    sortLabel.textContent = "Sort by";
+    const sortSelect = document.createElement("select");
+    sortSelect.className = "sort-field";
+    sortSelect.setAttribute("aria-label", "Sort entries");
+    [
+      { value: "updated", label: "Date Modified" },
+      { value: "created", label: "Date Added" },
+      { value: "lecture", label: "Lecture Added" },
+      { value: "name", label: "Alphabetical" }
+    ].forEach((opt) => {
+      const option = document.createElement("option");
+      option.value = opt.value;
+      option.textContent = opt.label;
+      sortSelect.appendChild(option);
+    });
+    sortSelect.value = currentSortField;
+    sortLabel.appendChild(sortSelect);
+    sortControls.appendChild(sortLabel);
+    const directionBtn = document.createElement("button");
+    directionBtn.type = "button";
+    directionBtn.className = "sort-direction-btn";
+    directionBtn.setAttribute("aria-label", "Toggle sort direction");
+    directionBtn.setAttribute("title", "Toggle sort direction");
+    function updateDirectionButton() {
+      directionBtn.dataset.direction = currentSortDirection;
+      directionBtn.textContent = currentSortDirection === "asc" ? "\u2191 Asc" : "\u2193 Desc";
+    }
+    function applySortChange() {
+      const nextValue = `${currentSortField}-${currentSortDirection}`;
+      if (state.filters.sort === nextValue) return;
+      setFilters({ sort: nextValue });
+      onChange && onChange();
+    }
+    updateDirectionButton();
+    sortSelect.addEventListener("change", () => {
+      const selected = sortSelect.value;
+      currentSortField = sortOptions.includes(selected) ? selected : "updated";
+      applySortChange();
+    });
+    directionBtn.addEventListener("click", () => {
+      currentSortDirection = currentSortDirection === "asc" ? "desc" : "asc";
+      updateDirectionButton();
+      applySortChange();
+    });
+    sortControls.appendChild(directionBtn);
+    toolbar.appendChild(sortControls);
     const viewToggle = document.createElement("div");
     viewToggle.className = "layout-toggle";
     const listBtn = document.createElement("button");
@@ -5306,6 +5492,31 @@
       });
     }
     updateToolbar();
+    const blockKeys = sortedBlocks.map((b) => String(b));
+    function applyBlockActivation(nextKey) {
+      const candidate = nextKey && blockKeys.includes(nextKey) ? nextKey : null;
+      activeBlockKey = candidate;
+      collapsedBlocks.clear();
+      if (!activeBlockKey) {
+        blockKeys.forEach((key) => collapsedBlocks.add(key));
+      } else {
+        blockKeys.forEach((key) => {
+          if (key !== activeBlockKey) {
+            collapsedBlocks.add(key);
+          }
+        });
+      }
+    }
+    if (blockKeys.length) {
+      const initial = activeBlockKey && blockKeys.includes(activeBlockKey) ? activeBlockKey : blockKeys[0];
+      applyBlockActivation(initial);
+    } else {
+      applyBlockActivation(null);
+    }
+    const blockUpdaters = /* @__PURE__ */ new Map();
+    const refreshBlocks = () => {
+      blockUpdaters.forEach((fn) => fn());
+    };
     sortedBlocks.forEach((b) => {
       const blockSec = document.createElement("section");
       blockSec.className = "block-section";
@@ -5322,11 +5533,18 @@
         blockHeader.textContent = `${isCollapsed ? "\u25B8" : "\u25BE"} ${blockLabel}`;
         blockHeader.setAttribute("aria-expanded", String(!isCollapsed));
       }
+      blockUpdaters.set(blockKey, updateBlockState);
       updateBlockState();
       blockHeader.addEventListener("click", () => {
-        if (collapsedBlocks.has(blockKey)) collapsedBlocks.delete(blockKey);
-        else collapsedBlocks.add(blockKey);
-        updateBlockState();
+        const isCollapsed = collapsedBlocks.has(blockKey);
+        if (isCollapsed) {
+          applyBlockActivation(blockKey);
+        } else if (activeBlockKey === blockKey) {
+          applyBlockActivation(null);
+        } else {
+          collapsedBlocks.add(blockKey);
+        }
+        refreshBlocks();
       });
       blockSec.appendChild(blockHeader);
       const wkMap = groups.get(b);
@@ -16916,4 +17134,5 @@
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
+  return __toCommonJS(main_exports);
 })();

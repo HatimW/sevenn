@@ -1,13 +1,13 @@
 import { upsertItem, deleteItem } from '../../storage/storage.js';
 import { loadBlockCatalog } from '../../storage/block-catalog.js';
-import { state, setEntryLayout } from '../../state.js';
+import { state, setEntryLayout, setFilters } from '../../state.js';
 import { setToggleState } from '../../utils.js';
 import { openEditor } from './editor.js';
 import { confirmModal } from './confirm.js';
 import { openLinker } from './linker.js';
 import { renderRichText } from './rich-text.js';
 
-const kindColors = { disease: 'var(--pink)', drug: 'var(--blue)', concept: 'var(--green)' };
+const kindColors = { disease: 'var(--purple)', drug: 'var(--green)', concept: 'var(--blue)' };
 const fieldDefs = {
   disease: [
     ['etiology','Etiology','🧬'],
@@ -63,6 +63,7 @@ function ensureExtras(item) {
 const expanded = new Set();
 const collapsedBlocks = new Set();
 const collapsedWeeks = new Set();
+let activeBlockKey = null;
 
 export function createItemCard(item, onChange){
   const card = document.createElement('div');
@@ -349,6 +350,90 @@ export async function renderCardList(container, itemSource, kind, onChange){
   const toolbar = document.createElement('div');
   toolbar.className = 'entry-layout-toolbar';
 
+  const rawSort = state.filters?.sort;
+  const sortOptions = ['updated', 'created', 'lecture', 'name'];
+  let currentSortField = 'updated';
+  let currentSortDirection = 'desc';
+  if (typeof rawSort === 'string' && rawSort) {
+    const parts = rawSort.split('-');
+    if (parts.length === 1) {
+      currentSortField = sortOptions.includes(parts[0]) ? parts[0] : 'updated';
+    } else {
+      const [fieldPart, dirPart] = parts;
+      currentSortField = sortOptions.includes(fieldPart) ? fieldPart : 'updated';
+      currentSortDirection = dirPart === 'asc' ? 'asc' : 'desc';
+    }
+  } else if (rawSort && typeof rawSort === 'object') {
+    const mode = rawSort.mode;
+    const dir = rawSort.direction;
+    if (typeof mode === 'string' && sortOptions.includes(mode)) {
+      currentSortField = mode;
+    }
+    if (dir === 'asc' || dir === 'desc') {
+      currentSortDirection = dir;
+    }
+  }
+
+  const sortControls = document.createElement('div');
+  sortControls.className = 'sort-controls';
+
+  const sortLabel = document.createElement('label');
+  sortLabel.className = 'sort-select';
+  sortLabel.textContent = 'Sort by';
+
+  const sortSelect = document.createElement('select');
+  sortSelect.className = 'sort-field';
+  sortSelect.setAttribute('aria-label', 'Sort entries');
+  [
+    { value: 'updated', label: 'Date Modified' },
+    { value: 'created', label: 'Date Added' },
+    { value: 'lecture', label: 'Lecture Added' },
+    { value: 'name', label: 'Alphabetical' }
+  ].forEach(opt => {
+    const option = document.createElement('option');
+    option.value = opt.value;
+    option.textContent = opt.label;
+    sortSelect.appendChild(option);
+  });
+  sortSelect.value = currentSortField;
+  sortLabel.appendChild(sortSelect);
+  sortControls.appendChild(sortLabel);
+
+  const directionBtn = document.createElement('button');
+  directionBtn.type = 'button';
+  directionBtn.className = 'sort-direction-btn';
+  directionBtn.setAttribute('aria-label', 'Toggle sort direction');
+  directionBtn.setAttribute('title', 'Toggle sort direction');
+
+  function updateDirectionButton() {
+    directionBtn.dataset.direction = currentSortDirection;
+    directionBtn.textContent = currentSortDirection === 'asc' ? '↑ Asc' : '↓ Desc';
+  }
+
+  function applySortChange() {
+    const nextValue = `${currentSortField}-${currentSortDirection}`;
+    if (state.filters.sort === nextValue) return;
+    setFilters({ sort: nextValue });
+    onChange && onChange();
+  }
+
+  updateDirectionButton();
+
+  sortSelect.addEventListener('change', () => {
+    const selected = sortSelect.value;
+    currentSortField = sortOptions.includes(selected) ? selected : 'updated';
+    applySortChange();
+  });
+
+  directionBtn.addEventListener('click', () => {
+    currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+    updateDirectionButton();
+    applySortChange();
+  });
+
+  sortControls.appendChild(directionBtn);
+  toolbar.appendChild(sortControls);
+
   const viewToggle = document.createElement('div');
   viewToggle.className = 'layout-toggle';
 
@@ -464,6 +549,34 @@ export async function renderCardList(container, itemSource, kind, onChange){
 
   updateToolbar();
 
+  const blockKeys = sortedBlocks.map(b => String(b));
+  function applyBlockActivation(nextKey) {
+    const candidate = nextKey && blockKeys.includes(nextKey) ? nextKey : null;
+    activeBlockKey = candidate;
+    collapsedBlocks.clear();
+    if (!activeBlockKey) {
+      blockKeys.forEach(key => collapsedBlocks.add(key));
+    } else {
+      blockKeys.forEach(key => {
+        if (key !== activeBlockKey) {
+          collapsedBlocks.add(key);
+        }
+      });
+    }
+  }
+
+  if (blockKeys.length) {
+    const initial = activeBlockKey && blockKeys.includes(activeBlockKey) ? activeBlockKey : blockKeys[0];
+    applyBlockActivation(initial);
+  } else {
+    applyBlockActivation(null);
+  }
+
+  const blockUpdaters = new Map();
+  const refreshBlocks = () => {
+    blockUpdaters.forEach(fn => fn());
+  };
+
   sortedBlocks.forEach(b => {
     const blockSec = document.createElement('section');
     blockSec.className = 'block-section';
@@ -480,10 +593,18 @@ export async function renderCardList(container, itemSource, kind, onChange){
       blockHeader.textContent = `${isCollapsed ? '▸' : '▾'} ${blockLabel}`;
       blockHeader.setAttribute('aria-expanded', String(!isCollapsed));
     }
+    blockUpdaters.set(blockKey, updateBlockState);
     updateBlockState();
     blockHeader.addEventListener('click', () => {
-      if (collapsedBlocks.has(blockKey)) collapsedBlocks.delete(blockKey); else collapsedBlocks.add(blockKey);
-      updateBlockState();
+      const isCollapsed = collapsedBlocks.has(blockKey);
+      if (isCollapsed) {
+        applyBlockActivation(blockKey);
+      } else if (activeBlockKey === blockKey) {
+        applyBlockActivation(null);
+      } else {
+        collapsedBlocks.add(blockKey);
+      }
+      refreshBlocks();
     });
     blockSec.appendChild(blockHeader);
     const wkMap = groups.get(b);

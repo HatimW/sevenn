@@ -120,7 +120,7 @@ button:focus-visible {
   outline-offset: 3px;
 }
 
-button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle) {
+button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(.list-subtab) {
   background: rgba(148, 163, 184, 0.14);
   color: var(--text);
   border: 1px solid var(--border);
@@ -129,7 +129,7 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle) {
   box-shadow: none;
 }
 
-button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):hover {
+button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(.list-subtab):hover {
   background: rgba(148, 163, 184, 0.22);
 }
 
@@ -498,9 +498,9 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):hove
   gap: 0.35rem;
   border-radius: 999px;
   padding: 6px 18px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  background: rgba(15, 23, 42, 0.6);
-  color: color-mix(in srgb, var(--text-muted) 80%, white 10%);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.55);
+  color: var(--text-muted);
   font-size: 0.9rem;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -513,61 +513,60 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):hove
 }
 
 .list-subtab[data-list-kind='disease'] {
-  background: rgba(249, 168, 212, 0.2);
-  border-color: rgba(249, 168, 212, 0.38);
-  color: color-mix(in srgb, var(--pink) 70%, white 12%);
+  background: color-mix(in srgb, var(--purple) 18%, transparent);
+  border-color: color-mix(in srgb, var(--purple) 42%, transparent);
+  color: color-mix(in srgb, var(--purple) 72%, white 18%);
 }
 
 .list-subtab[data-list-kind='disease']:is(:hover, :focus-visible):not(.active) {
-  background: rgba(249, 168, 212, 0.3);
-  border-color: rgba(249, 168, 212, 0.5);
-  color: color-mix(in srgb, var(--pink) 85%, white 6%);
+  background: color-mix(in srgb, var(--purple) 28%, transparent);
+  border-color: color-mix(in srgb, var(--purple) 58%, transparent);
+  color: color-mix(in srgb, var(--purple) 86%, white 10%);
 }
 
 .list-subtab[data-list-kind='drug'] {
-  background: rgba(96, 165, 250, 0.2);
-  border-color: rgba(96, 165, 250, 0.4);
-  color: color-mix(in srgb, var(--blue) 72%, white 10%);
+  background: color-mix(in srgb, var(--green) 20%, transparent);
+  border-color: color-mix(in srgb, var(--green) 46%, transparent);
+  color: color-mix(in srgb, var(--green) 70%, white 18%);
 }
 
 .list-subtab[data-list-kind='drug']:is(:hover, :focus-visible):not(.active) {
-  background: rgba(96, 165, 250, 0.3);
-  border-color: rgba(96, 165, 250, 0.52);
-  color: color-mix(in srgb, var(--blue) 88%, white 8%);
+  background: color-mix(in srgb, var(--green) 30%, transparent);
+  border-color: color-mix(in srgb, var(--green) 60%, transparent);
+  color: color-mix(in srgb, var(--green) 88%, white 8%);
 }
 
 .list-subtab[data-list-kind='concept'] {
-  background: rgba(134, 239, 172, 0.22);
-  border-color: rgba(134, 239, 172, 0.42);
-  color: color-mix(in srgb, var(--green) 68%, white 14%);
+  background: color-mix(in srgb, var(--blue) 20%, transparent);
+  border-color: color-mix(in srgb, var(--blue) 44%, transparent);
+  color: color-mix(in srgb, var(--blue) 74%, white 16%);
 }
 
 .list-subtab[data-list-kind='concept']:is(:hover, :focus-visible):not(.active) {
-  background: rgba(134, 239, 172, 0.32);
-  border-color: rgba(134, 239, 172, 0.52);
-  color: color-mix(in srgb, var(--green) 86%, white 8%);
+  background: color-mix(in srgb, var(--blue) 30%, transparent);
+  border-color: color-mix(in srgb, var(--blue) 58%, transparent);
+  color: color-mix(in srgb, var(--blue) 90%, white 6%);
 }
 
 .list-subtab.active {
-  color: #041021;
   border-color: transparent;
   box-shadow: 0 18px 34px rgba(2, 6, 23, 0.42);
   transform: translateY(-1px);
 }
 
 .list-subtab[data-list-kind='disease'].active {
-  background: linear-gradient(135deg, rgba(249, 168, 212, 0.96), rgba(244, 114, 182, 0.94));
-  color: #2b091b;
+  background: linear-gradient(135deg, rgba(192, 132, 252, 0.96), rgba(124, 58, 237, 0.92));
+  color: #160b2c;
 }
 
 .list-subtab[data-list-kind='drug'].active {
-  background: linear-gradient(135deg, rgba(96, 165, 250, 0.96), rgba(34, 211, 238, 0.92));
-  color: #041021;
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.96), rgba(34, 197, 94, 0.92));
+  color: #05210f;
 }
 
 .list-subtab[data-list-kind='concept'].active {
-  background: linear-gradient(135deg, rgba(134, 239, 172, 0.96), rgba(16, 185, 129, 0.92));
-  color: #032514;
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.96), rgba(37, 99, 235, 0.92));
+  color: #021528;
 }
 
 .list-host {
@@ -2678,6 +2677,60 @@ button.builder-pill.builder-pill-outline {
   background: rgba(15, 23, 42, 0.35);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+
+.sort-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pad-sm);
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+}
+
+.sort-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.sort-select select {
+  appearance: none;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 4px 10px;
+  font-size: 0.9rem;
+}
+
+.sort-select select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sort-direction-btn {
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.sort-direction-btn:hover,
+.sort-direction-btn:focus-visible {
+  color: var(--text);
+  border-color: var(--accent);
+  background: rgba(56, 189, 248, 0.18);
+}
+
+.sort-direction-btn[data-direction='asc'] {
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.35);
 }
 
 .layout-toggle {
