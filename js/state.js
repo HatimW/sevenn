@@ -11,7 +11,7 @@ export const state = {
     Settings: ""
   },
   query: "",
-  filters: { types:["disease","drug","concept"], block:"", week:"", onlyFav:false, sort:"updated" },
+  filters: { types:["disease","drug","concept"], block:"", week:"", onlyFav:false, sort:"updated-desc" },
   lectures: { query: '', blockId: '', week: '', status: '', tag: '' },
   entryLayout: { mode: 'list', columns: 3, scale: 1, controlsVisible: false },
   blockBoard: { collapsedBlocks: [], hiddenTimelines: [] },

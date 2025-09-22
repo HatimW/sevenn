@@ -55,7 +55,7 @@ test('findItemsByFilter yields batched, filtered results efficiently', async () 
     await upsertItem(item);
   }
 
-  const blockQuery = findItemsByFilter({ types: ['disease'], block: blockId, week: 1, query: base, sort: 'updated' });
+  const blockQuery = findItemsByFilter({ types: ['disease'], block: blockId, week: 1, query: base, sort: 'updated-desc' });
   const batches = [];
   for await (const batch of blockQuery) {
     batches.push(batch);
@@ -70,16 +70,16 @@ test('findItemsByFilter yields batched, filtered results efficiently', async () 
   const repeated = await blockQuery.toArray();
   assert.deepEqual(repeated.map(it => it.id), flattened.map(it => it.id), 'cached materialization should match streamed batches');
 
-  const favoritesQuery = findItemsByFilter({ types: ['disease'], onlyFav: true, query: base, sort: 'updated' });
+  const favoritesQuery = findItemsByFilter({ types: ['disease'], onlyFav: true, query: base, sort: 'updated-desc' });
   const favorites = await favoritesQuery.toArray();
   assert.ok(favorites.length > 0, 'favorites filter should return matches');
   assert.ok(favorites.every(it => it.favorite), 'favorites query should only include favorite items');
 
-  const unlabeled = await findItemsByFilter({ types: ['disease'], block: '__unlabeled', query: base, sort: 'updated' }).toArray();
+  const unlabeled = await findItemsByFilter({ types: ['disease'], block: '__unlabeled', query: base, sort: 'updated-desc' }).toArray();
   assert.equal(unlabeled.length, expectedBlockMatches, 'unlabeled filter should return items without blocks');
   assert.ok(unlabeled.every(it => (it.blocks || []).length === 0), 'unlabeled results should have no block assignments');
 
-  const tagMatches = await findItemsByFilter({ types: ['disease'], query: markerTag, sort: 'name' }).toArray();
+  const tagMatches = await findItemsByFilter({ types: ['disease'], query: markerTag, sort: 'name-asc' }).toArray();
   const expectedTagCount = Math.ceil(TOTAL_ITEMS / 3);
   assert.equal(tagMatches.length, expectedTagCount, 'tag query should locate all tagged items');
   assert.ok(tagMatches.every(it => (it.tags || []).includes(markerTag)), 'query results should include the marker tag');

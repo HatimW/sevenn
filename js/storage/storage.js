@@ -571,6 +571,36 @@ function titleOf(item){
   return item.name || item.concept || '';
 }
 
+const DEFAULT_SORT = { mode: 'updated', direction: 'desc' };
+
+function normalizeSort(sort) {
+  const raw = typeof sort === 'string' ? sort.toLowerCase() : '';
+  switch (raw) {
+    case 'updated-asc':
+      return { mode: 'updated', direction: 'asc' };
+    case 'updated-desc':
+    case 'updated':
+      return { mode: 'updated', direction: 'desc' };
+    case 'created-asc':
+      return { mode: 'created', direction: 'asc' };
+    case 'created-desc':
+    case 'created':
+      return { mode: 'created', direction: 'desc' };
+    case 'lecture-asc':
+      return { mode: 'lecture', direction: 'asc' };
+    case 'lecture-desc':
+    case 'lecture':
+      return { mode: 'lecture', direction: 'desc' };
+    case 'name-desc':
+      return { mode: 'name', direction: 'desc' };
+    case 'name':
+    case 'name-asc':
+      return { mode: 'name', direction: 'asc' };
+    default:
+      return { ...DEFAULT_SORT };
+  }
+}
+
 function normalizeFilter(filter = {}) {
   const rawTypes = Array.isArray(filter.types) ? filter.types.filter(t => typeof t === 'string' && t) : [];
   const types = rawTypes.length ? Array.from(new Set(rawTypes)) : DEFAULT_KINDS;
@@ -592,7 +622,7 @@ function normalizeFilter(filter = {}) {
     week,
     onlyFav,
     tokens: tokens.length ? tokens : null,
-    sort: filter.sort === 'name' ? 'name' : 'updated'
+    sort: normalizeSort(filter.sort)
   };
 }
 
@@ -668,11 +698,67 @@ async function executeItemQuery(filter) {
     }
   }
 
-  if (normalized.sort === 'name') {
-    results.sort((a, b) => titleOf(a).localeCompare(titleOf(b)));
-  } else {
-    results.sort((a, b) => b.updatedAt - a.updatedAt);
+  let lectureDateIndex = null;
+  if (normalized.sort.mode === 'lecture') {
+    const lectures = await fetchAllLectures();
+    lectureDateIndex = new Map();
+    (lectures || []).forEach(lecture => {
+      if (!lecture || lecture.blockId == null || lecture.id == null) return;
+      const key = composeLectureKey(lecture.blockId, lecture.id);
+      const created = typeof lecture.createdAt === 'number' ? lecture.createdAt : 0;
+      lectureDateIndex.set(key, created);
+    });
   }
+
+  const lectureSortCache = new Map();
+  function lectureTimestamp(item) {
+    if (!lectureDateIndex) return 0;
+    const cacheKey = item?.id ?? null;
+    if (cacheKey != null && lectureSortCache.has(cacheKey)) {
+      return lectureSortCache.get(cacheKey);
+    }
+    const links = Array.isArray(item?.lectures) ? item.lectures : [];
+    let latest = 0;
+    for (const link of links) {
+      if (!link || link.blockId == null || link.id == null) continue;
+      const key = composeLectureKey(link.blockId, link.id);
+      const created = lectureDateIndex.get(key);
+      if (typeof created === 'number' && created > latest) {
+        latest = created;
+      }
+    }
+    if (cacheKey != null) lectureSortCache.set(cacheKey, latest);
+    return latest;
+  }
+
+  results.sort((a, b) => {
+    let cmp = 0;
+    switch (normalized.sort.mode) {
+      case 'name':
+        cmp = titleOf(a).localeCompare(titleOf(b));
+        break;
+      case 'created': {
+        const av = typeof a.createdAt === 'number' ? a.createdAt : 0;
+        const bv = typeof b.createdAt === 'number' ? b.createdAt : 0;
+        cmp = av - bv;
+        break;
+      }
+      case 'lecture':
+        cmp = lectureTimestamp(a) - lectureTimestamp(b);
+        break;
+      case 'updated':
+      default: {
+        const av = typeof a.updatedAt === 'number' ? a.updatedAt : 0;
+        const bv = typeof b.updatedAt === 'number' ? b.updatedAt : 0;
+        cmp = av - bv;
+        break;
+      }
+    }
+    if (cmp === 0 && normalized.sort.mode !== 'name') {
+      cmp = titleOf(a).localeCompare(titleOf(b));
+    }
+    return normalized.sort.direction === 'asc' ? cmp : -cmp;
+  });
 
   return results;
 }
