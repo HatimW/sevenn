@@ -307,6 +307,22 @@ export async function renderCardList(container, itemSource, kind, onChange){
   const { blocks } = await loadBlockCatalog();
   const blockTitle = id => blocks.find(b => b.blockId === id)?.title || id;
   const orderMap = new Map(blocks.map((b,i)=>[b.blockId,i]));
+  const blockWeekMap = new Map();
+  const allWeeks = new Set();
+  blocks.forEach(block => {
+    if (!block) return;
+    const weeks = new Set();
+    if (Number.isFinite(block.weeks)) {
+      for (let i = 1; i <= block.weeks; i++) weeks.add(i);
+    }
+    (block.lectures || []).forEach(lecture => {
+      if (typeof lecture.week === 'number') weeks.add(lecture.week);
+    });
+    const sortedWeeks = Array.from(weeks).sort((a, b) => a - b);
+    blockWeekMap.set(block.blockId, sortedWeeks);
+    sortedWeeks.forEach(weekNumber => allWeeks.add(weekNumber));
+  });
+  const sortedAllWeeks = Array.from(allWeeks).sort((a, b) => a - b);
   const groups = new Map();
   items.forEach(it => {
     let block = '_';
@@ -373,6 +389,117 @@ export async function renderCardList(container, itemSource, kind, onChange){
       currentSortDirection = dir;
     }
   }
+
+  const filterControls = document.createElement('div');
+  filterControls.className = 'entry-filter-controls';
+
+  const currentBlockFilter = typeof state.filters?.block === 'string' ? state.filters.block : '';
+  const currentWeekFilter = state.filters?.week ?? '';
+
+  const blockFilterLabel = document.createElement('label');
+  blockFilterLabel.className = 'entry-filter-select';
+  blockFilterLabel.textContent = 'Block';
+  const blockFilterSelect = document.createElement('select');
+  blockFilterSelect.className = 'entry-filter-block';
+  blockFilterSelect.setAttribute('aria-label', 'Filter entries by block');
+  const blockOptions = [
+    { value: '', label: 'All blocks' },
+    { value: '__unlabeled', label: 'Unlabeled' }
+  ];
+  blocks.forEach(block => {
+    if (!block) return;
+    blockOptions.push({ value: block.blockId, label: blockTitle(block.blockId) });
+  });
+  blockOptions.forEach(opt => {
+    const option = document.createElement('option');
+    option.value = opt.value;
+    option.textContent = opt.label;
+    blockFilterSelect.appendChild(option);
+  });
+  if (blockOptions.some(opt => opt.value === currentBlockFilter)) {
+    blockFilterSelect.value = currentBlockFilter;
+  } else {
+    blockFilterSelect.value = '';
+  }
+  blockFilterLabel.appendChild(blockFilterSelect);
+  filterControls.appendChild(blockFilterLabel);
+
+  const weekFilterLabel = document.createElement('label');
+  weekFilterLabel.className = 'entry-filter-select';
+  weekFilterLabel.textContent = 'Week';
+  const weekFilterSelect = document.createElement('select');
+  weekFilterSelect.className = 'entry-filter-week';
+  weekFilterSelect.setAttribute('aria-label', 'Filter entries by week');
+  weekFilterLabel.appendChild(weekFilterSelect);
+  filterControls.appendChild(weekFilterLabel);
+
+  function populateWeekFilter() {
+    const selectedBlock = blockFilterSelect.value;
+    weekFilterSelect.innerHTML = '';
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = 'All weeks';
+    weekFilterSelect.appendChild(defaultOption);
+    if (selectedBlock === '__unlabeled') {
+      weekFilterSelect.disabled = true;
+      return;
+    }
+    weekFilterSelect.disabled = false;
+    const weeks = selectedBlock && blockWeekMap.has(selectedBlock)
+      ? blockWeekMap.get(selectedBlock)
+      : sortedAllWeeks;
+    if (!weeks.length) {
+      const none = document.createElement('option');
+      none.value = '';
+      none.textContent = selectedBlock ? 'No weeks available' : 'No weeks defined';
+      none.disabled = true;
+      weekFilterSelect.appendChild(none);
+      return;
+    }
+    weeks.forEach(weekNumber => {
+      const option = document.createElement('option');
+      option.value = String(weekNumber);
+      option.textContent = `Week ${weekNumber}`;
+      weekFilterSelect.appendChild(option);
+    });
+  }
+
+  toolbar.appendChild(filterControls);
+  populateWeekFilter();
+  const normalizedWeekFilter = currentWeekFilter === '' || currentWeekFilter == null
+    ? ''
+    : String(currentWeekFilter);
+  if (normalizedWeekFilter && weekFilterSelect.querySelector(`option[value="${normalizedWeekFilter}"]`)) {
+    weekFilterSelect.value = normalizedWeekFilter;
+  } else {
+    weekFilterSelect.value = '';
+  }
+
+  blockFilterSelect.addEventListener('change', () => {
+    populateWeekFilter();
+    weekFilterSelect.value = '';
+    const nextBlock = blockFilterSelect.value || '';
+    const patch = { block: nextBlock, week: '' };
+    const currentBlockValue = state.filters.block || '';
+    const currentWeekValue = state.filters.week || '';
+    if (currentBlockValue !== patch.block || currentWeekValue !== patch.week) {
+      setFilters(patch);
+      onChange && onChange();
+    }
+  });
+
+  weekFilterSelect.addEventListener('change', () => {
+    if (weekFilterSelect.disabled) return;
+    const raw = weekFilterSelect.value;
+    const normalized = raw ? Number(raw) : '';
+    if (normalized !== '' && !Number.isFinite(normalized)) return;
+    const currentValue = state.filters.week ?? '';
+    const normalizedCurrent = currentValue === '' ? '' : Number(currentValue);
+    if (normalized === '' && currentValue === '') return;
+    if (normalized !== '' && String(normalizedCurrent) === String(normalized)) return;
+    setFilters({ week: normalized });
+    onChange && onChange();
+  });
 
   const sortControls = document.createElement('div');
   sortControls.className = 'sort-controls';
