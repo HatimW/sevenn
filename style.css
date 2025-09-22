@@ -1338,17 +1338,28 @@ input[type="checkbox"]:checked::after {
 
 .editor-curriculum-browser {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: var(--pad);
   margin-top: var(--pad);
+  grid-template-areas:
+    'blocks'
+    'weeks'
+    'lectures';
 }
 
-@media (min-width: 1080px) {
+@media (min-width: 720px) {
+  .editor-curriculum-browser {
+    grid-template-columns: repeat(2, minmax(260px, 1fr));
+    grid-template-areas:
+      'blocks weeks'
+      'lectures lectures';
+  }
+}
+
+@media (min-width: 1200px) {
   .editor-curriculum-browser {
     grid-template-columns:
-      minmax(240px, 1fr)
-      minmax(240px, 1fr)
-      minmax(320px, 2fr);
+      minmax(280px, 1fr)
+      minmax(280px, 1fr);
   }
 }
 
@@ -1362,6 +1373,19 @@ input[type="checkbox"]:checked::after {
   background: rgba(8, 13, 23, 0.65);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
   min-height: 220px;
+}
+
+.editor-block-column {
+  grid-area: blocks;
+}
+
+.editor-week-column {
+  grid-area: weeks;
+}
+
+.editor-lecture-column {
+  grid-area: lectures;
+  min-height: 360px;
 }
 
 .editor-column-heading {
@@ -1382,13 +1406,11 @@ input[type="checkbox"]:checked::after {
 .editor-lecture-browser {
   display: grid;
   gap: 10px;
-  grid-template-columns: 1fr;
-}
-
-@media (min-width: 720px) {
-  .editor-lecture-browser {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  align-content: start;
+  overflow-y: auto;
+  max-height: 420px;
+  padding-right: 4px;
 }
 
 .editor-block-row {
