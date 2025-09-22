@@ -3632,9 +3632,9 @@ var Sevenn = (() => {
       const selection = window.getSelection();
       if (!selection) return false;
       selection.removeAllRanges();
-      const clone6 = range.cloneRange();
-      selection.addRange(clone6);
-      savedRange = clone6.cloneRange();
+      const clone7 = range.cloneRange();
+      selection.addRange(clone7);
+      savedRange = clone7.cloneRange();
       return true;
     }
     function runCommand(action, { requireSelection = false } = {}) {
@@ -7079,6 +7079,513 @@ var Sevenn = (() => {
     return btn;
   }
 
+  // js/storage/transfers.js
+  var TRANSFER_VERSION = 1;
+  function prom4(req) {
+    return new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  function clone5(value) {
+    if (value == null) return value;
+    return JSON.parse(JSON.stringify(value));
+  }
+  function sanitizeBlock(block) {
+    if (!block || typeof block !== "object") return null;
+    const copy = clone5(block);
+    return {
+      blockId: copy.blockId,
+      title: copy.title || "",
+      color: copy.color || null,
+      weeks: Number.isFinite(copy.weeks) ? copy.weeks : null,
+      startDate: null,
+      endDate: null
+    };
+  }
+  function sanitizeLecture(lecture) {
+    if (!lecture || typeof lecture !== "object") return null;
+    const copy = clone5(lecture);
+    return {
+      blockId: copy.blockId,
+      id: copy.id,
+      name: copy.name || "",
+      week: copy.week ?? null,
+      tags: Array.isArray(copy.tags) ? copy.tags.slice() : [],
+      passPlan: copy.passPlan ? clone5(copy.passPlan) : null,
+      plannerDefaults: copy.plannerDefaults ? clone5(copy.plannerDefaults) : null,
+      notes: typeof copy.notes === "string" ? copy.notes : "",
+      position: Number.isFinite(copy.position) ? copy.position : null
+    };
+  }
+  function buildLectureKey(blockId, lectureId) {
+    if (blockId == null || lectureId == null) return null;
+    return `${blockId}|${lectureId}`;
+  }
+  function collectLectureKeys(lectures) {
+    const keys = /* @__PURE__ */ new Set();
+    lectures.forEach((lecture) => {
+      const key = buildLectureKey(lecture.blockId, lecture.id);
+      if (key) keys.add(key);
+    });
+    return keys;
+  }
+  function matchItemToScope(item, { blockId, week, lectureKeys, includeLooseBlockItems = false }) {
+    if (!item) return false;
+    const itemLectures = Array.isArray(item.lectures) ? item.lectures : [];
+    for (const ref of itemLectures) {
+      const key = buildLectureKey(ref?.blockId, ref?.id);
+      if (key && lectureKeys.has(key)) {
+        return true;
+      }
+      if (week != null && ref && ref.blockId === blockId) {
+        const refWeek = ref.week == null ? null : ref.week;
+        if (refWeek === week) return true;
+      }
+    }
+    if (includeLooseBlockItems) {
+      const itemBlocks = Array.isArray(item.blocks) ? item.blocks : [];
+      if (itemBlocks.some((id) => id === blockId)) {
+        if (week == null) return true;
+        const weeks = Array.isArray(item.weeks) ? item.weeks : [];
+        if (weeks.some((w) => w === week)) return true;
+      }
+    }
+    return false;
+  }
+  async function fetchBlockRecord(blockId) {
+    if (!blockId) return null;
+    const db = await openDB();
+    const tx = db.transaction("blocks");
+    const store2 = tx.objectStore("blocks");
+    const record = await prom4(store2.get(blockId));
+    if (!record) return null;
+    const { lectures, ...rest } = record;
+    return rest;
+  }
+  async function fetchLectures(blockId) {
+    const db = await openDB();
+    const tx = db.transaction("lectures");
+    const store2 = tx.objectStore("lectures");
+    if (!blockId) {
+      const all2 = await prom4(store2.getAll());
+      return Array.isArray(all2) ? all2 : [];
+    }
+    const index = typeof store2.index === "function" ? store2.index("by_block") : null;
+    if (index && typeof index.getAll === "function") {
+      return await prom4(index.getAll(blockId));
+    }
+    const all = await prom4(store2.getAll());
+    return (Array.isArray(all) ? all : []).filter((lecture) => lecture?.blockId === blockId);
+  }
+  async function fetchAllItems() {
+    const db = await openDB();
+    const tx = db.transaction("items");
+    const store2 = tx.objectStore("items");
+    const all = await prom4(store2.getAll());
+    return Array.isArray(all) ? all : [];
+  }
+  function extractMapData(mapConfig, itemIds) {
+    if (!mapConfig || !Array.isArray(mapConfig.tabs)) return { tabs: [] };
+    const idSet = new Set(itemIds);
+    const tabs2 = mapConfig.tabs.map((tab) => {
+      const layoutEntries = Object.entries(tab.layout || {}).filter(([id]) => idSet.has(id)).map(([id, pos]) => [id, { x: Number(pos?.x) || 0, y: Number(pos?.y) || 0 }]);
+      const manualIds = Array.isArray(tab.manualIds) ? tab.manualIds.filter((id) => idSet.has(id)) : [];
+      if (!layoutEntries.length && !manualIds.length) return null;
+      return {
+        name: tab.name || "Imported map",
+        includeLinked: tab.includeLinked !== false,
+        manualMode: Boolean(tab.manualMode),
+        manualIds,
+        layout: Object.fromEntries(layoutEntries),
+        layoutSeeded: tab.layoutSeeded === true,
+        filter: tab.filter ? { ...tab.filter } : { blockId: "", week: "", lectureKey: "" }
+      };
+    }).filter(Boolean);
+    return { tabs: tabs2 };
+  }
+  function sanitizeItems(items) {
+    return items.map((item) => {
+      const copy = clone5(item);
+      delete copy.tokens;
+      delete copy.searchMeta;
+      return copy;
+    });
+  }
+  function buildBundle({ scope, block, lectures, items, map }) {
+    return {
+      version: TRANSFER_VERSION,
+      scope,
+      exportedAt: Date.now(),
+      block: block ? sanitizeBlock(block) : null,
+      lectures: Array.isArray(lectures) ? lectures.map(sanitizeLecture).filter(Boolean) : [],
+      items: sanitizeItems(items || []),
+      map: map || { tabs: [] }
+    };
+  }
+  async function readMapConfig() {
+    try {
+      const raw = await getMapConfig();
+      return clone5(raw);
+    } catch (err) {
+      console.warn("Failed to read map config for transfer", err);
+      return { tabs: [] };
+    }
+  }
+  async function exportBundleForLectures(lectures, options = {}) {
+    if (!Array.isArray(lectures) || !lectures.length) {
+      throw new Error("No lectures to export");
+    }
+    const blockId = lectures[0].blockId;
+    const block = blockId ? await fetchBlockRecord(blockId) : null;
+    const lectureKeys = collectLectureKeys(lectures);
+    const allItems = await fetchAllItems();
+    const items = allItems.filter(
+      (item) => matchItemToScope(item, {
+        blockId,
+        week: options.week ?? null,
+        lectureKeys,
+        includeLooseBlockItems: options.includeLooseBlockItems === true
+      })
+    );
+    const mapConfig = await readMapConfig();
+    const map = extractMapData(mapConfig, items.map((item) => item.id));
+    return buildBundle({ scope: options.scope || "lecture", block, lectures, items, map });
+  }
+  async function exportLectureTransfer(blockId, lectureId) {
+    if (blockId == null || lectureId == null) {
+      throw new Error("Missing lecture identity");
+    }
+    const lectures = await fetchLectures(blockId);
+    const numericId = Number(lectureId);
+    const match = lectures.find((lecture) => {
+      const id = Number(lecture?.id);
+      if (Number.isFinite(id) && Number.isFinite(numericId)) return id === numericId;
+      return lecture?.id === lectureId;
+    });
+    if (!match) {
+      throw new Error("Lecture not found");
+    }
+    return exportBundleForLectures([match], { scope: "lecture", week: match.week ?? null });
+  }
+  async function exportWeekTransfer(blockId, week) {
+    if (blockId == null) {
+      throw new Error("Missing block identity");
+    }
+    const lectures = await fetchLectures(blockId);
+    const normalizedWeek = week == null || week === "" ? null : week;
+    const filtered = lectures.filter((lecture) => {
+      const lectureWeek = lecture.week == null ? null : lecture.week;
+      if (normalizedWeek == null) {
+        return lectureWeek == null;
+      }
+      return lectureWeek === normalizedWeek;
+    });
+    if (!filtered.length) {
+      throw new Error("No lectures found for week");
+    }
+    return exportBundleForLectures(filtered, { scope: "week", week: normalizedWeek });
+  }
+  async function exportBlockTransfer(blockId) {
+    if (!blockId) {
+      throw new Error("Missing block identity");
+    }
+    const lectures = await fetchLectures(blockId);
+    if (!lectures.length) {
+      throw new Error("No lectures found for block");
+    }
+    return exportBundleForLectures(lectures, { scope: "block", includeLooseBlockItems: true });
+  }
+  function ensureLectureDefaults(lecture) {
+    const base = sanitizeLecture(lecture) || {};
+    base.passes = [];
+    base.passPlan = base.passPlan || null;
+    base.plannerDefaults = base.plannerDefaults || null;
+    base.status = { ...DEFAULT_LECTURE_STATUS, state: "unscheduled", completedPasses: 0, lastCompletedAt: null };
+    base.nextDueAt = null;
+    base.startAt = null;
+    return base;
+  }
+  function normalizeTransferPayload(bundle) {
+    if (!bundle || typeof bundle !== "object") {
+      throw new Error("Invalid transfer payload");
+    }
+    if (bundle.version !== TRANSFER_VERSION) {
+      throw new Error("Unsupported transfer version");
+    }
+    const scope = bundle.scope === "block" || bundle.scope === "week" ? bundle.scope : "lecture";
+    const block = sanitizeBlock(bundle.block || {});
+    const lectures = Array.isArray(bundle.lectures) ? bundle.lectures.map(ensureLectureDefaults).filter(Boolean) : [];
+    const items = Array.isArray(bundle.items) ? bundle.items.map((item) => {
+      const cleaned = cleanItem({ ...clone5(item) });
+      delete cleaned.tokens;
+      delete cleaned.searchMeta;
+      return cleaned;
+    }) : [];
+    const map = bundle.map && typeof bundle.map === "object" && Array.isArray(bundle.map.tabs) ? {
+      tabs: bundle.map.tabs.map((tab) => ({
+        name: tab.name || "Imported map",
+        includeLinked: tab.includeLinked !== false,
+        manualMode: Boolean(tab.manualMode),
+        manualIds: Array.isArray(tab.manualIds) ? tab.manualIds.filter(Boolean) : [],
+        layout: tab.layout && typeof tab.layout === "object" ? { ...tab.layout } : {},
+        layoutSeeded: tab.layoutSeeded === true,
+        filter: tab.filter && typeof tab.filter === "object" ? { ...tab.filter } : { blockId: "", week: "", lectureKey: "" }
+      }))
+    } : { tabs: [] };
+    return { scope, block, lectures, items, map };
+  }
+  async function deleteExisting(scope, blockId, lectures, strategy) {
+    if (strategy !== "replace") return;
+    if (!blockId) return;
+    if (scope === "block") {
+      await deleteBlock(blockId);
+      return;
+    }
+    if (scope === "week") {
+      const targetWeek = lectures[0]?.week ?? null;
+      const existing = await listLecturesByBlock(blockId);
+      const matches = existing.filter((lecture) => {
+        const lectureWeek = lecture.week == null ? null : lecture.week;
+        if (targetWeek == null) {
+          return lectureWeek == null;
+        }
+        return lectureWeek === targetWeek;
+      });
+      for (const lecture of matches) {
+        await deleteLecture(blockId, lecture.id);
+      }
+      return;
+    }
+    if (scope === "lecture") {
+      const lecture = lectures[0];
+      if (!lecture) return;
+      await deleteLecture(blockId, lecture.id);
+    }
+  }
+  function remapLectureIds(blockId, lectures, existingLectures, strategy) {
+    const remapped = [];
+    const lectureIdMap = /* @__PURE__ */ new Map();
+    let maxId = existingLectures.reduce((max, lecture) => {
+      const num = Number(lecture?.id);
+      if (Number.isFinite(num) && num > max) return num;
+      return max;
+    }, 0);
+    const existingIds = new Set(existingLectures.map((lecture) => lecture.id));
+    lectures.forEach((lecture) => {
+      const normalized2 = ensureLectureDefaults(lecture);
+      normalized2.blockId = blockId;
+      const desired = Number.isFinite(Number(lecture.id)) ? Number(lecture.id) : lecture.id;
+      let finalId = desired;
+      if (strategy === "merge" && existingIds.has(desired)) {
+        maxId += 1;
+        finalId = maxId;
+      }
+      normalized2.id = finalId;
+      existingIds.add(finalId);
+      const key = buildLectureKey(blockId, lecture.id);
+      if (key) {
+        lectureIdMap.set(key, {
+          blockId,
+          lectureId: finalId,
+          name: normalized2.name,
+          week: normalized2.week ?? null
+        });
+      }
+      remapped.push(normalized2);
+    });
+    return { lectures: remapped, lectureIdMap };
+  }
+  function remapLectureRefs(refs, lectureIdMap) {
+    if (!Array.isArray(refs)) return [];
+    return refs.map((ref) => {
+      if (!ref || typeof ref !== "object") return ref;
+      const key = buildLectureKey(ref.blockId, ref.id);
+      if (key && lectureIdMap.has(key)) {
+        const mapping = lectureIdMap.get(key);
+        return {
+          blockId: mapping.blockId,
+          id: mapping.lectureId,
+          name: mapping.name || ref.name || "",
+          week: mapping.week ?? ref.week ?? null
+        };
+      }
+      return ref;
+    });
+  }
+  function remapLinks(links, itemIdMap) {
+    if (!Array.isArray(links)) return [];
+    return links.map((link) => {
+      if (!link || typeof link !== "object") return link;
+      const mappedId = itemIdMap.get(link.id);
+      if (mappedId) {
+        return { ...link, id: mappedId };
+      }
+      return link;
+    });
+  }
+  async function persistLectures(blockId, lectures, lectureIdMap) {
+    for (const lecture of lectures) {
+      const payload = {
+        blockId,
+        id: lecture.id,
+        name: lecture.name,
+        week: lecture.week,
+        passPlan: lecture.passPlan || null,
+        startAt: Date.now(),
+        tags: Array.isArray(lecture.tags) ? lecture.tags.slice() : [],
+        plannerDefaults: lecture.plannerDefaults || null,
+        position: lecture.position
+      };
+      await saveLecture(payload);
+      const db = await openDB();
+      const tx = db.transaction("lectures", "readwrite");
+      const store2 = tx.objectStore("lectures");
+      const key = lectureKey(blockId, lecture.id);
+      const record = await prom4(store2.get(key));
+      if (record) {
+        record.passes = [];
+        record.status = { ...DEFAULT_LECTURE_STATUS, state: "unscheduled", completedPasses: 0, lastCompletedAt: null };
+        record.nextDueAt = null;
+        record.startAt = null;
+        record.plannerDefaults = lecture.plannerDefaults || null;
+        record.updatedAt = Date.now();
+        await prom4(store2.put(record));
+      }
+      await new Promise((resolve, reject) => {
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+      const keyStr = buildLectureKey(blockId, lecture.id);
+      if (keyStr) {
+        lectureIdMap.set(keyStr, {
+          blockId,
+          lectureId: lecture.id,
+          name: lecture.name,
+          week: lecture.week ?? null
+        });
+      }
+    }
+  }
+  async function persistItems(items, lectureIdMap, strategy) {
+    const existingIds = /* @__PURE__ */ new Set();
+    const allExisting = await fetchAllItems();
+    allExisting.forEach((item) => {
+      if (item?.id) existingIds.add(item.id);
+    });
+    const plans = [];
+    const itemIdMap = /* @__PURE__ */ new Map();
+    for (const rawItem of items) {
+      const originalId = rawItem?.id || null;
+      let finalId = originalId;
+      if (!originalId) {
+        finalId = uid();
+      } else if (!existingIds.has(originalId)) {
+        finalId = originalId;
+      } else if (strategy === "replace") {
+        finalId = originalId;
+      } else {
+        let candidate = `${originalId}-${uid().slice(0, 6)}`;
+        while (existingIds.has(candidate)) {
+          candidate = `${originalId}-${uid().slice(0, 6)}`;
+        }
+        finalId = candidate;
+        itemIdMap.set(originalId, finalId);
+      }
+      existingIds.add(finalId);
+      plans.push({ raw: rawItem, finalId });
+    }
+    for (const plan of plans) {
+      const item = cleanItem({ ...plan.raw });
+      item.id = plan.finalId;
+      item.lectures = remapLectureRefs(item.lectures, lectureIdMap);
+      item.links = remapLinks(item.links, itemIdMap);
+      delete item.tokens;
+      delete item.searchMeta;
+      item.tokens = buildTokens(item);
+      item.searchMeta = buildSearchMeta(item);
+      await upsertItem(item);
+    }
+    return itemIdMap;
+  }
+  function remapMapTabs(map, lectureIdMap, itemIdMap) {
+    if (!map || !Array.isArray(map.tabs)) return [];
+    return map.tabs.map((tab) => {
+      const layout = {};
+      Object.entries(tab.layout || {}).forEach(([id, pos]) => {
+        const mapped = itemIdMap.get(id) || id;
+        layout[mapped] = {
+          x: Number(pos?.x) || 0,
+          y: Number(pos?.y) || 0
+        };
+      });
+      const manualIds = Array.isArray(tab.manualIds) ? tab.manualIds.map((id) => itemIdMap.get(id) || id) : [];
+      let lectureKeyFilter = tab.filter?.lectureKey || "";
+      if (lectureKeyFilter) {
+        const mapping = lectureIdMap.get(lectureKeyFilter);
+        if (mapping) {
+          lectureKeyFilter = lectureKey(mapping.blockId, mapping.lectureId);
+        }
+      }
+      return {
+        id: uid(),
+        name: tab.name || "Imported map",
+        includeLinked: tab.includeLinked !== false,
+        manualMode: Boolean(tab.manualMode),
+        manualIds,
+        layout,
+        layoutSeeded: tab.layoutSeeded === true,
+        filter: {
+          blockId: tab.filter?.blockId || "",
+          week: tab.filter?.week ?? "",
+          lectureKey: lectureKeyFilter
+        }
+      };
+    });
+  }
+  async function mergeMapConfig(map, lectureIdMap, itemIdMap) {
+    if (!map || !Array.isArray(map.tabs) || !map.tabs.length) return;
+    const config = await getMapConfig();
+    const copy = clone5(config);
+    const appended = remapMapTabs(map, lectureIdMap, itemIdMap);
+    appended.forEach((tab) => {
+      let name = tab.name;
+      const existingNames = new Set(copy.tabs.map((existing) => existing.name));
+      while (existingNames.has(name)) {
+        name = `${tab.name} (import)`;
+        tab.name = name;
+      }
+      copy.tabs.push(tab);
+    });
+    await saveMapConfig(copy);
+  }
+  async function importLectureTransfer(bundle, options = {}) {
+    const { scope, block, lectures, items, map } = normalizeTransferPayload(bundle);
+    if (!block || !block.blockId) {
+      throw new Error("Transfer missing block information");
+    }
+    const strategy = options.strategy === "replace" ? "replace" : "merge";
+    const blockId = block.blockId;
+    await deleteExisting(scope, blockId, lectures, strategy);
+    const existingBlock = await fetchBlockRecord(blockId);
+    if (!existingBlock) {
+      await upsertBlock({
+        blockId,
+        title: block.title,
+        color: block.color,
+        weeks: block.weeks,
+        startDate: null,
+        endDate: null,
+        lectures: []
+      });
+    }
+    const existingLectures = await listLecturesByBlock(blockId);
+    const { lectures: normalizedLectures, lectureIdMap } = remapLectureIds(blockId, lectures, existingLectures, strategy);
+    await persistLectures(blockId, normalizedLectures, lectureIdMap);
+    const itemIdMap = await persistItems(items, lectureIdMap, strategy);
+    await mergeMapConfig(map, lectureIdMap, itemIdMap);
+  }
+
   // js/ui/components/lectures.js
   function ensureLectureState() {
     if (!state.lectures) {
@@ -7107,6 +7614,160 @@ var Sevenn = (() => {
       order.set(String(block.blockId), index);
     });
     return order;
+  }
+  function slugify(value, fallback = "export") {
+    if (value == null) return fallback;
+    const text = String(value).toLowerCase();
+    const slug = text.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
+    return slug || fallback;
+  }
+  function downloadJson(data, filename) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+  function describeWeekValue(value) {
+    if (value == null || value === "") return "No week assigned";
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return `Week ${numeric}`;
+    }
+    return `Week ${value}`;
+  }
+  function detectImportConflicts(bundle, catalog) {
+    if (!bundle || typeof bundle !== "object") {
+      return { hasConflicts: false };
+    }
+    const scopeRaw = typeof bundle.scope === "string" ? bundle.scope.toLowerCase() : "lecture";
+    const scope = scopeRaw === "block" || scopeRaw === "week" ? scopeRaw : "lecture";
+    const blockId = bundle.block && bundle.block.blockId != null ? String(bundle.block.blockId) : "";
+    const blocks = Array.isArray(catalog?.blocks) ? catalog.blocks : [];
+    const lectureLists = catalog?.lectureLists || {};
+    const lectureIndex = catalog?.lectureIndex || {};
+    const blockInfo = blocks.find((block) => String(block?.blockId) === blockId) || null;
+    const blockTitle = blockInfo?.title || bundle?.block?.title || blockId || "Block";
+    const blockExists = Boolean(blockInfo);
+    const conflicts = {
+      scope,
+      blockId,
+      blockTitle,
+      blockExists: scope === "block" && blockExists,
+      weeks: [],
+      lectures: []
+    };
+    const existingLectures = lectureIndex[blockId] || {};
+    const weekSet = /* @__PURE__ */ new Set();
+    if (Array.isArray(bundle?.lectures)) {
+      bundle.lectures.forEach((lecture) => {
+        const lectureId = lecture?.id;
+        const hasLectureConflict = Object.values(existingLectures).some((existing) => {
+          if (!existing) return false;
+          const existingId = existing.id;
+          if (Number.isFinite(Number(existingId)) && Number.isFinite(Number(lectureId))) {
+            return Number(existingId) === Number(lectureId);
+          }
+          return String(existingId) === String(lectureId);
+        });
+        if (hasLectureConflict) {
+          conflicts.lectures.push({
+            id: lectureId,
+            name: lecture?.name || `Lecture ${lectureId}`
+          });
+        }
+        if (scope !== "lecture") {
+          const weekValue = lecture?.week == null ? null : lecture.week;
+          if (!weekSet.has(weekValue)) {
+            const existingWeek = (lectureLists[blockId] || []).some((entry) => {
+              const entryWeek = entry?.week == null ? null : entry.week;
+              return entryWeek === weekValue;
+            });
+            if (existingWeek) {
+              conflicts.weeks.push(weekValue);
+            }
+            weekSet.add(weekValue);
+          }
+        }
+      });
+    }
+    conflicts.hasConflicts = conflicts.blockExists || conflicts.weeks.length > 0 || conflicts.lectures.length > 0;
+    return conflicts;
+  }
+  function promptImportStrategy(conflicts) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.className = "modal import-conflict-modal";
+      const card = document.createElement("div");
+      card.className = "card import-conflict-card";
+      const title = document.createElement("h3");
+      title.textContent = "Content already exists";
+      card.appendChild(title);
+      const message = document.createElement("p");
+      message.textContent = "Choose whether to replace the existing content or merge the new material.";
+      card.appendChild(message);
+      const list = document.createElement("ul");
+      list.className = "import-conflict-list";
+      if (conflicts.blockExists) {
+        const item = document.createElement("li");
+        item.textContent = `Block "${conflicts.blockTitle}" already exists.`;
+        list.appendChild(item);
+      }
+      if (Array.isArray(conflicts.weeks) && conflicts.weeks.length) {
+        const item = document.createElement("li");
+        const labels = conflicts.weeks.map(describeWeekValue).join(", ");
+        item.textContent = `Week assignments already exist: ${labels}.`;
+        list.appendChild(item);
+      }
+      if (Array.isArray(conflicts.lectures) && conflicts.lectures.length) {
+        const item = document.createElement("li");
+        const names = conflicts.lectures.map((entry) => entry.name || `Lecture ${entry.id}`).join(", ");
+        item.textContent = `Lectures already exist: ${names}.`;
+        list.appendChild(item);
+      }
+      if (list.childElementCount) {
+        card.appendChild(list);
+      }
+      const actions = document.createElement("div");
+      actions.className = "row import-conflict-actions";
+      function cleanup(result) {
+        if (document.body.contains(overlay)) {
+          document.body.removeChild(overlay);
+        }
+        resolve(result);
+      }
+      const replaceBtn = document.createElement("button");
+      replaceBtn.type = "button";
+      replaceBtn.className = "btn";
+      replaceBtn.textContent = "Replace";
+      replaceBtn.addEventListener("click", () => cleanup("replace"));
+      const mergeBtn = document.createElement("button");
+      mergeBtn.type = "button";
+      mergeBtn.className = "btn secondary";
+      mergeBtn.textContent = "Merge";
+      mergeBtn.addEventListener("click", () => cleanup("merge"));
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "btn secondary";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.addEventListener("click", () => cleanup(null));
+      actions.appendChild(replaceBtn);
+      actions.appendChild(mergeBtn);
+      actions.appendChild(cancelBtn);
+      card.appendChild(actions);
+      overlay.appendChild(card);
+      overlay.addEventListener("click", (event) => {
+        if (event.target === overlay) {
+          cleanup(null);
+        }
+      });
+      document.body.appendChild(overlay);
+      replaceBtn.focus();
+    });
   }
   function normalizeWeekValue(value) {
     if (value == null || value === "") return "";
@@ -7624,7 +8285,7 @@ var Sevenn = (() => {
     if (counts.completed > 0) return "in-progress";
     return "pending";
   }
-  function renderLectureWeekRow(lecture, onEdit, onDelete, onEditPass, onTogglePass, now = Date.now()) {
+  function renderLectureWeekRow(lecture, onEdit, onDelete, onEditPass, onTogglePass, onExport, now = Date.now()) {
     const row = document.createElement("tr");
     row.dataset.lectureRow = "true";
     row.dataset.lectureId = String(lecture.id);
@@ -7716,10 +8377,22 @@ var Sevenn = (() => {
     deleteBtn.textContent = "Delete";
     deleteBtn.addEventListener("click", () => onDelete(lecture));
     actions.appendChild(deleteBtn);
+    if (typeof onExport === "function") {
+      const exportBtn = document.createElement("button");
+      exportBtn.type = "button";
+      exportBtn.className = "btn secondary";
+      exportBtn.dataset.action = "export-lecture";
+      exportBtn.textContent = "Export";
+      exportBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        onExport(lecture);
+      });
+      actions.appendChild(exportBtn);
+    }
     row.appendChild(actions);
     return row;
   }
-  function renderLectureTable(blocks, lectures, filters, onEdit, onDelete, onEditPass, onTogglePass) {
+  function renderLectureTable(blocks, lectures, filters, onEdit, onDelete, onEditPass, onTogglePass, onExportLecture, onExportWeek, onExportBlock) {
     const card = document.createElement("section");
     card.className = "card lectures-card";
     const title = document.createElement("h2");
@@ -7805,6 +8478,17 @@ var Sevenn = (() => {
       const lectureLabel = `${lectureCount} lecture${lectureCount === 1 ? "" : "s"}`;
       blockCounts.textContent = `${lectureLabel} \u2022 ${formatPassTotals(blockStats)}`;
       blockSummary.appendChild(blockCounts);
+      if (typeof onExportBlock === "function") {
+        const blockExportBtn = document.createElement("button");
+        blockExportBtn.type = "button";
+        blockExportBtn.className = "btn secondary lectures-block-export";
+        blockExportBtn.textContent = "Export block";
+        blockExportBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          onExportBlock(group.block);
+        });
+        blockSummary.appendChild(blockExportBtn);
+      }
       blockDetails.appendChild(blockSummary);
       const weekWrapper = document.createElement("div");
       weekWrapper.className = "lectures-week-groups";
@@ -7844,6 +8528,18 @@ var Sevenn = (() => {
         const weekLectureLabel = `${weekLectureCount} lecture${weekLectureCount === 1 ? "" : "s"}`;
         weekCounts.textContent = `${weekLectureLabel} \u2022 ${formatPassTotals(weekStats)}`;
         weekSummary.appendChild(weekCounts);
+        if (typeof onExportWeek === "function") {
+          const weekExportBtn = document.createElement("button");
+          weekExportBtn.type = "button";
+          weekExportBtn.className = "btn secondary lectures-week-export";
+          weekExportBtn.textContent = "Export week";
+          weekExportBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            const targetWeek = weekLectures[0]?.week == null ? null : weekLectures[0].week;
+            onExportWeek(group.block, targetWeek);
+          });
+          weekSummary.appendChild(weekExportBtn);
+        }
         weekDetails.appendChild(weekSummary);
         const weekBody = document.createElement("div");
         weekBody.className = "lectures-week-body";
@@ -7865,7 +8561,15 @@ var Sevenn = (() => {
         table.appendChild(thead);
         const tbody = document.createElement("tbody");
         sortLecturesForDisplay(weekLectures).forEach((entry) => {
-          const row = renderLectureWeekRow(entry, onEdit, onDelete, onEditPass, onTogglePass, now);
+          const row = renderLectureWeekRow(
+            entry,
+            onEdit,
+            onDelete,
+            onEditPass,
+            onTogglePass,
+            (lecture) => onExportLecture?.(lecture, group.block),
+            now
+          );
           tbody.appendChild(row);
         });
         table.appendChild(tbody);
@@ -7930,7 +8634,7 @@ var Sevenn = (() => {
       return true;
     });
   }
-  function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan) {
+  function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan, onImport) {
     const filters = ensureLectureState();
     const toolbar = document.createElement("div");
     toolbar.className = "lectures-toolbar";
@@ -7942,6 +8646,33 @@ var Sevenn = (() => {
     const actionsGroup = document.createElement("div");
     actionsGroup.className = "lectures-toolbar-actions";
     toolbar.appendChild(actionsGroup);
+    if (typeof onImport === "function") {
+      const importInput = document.createElement("input");
+      importInput.type = "file";
+      importInput.accept = "application/json";
+      importInput.style.display = "none";
+      const importBtn = document.createElement("button");
+      importBtn.type = "button";
+      importBtn.className = "btn secondary lectures-import-btn";
+      importBtn.textContent = "Import bundle";
+      importBtn.addEventListener("click", () => importInput.click());
+      importInput.addEventListener("change", async () => {
+        const file = importInput.files[0];
+        if (!file) return;
+        try {
+          const text = await file.text();
+          const json = JSON.parse(text);
+          await onImport(json);
+        } catch (err) {
+          console.error("Failed to import lecture bundle", err);
+          alert("Import failed.");
+        } finally {
+          importInput.value = "";
+        }
+      });
+      actionsGroup.appendChild(importBtn);
+      toolbar.appendChild(importInput);
+    }
     const search = document.createElement("input");
     search.type = "search";
     search.className = "input lectures-search";
@@ -8873,11 +9604,88 @@ var Sevenn = (() => {
     const lectureLists = catalog.lectureLists || {};
     const filtered = applyFilters(allLectures, filters);
     const defaultPassPlan = plannerDefaultsToPassPlan(settings?.plannerDefaults);
+    const resolveBlockLabel = (blockInfo) => {
+      if (!blockInfo) return "block";
+      return blockInfo.title || blockInfo.name || blockInfo.blockId || "block";
+    };
+    async function handleExportLectureBundle(lecture, blockInfo) {
+      if (!lecture || lecture.id == null) {
+        alert("Lecture information is incomplete.");
+        return;
+      }
+      const normalizedBlockId = String(lecture.blockId ?? "").trim();
+      if (!normalizedBlockId) {
+        alert("Assign this lecture to a block before exporting.");
+        return;
+      }
+      try {
+        const bundle = await exportLectureTransfer(normalizedBlockId, lecture.id);
+        const blockLabel = resolveBlockLabel(blockInfo) || lecture.blockId || "block";
+        const lectureLabel = lecture.name || `lecture-${lecture.id}`;
+        const filename = `lecture-${slugify(blockLabel)}-${slugify(lectureLabel)}.json`;
+        downloadJson(bundle, filename);
+      } catch (err) {
+        console.error("Failed to export lecture bundle", err);
+        alert("Failed to export lecture.");
+      }
+    }
+    async function handleExportWeekBundle(blockInfo, weekValue) {
+      const blockId = blockInfo?.blockId;
+      if (!blockId) {
+        alert("Assign the lectures to a block before exporting a week.");
+        return;
+      }
+      try {
+        const bundle = await exportWeekTransfer(blockId, weekValue == null ? null : weekValue);
+        const blockLabel = resolveBlockLabel(blockInfo);
+        const weekSlug = weekValue == null ? "no-week" : `week-${weekValue}`;
+        const filename = `week-${slugify(blockLabel)}-${slugify(weekSlug)}.json`;
+        downloadJson(bundle, filename);
+      } catch (err) {
+        console.error("Failed to export week bundle", err);
+        alert("Failed to export week.");
+      }
+    }
+    async function handleExportBlockBundle(blockInfo) {
+      const blockId = blockInfo?.blockId;
+      if (!blockId) {
+        alert("Select a block to export.");
+        return;
+      }
+      try {
+        const bundle = await exportBlockTransfer(blockId);
+        const filename = `block-${slugify(resolveBlockLabel(blockInfo))}.json`;
+        downloadJson(bundle, filename);
+      } catch (err) {
+        console.error("Failed to export block bundle", err);
+        alert("Failed to export block.");
+      }
+    }
+    async function handleImportBundle(payload) {
+      try {
+        const conflicts = detectImportConflicts(payload, catalog);
+        let strategy = "merge";
+        if (conflicts.hasConflicts) {
+          const choice = await promptImportStrategy(conflicts);
+          if (!choice) {
+            return;
+          }
+          strategy = choice;
+        }
+        await importLectureTransfer(payload, { strategy });
+        await invalidateBlockCatalog();
+        await redraw();
+        alert("Import complete.");
+      } catch (err) {
+        console.error("Failed to import lecture bundle", err);
+        alert("Import failed.");
+      }
+    }
     root.innerHTML = "";
     const layout = document.createElement("div");
     layout.className = "lectures-view";
     root.appendChild(layout);
-    const toolbar = buildToolbar(blocks, allLectures, lectureLists, redraw, defaultPassPlan);
+    const toolbar = buildToolbar(blocks, allLectures, lectureLists, redraw, defaultPassPlan, handleImportBundle);
     layout.appendChild(toolbar);
     const table = renderLectureTable(
       blocks,
@@ -8886,7 +9694,10 @@ var Sevenn = (() => {
       (lecture) => handleEdit(lecture, blocks, lectureLists, redraw),
       (lecture) => handleDelete(lecture, redraw),
       (lecture, pass) => handlePassEdit(lecture, pass, redraw),
-      (lecture, pass, checked) => handlePassToggle(lecture, pass, checked, redraw)
+      (lecture, pass, checked) => handlePassToggle(lecture, pass, checked, redraw),
+      (lecture, blockInfo) => handleExportLectureBundle(lecture, blockInfo || blocks.find((block) => block.blockId === lecture.blockId)),
+      (blockInfo, weekValue) => handleExportWeekBundle(blockInfo, weekValue),
+      (blockInfo) => handleExportBlockBundle(blockInfo)
     );
     layout.appendChild(table);
   }
@@ -10165,12 +10976,12 @@ var Sevenn = (() => {
   }
   function snapshotBlockState() {
     const source = state.blockMode || {};
-    const clone6 = (value) => JSON.parse(JSON.stringify(value ?? {}));
+    const clone7 = (value) => JSON.parse(JSON.stringify(value ?? {}));
     return {
       section: source.section || "",
-      assignments: clone6(source.assignments),
-      reveal: clone6(source.reveal),
-      order: clone6(source.order)
+      assignments: clone7(source.assignments),
+      reveal: clone7(source.reveal),
+      order: clone7(source.order)
     };
   }
   function renderFooter({ globalRedraw, sectionLabel, filledCount, total }) {
@@ -10499,7 +11310,7 @@ var Sevenn = (() => {
 
   // js/ui/components/block-board.js
   var loadCatalog = loadBlockCatalog;
-  var fetchLectures = listAllLectures;
+  var fetchLectures2 = listAllLectures;
   var persistLecture = saveLecture;
   var DAY_MS2 = 24 * 60 * 60 * 1e3;
   var PASS_COLORS = [
@@ -11103,7 +11914,7 @@ var Sevenn = (() => {
         }
       }
     }
-    const lectures = await fetchLectures();
+    const lectures = await fetchLectures2();
     const fallbackDays = collectDefaultBoardDays();
     const queues = groupLectureQueues(lectures);
     const urgentHost = document.createElement("div");
@@ -11163,7 +11974,7 @@ var Sevenn = (() => {
   var keyHandler = null;
   var keyHandlerSession = null;
   var lastExamStatusMessage = "";
-  function clone5(value) {
+  function clone6(value) {
     return value ? JSON.parse(JSON.stringify(value)) : value;
   }
   function totalExamTimeMs(exam) {
@@ -11265,7 +12076,7 @@ var Sevenn = (() => {
     }
     return base;
   }
-  function slugify(text) {
+  function slugify2(text) {
     const lowered = (text || "").toLowerCase();
     const normalized2 = lowered.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     return normalized2 || "exam";
@@ -11277,7 +12088,7 @@ var Sevenn = (() => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${slugify(exam.examTitle || "exam")}.json`;
+      a.download = `${slugify2(exam.examTitle || "exam")}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -11289,7 +12100,7 @@ var Sevenn = (() => {
     }
   }
   function ensureExamShape(exam) {
-    const next = clone5(exam) || {};
+    const next = clone6(exam) || {};
     let changed = false;
     if (!next.id) {
       next.id = uid();
@@ -11405,7 +12216,7 @@ var Sevenn = (() => {
     };
   }
   function createTakingSession(exam) {
-    const snapshot = clone5(exam);
+    const snapshot = clone6(exam);
     const totalMs = snapshot.timerMode === "timed" ? totalExamTimeMs(snapshot) : null;
     return {
       mode: "taking",
@@ -11421,7 +12232,7 @@ var Sevenn = (() => {
   }
   function hydrateSavedSession(saved, fallbackExam) {
     const baseExam = saved?.exam ? ensureExamShape(saved.exam).exam : fallbackExam;
-    const exam = clone5(baseExam);
+    const exam = clone6(baseExam);
     const questionCount = exam.questions.length;
     const idx = Math.min(Math.max(Number(saved?.idx) || 0, 0), Math.max(0, questionCount - 1));
     const remaining = typeof saved?.remainingMs === "number" ? Math.max(0, saved.remainingMs) : exam.timerMode === "timed" ? totalExamTimeMs(exam) : null;
@@ -11606,7 +12417,7 @@ var Sevenn = (() => {
       reviewBtn.className = "btn secondary";
       reviewBtn.textContent = "Review Last Attempt";
       reviewBtn.addEventListener("click", () => {
-        setExamSession({ mode: "review", exam: clone5(exam), result: clone5(last), idx: 0 });
+        setExamSession({ mode: "review", exam: clone6(exam), result: clone6(last), idx: 0 });
         render();
       });
       actions.appendChild(reviewBtn);
@@ -11701,7 +12512,7 @@ var Sevenn = (() => {
     review.className = "btn secondary";
     review.textContent = "Review";
     review.addEventListener("click", () => {
-      setExamSession({ mode: "review", exam: clone5(exam), result: clone5(result), idx: 0 });
+      setExamSession({ mode: "review", exam: clone6(exam), result: clone6(result), idx: 0 });
       render();
     });
     row.appendChild(review);
@@ -12123,7 +12934,7 @@ var Sevenn = (() => {
     stopTimer(sess);
     const payload = {
       examId: sess.exam.id,
-      exam: clone5(sess.exam),
+      exam: clone6(sess.exam),
       idx: sess.idx,
       answers: { ...sess.answers || {} },
       flagged: { ...sess.flagged || {} },
@@ -12168,7 +12979,7 @@ var Sevenn = (() => {
       durationMs: sess.elapsedMs || 0,
       answered: answeredCount
     };
-    const updatedExam = clone5(sess.exam);
+    const updatedExam = clone6(sess.exam);
     updatedExam.results = [...updatedExam.results || [], result];
     updatedExam.updatedAt = Date.now();
     await upsertExam(updatedExam);
@@ -12206,10 +13017,10 @@ var Sevenn = (() => {
     reviewBtn.addEventListener("click", () => {
       setExamSession({
         mode: "review",
-        exam: clone5(sess.exam),
-        result: clone5(sess.latestResult),
+        exam: clone6(sess.exam),
+        result: clone6(sess.latestResult),
         idx: 0,
-        fromSummary: clone5(sess.latestResult)
+        fromSummary: clone6(sess.latestResult)
       });
       render();
     });
@@ -12795,9 +13606,9 @@ var Sevenn = (() => {
     const deduped = [];
     tabs2.forEach((tab) => {
       if (ids.has(tab.id)) {
-        const clone6 = { ...tab, id: uid() };
-        ids.add(clone6.id);
-        deduped.push(clone6);
+        const clone7 = { ...tab, id: uid() };
+        ids.add(clone7.id);
+        deduped.push(clone7);
       } else {
         ids.add(tab.id);
         deduped.push(tab);
