@@ -230,13 +230,17 @@ export async function openEditor(kind, onSave, existing = null) {
   }));
   const blockMap = new Map(blocks.map(b => [b.blockId, b]));
   const blockSet = new Set(existing?.blocks || []);
-  const weekSet = new Set();
+  const manualWeeks = new Set(
+    Array.isArray(existing?.weeks)
+      ? existing.weeks.filter(value => Number.isFinite(Number(value))).map(value => Number(value))
+      : []
+  );
   const lectSet = new Set();
   existing?.lectures?.forEach(l => {
-    blockSet.add(l.blockId);
-    const weekKey = l.week == null || l.week === '' ? UNSCHEDULED_KEY : l.week;
-    weekSet.add(`${l.blockId}|${weekKey}`);
-    lectSet.add(`${l.blockId}|${l.id}`);
+    if (l.blockId != null) blockSet.add(l.blockId);
+    if (l.blockId != null && l.id != null) {
+      lectSet.add(`${l.blockId}|${l.id}`);
+    }
   });
 
   const blockWrap = document.createElement('section');
@@ -246,9 +250,32 @@ export async function openEditor(kind, onSave, existing = null) {
   blockTitle.textContent = 'Curriculum tags';
   blockWrap.appendChild(blockTitle);
 
+  const blockDescription = document.createElement('p');
+  blockDescription.className = 'editor-tags-description';
+  blockDescription.textContent = 'Pick the lectures that relate to this entry. Block and week tags update automatically as you choose lectures.';
+  blockWrap.appendChild(blockDescription);
+
   const blockChipRow = document.createElement('div');
   blockChipRow.className = 'editor-chip-row';
   blockWrap.appendChild(blockChipRow);
+
+  const manualWeeksBox = document.createElement('div');
+  manualWeeksBox.className = 'editor-manual-weeks';
+  const manualWeeksHeader = document.createElement('div');
+  manualWeeksHeader.className = 'editor-manual-weeks-header';
+  const manualWeeksTitle = document.createElement('span');
+  manualWeeksTitle.textContent = 'Additional week tags';
+  manualWeeksHeader.appendChild(manualWeeksTitle);
+  const addWeekBtn = document.createElement('button');
+  addWeekBtn.type = 'button';
+  addWeekBtn.className = 'btn subtle';
+  addWeekBtn.textContent = 'Add week tag';
+  manualWeeksHeader.appendChild(addWeekBtn);
+  manualWeeksBox.appendChild(manualWeeksHeader);
+  const manualWeekList = document.createElement('div');
+  manualWeekList.className = 'editor-manual-weeks-list';
+  manualWeeksBox.appendChild(manualWeekList);
+  blockWrap.appendChild(manualWeeksBox);
 
   const blockPanels = document.createElement('div');
   blockPanels.className = 'editor-block-panels';
@@ -265,14 +292,91 @@ export async function openEditor(kind, onSave, existing = null) {
     return chip;
   }
 
-  function pruneBlock(blockId) {
-    for (const key of Array.from(weekSet)) {
-      if (key.startsWith(`${blockId}|`)) weekSet.delete(key);
-    }
-    for (const key of Array.from(lectSet)) {
-      if (key.startsWith(`${blockId}|`)) lectSet.delete(key);
+  function blockHasSelectedLectures(blockId) {
+    const block = blockMap.get(blockId);
+    if (!block?.lectures) return false;
+    return block.lectures.some(l => lectSet.has(`${blockId}|${l.id}`));
+  }
+
+  function collectSelectedWeekKeys() {
+    const selected = new Set();
+    lectSet.forEach(key => {
+      const [blockId, lectureId] = key.split('|');
+      const lecId = Number(lectureId);
+      if (!blockId || !Number.isFinite(lecId)) return;
+      const block = blockMap.get(blockId);
+      const lecture = block?.lectures?.find(le => le.id === lecId);
+      if (!lecture) return;
+      const weekValue = lecture.week == null || lecture.week === '' ? UNSCHEDULED_KEY : lecture.week;
+      selected.add(`${blockId}|${weekValue}`);
+    });
+    return selected;
+  }
+
+  function collectWeekNumbers() {
+    const numbers = new Set(manualWeeks);
+    lectSet.forEach(key => {
+      const [blockId, lectureId] = key.split('|');
+      const lecId = Number(lectureId);
+      if (!blockId || !Number.isFinite(lecId)) return;
+      const block = blockMap.get(blockId);
+      const lecture = block?.lectures?.find(le => le.id === lecId);
+      if (!lecture) return;
+      const weekValue = Number(lecture.week);
+      if (Number.isFinite(weekValue)) numbers.add(weekValue);
+    });
+    return numbers;
+  }
+
+  function renderManualWeekTags() {
+    manualWeekList.innerHTML = '';
+    if (!manualWeeks.size) {
+      const empty = document.createElement('span');
+      empty.className = 'editor-manual-weeks-empty';
+      empty.textContent = 'No extra week tags yet.';
+      manualWeekList.appendChild(empty);
+      manualWeeksBox.classList.add('empty');
+    } else {
+      manualWeeksBox.classList.remove('empty');
+      Array.from(manualWeeks)
+        .sort((a, b) => a - b)
+        .forEach(weekNum => {
+          const chip = document.createElement('div');
+          chip.className = 'editor-manual-week-chip';
+          const label = document.createElement('span');
+          label.textContent = `Week ${weekNum}`;
+          chip.appendChild(label);
+          const removeBtn = document.createElement('button');
+          removeBtn.type = 'button';
+          removeBtn.className = 'icon-btn ghost';
+          removeBtn.title = 'Remove week tag';
+          removeBtn.setAttribute('aria-label', `Remove week ${weekNum}`);
+          removeBtn.textContent = '✕';
+          removeBtn.addEventListener('click', () => {
+            manualWeeks.delete(weekNum);
+            markDirty();
+            renderManualWeekTags();
+            renderBlockPanels();
+          });
+          chip.appendChild(removeBtn);
+          manualWeekList.appendChild(chip);
+        });
     }
   }
+
+  addWeekBtn.addEventListener('click', () => {
+    const value = prompt('Enter a week number to tag (1-52)');
+    if (!value) return;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    const clamped = Math.max(1, Math.round(parsed));
+    if (!manualWeeks.has(clamped)) {
+      manualWeeks.add(clamped);
+      markDirty();
+    }
+    renderManualWeekTags();
+    renderBlockPanels();
+  });
 
   function renderBlockChips() {
     blockChipRow.innerHTML = '';
@@ -284,11 +388,13 @@ export async function openEditor(kind, onSave, existing = null) {
       return;
     }
     blocks.forEach(b => {
-      const chip = createTagChip(b.title || b.blockId, 'block', blockSet.has(b.blockId));
+      const isSelected = blockSet.has(b.blockId);
+      const hasLectures = blockHasSelectedLectures(b.blockId);
+      const chip = createTagChip(b.title || b.blockId, 'block', isSelected || hasLectures);
+      chip.dataset.manual = isSelected ? 'true' : 'false';
       chip.addEventListener('click', () => {
         if (blockSet.has(b.blockId)) {
           blockSet.delete(b.blockId);
-          pruneBlock(b.blockId);
         } else {
           blockSet.add(b.blockId);
         }
@@ -302,26 +408,34 @@ export async function openEditor(kind, onSave, existing = null) {
 
   function renderBlockPanels() {
     blockPanels.innerHTML = '';
-    if (!blockSet.size) {
+    if (!blocks.length) {
       const empty = document.createElement('div');
       empty.className = 'editor-tags-empty';
-      empty.textContent = 'Choose a block to pick weeks and lectures.';
+      empty.textContent = 'No curriculum blocks have been created yet.';
       blockPanels.appendChild(empty);
       return;
     }
 
-    Array.from(blockSet).forEach(blockId => {
-      const block = blockMap.get(blockId);
+    const selectedWeekKeys = collectSelectedWeekKeys();
+    blocks.forEach(block => {
       if (!block) return;
-
-      const panel = document.createElement('div');
+      const blockId = block.blockId;
+      const panel = document.createElement('section');
       panel.className = 'editor-block-panel';
+      if (blockSet.has(blockId) || blockHasSelectedLectures(blockId)) {
+        panel.classList.add('active');
+      }
 
       const header = document.createElement('div');
       header.className = 'editor-block-panel-header';
+
+      const titleWrap = document.createElement('div');
+      titleWrap.className = 'editor-block-panel-title';
+
       const title = document.createElement('h4');
       title.textContent = block.title || blockId;
-      header.appendChild(title);
+      titleWrap.appendChild(title);
+
       const meta = document.createElement('span');
       meta.className = 'editor-block-meta';
       const lectureCount = block.lectures?.length || 0;
@@ -330,7 +444,20 @@ export async function openEditor(kind, onSave, existing = null) {
       if (weekTotal) metaParts.push(`${weekTotal} week${weekTotal === 1 ? '' : 's'}`);
       if (lectureCount) metaParts.push(`${lectureCount} lecture${lectureCount === 1 ? '' : 's'}`);
       meta.textContent = metaParts.join(' • ') || 'No weeks defined yet';
-      header.appendChild(meta);
+      titleWrap.appendChild(meta);
+
+      header.appendChild(titleWrap);
+
+      const selectedCount = (block.lectures || []).reduce((count, l) => (
+        lectSet.has(`${blockId}|${l.id}`) ? count + 1 : count
+      ), 0);
+      if (selectedCount) {
+        const badge = document.createElement('span');
+        badge.className = 'editor-block-selected-count';
+        badge.textContent = `${selectedCount} selected`;
+        header.appendChild(badge);
+      }
+
       panel.appendChild(header);
 
       const weekList = document.createElement('div');
@@ -348,12 +475,13 @@ export async function openEditor(kind, onSave, existing = null) {
       const weekGroups = sortedWeeks.map(weekNumber => ({
         key: `${blockId}|${weekNumber}`,
         label: `Week ${weekNumber}`,
-        lectures: (block.lectures || []).filter(l => l.week === weekNumber)
+        lectures: (block.lectures || []).filter(l => l.week === weekNumber),
+        weekNumber
       }));
       if (unscheduledLectures.length) {
         weekGroups.push({
           key: `${blockId}|${UNSCHEDULED_KEY}`,
-          label: 'No week',
+          label: 'Unscheduled',
           lectures: unscheduledLectures,
           unscheduled: true
         });
@@ -366,37 +494,48 @@ export async function openEditor(kind, onSave, existing = null) {
         weekList.appendChild(noWeeks);
       } else {
         weekGroups.forEach(group => {
-          const { key: weekKey, label, lectures, unscheduled } = group;
+          const { key: weekKey, label, lectures, weekNumber, unscheduled } = group;
           const section = document.createElement('div');
           section.className = 'editor-week-section';
-          if (weekSet.has(weekKey)) section.classList.add('active');
 
-          const weekChip = createTagChip(label, 'week', weekSet.has(weekKey));
-          weekChip.addEventListener('click', () => {
-            const wasActive = weekSet.has(weekKey);
-            if (wasActive) {
-              weekSet.delete(weekKey);
-              section.classList.remove('active');
-              lectureWrap.classList.add('collapsed');
-              lectures.forEach(l => {
-                const key = `${blockId}|${l.id}`;
-                lectSet.delete(key);
-                const chip = lectureWrap.querySelector(`[data-lecture='${key}']`);
-                if (chip) setToggleState(chip, false);
-              });
-            } else {
-              weekSet.add(weekKey);
-              section.classList.add('active');
-              lectureWrap.classList.remove('collapsed');
-            }
-            setToggleState(weekChip, weekSet.has(weekKey));
-            markDirty();
-          });
-          section.appendChild(weekChip);
+          const hasLectureSelection = (lectures || []).some(l => lectSet.has(`${blockId}|${l.id}`));
+          const isManualWeek = Number.isFinite(weekNumber) && manualWeeks.has(Number(weekNumber));
+          if (hasLectureSelection || isManualWeek) {
+            section.classList.add('active');
+          }
+          if (selectedWeekKeys.has(weekKey)) {
+            section.classList.add('active');
+          }
+
+          const weekHeader = document.createElement('div');
+          weekHeader.className = 'editor-week-header';
+          const weekLabel = document.createElement('span');
+          weekLabel.textContent = label;
+          weekHeader.appendChild(weekLabel);
+
+          const countLabel = document.createElement('span');
+          countLabel.className = 'editor-week-count';
+          const total = lectures?.length || 0;
+          if (total) {
+            countLabel.textContent = `${total} lecture${total === 1 ? '' : 's'}`;
+          } else if (unscheduled) {
+            countLabel.textContent = 'No unscheduled lectures yet';
+          } else {
+            countLabel.textContent = 'No lectures yet';
+          }
+          weekHeader.appendChild(countLabel);
+
+          if (Number.isFinite(weekNumber) && manualWeeks.has(Number(weekNumber))) {
+            const badge = document.createElement('span');
+            badge.className = 'editor-week-manual';
+            badge.textContent = 'Tagged';
+            weekHeader.appendChild(badge);
+          }
+
+          section.appendChild(weekHeader);
 
           const lectureWrap = document.createElement('div');
           lectureWrap.className = 'editor-lecture-list';
-          if (!weekSet.has(weekKey)) lectureWrap.classList.add('collapsed');
 
           if (!lectures.length) {
             const empty = document.createElement('div');
@@ -413,18 +552,12 @@ export async function openEditor(kind, onSave, existing = null) {
               lectureChip.addEventListener('click', () => {
                 if (lectSet.has(key)) {
                   lectSet.delete(key);
-                  setToggleState(lectureChip, false);
                 } else {
                   lectSet.add(key);
-                  setToggleState(lectureChip, true);
-                  if (!weekSet.has(weekKey)) {
-                    weekSet.add(weekKey);
-                    section.classList.add('active');
-                    setToggleState(weekChip, true);
-                    lectureWrap.classList.remove('collapsed');
-                  }
                 }
                 markDirty();
+                renderBlockChips();
+                renderBlockPanels();
               });
               lectureWrap.appendChild(lectureChip);
             });
@@ -440,6 +573,7 @@ export async function openEditor(kind, onSave, existing = null) {
     });
   }
 
+  renderManualWeekTags();
   renderBlockChips();
   renderBlockPanels();
 
@@ -479,17 +613,15 @@ export async function openEditor(kind, onSave, existing = null) {
       body: editor.getValue()
     })).filter(ex => ex.title || ex.body);
     item.facts = [];
-    item.blocks = Array.from(blockSet);
-    const weekNums = new Set();
-    for (const key of weekSet) {
-      const parts = key.split('|');
-      const raw = parts[1];
-      const numeric = Number(raw);
-      if (Number.isFinite(numeric)) {
-        weekNums.add(numeric);
-      }
-    }
-    item.weeks = Array.from(weekNums);
+    const blockTags = new Set(blockSet);
+    lectSet.forEach(key => {
+      const [blockId] = key.split('|');
+      if (blockId) blockTags.add(blockId);
+    });
+    item.blocks = Array.from(blockTags);
+
+    const weekNums = collectWeekNumbers();
+    item.weeks = Array.from(weekNums).sort((a, b) => a - b);
     const lectures = [];
     for (const key of lectSet) {
       const [blockId, lecIdStr] = key.split('|');
