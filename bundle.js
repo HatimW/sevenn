@@ -1,4 +1,31 @@
-(() => {
+var Sevenn = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // js/main.js
+  var main_exports = {};
+  __export(main_exports, {
+    render: () => renderApp,
+    renderApp: () => renderApp,
+    resolveListKind: () => resolveListKind,
+    tabs: () => tabs
+  });
+
   // js/state.js
   var state = {
     tab: "Block Board",
@@ -398,6 +425,25 @@
     if (passes[clamped]) {
       passes[clamped].completedAt = completedAt;
     }
+    const status = deriveLectureStatus(passes, lecture.status);
+    const nextDueAt = calculateNextDue(passes);
+    return {
+      ...lecture,
+      passes,
+      status,
+      nextDueAt
+    };
+  }
+  function shiftLecturePasses(lecture, shiftMinutes, { includeCompleted = false } = {}) {
+    if (!lecture || typeof lecture !== "object") return null;
+    const shiftMs = Math.round(toNumber(shiftMinutes, 0) * MINUTE_MS);
+    const passes = Array.isArray(lecture.passes) ? lecture.passes.map((pass) => {
+      if (!pass || !Number.isFinite(pass.due)) return { ...pass };
+      if (!includeCompleted && Number.isFinite(pass.completedAt)) {
+        return { ...pass };
+      }
+      return { ...pass, due: pass.due + shiftMs };
+    }) : [];
     const status = deriveLectureStatus(passes, lecture.status);
     const nextDueAt = calculateNextDue(passes);
     return {
@@ -1273,87 +1319,86 @@
       for (const entry of additionalSettings) {
         await prom2(settings.put(entry));
       }
-      const lectureRecords = /* @__PURE__ */ new Map();
-      const addLectureRecord = (record, { preferExisting = false } = {}) => {
-        if (!record || typeof record !== "object") return;
-        const blockId = record.blockId ?? record.block ?? null;
-        const lectureId = record.id ?? record.lectureId ?? null;
-        if (blockId == null || lectureId == null) return;
-        const key = record.key || lectureKey(blockId, lectureId);
-        if (!key) return;
-        if (preferExisting && lectureRecords.has(key)) return;
-        const clone7 = JSON.parse(JSON.stringify({ ...record, key, blockId, id: lectureId }));
-        lectureRecords.set(key, clone7);
-      };
-      if (Array.isArray(dbDump?.lectures)) {
-        for (const lecture of dbDump.lectures) {
-          addLectureRecord(lecture);
-        }
+    const lectureRecords = new Map();
+    const addLectureRecord = (record, { preferExisting = false } = {}) => {
+      if (!record || typeof record !== "object") return;
+      const blockId = record.blockId ?? record.block ?? null;
+      const lectureId = record.id ?? record.lectureId ?? null;
+      if (blockId == null || lectureId == null) return;
+      const key = record.key || lectureKey(blockId, lectureId);
+      if (!key) return;
+      if (preferExisting && lectureRecords.has(key)) return;
+      const clone = JSON.parse(JSON.stringify({ ...record, key, blockId, id: lectureId }));
+      lectureRecords.set(key, clone);
+    };
+    if (Array.isArray(dbDump?.lectures)) {
+      for (const lecture of dbDump.lectures) {
+        addLectureRecord(lecture);
       }
-      const migrationTimestamp = Date.now();
-      if (Array.isArray(dbDump?.blocks)) {
-        for (const b of dbDump.blocks) {
-          if (!b || typeof b !== "object") continue;
-          const { lectures: legacyLectures, ...rest } = b;
-          await prom2(blocks.put(rest));
-          if (!Array.isArray(legacyLectures) || legacyLectures.length === 0) continue;
-          const blockId = rest?.blockId;
-          if (blockId == null) continue;
-          for (const legacy of legacyLectures) {
-            const normalized2 = normalizeLectureRecord(blockId, legacy, migrationTimestamp);
-            if (!normalized2) continue;
-            if (typeof legacy?.createdAt === "number" && Number.isFinite(legacy.createdAt)) {
-              normalized2.createdAt = legacy.createdAt;
-            }
-            if (typeof legacy?.updatedAt === "number" && Number.isFinite(legacy.updatedAt)) {
-              normalized2.updatedAt = legacy.updatedAt;
-            }
-            addLectureRecord(normalized2, { preferExisting: true });
+    }
+    const migrationTimestamp = Date.now();
+    if (Array.isArray(dbDump?.blocks)) {
+      for (const b of dbDump.blocks) {
+        if (!b || typeof b !== "object") continue;
+        const { lectures: legacyLectures, ...rest } = b;
+        await prom2(blocks.put(rest));
+        if (!Array.isArray(legacyLectures) || legacyLectures.length === 0) continue;
+        const blockId = rest?.blockId;
+        if (blockId == null) continue;
+        for (const legacy of legacyLectures) {
+          const normalized = normalizeLectureRecord(blockId, legacy, migrationTimestamp);
+          if (!normalized) continue;
+          if (typeof legacy?.createdAt === "number" && Number.isFinite(legacy.createdAt)) {
+            normalized.createdAt = legacy.createdAt;
           }
+          if (typeof legacy?.updatedAt === "number" && Number.isFinite(legacy.updatedAt)) {
+            normalized.updatedAt = legacy.updatedAt;
+          }
+          addLectureRecord(normalized, { preferExisting: true });
         }
       }
-      if (lectureRecords.size) {
-        for (const lecture of lectureRecords.values()) {
-          await prom2(lectures.put(lecture));
-        }
+    }
+    if (lectureRecords.size) {
+      for (const lecture of lectureRecords.values()) {
+        await prom2(lectures.put(lecture));
       }
-      if (Array.isArray(dbDump?.items)) {
-        for (const it of dbDump.items) {
-          if (!it || typeof it !== "object") continue;
-          it.tokens = buildTokens(it);
-          it.searchMeta = buildSearchMeta(it);
-          await prom2(items.put(it));
-        }
+    }
+    if (Array.isArray(dbDump?.items)) {
+      for (const it of dbDump.items) {
+        if (!it || typeof it !== "object") continue;
+        it.tokens = buildTokens(it);
+        it.searchMeta = buildSearchMeta(it);
+        await prom2(items.put(it));
       }
-      if (Array.isArray(dbDump?.exams)) {
-        for (const ex of dbDump.exams) {
-          if (!ex || typeof ex !== "object") continue;
-          await prom2(exams.put(ex));
-        }
+    }
+    if (Array.isArray(dbDump?.exams)) {
+      for (const ex of dbDump.exams) {
+        if (!ex || typeof ex !== "object") continue;
+        await prom2(exams.put(ex));
       }
-      if (Array.isArray(dbDump?.examSessions)) {
-        for (const session of dbDump.examSessions) {
-          if (!session || typeof session !== "object") continue;
-          await prom2(examSessions.put(session));
-        }
+    }
+    if (Array.isArray(dbDump?.examSessions)) {
+      for (const session of dbDump.examSessions) {
+        if (!session || typeof session !== "object") continue;
+        await prom2(examSessions.put(session));
       }
+    }
       if (Array.isArray(dbDump?.studySessions)) {
         for (const session of dbDump.studySessions) {
           if (!session || typeof session !== "object") continue;
           await prom2(studySessions.put(session));
         }
       }
-      await new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-      if (db && typeof db.close === "function") {
-        try {
-          db.close();
-        } catch (_) {
-        }
-      }
-      return { ok: true, message: "Import complete" };
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    if (db && typeof db.close === "function") {
+      try {
+        db.close();
+      } catch (__) {}
+    }
+    return { ok: true, message: "Import complete" };
     } catch (e) {
       return { ok: false, message: e.message };
     }
@@ -11435,15 +11480,6 @@
     "var(--cyan)"
   ];
   var DEFAULT_BOARD_DAYS = 14;
-  var SHIFT_OFFSET_UNITS = [
-    { id: "minutes", label: "minutes", minutes: 1 },
-    { id: "hours", label: "hours", minutes: 60 },
-    { id: "days", label: "days", minutes: 60 * 24 },
-    { id: "weeks", label: "weeks", minutes: 60 * 24 * 7 }
-  ];
-  var TIMELINE_BASE_UNIT_HEIGHT = 8;
-  var TIMELINE_MAX_BAR_HEIGHT = 200;
-  var TIMELINE_MIN_SEGMENT_HEIGHT = 3;
   var BLOCK_RANGE_FORMAT = new Intl.DateTimeFormat(void 0, {
     month: "short",
     day: "numeric",
@@ -11513,199 +11549,6 @@
     const diff = end.getTime() - start.getTime();
     if (diff < 0) return null;
     return Math.round(diff / DAY_MS2) + 1;
-  }
-  function normalizeShiftUnit(id) {
-    if (typeof id !== "string") return "days";
-    const normalized2 = SHIFT_OFFSET_UNITS.find((option) => option.id === id);
-    return normalized2 ? normalized2.id : "days";
-  }
-  function combineShiftValueUnit(value, unitId) {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric) || numeric <= 0) {
-      return 0;
-    }
-    const unit = SHIFT_OFFSET_UNITS.find((option) => option.id === normalizeShiftUnit(unitId)) || SHIFT_OFFSET_UNITS[2];
-    return Math.max(0, Math.round(numeric * unit.minutes));
-  }
-  function buildScopeOptions(mode) {
-    if (mode === "pull") {
-      return [
-        { id: "single", label: "Only this pass" },
-        { id: "chain-before", label: "This & preceding passes" }
-      ];
-    }
-    return [
-      { id: "single", label: "Only this pass" },
-      { id: "chain-after", label: "This & following passes" }
-    ];
-  }
-  function openShiftDialog(mode, { title, description, defaultValue = 1, defaultUnit = "days" } = {}) {
-    return new Promise((resolve) => {
-      const overlay = document.createElement("div");
-      overlay.className = "modal block-board-shift-modal";
-      const card = document.createElement("div");
-      card.className = "card block-board-shift-card";
-      const heading = document.createElement("h3");
-      heading.textContent = title || (mode === "push" ? "Push later" : "Pull earlier");
-      card.appendChild(heading);
-      if (description) {
-        const desc = document.createElement("p");
-        desc.className = "block-board-shift-description";
-        desc.textContent = description;
-        card.appendChild(desc);
-      }
-      const fields = document.createElement("div");
-      fields.className = "block-board-shift-fields";
-      const amountField = document.createElement("label");
-      amountField.className = "block-board-shift-field";
-      amountField.textContent = "Amount";
-      const amountInput = document.createElement("input");
-      amountInput.type = "number";
-      amountInput.className = "input block-board-shift-input";
-      amountInput.min = "0";
-      amountInput.step = "1";
-      amountInput.value = String(defaultValue);
-      amountField.appendChild(amountInput);
-      fields.appendChild(amountField);
-      const unitField = document.createElement("label");
-      unitField.className = "block-board-shift-field";
-      unitField.textContent = "Unit";
-      const unitSelect = document.createElement("select");
-      unitSelect.className = "input block-board-shift-unit";
-      SHIFT_OFFSET_UNITS.forEach((option) => {
-        const opt = document.createElement("option");
-        opt.value = option.id;
-        opt.textContent = option.label;
-        unitSelect.appendChild(opt);
-      });
-      unitSelect.value = normalizeShiftUnit(defaultUnit);
-      unitField.appendChild(unitSelect);
-      fields.appendChild(unitField);
-      card.appendChild(fields);
-      const scopeGroup = document.createElement("fieldset");
-      scopeGroup.className = "block-board-shift-scope";
-      const legend = document.createElement("legend");
-      legend.textContent = "Scope";
-      scopeGroup.appendChild(legend);
-      const scopeInputs = [];
-      buildScopeOptions(mode).forEach((option, index) => {
-        const wrapper = document.createElement("label");
-        wrapper.className = "block-board-shift-scope-option";
-        const input = document.createElement("input");
-        input.type = "radio";
-        input.name = "block-board-shift-scope";
-        input.value = option.id;
-        if (index === 0) input.checked = true;
-        const span = document.createElement("span");
-        span.textContent = option.label;
-        wrapper.appendChild(input);
-        wrapper.appendChild(span);
-        scopeGroup.appendChild(wrapper);
-        scopeInputs.push(input);
-      });
-      card.appendChild(scopeGroup);
-      const feedback = document.createElement("div");
-      feedback.className = "block-board-shift-error";
-      card.appendChild(feedback);
-      const actions = document.createElement("div");
-      actions.className = "block-board-shift-actions";
-      const confirm2 = document.createElement("button");
-      confirm2.type = "button";
-      confirm2.className = "btn";
-      confirm2.textContent = mode === "push" ? "Push later" : "Pull earlier";
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.className = "btn secondary";
-      cancel.textContent = "Cancel";
-      actions.appendChild(confirm2);
-      actions.appendChild(cancel);
-      card.appendChild(actions);
-      function cleanup(result) {
-        if (document.body.contains(overlay)) {
-          document.body.removeChild(overlay);
-        }
-        resolve(result);
-      }
-      confirm2.addEventListener("click", () => {
-        const minutes = combineShiftValueUnit(amountInput.value, unitSelect.value);
-        if (!Number.isFinite(minutes) || minutes <= 0) {
-          feedback.textContent = "Enter a value greater than zero.";
-          feedback.classList.add("is-visible");
-          amountInput.focus();
-          return;
-        }
-        const selectedScope = scopeInputs.find((input) => input.checked)?.value || "single";
-        cleanup({ minutes, scope: selectedScope });
-      });
-      cancel.addEventListener("click", () => cleanup(null));
-      overlay.addEventListener("click", (event) => {
-        if (event.target === overlay) {
-          cleanup(null);
-        }
-      });
-      overlay.appendChild(card);
-      document.body.appendChild(overlay);
-      amountInput.focus({ preventScroll: true });
-    });
-  }
-  function shiftPassesForScope(lecture, passOrder, deltaMinutes, scope) {
-    if (!lecture || typeof lecture !== "object") return lecture;
-    const targetOrder = Number(passOrder);
-    if (!Number.isFinite(targetOrder)) return lecture;
-    const delta = Number(deltaMinutes);
-    if (!Number.isFinite(delta) || delta === 0) return lecture;
-    const passes = Array.isArray(lecture.passes) ? lecture.passes.map((pass) => ({ ...pass })) : [];
-    if (!passes.length) return lecture;
-    const shiftMs = Math.round(delta * 60 * 1e3);
-    const normalizedScope = scope === "chain-after" || scope === "chain-before" ? scope : "single";
-    passes.forEach((pass) => {
-      const order = Number(pass?.order);
-      if (!Number.isFinite(order)) return;
-      const inScope = normalizedScope === "chain-after" ? order >= targetOrder : normalizedScope === "chain-before" ? order <= targetOrder : order === targetOrder;
-      if (!inScope) return;
-      if (!Number.isFinite(pass?.due)) return;
-      if (Number.isFinite(pass?.completedAt)) return;
-      const nextDue = Math.max(0, Math.round(pass.due + shiftMs));
-      pass.due = nextDue;
-    });
-    const status = deriveLectureStatus(passes, lecture.status);
-    const nextDueAt = calculateNextDue(passes);
-    return {
-      ...lecture,
-      passes,
-      status,
-      nextDueAt
-    };
-  }
-  function collectTimelineSegments(blockLectures, days) {
-    const dayMap = new Map(days.map((day) => [day, []]));
-    blockLectures.forEach((lecture) => {
-      const passes = Array.isArray(lecture?.passes) ? lecture.passes : [];
-      passes.forEach((pass) => {
-        if (!pass) return;
-        const due = Number(pass?.due);
-        if (!Number.isFinite(due)) return;
-        const dayKey = startOfDay2(due);
-        if (!dayMap.has(dayKey)) return;
-        dayMap.get(dayKey).push({
-          lecture,
-          pass,
-          order: Number(pass?.order),
-          completed: Number.isFinite(pass?.completedAt)
-        });
-      });
-    });
-    return days.map((day) => {
-      const entries = (dayMap.get(day) || []).slice().sort((a, b) => {
-        const orderA = Number.isFinite(a.order) ? a.order : Number.POSITIVE_INFINITY;
-        const orderB = Number.isFinite(b.order) ? b.order : Number.POSITIVE_INFINITY;
-        if (orderA !== orderB) return orderA - orderB;
-        const nameA = a.lecture?.name || "";
-        const nameB = b.lecture?.name || "";
-        return nameA.localeCompare(nameB);
-      });
-      return { day, entries };
-    });
   }
   function formatPassDueLabel(due) {
     if (!Number.isFinite(due)) return "";
@@ -11789,7 +11632,7 @@
     }
     return [];
   }
-  function buildPassElement(entry, onComplete, onShift) {
+  function buildPassElement(entry, onComplete, onDelay) {
     const chip = document.createElement("div");
     chip.className = "block-board-pass-chip";
     chip.style.setProperty("--chip-accent", passColor(entry?.pass?.order));
@@ -11816,20 +11659,12 @@
     done.textContent = "Mark done";
     done.addEventListener("click", () => onComplete(entry));
     actions.appendChild(done);
-    if (typeof onShift === "function") {
-      const push = document.createElement("button");
-      push.type = "button";
-      push.className = "btn tertiary";
-      push.textContent = "Push";
-      push.addEventListener("click", () => onShift(entry, "push"));
-      actions.appendChild(push);
-      const pull = document.createElement("button");
-      pull.type = "button";
-      pull.className = "btn tertiary";
-      pull.textContent = "Pull";
-      pull.addEventListener("click", () => onShift(entry, "pull"));
-      actions.appendChild(pull);
-    }
+    const delay = document.createElement("button");
+    delay.type = "button";
+    delay.className = "btn tertiary";
+    delay.textContent = "+1 day";
+    delay.addEventListener("click", () => onDelay(entry));
+    actions.appendChild(delay);
     chip.appendChild(actions);
     return chip;
   }
@@ -11850,6 +11685,53 @@
     const nextDueAt = calculateNextDue(passes);
     return { ...lecture, passes, status, nextDueAt };
   }
+  function buildDensityGradient(byOrder, total) {
+    if (!total) return "linear-gradient(to top, var(--accent) 0% 100%)";
+    const entries = Array.from(byOrder.entries()).filter(([, count]) => Number.isFinite(count) && count > 0).sort(([a], [b]) => Number(a) - Number(b));
+    if (!entries.length) {
+      return "linear-gradient(to top, var(--accent) 0% 100%)";
+    }
+    let traversed = 0;
+    const segments = entries.map(([order, count]) => {
+      const start = traversed / total * 100;
+      traversed += count;
+      const end = traversed / total * 100;
+      const color = passColor(order);
+      return `${color} ${start}% ${end}%`;
+    });
+    return `linear-gradient(to top, ${segments.join(", ")})`;
+  }
+  function createDensityBar(dayStat, isToday, maxTotal) {
+    const bar = document.createElement("div");
+    bar.className = "block-board-density-bar";
+    if (isToday) bar.classList.add("today");
+    const total = Number(dayStat?.total ?? 0);
+    bar.style.setProperty("--density-value", String(total));
+    const fill = document.createElement("div");
+    fill.className = "block-board-density-fill";
+    const height = maxTotal > 0 ? Math.min(100, Math.round(total / maxTotal * 100)) : 0;
+    fill.style.height = `${height}%`;
+    const gradient = buildDensityGradient(dayStat?.byOrder || /* @__PURE__ */ new Map(), total);
+    fill.style.background = gradient;
+    bar.appendChild(fill);
+    return bar;
+  }
+  function createDensityLegend(dayStat, isToday, maxTotal) {
+    const slot = document.createElement("div");
+    slot.className = "block-board-density-slot";
+    if (isToday) slot.classList.add("today");
+    const bar = createDensityBar(dayStat, isToday, maxTotal);
+    if (Number.isFinite(dayStat?.day)) {
+      const displayDate = new Date(dayStat.day);
+      slot.title = displayDate.toLocaleDateString();
+    }
+    slot.appendChild(bar);
+    const label = document.createElement("div");
+    label.className = "block-board-density-label";
+    label.textContent = new Date(dayStat.day).getDate();
+    slot.appendChild(label);
+    return slot;
+  }
   function createPassCard(entry, onDrag) {
     const card = document.createElement("div");
     card.className = "block-board-pass-card";
@@ -11859,36 +11741,20 @@
     card.dataset.lectureId = entry?.lecture?.id ?? "";
     card.dataset.passOrder = entry?.pass?.order ?? "";
     card.dataset.passDue = Number.isFinite(entry?.pass?.due) ? String(entry.pass.due) : "";
-    const body = document.createElement("div");
-    body.className = "block-board-pass-body";
     const title = document.createElement("div");
-    title.className = "card-title block-board-pass-title";
-    const titleInner = document.createElement("div");
-    titleInner.className = "block-board-pass-title-inner";
-    const titleText = document.createElement("span");
-    titleText.className = "block-board-pass-title-text";
-    titleText.textContent = entry?.lecture?.name || "Lecture";
-    titleInner.appendChild(titleText);
-    const nameLength = (entry?.lecture?.name || "").length;
-    if (nameLength > 26) {
-      const clone7 = titleText.cloneNode(true);
-      clone7.classList.add("is-clone");
-      titleInner.appendChild(clone7);
-      title.classList.add("is-marquee");
-    }
-    title.appendChild(titleInner);
-    body.appendChild(title);
+    title.className = "card-title";
+    title.textContent = entry?.lecture?.name || "Lecture";
+    card.appendChild(title);
     const meta = document.createElement("div");
-    meta.className = "card-meta block-board-pass-meta";
+    meta.className = "card-meta";
     const metaParts = [];
     if (entry?.pass?.label) metaParts.push(entry.pass.label);
     else if (entry?.pass?.order != null) metaParts.push(`Pass ${entry.pass.order}`);
     if (entry?.pass?.action) metaParts.push(entry.pass.action);
     meta.textContent = metaParts.length ? metaParts.join(" \u2022 ") : "Pass";
-    body.appendChild(meta);
-    card.appendChild(body);
+    card.appendChild(meta);
     const due = document.createElement("div");
-    due.className = "card-due block-board-pass-due";
+    due.className = "card-due";
     const dueText = Number.isFinite(entry?.pass?.due) ? formatPassDueLabel(entry.pass.due) : "Unscheduled";
     due.textContent = dueText;
     card.appendChild(due);
@@ -11956,6 +11822,14 @@
       count.className = "block-board-summary-count";
       count.textContent = String(entries.length);
       header.appendChild(count);
+      if (entries.length) {
+        const pushAll = document.createElement("button");
+        pushAll.type = "button";
+        pushAll.className = "btn tertiary block-board-summary-action";
+        pushAll.textContent = "Push to tomorrow";
+        pushAll.addEventListener("click", () => handlers.onPushAll(key));
+        header.appendChild(pushAll);
+      }
       card.appendChild(header);
       const list = document.createElement("div");
       list.className = "block-board-summary-list";
@@ -11966,7 +11840,7 @@
         list.appendChild(emptyState);
       } else {
         entries.forEach((entry) => {
-          const chip = buildPassElement(entry, handlers.onComplete, handlers.onShift);
+          const chip = buildPassElement(entry, handlers.onComplete, handlers.onDelay);
           list.appendChild(chip);
         });
       }
@@ -12106,7 +11980,17 @@
     });
     unscheduledEntries.forEach((entry) => blockEntries.push(entry));
     if (!timelineHidden) {
-      const timelineData = collectTimelineSegments(blockLectures, days);
+      const dayStats = days.map((day) => {
+        const entries = assignments.get(day) || [];
+        const breakdown = /* @__PURE__ */ new Map();
+        entries.forEach((entry) => {
+          const order = Number(entry?.pass?.order);
+          if (!Number.isFinite(order)) return;
+          breakdown.set(order, (breakdown.get(order) || 0) + 1);
+        });
+        return { day, total: entries.length, byOrder: breakdown };
+      });
+      const maxTotal = dayStats.reduce((max, stat) => Math.max(max, stat.total), 0);
       const timeline = document.createElement("div");
       timeline.className = "block-board-timeline";
       const timelineHeader = document.createElement("div");
@@ -12121,73 +12005,13 @@
       spanLabel.textContent = `${spanCount} day${spanCount === 1 ? "" : "s"}`;
       timelineHeader.appendChild(spanLabel);
       timeline.appendChild(timelineHeader);
-      const track = document.createElement("div");
-      track.className = "block-board-timeline-track";
-      const todayKey = startOfDay2(Date.now());
-      timelineData.forEach(({ day, entries }) => {
-        const column = document.createElement("div");
-        column.className = "block-board-timeline-column";
-        if (day === todayKey) {
-          column.classList.add("is-today");
-        }
-        const date = new Date(day);
-        const isoDate = Number.isFinite(day) ? date.toISOString().slice(0, 10) : "";
-        const tooltip = isoDate ? `${isoDate} \u2022 ${entries.length} due` : `${date.toLocaleDateString()} \u2022 ${entries.length} due`;
-        column.setAttribute("data-count", String(entries.length));
-        const accentEntry = entries.find((entry) => !entry.completed) || entries[0];
-        if (accentEntry) {
-          column.style.setProperty("--timeline-accent", passColor(accentEntry.order));
-        }
-        const badge = document.createElement("div");
-        badge.className = "block-board-timeline-count";
-        if (entries.length) {
-          badge.textContent = String(entries.length);
-        } else {
-          badge.classList.add("is-empty");
-          badge.textContent = "0";
-          column.classList.add("is-empty");
-        }
-        column.appendChild(badge);
-        const bar = document.createElement("div");
-        bar.className = "block-board-timeline-bar";
-        bar.title = tooltip;
-        const count = entries.length;
-        if (count > 0) {
-          const gap = 2;
-          let segmentHeight = TIMELINE_BASE_UNIT_HEIGHT;
-          const gapTotal = gap * Math.max(0, count - 1);
-          let totalHeight = segmentHeight * count + gapTotal;
-          if (totalHeight > TIMELINE_MAX_BAR_HEIGHT) {
-            const available = Math.max(TIMELINE_MAX_BAR_HEIGHT - gapTotal, TIMELINE_MIN_SEGMENT_HEIGHT * count);
-            segmentHeight = Math.max(TIMELINE_MIN_SEGMENT_HEIGHT, available / count);
-            totalHeight = segmentHeight * count + gapTotal;
-          }
-          bar.style.height = `${Math.max(totalHeight, TIMELINE_MIN_SEGMENT_HEIGHT)}px`;
-          entries.forEach((entry) => {
-            const segment = document.createElement("div");
-            segment.className = "block-board-timeline-segment";
-            segment.style.setProperty("--segment-color", passColor(entry.order));
-            segment.style.height = `${segmentHeight}px`;
-            if (!entry.completed) {
-              segment.classList.add("is-pending");
-            }
-            bar.appendChild(segment);
-          });
-        } else {
-          bar.classList.add("is-empty");
-        }
-        column.appendChild(bar);
-        const label = document.createElement("div");
-        label.className = "block-board-timeline-day";
-        label.textContent = date.getDate();
-        label.setAttribute("aria-hidden", "true");
-        column.appendChild(label);
-        if (tooltip) {
-          column.setAttribute("aria-label", tooltip);
-        }
-        track.appendChild(column);
+      const density = document.createElement("div");
+      density.className = "block-board-density";
+      dayStats.forEach((stat) => {
+        const slot = createDensityLegend(stat, startOfDay2(Date.now()) === stat.day, Math.max(1, maxTotal));
+        density.appendChild(slot);
       });
-      timeline.appendChild(track);
+      timeline.appendChild(density);
       wrapper.appendChild(timeline);
     }
     if (isCollapsed) {
@@ -12258,26 +12082,23 @@
         await updateLectureSchedule(lecture, (lec) => markPassCompleted(lec, passIndex));
         await renderBlockBoard(container, refresh);
       },
-      onShift: async (entry, mode) => {
-        if (!entry?.lecture) return;
-        const lecture = entry.lecture;
-        const passOrder = Number(entry?.pass?.order);
-        if (!Number.isFinite(passOrder)) return;
-        const lectureLabel = lecture?.name || `Lecture ${lecture?.id ?? ""}`;
-        const passLabel = entry?.pass?.label || (Number.isFinite(passOrder) ? `Pass ${passOrder}` : "Pass");
-        const result = await openShiftDialog(mode, {
-          description: `${lectureLabel} \u2022 ${passLabel}`,
-          defaultUnit: "days",
-          defaultValue: 1
-        });
-        if (!result || !Number.isFinite(result.minutes) || result.minutes <= 0) return;
-        const delta = mode === "push" ? result.minutes : -result.minutes;
-        try {
-          await updateLectureSchedule(lecture, (lec) => shiftPassesForScope(lec, passOrder, delta, result.scope));
-          await renderBlockBoard(container, refresh);
-        } catch (err) {
-          console.error("Failed to shift pass timing", err);
+      onDelay: async (entry) => {
+        const lecture = entry?.lecture;
+        if (!lecture) return;
+        await updateLectureSchedule(lecture, (lec) => shiftLecturePasses(lec, 24 * 60));
+        await renderBlockBoard(container, refresh);
+      },
+      onPushAll: async (bucket) => {
+        const entries = queues[bucket] || [];
+        const affected = /* @__PURE__ */ new Set();
+        for (const entry of entries) {
+          if (!entry?.lecture) continue;
+          const key = `${entry.lecture.blockId}-${entry.lecture.id}`;
+          if (affected.has(key)) continue;
+          affected.add(key);
+          await updateLectureSchedule(entry.lecture, (lec) => shiftLecturePasses(lec, 24 * 60));
         }
+        await renderBlockBoard(container, refresh);
       }
     });
     container.appendChild(urgentHost);
@@ -16542,4 +16363,5 @@
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
+  return __toCommonJS(main_exports);
 })();
