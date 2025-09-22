@@ -24,7 +24,9 @@ export const state = {
     onlyFav:false,
     manualPicks:[],
     collapsedBlocks:[],
-    collapsedWeeks:[]
+    collapsedWeeks:[],
+    activeBlockId:'',
+    activeWeekKey:''
   },
   cards: {
     collapsedBlocks: [],
