@@ -2,7 +2,7 @@ import { state, setLecturesState } from '../../state.js';
 import { loadBlockCatalog, invalidateBlockCatalog } from '../../storage/block-catalog.js';
 import { saveLecture, deleteLecture, getSettings } from '../../storage/storage.js';
 import { confirmModal } from './confirm.js';
-import { debounce } from '../../utils.js';
+import { debounce, findActiveBlockId } from '../../utils.js';
 import {
   DEFAULT_PASS_PLAN,
   clonePassPlan,
@@ -851,6 +851,18 @@ function renderLectureTable(blocks, lectures, filters, onEdit, onDelete, onEditP
     return nameA.localeCompare(nameB);
   });
 
+  const activeBlockId = findActiveBlockId(blocks);
+  const defaultBlockId = (() => {
+    if (blockFilter) return blockFilter;
+    if (activeBlockId) return activeBlockId;
+    const firstWithId = sortedGroups.find(group => {
+      const id = String(group.blockId ?? '');
+      return id !== '';
+    });
+    if (firstWithId) return String(firstWithId.blockId ?? '');
+    return String(sortedGroups[0]?.blockId ?? '');
+  })();
+
   sortedGroups.forEach(group => {
     const blockDetails = document.createElement('details');
     blockDetails.className = 'lectures-block-group';
@@ -896,12 +908,21 @@ function renderLectureTable(blocks, lectures, filters, onEdit, onDelete, onEditP
       return String(aKey).localeCompare(String(bKey));
     });
 
-    sortedWeeks.forEach(([weekKey, weekLectures]) => {
+    const normalizedGroupId = String(group.blockId ?? '');
+    const shouldOpenBlock = blockFilter
+      ? blockFilter === normalizedGroupId
+      : defaultBlockId === normalizedGroupId;
+    blockDetails.open = shouldOpenBlock;
+
+    sortedWeeks.forEach(([weekKey, weekLectures], index) => {
       const weekDetails = document.createElement('details');
       weekDetails.className = 'lectures-week-group';
       const normalizedWeek = weekKey === '__no-week' ? '' : weekKey;
       weekDetails.dataset.week = normalizedWeek;
-      weekDetails.open = !weekFilter || weekFilter === normalizedWeek;
+      const shouldOpenWeek = weekFilter
+        ? weekFilter === normalizedWeek
+        : blockDetails.open && index === 0;
+      weekDetails.open = shouldOpenWeek;
 
       const weekSummary = document.createElement('summary');
       weekSummary.className = 'lectures-week-summary';
@@ -953,9 +974,6 @@ function renderLectureTable(blocks, lectures, filters, onEdit, onDelete, onEditP
       weekDetails.appendChild(weekBody);
       weekWrapper.appendChild(weekDetails);
     });
-
-    const shouldOpenBlock = !blockFilter || blockFilter === String(group.blockId ?? '') || sortedGroups.length === 1;
-    blockDetails.open = shouldOpenBlock;
 
     blockDetails.appendChild(weekWrapper);
     groupsContainer.appendChild(blockDetails);

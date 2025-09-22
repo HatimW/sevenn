@@ -3142,6 +3142,73 @@ var Sevenn = (() => {
       t = setTimeout(() => fn(...args), delay);
     };
   }
+  function parseDateValue(value) {
+    if (!value) return Number.NaN;
+    if (value instanceof Date) {
+      const time2 = value.getTime();
+      return Number.isNaN(time2) ? Number.NaN : time2;
+    }
+    const date = new Date(value);
+    const time = date.getTime();
+    return Number.isNaN(time) ? Number.NaN : time;
+  }
+  function findActiveBlockId(blocks, now = Date.now()) {
+    if (!Array.isArray(blocks) || blocks.length === 0) return "";
+    const nowTs = Number.isFinite(now) ? now : Date.now();
+    let current = null;
+    let upcoming = null;
+    let recent = null;
+    blocks.forEach((block) => {
+      if (!block || block.blockId == null) return;
+      const id = String(block.blockId);
+      const start = parseDateValue(block.startDate);
+      const end = parseDateValue(block.endDate);
+      const hasStart = Number.isFinite(start);
+      const hasEnd = Number.isFinite(end);
+      if (hasStart && hasEnd) {
+        if (start <= nowTs && nowTs <= end) {
+          if (!current || start < current.start || start === current.start && end < current.end) {
+            current = { id, start, end };
+          }
+          return;
+        }
+        if (start > nowTs) {
+          if (!upcoming || start < upcoming.start) {
+            upcoming = { id, start };
+          }
+          return;
+        }
+        if (!recent || end > recent.end) {
+          recent = { id, end };
+        }
+        return;
+      }
+      if (hasStart) {
+        if (start <= nowTs) {
+          if (!recent || start > recent.end) {
+            recent = { id, end: start };
+          }
+        } else if (!upcoming || start < upcoming.start) {
+          upcoming = { id, start };
+        }
+        return;
+      }
+      if (hasEnd) {
+        if (nowTs <= end) {
+          if (!current || end < current.end) {
+            current = { id, start: end, end };
+          }
+        } else if (!recent || end > recent.end) {
+          recent = { id, end };
+        }
+      }
+    });
+    if (current) return current.id;
+    if (upcoming) return upcoming.id;
+    if (recent) return recent.id;
+    const first = blocks.find((block) => block && block.blockId != null);
+    return first ? String(first.blockId) : "";
+  }
   function setToggleState(element, active, className = "active") {
     if (!element) return;
     const isActive = Boolean(active);
@@ -4149,7 +4216,7 @@ var Sevenn = (() => {
     colorLabel.appendChild(colorInput);
     form.appendChild(colorLabel);
     colorInput.addEventListener("input", markDirty);
-    const catalog = await loadBlockCatalog();
+    const catalog = await loadBlockCatalog({ force: true });
     const blocks = (catalog.blocks || []).map((block) => ({
       ...block,
       lectures: (catalog.lectureLists?.[block.blockId] || []).map((lecture) => ({ ...lecture }))
@@ -4160,7 +4227,8 @@ var Sevenn = (() => {
     const lectSet = /* @__PURE__ */ new Set();
     existing?.lectures?.forEach((l) => {
       blockSet.add(l.blockId);
-      weekSet.add(`${l.blockId}|${l.week}`);
+      const weekKey = l.week == null || l.week === "" ? UNSCHEDULED_KEY : l.week;
+      weekSet.add(`${l.blockId}|${weekKey}`);
       lectSet.add(`${l.blockId}|${l.id}`);
     });
     const blockWrap = document.createElement("section");
@@ -4175,6 +4243,7 @@ var Sevenn = (() => {
     const blockPanels = document.createElement("div");
     blockPanels.className = "editor-block-panels";
     blockWrap.appendChild(blockPanels);
+    const UNSCHEDULED_KEY = "__unscheduled";
     function createTagChip(label, variant, active = false) {
       const chip = document.createElement("button");
       chip.type = "button";
@@ -4255,25 +4324,39 @@ var Sevenn = (() => {
           if (typeof l.week === "number") weekNumbers.add(l.week);
         });
         const sortedWeeks = Array.from(weekNumbers).sort((a, b) => a - b);
-        if (!sortedWeeks.length) {
+        const unscheduledLectures = (block.lectures || []).filter((l) => l.week == null || l.week === "");
+        const weekGroups = sortedWeeks.map((weekNumber) => ({
+          key: `${blockId}|${weekNumber}`,
+          label: `Week ${weekNumber}`,
+          lectures: (block.lectures || []).filter((l) => l.week === weekNumber)
+        }));
+        if (unscheduledLectures.length) {
+          weekGroups.push({
+            key: `${blockId}|${UNSCHEDULED_KEY}`,
+            label: "No week",
+            lectures: unscheduledLectures,
+            unscheduled: true
+          });
+        }
+        if (!weekGroups.length) {
           const noWeeks = document.createElement("div");
           noWeeks.className = "editor-tags-empty subtle";
           noWeeks.textContent = "Add weeks or lectures to this block to start tagging.";
           weekList.appendChild(noWeeks);
         } else {
-          sortedWeeks.forEach((w) => {
-            const weekKey = `${blockId}|${w}`;
+          weekGroups.forEach((group) => {
+            const { key: weekKey, label, lectures, unscheduled } = group;
             const section = document.createElement("div");
             section.className = "editor-week-section";
             if (weekSet.has(weekKey)) section.classList.add("active");
-            const weekChip = createTagChip(`Week ${w}`, "week", weekSet.has(weekKey));
+            const weekChip = createTagChip(label, "week", weekSet.has(weekKey));
             weekChip.addEventListener("click", () => {
               const wasActive = weekSet.has(weekKey);
               if (wasActive) {
                 weekSet.delete(weekKey);
                 section.classList.remove("active");
                 lectureWrap.classList.add("collapsed");
-                (block.lectures || []).filter((l) => l.week === w).forEach((l) => {
+                lectures.forEach((l) => {
                   const key = `${blockId}|${l.id}`;
                   lectSet.delete(key);
                   const chip = lectureWrap.querySelector(`[data-lecture='${key}']`);
@@ -4291,11 +4374,10 @@ var Sevenn = (() => {
             const lectureWrap = document.createElement("div");
             lectureWrap.className = "editor-lecture-list";
             if (!weekSet.has(weekKey)) lectureWrap.classList.add("collapsed");
-            const lectures = (block.lectures || []).filter((l) => l.week === w);
             if (!lectures.length) {
               const empty = document.createElement("div");
               empty.className = "editor-tags-empty subtle";
-              empty.textContent = "No lectures linked to this week yet.";
+              empty.textContent = unscheduled ? "No unscheduled lectures yet." : "No lectures linked to this week yet.";
               lectureWrap.appendChild(empty);
             } else {
               lectures.forEach((l) => {
@@ -4365,7 +4447,15 @@ var Sevenn = (() => {
       })).filter((ex) => ex.title || ex.body);
       item.facts = [];
       item.blocks = Array.from(blockSet);
-      const weekNums = new Set(Array.from(weekSet).map((k) => Number(k.split("|")[1])));
+      const weekNums = /* @__PURE__ */ new Set();
+      for (const key of weekSet) {
+        const parts = key.split("|");
+        const raw = parts[1];
+        const numeric = Number(raw);
+        if (Number.isFinite(numeric)) {
+          weekNums.add(numeric);
+        }
+      }
       item.weeks = Array.from(weekNums);
       const lectures = [];
       for (const key of lectSet) {
@@ -7680,6 +7770,17 @@ var Sevenn = (() => {
       const nameB = (b.block?.title || b.block?.name || String(b.blockId || "") || "").toLowerCase();
       return nameA.localeCompare(nameB);
     });
+    const activeBlockId = findActiveBlockId(blocks);
+    const defaultBlockId = (() => {
+      if (blockFilter) return blockFilter;
+      if (activeBlockId) return activeBlockId;
+      const firstWithId = sortedGroups.find((group) => {
+        const id = String(group.blockId ?? "");
+        return id !== "";
+      });
+      if (firstWithId) return String(firstWithId.blockId ?? "");
+      return String(sortedGroups[0]?.blockId ?? "");
+    })();
     sortedGroups.forEach((group) => {
       const blockDetails = document.createElement("details");
       blockDetails.className = "lectures-block-group";
@@ -7718,12 +7819,16 @@ var Sevenn = (() => {
         if (!Number.isFinite(aNum) && Number.isFinite(bNum)) return 1;
         return String(aKey).localeCompare(String(bKey));
       });
-      sortedWeeks.forEach(([weekKey, weekLectures]) => {
+      const normalizedGroupId = String(group.blockId ?? "");
+      const shouldOpenBlock = blockFilter ? blockFilter === normalizedGroupId : defaultBlockId === normalizedGroupId;
+      blockDetails.open = shouldOpenBlock;
+      sortedWeeks.forEach(([weekKey, weekLectures], index) => {
         const weekDetails = document.createElement("details");
         weekDetails.className = "lectures-week-group";
         const normalizedWeek = weekKey === "__no-week" ? "" : weekKey;
         weekDetails.dataset.week = normalizedWeek;
-        weekDetails.open = !weekFilter || weekFilter === normalizedWeek;
+        const shouldOpenWeek = weekFilter ? weekFilter === normalizedWeek : blockDetails.open && index === 0;
+        weekDetails.open = shouldOpenWeek;
         const weekSummary = document.createElement("summary");
         weekSummary.className = "lectures-week-summary";
         const weekTitle = document.createElement("span");
@@ -7766,8 +7871,6 @@ var Sevenn = (() => {
         weekDetails.appendChild(weekBody);
         weekWrapper.appendChild(weekDetails);
       });
-      const shouldOpenBlock = !blockFilter || blockFilter === String(group.blockId ?? "") || sortedGroups.length === 1;
-      blockDetails.open = shouldOpenBlock;
       blockDetails.appendChild(weekWrapper);
       groupsContainer.appendChild(blockDetails);
     });
@@ -10985,7 +11088,18 @@ var Sevenn = (() => {
   async function renderBlockBoard(container, refresh) {
     container.innerHTML = "";
     container.classList.add("block-board-container");
+    const boardState = ensureBoardState();
     const { blocks } = await loadCatalog();
+    if ((!Array.isArray(boardState.collapsedBlocks) || boardState.collapsedBlocks.length === 0) && Array.isArray(blocks)) {
+      const activeBlockId = findActiveBlockId(blocks);
+      if (activeBlockId) {
+        const collapsedDefaults = blocks.map((block) => String(block?.blockId ?? "")).filter((id) => id && id !== activeBlockId);
+        if (collapsedDefaults.length) {
+          setBlockBoardState({ collapsedBlocks: collapsedDefaults });
+          boardState.collapsedBlocks = collapsedDefaults;
+        }
+      }
+    }
     const lectures = await fetchLectures();
     const fallbackDays = collectDefaultBoardDays();
     const queues = groupLectureQueues(lectures);
