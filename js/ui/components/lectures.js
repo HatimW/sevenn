@@ -295,15 +295,17 @@ function createPassChipDisplay(info, now = Date.now(), options = {}) {
     chip.classList.add('is-overdue');
   }
 
+  const passTitle = info?.action || info?.label || `Pass ${info?.order ?? ''}`;
   const check = document.createElement('label');
   check.className = 'lecture-pass-chip-check';
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
   checkbox.className = 'lecture-pass-chip-checkbox';
   checkbox.checked = Number.isFinite(info?.completedAt);
+  checkbox.setAttribute('aria-label', `Toggle completion for ${passTitle}`);
   const faux = document.createElement('span');
   faux.className = 'lecture-pass-chip-checkmark';
-  faux.textContent = '✓';
+  faux.setAttribute('aria-hidden', 'true');
   check.append(checkbox, faux);
   chip.appendChild(check);
 
@@ -316,10 +318,10 @@ function createPassChipDisplay(info, now = Date.now(), options = {}) {
   const badge = document.createElement('span');
   badge.className = 'lecture-pass-chip-order';
   badge.textContent = `P${info?.order ?? ''}`;
-  const label = document.createElement('span');
-  label.className = 'lecture-pass-chip-label';
-  label.textContent = info?.action || info?.label || `Pass ${info?.order ?? ''}`;
-  header.append(badge, label);
+  const labelEl = document.createElement('span');
+  labelEl.className = 'lecture-pass-chip-label';
+  labelEl.textContent = passTitle;
+  header.append(badge, labelEl);
   body.appendChild(header);
 
   const functionLine = document.createElement('div');
@@ -1211,7 +1213,8 @@ function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan) {
   addBtn.dataset.action = 'add-lecture';
   const addIcon = document.createElement('span');
   addIcon.className = 'add-lecture-btn-icon';
-  addIcon.textContent = '+';
+  addIcon.setAttribute('aria-hidden', 'true');
+  addIcon.innerHTML = '<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>';
   const addLabel = document.createElement('span');
   addLabel.className = 'add-lecture-btn-label';
   addLabel.textContent = 'Add lecture';

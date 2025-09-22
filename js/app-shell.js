@@ -165,7 +165,7 @@ export function createAppShell({
       listTabConfig.forEach(cfg => {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'btn secondary list-subtab';
+        btn.className = 'list-subtab';
         btn.textContent = cfg.label;
         btn.dataset.listKind = cfg.kind;
         btn.setAttribute('role', 'tab');
