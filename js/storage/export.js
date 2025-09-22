@@ -1,5 +1,6 @@
 import { openDB } from './idb.js';
 import { buildTokens, buildSearchMeta } from '../search.js';
+import { lectureKey, normalizeLectureRecord } from './lecture-schema.js';
 
 const MAP_CONFIG_KEY = 'map-config';
 const TRANSACTION_STORES = [
@@ -107,12 +108,54 @@ export async function importJSON(dbDump){
     for (const entry of additionalSettings) {
       await prom(settings.put(entry));
     }
+    const lectureRecords = new Map();
+    const addLectureRecord = (record, { preferExisting = false } = {}) => {
+      if (!record || typeof record !== 'object') return;
+      const blockId = record.blockId ?? record.block ?? null;
+      const lectureId = record.id ?? record.lectureId ?? null;
+      if (blockId == null || lectureId == null) return;
+      const key = record.key || lectureKey(blockId, lectureId);
+      if (!key) return;
+      if (preferExisting && lectureRecords.has(key)) return;
+      const clone = JSON.parse(JSON.stringify({ ...record, key, blockId, id: lectureId }));
+      lectureRecords.set(key, clone);
+    };
+
+    if (Array.isArray(dbDump?.lectures)) {
+      for (const lecture of dbDump.lectures) {
+        addLectureRecord(lecture);
+      }
+    }
+
+    const migrationTimestamp = Date.now();
     if (Array.isArray(dbDump?.blocks)) {
       for (const b of dbDump.blocks) {
         if (!b || typeof b !== 'object') continue;
-        await prom(blocks.put(b));
+        const { lectures: legacyLectures, ...rest } = b;
+        await prom(blocks.put(rest));
+        if (!Array.isArray(legacyLectures) || legacyLectures.length === 0) continue;
+        const blockId = rest?.blockId;
+        if (blockId == null) continue;
+        for (const legacy of legacyLectures) {
+          const normalized = normalizeLectureRecord(blockId, legacy, migrationTimestamp);
+          if (!normalized) continue;
+          if (typeof legacy?.createdAt === 'number' && Number.isFinite(legacy.createdAt)) {
+            normalized.createdAt = legacy.createdAt;
+          }
+          if (typeof legacy?.updatedAt === 'number' && Number.isFinite(legacy.updatedAt)) {
+            normalized.updatedAt = legacy.updatedAt;
+          }
+          addLectureRecord(normalized, { preferExisting: true });
+        }
       }
     }
+
+    if (lectureRecords.size) {
+      for (const lecture of lectureRecords.values()) {
+        await prom(lectures.put(lecture));
+      }
+    }
+
     if (Array.isArray(dbDump?.items)) {
       for (const it of dbDump.items) {
         if (!it || typeof it !== 'object') continue;
@@ -125,12 +168,6 @@ export async function importJSON(dbDump){
       for (const ex of dbDump.exams) {
         if (!ex || typeof ex !== 'object') continue;
         await prom(exams.put(ex));
-      }
-    }
-    if (Array.isArray(dbDump?.lectures)) {
-      for (const lecture of dbDump.lectures) {
-        if (!lecture || typeof lecture !== 'object') continue;
-        await prom(lectures.put(lecture));
       }
     }
     if (Array.isArray(dbDump?.examSessions)) {
@@ -147,6 +184,9 @@ export async function importJSON(dbDump){
     }
 
     await new Promise((resolve,reject)=>{ tx.oncomplete=()=>resolve(); tx.onerror=()=>reject(tx.error); });
+    if (db && typeof db.close === 'function') {
+      try { db.close(); } catch (_) {}
+    }
     return { ok:true, message:'Import complete' };
   } catch (e) {
     return { ok:false, message:e.message };

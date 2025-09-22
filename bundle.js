@@ -1319,49 +1319,86 @@ var Sevenn = (() => {
       for (const entry of additionalSettings) {
         await prom2(settings.put(entry));
       }
-      if (Array.isArray(dbDump?.blocks)) {
-        for (const b of dbDump.blocks) {
-          if (!b || typeof b !== "object") continue;
-          await prom2(blocks.put(b));
+    const lectureRecords = new Map();
+    const addLectureRecord = (record, { preferExisting = false } = {}) => {
+      if (!record || typeof record !== "object") return;
+      const blockId = record.blockId ?? record.block ?? null;
+      const lectureId = record.id ?? record.lectureId ?? null;
+      if (blockId == null || lectureId == null) return;
+      const key = record.key || lectureKey(blockId, lectureId);
+      if (!key) return;
+      if (preferExisting && lectureRecords.has(key)) return;
+      const clone = JSON.parse(JSON.stringify({ ...record, key, blockId, id: lectureId }));
+      lectureRecords.set(key, clone);
+    };
+    if (Array.isArray(dbDump?.lectures)) {
+      for (const lecture of dbDump.lectures) {
+        addLectureRecord(lecture);
+      }
+    }
+    const migrationTimestamp = Date.now();
+    if (Array.isArray(dbDump?.blocks)) {
+      for (const b of dbDump.blocks) {
+        if (!b || typeof b !== "object") continue;
+        const { lectures: legacyLectures, ...rest } = b;
+        await prom2(blocks.put(rest));
+        if (!Array.isArray(legacyLectures) || legacyLectures.length === 0) continue;
+        const blockId = rest?.blockId;
+        if (blockId == null) continue;
+        for (const legacy of legacyLectures) {
+          const normalized = normalizeLectureRecord(blockId, legacy, migrationTimestamp);
+          if (!normalized) continue;
+          if (typeof legacy?.createdAt === "number" && Number.isFinite(legacy.createdAt)) {
+            normalized.createdAt = legacy.createdAt;
+          }
+          if (typeof legacy?.updatedAt === "number" && Number.isFinite(legacy.updatedAt)) {
+            normalized.updatedAt = legacy.updatedAt;
+          }
+          addLectureRecord(normalized, { preferExisting: true });
         }
       }
-      if (Array.isArray(dbDump?.items)) {
-        for (const it of dbDump.items) {
-          if (!it || typeof it !== "object") continue;
-          it.tokens = buildTokens(it);
-          it.searchMeta = buildSearchMeta(it);
-          await prom2(items.put(it));
-        }
+    }
+    if (lectureRecords.size) {
+      for (const lecture of lectureRecords.values()) {
+        await prom2(lectures.put(lecture));
       }
-      if (Array.isArray(dbDump?.exams)) {
-        for (const ex of dbDump.exams) {
-          if (!ex || typeof ex !== "object") continue;
-          await prom2(exams.put(ex));
-        }
+    }
+    if (Array.isArray(dbDump?.items)) {
+      for (const it of dbDump.items) {
+        if (!it || typeof it !== "object") continue;
+        it.tokens = buildTokens(it);
+        it.searchMeta = buildSearchMeta(it);
+        await prom2(items.put(it));
       }
-      if (Array.isArray(dbDump?.lectures)) {
-        for (const lecture of dbDump.lectures) {
-          if (!lecture || typeof lecture !== "object") continue;
-          await prom2(lectures.put(lecture));
-        }
+    }
+    if (Array.isArray(dbDump?.exams)) {
+      for (const ex of dbDump.exams) {
+        if (!ex || typeof ex !== "object") continue;
+        await prom2(exams.put(ex));
       }
-      if (Array.isArray(dbDump?.examSessions)) {
-        for (const session of dbDump.examSessions) {
-          if (!session || typeof session !== "object") continue;
-          await prom2(examSessions.put(session));
-        }
+    }
+    if (Array.isArray(dbDump?.examSessions)) {
+      for (const session of dbDump.examSessions) {
+        if (!session || typeof session !== "object") continue;
+        await prom2(examSessions.put(session));
       }
+    }
       if (Array.isArray(dbDump?.studySessions)) {
         for (const session of dbDump.studySessions) {
           if (!session || typeof session !== "object") continue;
           await prom2(studySessions.put(session));
         }
       }
-      await new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-      return { ok: true, message: "Import complete" };
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    if (db && typeof db.close === "function") {
+      try {
+        db.close();
+      } catch (__) {}
+    }
+    return { ok: true, message: "Import complete" };
     } catch (e) {
       return { ok: false, message: e.message };
     }
