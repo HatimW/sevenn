@@ -114,7 +114,7 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):hove
 }
 
 
-[data-toggle="true"][data-active="true"]:not(.builder-pill):not(.builder-mode-toggle) {
+[data-toggle="true"][data-active="true"]:not(.builder-pill):not(.builder-mode-toggle):not(.tag-chip):not(.list-subtab) {
 
   background: linear-gradient(135deg, rgba(56, 189, 248, 0.96), rgba(192, 132, 252, 0.92));
   border-color: transparent;
@@ -468,35 +468,82 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):hove
 }
 
 .list-subtab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
   border-radius: 999px;
-  padding: 6px 14px;
+  padding: 6px 18px;
   border: 1px solid rgba(148, 163, 184, 0.28);
   background: rgba(15, 23, 42, 0.6);
-  color: color-mix(in srgb, var(--text-muted) 90%, white 6%);
-  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  color: color-mix(in srgb, var(--text-muted) 80%, white 10%);
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.list-subtab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 2px;
+}
+
+.list-subtab[data-list-kind='disease'] {
+  background: rgba(249, 168, 212, 0.2);
+  border-color: rgba(249, 168, 212, 0.38);
+  color: color-mix(in srgb, var(--pink) 70%, white 12%);
+}
+
+.list-subtab[data-list-kind='disease']:is(:hover, :focus-visible):not(.active) {
+  background: rgba(249, 168, 212, 0.3);
+  border-color: rgba(249, 168, 212, 0.5);
+  color: color-mix(in srgb, var(--pink) 85%, white 6%);
+}
+
+.list-subtab[data-list-kind='drug'] {
+  background: rgba(96, 165, 250, 0.2);
+  border-color: rgba(96, 165, 250, 0.4);
+  color: color-mix(in srgb, var(--blue) 72%, white 10%);
+}
+
+.list-subtab[data-list-kind='drug']:is(:hover, :focus-visible):not(.active) {
+  background: rgba(96, 165, 250, 0.3);
+  border-color: rgba(96, 165, 250, 0.52);
+  color: color-mix(in srgb, var(--blue) 88%, white 8%);
+}
+
+.list-subtab[data-list-kind='concept'] {
+  background: rgba(134, 239, 172, 0.22);
+  border-color: rgba(134, 239, 172, 0.42);
+  color: color-mix(in srgb, var(--green) 68%, white 14%);
+}
+
+.list-subtab[data-list-kind='concept']:is(:hover, :focus-visible):not(.active) {
+  background: rgba(134, 239, 172, 0.32);
+  border-color: rgba(134, 239, 172, 0.52);
+  color: color-mix(in srgb, var(--green) 86%, white 8%);
 }
 
 .list-subtab.active {
-  color: #051626;
+  color: #041021;
   border-color: transparent;
+  box-shadow: 0 18px 34px rgba(2, 6, 23, 0.42);
+  transform: translateY(-1px);
 }
 
 .list-subtab[data-list-kind='disease'].active {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--pink) 85%, white 18%), color-mix(in srgb, var(--pink) 62%, rgba(255, 255, 255, 0.12)));
-  box-shadow: 0 14px 28px color-mix(in srgb, var(--pink) 22%, transparent);
+  background: linear-gradient(135deg, rgba(249, 168, 212, 0.96), rgba(244, 114, 182, 0.94));
   color: #2b091b;
 }
 
 .list-subtab[data-list-kind='drug'].active {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--blue) 82%, white 20%), color-mix(in srgb, var(--blue) 60%, rgba(255, 255, 255, 0.12)));
-  box-shadow: 0 14px 28px color-mix(in srgb, var(--blue) 24%, transparent);
-  color: #061a32;
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.96), rgba(34, 211, 238, 0.92));
+  color: #041021;
 }
 
 .list-subtab[data-list-kind='concept'].active {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--green) 84%, white 18%), color-mix(in srgb, var(--green) 60%, rgba(255, 255, 255, 0.12)));
-  box-shadow: 0 14px 28px color-mix(in srgb, var(--green) 22%, transparent);
-  color: #092312;
+  background: linear-gradient(135deg, rgba(134, 239, 172, 0.96), rgba(16, 185, 129, 0.92));
+  color: #032514;
 }
 
 .list-host {
@@ -1329,21 +1376,28 @@ input[type="checkbox"]:checked::after {
 }
 
 .tag-chip-lecture {
-  background: rgba(191, 219, 254, 0.18);
-  border-color: rgba(191, 219, 254, 0.35);
+  background: color-mix(in srgb, var(--blue) 24%, rgba(15, 23, 42, 0.72));
+  border-color: color-mix(in srgb, var(--blue) 38%, transparent);
   font-size: 0.85rem;
+  color: color-mix(in srgb, var(--text) 82%, white 6%);
+}
+
+.tag-chip-lecture:is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--blue) 36%, rgba(15, 23, 42, 0.68));
+  border-color: color-mix(in srgb, var(--blue) 54%, transparent);
+  color: color-mix(in srgb, var(--text) 92%, white 8%);
 }
 
 .tag-chip-lecture.active {
-  background: linear-gradient(135deg, rgba(191, 219, 254, 0.98), rgba(221, 214, 254, 0.96));
-  color: #0b162d;
-  font-weight: 700;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.96), rgba(99, 102, 241, 0.9));
+  color: #041021;
+  border-color: transparent;
+  box-shadow: 0 16px 32px rgba(56, 189, 248, 0.32);
 }
 
-.tag-chip-lecture.active:hover,
-.tag-chip-lecture.active:focus-visible {
-  background: linear-gradient(135deg, rgba(224, 231, 255, 0.98), rgba(199, 210, 254, 0.96));
-  color: #071023;
+.tag-chip-lecture.active:is(:hover, :focus-visible) {
+  background: linear-gradient(135deg, rgba(79, 209, 255, 0.98), rgba(129, 140, 248, 0.94));
+  color: #020a16;
 }
 
 .editor-extras {
@@ -6348,6 +6402,12 @@ body.map-toolbox-dragging {
   color: #041320;
   font-size: 1.05rem;
   font-weight: 700;
+  line-height: 1;
+}
+
+.add-lecture-btn-icon svg {
+  width: 1.05rem;
+  height: 1.05rem;
 }
 
 .add-lecture-btn-label {
@@ -7117,6 +7177,7 @@ body.map-toolbox-dragging {
 }
 
 .lecture-pass-chip-checkmark {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7127,7 +7188,19 @@ body.map-toolbox-dragging {
   font-weight: 700;
   color: transparent;
   background: transparent;
-  transition: color 0.2s ease, background 0.2s ease;
+  overflow: hidden;
+  transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.lecture-pass-chip-checkmark::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: transparent;
+  opacity: 0;
+  transform: scale(0.25);
+  transition: opacity 0.25s ease, transform 0.25s ease, background 0.25s ease, inset 0.25s ease;
 }
 
 .lecture-pass-chip-check:hover {
@@ -7140,8 +7213,16 @@ body.map-toolbox-dragging {
 }
 
 .lecture-pass-chip-checkbox:checked + .lecture-pass-chip-checkmark {
-  background: color-mix(in srgb, var(--chip-accent) 85%, white 28%);
-  color: #04101f;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.18), transparent 55%),
+    linear-gradient(135deg, #22c55e, #16a34a);
+  box-shadow: inset 0 0 0 2px rgba(6, 12, 22, 0.65), 0 10px 18px rgba(34, 197, 94, 0.28);
+}
+
+.lecture-pass-chip-checkbox:checked + .lecture-pass-chip-checkmark::after {
+  inset: 0;
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.95), rgba(34, 197, 94, 0.9));
+  opacity: 1;
+  transform: scale(1);
 }
 
 .lecture-pass-chip-header {
@@ -7207,14 +7288,21 @@ body.map-toolbox-dragging {
 }
 
 .lecture-pass-chip.is-complete .lecture-pass-chip-check {
-  background: color-mix(in srgb, var(--chip-accent) 16%, rgba(12, 19, 30, 0.9));
-  border-color: color-mix(in srgb, var(--chip-accent) 32%, rgba(148, 163, 184, 0.22));
+  background: color-mix(in srgb, #22c55e 24%, rgba(12, 19, 30, 0.88));
+  border-color: color-mix(in srgb, #22c55e 58%, rgba(148, 163, 184, 0.24));
 }
 
 .lecture-pass-chip.is-complete .lecture-pass-chip-checkmark {
-  background: color-mix(in srgb, var(--chip-accent) 32%, rgba(148, 163, 184, 0.28));
-  border-color: color-mix(in srgb, var(--chip-accent) 42%, rgba(148, 163, 184, 0.25));
-  color: #041523;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.18), transparent 55%),
+    linear-gradient(135deg, #22c55e, #16a34a);
+  box-shadow: inset 0 0 0 2px rgba(6, 12, 22, 0.65), 0 10px 18px rgba(34, 197, 94, 0.28);
+}
+
+.lecture-pass-chip.is-complete .lecture-pass-chip-checkmark::after {
+  inset: 0;
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.95), rgba(34, 197, 94, 0.9));
+  opacity: 1;
+  transform: scale(1);
 }
 
 .lecture-pass-chip.is-overdue {
