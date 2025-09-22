@@ -6029,7 +6029,19 @@ body.map-toolbox-dragging {
 .block-board-urgent-group { background: var(--surface-2); border-radius: 12px; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
 .block-board-urgent-header { font-weight: 600; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
 .block-board-urgent-list { display: flex; flex-direction: column; gap: 0.5rem; }
-.block-board-pass-chip { background: color-mix(in srgb, var(--chip-accent) 22%, rgba(8, 13, 24, 0.82)); border: 1px solid color-mix(in srgb, var(--chip-accent) 45%, transparent); border-radius: 10px; padding: 0.42rem 0.65rem; display: flex; flex-direction: column; gap: 0.25rem; box-shadow: 0 10px 22px rgba(8, 11, 22, 0.38); }
+.block-board-pass-chip {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0.5rem 0.8rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--chip-accent) 68%, rgba(148, 163, 184, 0.16));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--chip-accent) 74%, rgba(10, 16, 32, 0.8)), color-mix(in srgb, var(--chip-accent) 48%, rgba(6, 10, 22, 0.92)));
+  box-shadow: 0 18px 36px color-mix(in srgb, var(--chip-accent) 34%, rgba(3, 6, 23, 0.38));
+  transition: filter 0.2s ease, box-shadow 0.2s ease;
+}
 .block-board-pass-title { font-weight: 600; font-size: 0.82rem; line-height: 1.2; }
 .block-board-pass-meta { font-size: 0.7rem; opacity: 0.78; letter-spacing: 0.02em; text-transform: uppercase; }
 .block-board-pass-actions { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; }
@@ -6042,7 +6054,14 @@ body.map-toolbox-dragging {
 .block-board-grid { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(210px, 1fr); gap: 0.85rem; overflow-x: auto; padding-bottom: 0.5rem; }
 .block-board-day-column { background: color-mix(in srgb, var(--surface-2) 90%, rgba(15, 23, 42, 0.55)); border-radius: 12px; display: flex; flex-direction: column; }
 .block-board-day-header { font-weight: 600; padding: 0.75rem 0.9rem; border-bottom: 1px solid var(--surface-3); }
-.block-board-day-list { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.6rem 0.8rem 0.75rem; }
+.block-board-day-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.6rem 0.85rem 0.75rem;
+  max-height: clamp(14rem, 32vh, 21rem);
+  overflow-y: auto;
+}
 .block-board-day-column.today .block-board-day-header { color: var(--accent); }
 .block-board-day-column.dropping { outline: 2px dashed var(--accent); }
 /* --- Refined block board styling --- */
@@ -6466,27 +6485,48 @@ body.map-toolbox-dragging {
   position: relative;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 0.3rem;
-  padding: 0.35rem 0.6rem 0.45rem;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--card-accent) 64%, rgba(148, 163, 184, 0.16));
-  background: linear-gradient(150deg, color-mix(in srgb, var(--card-accent) 46%, rgba(10, 16, 32, 0.78)), rgba(6, 10, 18, 0.92));
-  box-shadow: 0 16px 30px rgba(3, 6, 23, 0.35);
+  padding: 0.4rem 0.7rem 0.55rem;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--card-accent) 70%, rgba(148, 163, 184, 0.18));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--card-accent) 76%, rgba(10, 16, 34, 0.78)), color-mix(in srgb, var(--card-accent) 50%, rgba(6, 10, 22, 0.92)));
+  box-shadow: 0 20px 38px color-mix(in srgb, var(--card-accent) 34%, rgba(3, 6, 24, 0.45));
   cursor: grab;
   overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
 }
 
 .block-board-pass-card::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(120deg, rgba(255, 255, 255, 0.22), transparent 55%);
-  opacity: 0.32;
+  background: linear-gradient(120deg, rgba(255, 255, 255, 0.26), transparent 55%);
+  opacity: 0.35;
   pointer-events: none;
 }
 
 .block-board-pass-card:active {
   cursor: grabbing;
+}
+
+.block-board-pass-card.is-pending {
+  filter: saturate(1.05);
+}
+
+.block-board-pass-card.is-complete {
+  border-color: color-mix(in srgb, var(--card-accent) 26%, rgba(148, 163, 184, 0.26));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--card-accent) 24%, rgba(10, 16, 28, 0.88)), rgba(6, 9, 18, 0.94));
+  box-shadow: 0 12px 20px rgba(3, 6, 20, 0.3);
+  filter: saturate(0.55);
+}
+
+.block-board-pass-card.is-complete::before {
+  opacity: 0.12;
+}
+
+.block-board-pass-card + .block-board-pass-card {
+  margin-top: 0.2rem;
 }
 
 .block-board-pass-title {
@@ -6497,8 +6537,23 @@ body.map-toolbox-dragging {
   font-weight: 600;
   font-size: 0.78rem;
   letter-spacing: 0.02em;
-  color: color-mix(in srgb, white 82%, var(--card-accent) 18%);
   --marquee-distance: 0px;
+}
+
+.block-board-pass-card .block-board-pass-title {
+  color: color-mix(in srgb, white 88%, var(--card-accent) 18%);
+}
+
+.block-board-pass-card.is-complete .block-board-pass-title {
+  color: color-mix(in srgb, white 62%, var(--card-accent) 12%);
+}
+
+.block-board-pass-chip .block-board-pass-title {
+  color: color-mix(in srgb, white 90%, var(--chip-accent) 22%);
+}
+
+.block-board-pass-chip.is-complete .block-board-pass-title {
+  color: color-mix(in srgb, white 64%, var(--chip-accent) 12%);
 }
 
 .block-board-pass-title::before,
@@ -6538,36 +6593,90 @@ body.map-toolbox-dragging {
   animation-play-state: paused;
 }
 
-.block-board-pass-footer {
+.block-board-pass-details {
   position: relative;
   z-index: 1;
   display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  font-size: 0.68rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.12rem;
 }
 
-.block-board-pass-meta {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  letter-spacing: 0.08em;
+.block-board-pass-order {
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--card-accent) 32%, var(--text-muted));
+  font-weight: 700;
+  color: color-mix(in srgb, white 72%, var(--card-accent) 22%);
 }
 
-.block-board-pass-due {
-  flex-shrink: 0;
-  font-weight: 600;
-  letter-spacing: 0.015em;
-  color: color-mix(in srgb, white 74%, var(--card-accent) 12%);
-  white-space: nowrap;
+.block-board-pass-order[data-action] {
+  cursor: help;
 }
 
-.block-board-pass-card + .block-board-pass-card {
-  margin-top: 0.18rem;
+.block-board-pass-date {
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, white 78%, var(--card-accent) 26%);
+}
+
+.block-board-pass-card.is-complete .block-board-pass-order,
+.block-board-pass-card.is-complete .block-board-pass-date {
+  color: color-mix(in srgb, var(--text-muted) 84%, white 12%);
+}
+
+.block-board-pass-chip::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(120deg, rgba(255, 255, 255, 0.24), transparent 55%);
+  opacity: 0.32;
+  pointer-events: none;
+}
+
+.block-board-pass-chip.is-pending {
+  filter: saturate(1.05);
+}
+
+.block-board-pass-chip.is-complete {
+  border-color: color-mix(in srgb, var(--chip-accent) 26%, rgba(148, 163, 184, 0.22));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--chip-accent) 24%, rgba(10, 16, 30, 0.88)), rgba(6, 9, 20, 0.94));
+  box-shadow: 0 12px 22px rgba(3, 6, 20, 0.28);
+  filter: saturate(0.58);
+}
+
+.block-board-pass-chip.is-complete::before {
+  opacity: 0.12;
+}
+
+.block-board-pass-chip .block-board-pass-meta {
+  position: relative;
+  z-index: 1;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, white 78%, var(--chip-accent) 16%);
+}
+
+.block-board-pass-chip.is-complete .block-board-pass-meta {
+  color: color-mix(in srgb, var(--text-muted) 82%, white 12%);
+}
+
+.block-board-pass-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.block-board-pass-actions .btn {
+  padding: 0.28rem 0.55rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  border-radius: 999px;
 }
 
 @keyframes block-board-pass-marquee {
@@ -6669,8 +6778,10 @@ body.map-toolbox-dragging {
   border: 1px solid color-mix(in srgb, rgba(88, 114, 196, 0.42) 36%, transparent);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   min-height: 24px;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease, opacity 0.18s ease;
   overflow: hidden;
+  opacity: 0.55;
+  filter: saturate(0.45);
 }
 
 .block-board-timeline-bar::before {
@@ -6690,13 +6801,28 @@ body.map-toolbox-dragging {
   height: 18px;
 }
 
+.block-board-timeline-bar.is-pending {
+  opacity: 0.5;
+  filter: saturate(0.35);
+}
+
+.block-board-timeline-bar.has-complete {
+  opacity: 1;
+  filter: saturate(1.05);
+  box-shadow: 0 16px 30px rgba(6, 12, 28, 0.45);
+}
+
 .block-board-timeline-column:hover .block-board-timeline-bar:not(.is-empty) {
   transform: translateY(-4px);
-  box-shadow: 0 16px 26px rgba(6, 12, 28, 0.45);
+  box-shadow: 0 18px 32px rgba(6, 12, 28, 0.5);
+  opacity: 1;
+  filter: saturate(1.15);
 }
 
 .block-board-timeline-column.is-today .block-board-timeline-bar {
-  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.32), 0 16px 26px rgba(6, 12, 28, 0.45);
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.32), 0 18px 34px rgba(6, 12, 28, 0.48);
+  opacity: 1;
+  filter: saturate(1.15);
 }
 
 .block-board-timeline-segment {
@@ -6706,6 +6832,10 @@ body.map-toolbox-dragging {
   min-height: 12px;
   box-shadow: none;
   overflow: hidden;
+  background: color-mix(in srgb, var(--segment-color, var(--accent)) 36%, rgba(10, 16, 30, 0.82));
+  transition: opacity 0.2s ease, filter 0.2s ease;
+  filter: saturate(0.45);
+  opacity: 0.6;
 }
 
 .block-board-timeline-segment:first-child {
@@ -6731,8 +6861,22 @@ body.map-toolbox-dragging {
   opacity: 0.65;
 }
 
+.block-board-timeline-segment.is-complete {
+  background: linear-gradient(200deg, color-mix(in srgb, var(--segment-color, var(--accent)) 82%, rgba(255, 255, 255, 0.08)), color-mix(in srgb, var(--segment-color, var(--accent)) 56%, rgba(8, 12, 24, 0.85)));
+  filter: saturate(1.3);
+  opacity: 1;
+}
+
+.block-board-timeline-segment.is-complete::after {
+  opacity: 0.78;
+}
+
+.block-board-timeline-segment.is-pending {
+  opacity: 0.45;
+}
+
 .block-board-timeline-segment.is-pending::after {
-  opacity: 0.28;
+  opacity: 0.18;
 }
 
 .block-board-timeline-day {

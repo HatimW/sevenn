@@ -434,6 +434,9 @@ function buildPassElement(entry, onComplete, onShift) {
   const chip = document.createElement('div');
   chip.className = 'block-board-pass-chip';
   chip.style.setProperty('--chip-accent', passColor(entry?.pass?.order));
+  const chipComplete = Number.isFinite(entry?.pass?.completedAt);
+  chip.classList.toggle('is-complete', chipComplete);
+  chip.classList.toggle('is-pending', !chipComplete);
   chip.dataset.passOrder = String(entry?.pass?.order ?? '');
   const title = document.createElement('div');
   title.className = 'block-board-pass-title';
@@ -459,7 +462,11 @@ function buildPassElement(entry, onComplete, onShift) {
   done.type = 'button';
   done.className = 'btn tertiary';
   done.textContent = 'Mark done';
-  done.addEventListener('click', () => onComplete(entry));
+  done.addEventListener('click', () => {
+    chip.classList.add('is-complete');
+    chip.classList.remove('is-pending');
+    onComplete(entry);
+  });
   actions.appendChild(done);
 
   if (typeof onShift === 'function') {
@@ -507,10 +514,14 @@ function createPassCard(entry, onDrag) {
   card.className = 'block-board-pass-card';
   card.draggable = true;
   card.style.setProperty('--card-accent', passColor(entry?.pass?.order));
+  const isComplete = Number.isFinite(entry?.pass?.completedAt);
+  card.classList.toggle('is-complete', isComplete);
+  card.classList.toggle('is-pending', !isComplete);
   card.dataset.blockId = entry?.lecture?.blockId ?? '';
   card.dataset.lectureId = entry?.lecture?.id ?? '';
   card.dataset.passOrder = entry?.pass?.order ?? '';
   card.dataset.passDue = Number.isFinite(entry?.pass?.due) ? String(entry.pass.due) : '';
+  card.dataset.status = isComplete ? 'complete' : 'pending';
 
   const lectureName = entry?.lecture?.name || 'Lecture';
   const title = document.createElement('div');
@@ -542,28 +553,39 @@ function createPassCard(entry, onDrag) {
     setTimeout(scheduleMarquee, 0);
   }
 
-  const metaParts = [];
-  if (entry?.pass?.label) metaParts.push(entry.pass.label);
-  else if (entry?.pass?.order != null) metaParts.push(`Pass ${entry.pass.order}`);
-  if (entry?.pass?.action) metaParts.push(entry.pass.action);
+  const details = document.createElement('div');
+  details.className = 'block-board-pass-details';
 
-  const footer = document.createElement('div');
-  footer.className = 'block-board-pass-footer';
+  const passLabel = entry?.pass?.label || (entry?.pass?.order != null ? `Pass ${entry.pass.order}` : 'Pass');
+  const passOrder = document.createElement('span');
+  passOrder.className = 'block-board-pass-order';
+  passOrder.textContent = passLabel;
+  if (entry?.pass?.action) {
+    passOrder.setAttribute('data-action', entry.pass.action);
+    passOrder.title = entry.pass.action;
+  }
+  details.appendChild(passOrder);
 
-  const meta = document.createElement('span');
-  meta.className = 'block-board-pass-meta';
-  meta.textContent = metaParts.length ? metaParts.join(' • ') : 'Pass';
-  footer.appendChild(meta);
-
-  const due = document.createElement('span');
-  due.className = 'block-board-pass-due';
-  const dueText = Number.isFinite(entry?.pass?.due)
+  const dueFullLabel = Number.isFinite(entry?.pass?.due)
     ? formatPassDueLabel(entry.pass.due)
     : 'Unscheduled';
-  due.textContent = dueText;
-  footer.appendChild(due);
+  const dueDateLabel = Number.isFinite(entry?.pass?.due)
+    ? PASS_DUE_FORMAT.format(new Date(entry.pass.due))
+    : 'Unscheduled';
+  const due = document.createElement('span');
+  due.className = 'block-board-pass-date';
+  due.textContent = dueDateLabel;
+  due.setAttribute('title', dueFullLabel);
+  due.setAttribute('aria-label', dueFullLabel);
+  details.appendChild(due);
 
-  card.appendChild(footer);
+  card.appendChild(details);
+
+  const descriptionParts = [lectureName, passLabel];
+  if (entry?.pass?.action) descriptionParts.push(entry.pass.action);
+  if (dueFullLabel) descriptionParts.push(dueFullLabel);
+  card.setAttribute('aria-label', descriptionParts.join(' • '));
+  card.title = descriptionParts.join(' • ');
 
   card.addEventListener('dragstart', (event) => {
     if (!event.dataTransfer) return;
@@ -835,6 +857,12 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
 
       const count = entries.length;
       if (count > 0) {
+        const hasCompleted = entries.some(entry => entry.completed);
+        if (hasCompleted) {
+          bar.classList.add('has-complete');
+        } else {
+          bar.classList.add('is-pending');
+        }
         const gap = 0;
         let segmentHeight = TIMELINE_BASE_UNIT_HEIGHT;
         const gapTotal = gap * Math.max(0, count - 1);
@@ -848,9 +876,11 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
         entries.forEach(entry => {
           const segment = document.createElement('div');
           segment.className = 'block-board-timeline-segment';
-          segment.style.background = passColor(entry.order);
+          segment.style.setProperty('--segment-color', passColor(entry.order));
           segment.style.height = `${segmentHeight}px`;
-          if (!entry.completed) {
+          if (entry.completed) {
+            segment.classList.add('is-complete');
+          } else {
             segment.classList.add('is-pending');
           }
           bar.appendChild(segment);
