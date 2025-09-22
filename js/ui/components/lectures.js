@@ -1,6 +1,12 @@
 import { state, setLecturesState } from '../../state.js';
 import { loadBlockCatalog, invalidateBlockCatalog } from '../../storage/block-catalog.js';
 import { saveLecture, deleteLecture, getSettings } from '../../storage/storage.js';
+import {
+  exportLectureTransfer,
+  exportWeekTransfer,
+  exportBlockTransfer,
+  importLectureTransfer
+} from '../../storage/transfers.js';
 import { confirmModal } from './confirm.js';
 import { debounce, findActiveBlockId } from '../../utils.js';
 import {
@@ -41,6 +47,182 @@ function buildBlockOrderMap(blocks) {
     order.set(String(block.blockId), index);
   });
   return order;
+}
+
+function slugify(value, fallback = 'export') {
+  if (value == null) return fallback;
+  const text = String(value).toLowerCase();
+  const slug = text
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 50);
+  return slug || fallback;
+}
+
+function downloadJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function describeWeekValue(value) {
+  if (value == null || value === '') return 'No week assigned';
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    return `Week ${numeric}`;
+  }
+  return `Week ${value}`;
+}
+
+function detectImportConflicts(bundle, catalog) {
+  if (!bundle || typeof bundle !== 'object') {
+    return { hasConflicts: false };
+  }
+  const scopeRaw = typeof bundle.scope === 'string' ? bundle.scope.toLowerCase() : 'lecture';
+  const scope = scopeRaw === 'block' || scopeRaw === 'week' ? scopeRaw : 'lecture';
+  const blockId = bundle.block && bundle.block.blockId != null ? String(bundle.block.blockId) : '';
+  const blocks = Array.isArray(catalog?.blocks) ? catalog.blocks : [];
+  const lectureLists = catalog?.lectureLists || {};
+  const lectureIndex = catalog?.lectureIndex || {};
+  const blockInfo = blocks.find(block => String(block?.blockId) === blockId) || null;
+  const blockTitle = blockInfo?.title || bundle?.block?.title || blockId || 'Block';
+  const blockExists = Boolean(blockInfo);
+  const conflicts = {
+    scope,
+    blockId,
+    blockTitle,
+    blockExists: scope === 'block' && blockExists,
+    weeks: [],
+    lectures: []
+  };
+  const existingLectures = lectureIndex[blockId] || {};
+  const weekSet = new Set();
+  if (Array.isArray(bundle?.lectures)) {
+    bundle.lectures.forEach(lecture => {
+      const lectureId = lecture?.id;
+      const hasLectureConflict = Object.values(existingLectures).some(existing => {
+        if (!existing) return false;
+        const existingId = existing.id;
+        if (Number.isFinite(Number(existingId)) && Number.isFinite(Number(lectureId))) {
+          return Number(existingId) === Number(lectureId);
+        }
+        return String(existingId) === String(lectureId);
+      });
+      if (hasLectureConflict) {
+        conflicts.lectures.push({
+          id: lectureId,
+          name: lecture?.name || `Lecture ${lectureId}`
+        });
+      }
+      if (scope !== 'lecture') {
+        const weekValue = lecture?.week == null ? null : lecture.week;
+        if (!weekSet.has(weekValue)) {
+          const existingWeek = (lectureLists[blockId] || []).some(entry => {
+            const entryWeek = entry?.week == null ? null : entry.week;
+            return entryWeek === weekValue;
+          });
+          if (existingWeek) {
+            conflicts.weeks.push(weekValue);
+          }
+          weekSet.add(weekValue);
+        }
+      }
+    });
+  }
+  conflicts.hasConflicts = conflicts.blockExists || conflicts.weeks.length > 0 || conflicts.lectures.length > 0;
+  return conflicts;
+}
+
+function promptImportStrategy(conflicts) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal import-conflict-modal';
+
+    const card = document.createElement('div');
+    card.className = 'card import-conflict-card';
+
+    const title = document.createElement('h3');
+    title.textContent = 'Content already exists';
+    card.appendChild(title);
+
+    const message = document.createElement('p');
+    message.textContent = 'Choose whether to replace the existing content or merge the new material.';
+    card.appendChild(message);
+
+    const list = document.createElement('ul');
+    list.className = 'import-conflict-list';
+
+    if (conflicts.blockExists) {
+      const item = document.createElement('li');
+      item.textContent = `Block "${conflicts.blockTitle}" already exists.`;
+      list.appendChild(item);
+    }
+    if (Array.isArray(conflicts.weeks) && conflicts.weeks.length) {
+      const item = document.createElement('li');
+      const labels = conflicts.weeks.map(describeWeekValue).join(', ');
+      item.textContent = `Week assignments already exist: ${labels}.`;
+      list.appendChild(item);
+    }
+    if (Array.isArray(conflicts.lectures) && conflicts.lectures.length) {
+      const item = document.createElement('li');
+      const names = conflicts.lectures.map(entry => entry.name || `Lecture ${entry.id}`).join(', ');
+      item.textContent = `Lectures already exist: ${names}.`;
+      list.appendChild(item);
+    }
+
+    if (list.childElementCount) {
+      card.appendChild(list);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'row import-conflict-actions';
+
+    function cleanup(result) {
+      if (document.body.contains(overlay)) {
+        document.body.removeChild(overlay);
+      }
+      resolve(result);
+    }
+
+    const replaceBtn = document.createElement('button');
+    replaceBtn.type = 'button';
+    replaceBtn.className = 'btn';
+    replaceBtn.textContent = 'Replace';
+    replaceBtn.addEventListener('click', () => cleanup('replace'));
+
+    const mergeBtn = document.createElement('button');
+    mergeBtn.type = 'button';
+    mergeBtn.className = 'btn secondary';
+    mergeBtn.textContent = 'Merge';
+    mergeBtn.addEventListener('click', () => cleanup('merge'));
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn secondary';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => cleanup(null));
+
+    actions.appendChild(replaceBtn);
+    actions.appendChild(mergeBtn);
+    actions.appendChild(cancelBtn);
+    card.appendChild(actions);
+
+    overlay.appendChild(card);
+    overlay.addEventListener('click', event => {
+      if (event.target === overlay) {
+        cleanup(null);
+      }
+    });
+
+    document.body.appendChild(overlay);
+    replaceBtn.focus();
+  });
 }
 
 function normalizeWeekValue(value) {
@@ -676,7 +858,7 @@ function getLectureState(lecture, stats) {
   return 'pending';
 }
 
-function renderLectureWeekRow(lecture, onEdit, onDelete, onEditPass, onTogglePass, now = Date.now()) {
+function renderLectureWeekRow(lecture, onEdit, onDelete, onEditPass, onTogglePass, onExport, now = Date.now()) {
   const row = document.createElement('tr');
   row.dataset.lectureRow = 'true';
   row.dataset.lectureId = String(lecture.id);
@@ -787,12 +969,36 @@ function renderLectureWeekRow(lecture, onEdit, onDelete, onEditPass, onTogglePas
   deleteBtn.addEventListener('click', () => onDelete(lecture));
   actions.appendChild(deleteBtn);
 
+  if (typeof onExport === 'function') {
+    const exportBtn = document.createElement('button');
+    exportBtn.type = 'button';
+    exportBtn.className = 'btn secondary';
+    exportBtn.dataset.action = 'export-lecture';
+    exportBtn.textContent = 'Export';
+    exportBtn.addEventListener('click', event => {
+      event.stopPropagation();
+      onExport(lecture);
+    });
+    actions.appendChild(exportBtn);
+  }
+
   row.appendChild(actions);
 
   return row;
 }
 
-function renderLectureTable(blocks, lectures, filters, onEdit, onDelete, onEditPass, onTogglePass) {
+function renderLectureTable(
+  blocks,
+  lectures,
+  filters,
+  onEdit,
+  onDelete,
+  onEditPass,
+  onTogglePass,
+  onExportLecture,
+  onExportWeek,
+  onExportBlock
+) {
   const card = document.createElement('section');
   card.className = 'card lectures-card';
 
@@ -891,6 +1097,18 @@ function renderLectureTable(blocks, lectures, filters, onEdit, onDelete, onEditP
     blockCounts.textContent = `${lectureLabel} • ${formatPassTotals(blockStats)}`;
     blockSummary.appendChild(blockCounts);
 
+    if (typeof onExportBlock === 'function') {
+      const blockExportBtn = document.createElement('button');
+      blockExportBtn.type = 'button';
+      blockExportBtn.className = 'btn secondary lectures-block-export';
+      blockExportBtn.textContent = 'Export block';
+      blockExportBtn.addEventListener('click', event => {
+        event.stopPropagation();
+        onExportBlock(group.block);
+      });
+      blockSummary.appendChild(blockExportBtn);
+    }
+
     blockDetails.appendChild(blockSummary);
 
     const weekWrapper = document.createElement('div');
@@ -942,6 +1160,19 @@ function renderLectureTable(blocks, lectures, filters, onEdit, onDelete, onEditP
       weekCounts.textContent = `${weekLectureLabel} • ${formatPassTotals(weekStats)}`;
       weekSummary.appendChild(weekCounts);
 
+      if (typeof onExportWeek === 'function') {
+        const weekExportBtn = document.createElement('button');
+        weekExportBtn.type = 'button';
+        weekExportBtn.className = 'btn secondary lectures-week-export';
+        weekExportBtn.textContent = 'Export week';
+        weekExportBtn.addEventListener('click', event => {
+          event.stopPropagation();
+          const targetWeek = weekLectures[0]?.week == null ? null : weekLectures[0].week;
+          onExportWeek(group.block, targetWeek);
+        });
+        weekSummary.appendChild(weekExportBtn);
+      }
+
       weekDetails.appendChild(weekSummary);
 
       const weekBody = document.createElement('div');
@@ -967,7 +1198,15 @@ function renderLectureTable(blocks, lectures, filters, onEdit, onDelete, onEditP
 
       const tbody = document.createElement('tbody');
       sortLecturesForDisplay(weekLectures).forEach(entry => {
-        const row = renderLectureWeekRow(entry, onEdit, onDelete, onEditPass, onTogglePass, now);
+        const row = renderLectureWeekRow(
+          entry,
+          onEdit,
+          onDelete,
+          onEditPass,
+          onTogglePass,
+          lecture => onExportLecture?.(lecture, group.block),
+          now
+        );
         tbody.appendChild(row);
       });
       table.appendChild(tbody);
@@ -1046,7 +1285,7 @@ function applyFilters(lectures, filters) {
   });
 }
 
-function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan) {
+function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan, onImport) {
   const filters = ensureLectureState();
   const toolbar = document.createElement('div');
   toolbar.className = 'lectures-toolbar';
@@ -1060,6 +1299,36 @@ function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan) {
   const actionsGroup = document.createElement('div');
   actionsGroup.className = 'lectures-toolbar-actions';
   toolbar.appendChild(actionsGroup);
+
+  if (typeof onImport === 'function') {
+    const importInput = document.createElement('input');
+    importInput.type = 'file';
+    importInput.accept = 'application/json';
+    importInput.style.display = 'none';
+
+    const importBtn = document.createElement('button');
+    importBtn.type = 'button';
+    importBtn.className = 'btn secondary lectures-import-btn';
+    importBtn.textContent = 'Import bundle';
+    importBtn.addEventListener('click', () => importInput.click());
+    importInput.addEventListener('change', async () => {
+      const file = importInput.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const json = JSON.parse(text);
+        await onImport(json);
+      } catch (err) {
+        console.error('Failed to import lecture bundle', err);
+        alert('Import failed.');
+      } finally {
+        importInput.value = '';
+      }
+    });
+
+    actionsGroup.appendChild(importBtn);
+    toolbar.appendChild(importInput);
+  }
 
   const search = document.createElement('input');
   search.type = 'search';
@@ -2137,12 +2406,94 @@ export async function renderLectures(root, redraw) {
   const filtered = applyFilters(allLectures, filters);
   const defaultPassPlan = plannerDefaultsToPassPlan(settings?.plannerDefaults);
 
+  const resolveBlockLabel = blockInfo => {
+    if (!blockInfo) return 'block';
+    return blockInfo.title || blockInfo.name || blockInfo.blockId || 'block';
+  };
+
+  async function handleExportLectureBundle(lecture, blockInfo) {
+    if (!lecture || lecture.id == null) {
+      alert('Lecture information is incomplete.');
+      return;
+    }
+    const normalizedBlockId = String(lecture.blockId ?? '').trim();
+    if (!normalizedBlockId) {
+      alert('Assign this lecture to a block before exporting.');
+      return;
+    }
+    try {
+      const bundle = await exportLectureTransfer(normalizedBlockId, lecture.id);
+      const blockLabel = resolveBlockLabel(blockInfo) || lecture.blockId || 'block';
+      const lectureLabel = lecture.name || `lecture-${lecture.id}`;
+      const filename = `lecture-${slugify(blockLabel)}-${slugify(lectureLabel)}.json`;
+      downloadJson(bundle, filename);
+    } catch (err) {
+      console.error('Failed to export lecture bundle', err);
+      alert('Failed to export lecture.');
+    }
+  }
+
+  async function handleExportWeekBundle(blockInfo, weekValue) {
+    const blockId = blockInfo?.blockId;
+    if (!blockId) {
+      alert('Assign the lectures to a block before exporting a week.');
+      return;
+    }
+    try {
+      const bundle = await exportWeekTransfer(blockId, weekValue == null ? null : weekValue);
+      const blockLabel = resolveBlockLabel(blockInfo);
+      const weekSlug = weekValue == null ? 'no-week' : `week-${weekValue}`;
+      const filename = `week-${slugify(blockLabel)}-${slugify(weekSlug)}.json`;
+      downloadJson(bundle, filename);
+    } catch (err) {
+      console.error('Failed to export week bundle', err);
+      alert('Failed to export week.');
+    }
+  }
+
+  async function handleExportBlockBundle(blockInfo) {
+    const blockId = blockInfo?.blockId;
+    if (!blockId) {
+      alert('Select a block to export.');
+      return;
+    }
+    try {
+      const bundle = await exportBlockTransfer(blockId);
+      const filename = `block-${slugify(resolveBlockLabel(blockInfo))}.json`;
+      downloadJson(bundle, filename);
+    } catch (err) {
+      console.error('Failed to export block bundle', err);
+      alert('Failed to export block.');
+    }
+  }
+
+  async function handleImportBundle(payload) {
+    try {
+      const conflicts = detectImportConflicts(payload, catalog);
+      let strategy = 'merge';
+      if (conflicts.hasConflicts) {
+        const choice = await promptImportStrategy(conflicts);
+        if (!choice) {
+          return;
+        }
+        strategy = choice;
+      }
+      await importLectureTransfer(payload, { strategy });
+      await invalidateBlockCatalog();
+      await redraw();
+      alert('Import complete.');
+    } catch (err) {
+      console.error('Failed to import lecture bundle', err);
+      alert('Import failed.');
+    }
+  }
+
   root.innerHTML = '';
   const layout = document.createElement('div');
   layout.className = 'lectures-view';
   root.appendChild(layout);
 
-  const toolbar = buildToolbar(blocks, allLectures, lectureLists, redraw, defaultPassPlan);
+  const toolbar = buildToolbar(blocks, allLectures, lectureLists, redraw, defaultPassPlan, handleImportBundle);
   layout.appendChild(toolbar);
 
   const table = renderLectureTable(
@@ -2152,7 +2503,10 @@ export async function renderLectures(root, redraw) {
     lecture => handleEdit(lecture, blocks, lectureLists, redraw),
     lecture => handleDelete(lecture, redraw),
     (lecture, pass) => handlePassEdit(lecture, pass, redraw),
-    (lecture, pass, checked) => handlePassToggle(lecture, pass, checked, redraw)
+    (lecture, pass, checked) => handlePassToggle(lecture, pass, checked, redraw),
+    (lecture, blockInfo) => handleExportLectureBundle(lecture, blockInfo || blocks.find(block => block.blockId === lecture.blockId)),
+    (blockInfo, weekValue) => handleExportWeekBundle(blockInfo, weekValue),
+    blockInfo => handleExportBlockBundle(blockInfo)
   );
   layout.appendChild(table);
 }
