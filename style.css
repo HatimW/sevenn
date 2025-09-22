@@ -6029,10 +6029,11 @@ body.map-toolbox-dragging {
 .block-board-urgent-group { background: var(--surface-2); border-radius: 12px; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
 .block-board-urgent-header { font-weight: 600; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
 .block-board-urgent-list { display: flex; flex-direction: column; gap: 0.5rem; }
-.block-board-pass-chip { background: color-mix(in srgb, var(--chip-accent) 18%, rgba(10, 15, 28, 0.78)); border: 1px solid color-mix(in srgb, var(--chip-accent) 42%, transparent); border-radius: 12px; padding: 0.6rem 0.75rem; display: flex; flex-direction: column; gap: 0.35rem; }
-.block-board-pass-title { font-weight: 600; }
-.block-board-pass-meta { font-size: 0.78rem; opacity: 0.78; letter-spacing: 0.01em; }
-.block-board-pass-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+.block-board-pass-chip { background: color-mix(in srgb, var(--chip-accent) 22%, rgba(8, 13, 24, 0.82)); border: 1px solid color-mix(in srgb, var(--chip-accent) 45%, transparent); border-radius: 10px; padding: 0.42rem 0.65rem; display: flex; flex-direction: column; gap: 0.25rem; box-shadow: 0 10px 22px rgba(8, 11, 22, 0.38); }
+.block-board-pass-title { font-weight: 600; font-size: 0.82rem; line-height: 1.2; }
+.block-board-pass-meta { font-size: 0.7rem; opacity: 0.78; letter-spacing: 0.02em; text-transform: uppercase; }
+.block-board-pass-actions { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; }
+.block-board-pass-actions .btn { padding: 0.28rem 0.5rem; font-size: 0.68rem; letter-spacing: 0.04em; }
 .block-board-empty { font-size: 0.85rem; opacity: 0.7; }
 .block-board-list { display: flex; flex-direction: column; gap: 1.5rem; }
 .block-board-block { display: flex; flex-direction: column; gap: 1.1rem; }
@@ -6041,7 +6042,7 @@ body.map-toolbox-dragging {
 .block-board-grid { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(210px, 1fr); gap: 0.85rem; overflow-x: auto; padding-bottom: 0.5rem; }
 .block-board-day-column { background: color-mix(in srgb, var(--surface-2) 90%, rgba(15, 23, 42, 0.55)); border-radius: 12px; display: flex; flex-direction: column; }
 .block-board-day-header { font-weight: 600; padding: 0.75rem 0.9rem; border-bottom: 1px solid var(--surface-3); }
-.block-board-day-list { display: flex; flex-direction: column; gap: 0.45rem; padding: 0.65rem 0.85rem 0.8rem; }
+.block-board-day-list { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.6rem 0.8rem 0.75rem; }
 .block-board-day-column.today .block-board-day-header { color: var(--accent); }
 .block-board-day-column.dropping { outline: 2px dashed var(--accent); }
 .block-board-pass-card { border-radius: 9px; border: 1px solid color-mix(in srgb, var(--card-accent) 55%, rgba(148, 163, 184, 0.18)); padding: 0.4rem 0.55rem; background: linear-gradient(150deg, color-mix(in srgb, var(--card-accent) 24%, rgba(10, 16, 28, 0.8)), rgba(6, 10, 18, 0.86)); display: flex; flex-direction: column; gap: 0.2rem; cursor: grab; box-shadow: 0 12px 24px rgba(2, 6, 23, 0.24); }
@@ -6224,11 +6225,13 @@ body.map-toolbox-dragging {
 .block-board-timeline {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 0.9rem 1.05rem;
+
+  gap: 1rem;
+  padding: 1rem 1.1rem;
   border-radius: var(--radius-lg);
-  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
-  background: linear-gradient(155deg, rgba(10, 15, 28, 0.85), rgba(14, 22, 38, 0.6));
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: radial-gradient(circle at top left, rgba(24, 34, 55, 0.85), rgba(9, 14, 28, 0.82));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .block-board-timeline-header {
@@ -6250,45 +6253,72 @@ body.map-toolbox-dragging {
 }
 
 .block-board-timeline-track {
+
+  position: relative;
   display: flex;
-  gap: 0.45rem;
+  align-items: flex-end;
+  gap: 0.4rem;
+  min-height: 210px;
+  padding: 0.25rem 0.15rem 0.5rem;
   overflow-x: auto;
-  padding-bottom: 0.35rem;
+}
+
+.block-board-timeline-track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 2.1rem;
+  border-top: 1px dashed rgba(148, 163, 184, 0.2);
+  pointer-events: none;
+  z-index: 0;
 }
 
 .block-board-timeline-column {
+  flex: 0 0 22px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.35rem;
-  min-width: 44px;
+  position: relative;
+  z-index: 1;
 }
 
 .block-board-timeline-bar {
   width: 100%;
-  min-width: 14px;
+  min-width: 12px;
   display: flex;
-  flex-direction: column-reverse;
-  justify-content: flex-start;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
   gap: 2px;
-  border-radius: 8px;
-  background: rgba(6, 10, 18, 0.82);
-  position: relative;
-  min-height: 12px;
+  padding: 0.25rem;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(11, 18, 32, 0.9), rgba(5, 10, 18, 0.7));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  min-height: 14px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 
 .block-board-timeline-bar.is-empty {
-  height: 14px;
+  padding: 0;
   background: rgba(12, 20, 36, 0.45);
+  height: 16px;
+  border-radius: 999px;
 }
 
 .block-board-timeline-column.is-today .block-board-timeline-bar {
   box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.45);
 }
 
+.block-board-timeline-column:hover .block-board-timeline-bar:not(.is-empty) {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 25px rgba(15, 23, 42, 0.35);
+}
+
 .block-board-timeline-segment {
   width: 100%;
-  border-radius: 4px;
+  border-radius: 6px;
   position: relative;
   min-height: 3px;
   box-shadow: 0 6px 12px rgba(2, 6, 23, 0.28);
@@ -6299,12 +6329,14 @@ body.map-toolbox-dragging {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: rgba(15, 23, 42, 0.35);
+
+  background: rgba(15, 23, 42, 0.4);
 }
 
 .block-board-timeline-day {
-  font-size: 0.75rem;
-  color: color-mix(in srgb, var(--text-muted) 88%, white 6%);
+  font-size: 0.7rem;
+  color: color-mix(in srgb, var(--text-muted) 82%, white 8%);
+  letter-spacing: 0.02em;
 }
 
 .block-board-timeline-column.is-today .block-board-timeline-day {
