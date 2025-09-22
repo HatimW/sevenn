@@ -522,22 +522,43 @@ function createPassCard(entry, onDrag) {
   card.dataset.lectureId = entry?.lecture?.id ?? '';
   card.dataset.passOrder = entry?.pass?.order ?? '';
   card.dataset.passDue = Number.isFinite(entry?.pass?.due) ? String(entry.pass.due) : '';
+
+  const body = document.createElement('div');
+  body.className = 'block-board-pass-body';
+
   const title = document.createElement('div');
-  title.className = 'card-title';
-  title.textContent = entry?.lecture?.name || 'Lecture';
-  card.appendChild(title);
+  title.className = 'card-title block-board-pass-title';
+  const titleInner = document.createElement('div');
+  titleInner.className = 'block-board-pass-title-inner';
+  const titleText = document.createElement('span');
+  titleText.className = 'block-board-pass-title-text';
+  titleText.textContent = entry?.lecture?.name || 'Lecture';
+  titleInner.appendChild(titleText);
+
+  const nameLength = (entry?.lecture?.name || '').length;
+  if (nameLength > 26) {
+    const clone = titleText.cloneNode(true);
+    clone.classList.add('is-clone');
+    titleInner.appendChild(clone);
+    title.classList.add('is-marquee');
+  }
+
+  title.appendChild(titleInner);
+  body.appendChild(title);
 
   const meta = document.createElement('div');
-  meta.className = 'card-meta';
+  meta.className = 'card-meta block-board-pass-meta';
   const metaParts = [];
   if (entry?.pass?.label) metaParts.push(entry.pass.label);
   else if (entry?.pass?.order != null) metaParts.push(`Pass ${entry.pass.order}`);
   if (entry?.pass?.action) metaParts.push(entry.pass.action);
   meta.textContent = metaParts.length ? metaParts.join(' • ') : 'Pass';
-  card.appendChild(meta);
+  body.appendChild(meta);
+
+  card.appendChild(body);
 
   const due = document.createElement('div');
-  due.className = 'card-due';
+  due.className = 'card-due block-board-pass-due';
   const dueText = Number.isFinite(entry?.pass?.due)
     ? formatPassDueLabel(entry.pass.due)
     : 'Unscheduled';
@@ -796,19 +817,35 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
     const track = document.createElement('div');
     track.className = 'block-board-timeline-track';
     const todayKey = startOfDay(Date.now());
-    timelineData.forEach(({ day, entries }) => {
-      const column = document.createElement('div');
-      column.className = 'block-board-timeline-column';
-      if (day === todayKey) {
-        column.classList.add('is-today');
-      }
-      const date = new Date(day);
+  timelineData.forEach(({ day, entries }) => {
+    const column = document.createElement('div');
+    column.className = 'block-board-timeline-column';
+    if (day === todayKey) {
+      column.classList.add('is-today');
+    }
+    const date = new Date(day);
 
-      const isoDate = Number.isFinite(day) ? date.toISOString().slice(0, 10) : '';
-      const tooltip = isoDate ? `${isoDate} • ${entries.length} due` : `${date.toLocaleDateString()} • ${entries.length} due`;
-      column.setAttribute('data-count', String(entries.length));
+    const isoDate = Number.isFinite(day) ? date.toISOString().slice(0, 10) : '';
+    const tooltip = isoDate ? `${isoDate} • ${entries.length} due` : `${date.toLocaleDateString()} • ${entries.length} due`;
+    column.setAttribute('data-count', String(entries.length));
 
-      const bar = document.createElement('div');
+    const accentEntry = entries.find(entry => !entry.completed) || entries[0];
+    if (accentEntry) {
+      column.style.setProperty('--timeline-accent', passColor(accentEntry.order));
+    }
+
+    const badge = document.createElement('div');
+    badge.className = 'block-board-timeline-count';
+    if (entries.length) {
+      badge.textContent = String(entries.length);
+    } else {
+      badge.classList.add('is-empty');
+      badge.textContent = '0';
+      column.classList.add('is-empty');
+    }
+    column.appendChild(badge);
+
+    const bar = document.createElement('div');
       bar.className = 'block-board-timeline-bar';
       bar.title = tooltip;
 
@@ -827,7 +864,7 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
         entries.forEach(entry => {
           const segment = document.createElement('div');
           segment.className = 'block-board-timeline-segment';
-          segment.style.background = passColor(entry.order);
+          segment.style.setProperty('--segment-color', passColor(entry.order));
           segment.style.height = `${segmentHeight}px`;
           if (!entry.completed) {
             segment.classList.add('is-pending');
