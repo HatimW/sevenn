@@ -4,7 +4,6 @@ import { listAllLectures, saveLecture } from '../../storage/storage.js';
 import {
   groupLectureQueues,
   markPassCompleted,
-  shiftLecturePasses,
   deriveLectureStatus,
   calculateNextDue
 } from '../../lectures/scheduler.js';
@@ -34,6 +33,15 @@ const PASS_COLORS = [
   'var(--cyan)'
 ];
 const DEFAULT_BOARD_DAYS = 14;
+const SHIFT_OFFSET_UNITS = [
+  { id: 'minutes', label: 'minutes', minutes: 1 },
+  { id: 'hours', label: 'hours', minutes: 60 },
+  { id: 'days', label: 'days', minutes: 60 * 24 },
+  { id: 'weeks', label: 'weeks', minutes: 60 * 24 * 7 }
+];
+const TIMELINE_BASE_UNIT_HEIGHT = 8;
+const TIMELINE_MAX_BAR_HEIGHT = 200;
+const TIMELINE_MIN_SEGMENT_HEIGHT = 3;
 
 const BLOCK_RANGE_FORMAT = new Intl.DateTimeFormat(undefined, {
   month: 'short',
@@ -114,6 +122,223 @@ function blockSpanDays(block) {
   const diff = end.getTime() - start.getTime();
   if (diff < 0) return null;
   return Math.round(diff / DAY_MS) + 1;
+}
+
+function normalizeShiftUnit(id) {
+  if (typeof id !== 'string') return 'days';
+  const normalized = SHIFT_OFFSET_UNITS.find(option => option.id === id);
+  return normalized ? normalized.id : 'days';
+}
+
+function combineShiftValueUnit(value, unitId) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 0;
+  }
+  const unit = SHIFT_OFFSET_UNITS.find(option => option.id === normalizeShiftUnit(unitId)) || SHIFT_OFFSET_UNITS[2];
+  return Math.max(0, Math.round(numeric * unit.minutes));
+}
+
+function buildScopeOptions(mode) {
+  if (mode === 'pull') {
+    return [
+      { id: 'single', label: 'Only this pass' },
+      { id: 'chain-before', label: 'This & preceding passes' }
+    ];
+  }
+  return [
+    { id: 'single', label: 'Only this pass' },
+    { id: 'chain-after', label: 'This & following passes' }
+  ];
+}
+
+function openShiftDialog(mode, { title, description, defaultValue = 1, defaultUnit = 'days' } = {}) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal block-board-shift-modal';
+
+    const card = document.createElement('div');
+    card.className = 'card block-board-shift-card';
+
+    const heading = document.createElement('h3');
+    heading.textContent = title || (mode === 'push' ? 'Push later' : 'Pull earlier');
+    card.appendChild(heading);
+
+    if (description) {
+      const desc = document.createElement('p');
+      desc.className = 'block-board-shift-description';
+      desc.textContent = description;
+      card.appendChild(desc);
+    }
+
+    const fields = document.createElement('div');
+    fields.className = 'block-board-shift-fields';
+
+    const amountField = document.createElement('label');
+    amountField.className = 'block-board-shift-field';
+    amountField.textContent = 'Amount';
+    const amountInput = document.createElement('input');
+    amountInput.type = 'number';
+    amountInput.className = 'input block-board-shift-input';
+    amountInput.min = '0';
+    amountInput.step = '1';
+    amountInput.value = String(defaultValue);
+    amountField.appendChild(amountInput);
+    fields.appendChild(amountField);
+
+    const unitField = document.createElement('label');
+    unitField.className = 'block-board-shift-field';
+    unitField.textContent = 'Unit';
+    const unitSelect = document.createElement('select');
+    unitSelect.className = 'input block-board-shift-unit';
+    SHIFT_OFFSET_UNITS.forEach(option => {
+      const opt = document.createElement('option');
+      opt.value = option.id;
+      opt.textContent = option.label;
+      unitSelect.appendChild(opt);
+    });
+    unitSelect.value = normalizeShiftUnit(defaultUnit);
+    unitField.appendChild(unitSelect);
+    fields.appendChild(unitField);
+
+    card.appendChild(fields);
+
+    const scopeGroup = document.createElement('fieldset');
+    scopeGroup.className = 'block-board-shift-scope';
+    const legend = document.createElement('legend');
+    legend.textContent = 'Scope';
+    scopeGroup.appendChild(legend);
+    const scopeInputs = [];
+    buildScopeOptions(mode).forEach((option, index) => {
+      const wrapper = document.createElement('label');
+      wrapper.className = 'block-board-shift-scope-option';
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = 'block-board-shift-scope';
+      input.value = option.id;
+      if (index === 0) input.checked = true;
+      const span = document.createElement('span');
+      span.textContent = option.label;
+      wrapper.appendChild(input);
+      wrapper.appendChild(span);
+      scopeGroup.appendChild(wrapper);
+      scopeInputs.push(input);
+    });
+    card.appendChild(scopeGroup);
+
+    const feedback = document.createElement('div');
+    feedback.className = 'block-board-shift-error';
+    card.appendChild(feedback);
+
+    const actions = document.createElement('div');
+    actions.className = 'block-board-shift-actions';
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'btn';
+    confirm.textContent = mode === 'push' ? 'Push later' : 'Pull earlier';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'btn secondary';
+    cancel.textContent = 'Cancel';
+    actions.appendChild(confirm);
+    actions.appendChild(cancel);
+    card.appendChild(actions);
+
+    function cleanup(result) {
+      if (document.body.contains(overlay)) {
+        document.body.removeChild(overlay);
+      }
+      resolve(result);
+    }
+
+    confirm.addEventListener('click', () => {
+      const minutes = combineShiftValueUnit(amountInput.value, unitSelect.value);
+      if (!Number.isFinite(minutes) || minutes <= 0) {
+        feedback.textContent = 'Enter a value greater than zero.';
+        feedback.classList.add('is-visible');
+        amountInput.focus();
+        return;
+      }
+      const selectedScope = scopeInputs.find(input => input.checked)?.value || 'single';
+      cleanup({ minutes, scope: selectedScope });
+    });
+
+    cancel.addEventListener('click', () => cleanup(null));
+    overlay.addEventListener('click', event => {
+      if (event.target === overlay) {
+        cleanup(null);
+      }
+    });
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    amountInput.focus({ preventScroll: true });
+  });
+}
+
+function shiftPassesForScope(lecture, passOrder, deltaMinutes, scope) {
+  if (!lecture || typeof lecture !== 'object') return lecture;
+  const targetOrder = Number(passOrder);
+  if (!Number.isFinite(targetOrder)) return lecture;
+  const delta = Number(deltaMinutes);
+  if (!Number.isFinite(delta) || delta === 0) return lecture;
+  const passes = Array.isArray(lecture.passes) ? lecture.passes.map(pass => ({ ...pass })) : [];
+  if (!passes.length) return lecture;
+  const shiftMs = Math.round(delta * 60 * 1000);
+  const normalizedScope = scope === 'chain-after' || scope === 'chain-before' ? scope : 'single';
+  passes.forEach(pass => {
+    const order = Number(pass?.order);
+    if (!Number.isFinite(order)) return;
+    const inScope = normalizedScope === 'chain-after'
+      ? order >= targetOrder
+      : normalizedScope === 'chain-before'
+        ? order <= targetOrder
+        : order === targetOrder;
+    if (!inScope) return;
+    if (!Number.isFinite(pass?.due)) return;
+    if (Number.isFinite(pass?.completedAt)) return;
+    const nextDue = Math.max(0, Math.round(pass.due + shiftMs));
+    pass.due = nextDue;
+  });
+  const status = deriveLectureStatus(passes, lecture.status);
+  const nextDueAt = calculateNextDue(passes);
+  return {
+    ...lecture,
+    passes,
+    status,
+    nextDueAt
+  };
+}
+
+function collectTimelineSegments(blockLectures, days) {
+  const dayMap = new Map(days.map(day => [day, []]));
+  blockLectures.forEach(lecture => {
+    const passes = Array.isArray(lecture?.passes) ? lecture.passes : [];
+    passes.forEach(pass => {
+      if (!pass) return;
+      const due = Number(pass?.due);
+      if (!Number.isFinite(due)) return;
+      const dayKey = startOfDay(due);
+      if (!dayMap.has(dayKey)) return;
+      dayMap.get(dayKey).push({
+        lecture,
+        pass,
+        order: Number(pass?.order),
+        completed: Number.isFinite(pass?.completedAt)
+      });
+    });
+  });
+  return days.map(day => {
+    const entries = (dayMap.get(day) || []).slice().sort((a, b) => {
+      const orderA = Number.isFinite(a.order) ? a.order : Number.POSITIVE_INFINITY;
+      const orderB = Number.isFinite(b.order) ? b.order : Number.POSITIVE_INFINITY;
+      if (orderA !== orderB) return orderA - orderB;
+      const nameA = a.lecture?.name || '';
+      const nameB = b.lecture?.name || '';
+      return nameA.localeCompare(nameB);
+    });
+    return { day, entries };
+  });
 }
 
 function formatDueTime(due) {
@@ -216,7 +441,7 @@ function collectDaysForBlock(block, lectures = [], now = Date.now()) {
   return [];
 }
 
-function buildPassElement(entry, onComplete, onDelay) {
+function buildPassElement(entry, onComplete, onShift) {
   const chip = document.createElement('div');
   chip.className = 'block-board-pass-chip';
   chip.style.setProperty('--chip-accent', passColor(entry?.pass?.order));
@@ -248,12 +473,21 @@ function buildPassElement(entry, onComplete, onDelay) {
   done.addEventListener('click', () => onComplete(entry));
   actions.appendChild(done);
 
-  const delay = document.createElement('button');
-  delay.type = 'button';
-  delay.className = 'btn tertiary';
-  delay.textContent = '+1 day';
-  delay.addEventListener('click', () => onDelay(entry));
-  actions.appendChild(delay);
+  if (typeof onShift === 'function') {
+    const push = document.createElement('button');
+    push.type = 'button';
+    push.className = 'btn tertiary';
+    push.textContent = 'Push';
+    push.addEventListener('click', () => onShift(entry, 'push'));
+    actions.appendChild(push);
+
+    const pull = document.createElement('button');
+    pull.type = 'button';
+    pull.className = 'btn tertiary';
+    pull.textContent = 'Pull';
+    pull.addEventListener('click', () => onShift(entry, 'pull'));
+    actions.appendChild(pull);
+  }
 
   chip.appendChild(actions);
   return chip;
@@ -277,58 +511,6 @@ function applyPassDueUpdate(lecture, passOrder, newDue) {
   const status = deriveLectureStatus(passes, lecture?.status);
   const nextDueAt = calculateNextDue(passes);
   return { ...lecture, passes, status, nextDueAt };
-}
-
-function buildDensityGradient(byOrder, total) {
-  if (!total) return 'linear-gradient(to top, var(--accent) 0% 100%)';
-  const entries = Array.from(byOrder.entries())
-    .filter(([, count]) => Number.isFinite(count) && count > 0)
-    .sort(([a], [b]) => Number(a) - Number(b));
-  if (!entries.length) {
-    return 'linear-gradient(to top, var(--accent) 0% 100%)';
-  }
-  let traversed = 0;
-  const segments = entries.map(([order, count]) => {
-    const start = (traversed / total) * 100;
-    traversed += count;
-    const end = (traversed / total) * 100;
-    const color = passColor(order);
-    return `${color} ${start}% ${end}%`;
-  });
-  return `linear-gradient(to top, ${segments.join(', ')})`;
-}
-
-function createDensityBar(dayStat, isToday, maxTotal) {
-  const bar = document.createElement('div');
-  bar.className = 'block-board-density-bar';
-  if (isToday) bar.classList.add('today');
-  const total = Number(dayStat?.total ?? 0);
-  bar.style.setProperty('--density-value', String(total));
-  const fill = document.createElement('div');
-  fill.className = 'block-board-density-fill';
-  const height = maxTotal > 0 ? Math.min(100, Math.round((total / maxTotal) * 100)) : 0;
-  fill.style.height = `${height}%`;
-  const gradient = buildDensityGradient(dayStat?.byOrder || new Map(), total);
-  fill.style.background = gradient;
-  bar.appendChild(fill);
-  return bar;
-}
-
-function createDensityLegend(dayStat, isToday, maxTotal) {
-  const slot = document.createElement('div');
-  slot.className = 'block-board-density-slot';
-  if (isToday) slot.classList.add('today');
-  const bar = createDensityBar(dayStat, isToday, maxTotal);
-  if (Number.isFinite(dayStat?.day)) {
-    const displayDate = new Date(dayStat.day);
-    slot.title = displayDate.toLocaleDateString();
-  }
-  slot.appendChild(bar);
-  const label = document.createElement('div');
-  label.className = 'block-board-density-label';
-  label.textContent = new Date(dayStat.day).getDate();
-  slot.appendChild(label);
-  return slot;
 }
 
 function createPassCard(entry, onDrag) {
@@ -433,15 +615,6 @@ function renderUrgentQueues(root, queues, handlers) {
     count.textContent = String(entries.length);
     header.appendChild(count);
 
-    if (entries.length) {
-      const pushAll = document.createElement('button');
-      pushAll.type = 'button';
-      pushAll.className = 'btn tertiary block-board-summary-action';
-      pushAll.textContent = 'Push to tomorrow';
-      pushAll.addEventListener('click', () => handlers.onPushAll(key));
-      header.appendChild(pushAll);
-    }
-
     card.appendChild(header);
 
     const list = document.createElement('div');
@@ -453,7 +626,7 @@ function renderUrgentQueues(root, queues, handlers) {
       list.appendChild(emptyState);
     } else {
       entries.forEach(entry => {
-        const chip = buildPassElement(entry, handlers.onComplete, handlers.onDelay);
+        const chip = buildPassElement(entry, handlers.onComplete, handlers.onShift);
         list.appendChild(chip);
       });
     }
@@ -601,17 +774,7 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
   unscheduledEntries.forEach(entry => blockEntries.push(entry));
 
   if (!timelineHidden) {
-    const dayStats = days.map(day => {
-      const entries = assignments.get(day) || [];
-      const breakdown = new Map();
-      entries.forEach(entry => {
-        const order = Number(entry?.pass?.order);
-        if (!Number.isFinite(order)) return;
-        breakdown.set(order, (breakdown.get(order) || 0) + 1);
-      });
-      return { day, total: entries.length, byOrder: breakdown };
-    });
-    const maxTotal = dayStats.reduce((max, stat) => Math.max(max, stat.total), 0);
+    const timelineData = collectTimelineSegments(blockLectures, days);
     const timeline = document.createElement('div');
     timeline.className = 'block-board-timeline';
 
@@ -630,13 +793,55 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
 
     timeline.appendChild(timelineHeader);
 
-    const density = document.createElement('div');
-    density.className = 'block-board-density';
-    dayStats.forEach(stat => {
-      const slot = createDensityLegend(stat, startOfDay(Date.now()) === stat.day, Math.max(1, maxTotal));
-      density.appendChild(slot);
+    const track = document.createElement('div');
+    track.className = 'block-board-timeline-track';
+    const todayKey = startOfDay(Date.now());
+    timelineData.forEach(({ day, entries }) => {
+      const column = document.createElement('div');
+      column.className = 'block-board-timeline-column';
+      if (day === todayKey) {
+        column.classList.add('is-today');
+      }
+      const date = new Date(day);
+      column.title = `${date.toLocaleDateString()} • ${entries.length} due`;
+
+      const bar = document.createElement('div');
+      bar.className = 'block-board-timeline-bar';
+      const count = entries.length;
+      if (count > 0) {
+        const gap = 2;
+        let segmentHeight = TIMELINE_BASE_UNIT_HEIGHT;
+        const gapTotal = gap * Math.max(0, count - 1);
+        let totalHeight = segmentHeight * count + gapTotal;
+        if (totalHeight > TIMELINE_MAX_BAR_HEIGHT) {
+          const available = Math.max(TIMELINE_MAX_BAR_HEIGHT - gapTotal, TIMELINE_MIN_SEGMENT_HEIGHT * count);
+          segmentHeight = Math.max(TIMELINE_MIN_SEGMENT_HEIGHT, available / count);
+          totalHeight = segmentHeight * count + gapTotal;
+        }
+        bar.style.height = `${Math.max(totalHeight, TIMELINE_MIN_SEGMENT_HEIGHT)}px`;
+        entries.forEach(entry => {
+          const segment = document.createElement('div');
+          segment.className = 'block-board-timeline-segment';
+          segment.style.background = passColor(entry.order);
+          segment.style.height = `${segmentHeight}px`;
+          if (!entry.completed) {
+            segment.classList.add('is-pending');
+          }
+          bar.appendChild(segment);
+        });
+      } else {
+        bar.classList.add('is-empty');
+      }
+      column.appendChild(bar);
+
+      const label = document.createElement('div');
+      label.className = 'block-board-timeline-day';
+      label.textContent = date.getDate();
+      column.appendChild(label);
+
+      track.appendChild(column);
     });
-    timeline.appendChild(density);
+    timeline.appendChild(track);
     wrapper.appendChild(timeline);
   }
 
@@ -720,23 +925,26 @@ export async function renderBlockBoard(container, refresh) {
       await updateLectureSchedule(lecture, lec => markPassCompleted(lec, passIndex));
       await renderBlockBoard(container, refresh);
     },
-    onDelay: async (entry) => {
-      const lecture = entry?.lecture;
-      if (!lecture) return;
-      await updateLectureSchedule(lecture, lec => shiftLecturePasses(lec, 24 * 60));
-      await renderBlockBoard(container, refresh);
-    },
-    onPushAll: async (bucket) => {
-      const entries = queues[bucket] || [];
-      const affected = new Set();
-      for (const entry of entries) {
-        if (!entry?.lecture) continue;
-        const key = `${entry.lecture.blockId}-${entry.lecture.id}`;
-        if (affected.has(key)) continue;
-        affected.add(key);
-        await updateLectureSchedule(entry.lecture, lec => shiftLecturePasses(lec, 24 * 60));
+    onShift: async (entry, mode) => {
+      if (!entry?.lecture) return;
+      const lecture = entry.lecture;
+      const passOrder = Number(entry?.pass?.order);
+      if (!Number.isFinite(passOrder)) return;
+      const lectureLabel = lecture?.name || `Lecture ${lecture?.id ?? ''}`;
+      const passLabel = entry?.pass?.label || (Number.isFinite(passOrder) ? `Pass ${passOrder}` : 'Pass');
+      const result = await openShiftDialog(mode, {
+        description: `${lectureLabel} • ${passLabel}`,
+        defaultUnit: 'days',
+        defaultValue: 1
+      });
+      if (!result || !Number.isFinite(result.minutes) || result.minutes <= 0) return;
+      const delta = mode === 'push' ? result.minutes : -result.minutes;
+      try {
+        await updateLectureSchedule(lecture, lec => shiftPassesForScope(lec, passOrder, delta, result.scope));
+        await renderBlockBoard(container, refresh);
+      } catch (err) {
+        console.error('Failed to shift pass timing', err);
       }
-      await renderBlockBoard(container, refresh);
     }
   });
   container.appendChild(urgentHost);
