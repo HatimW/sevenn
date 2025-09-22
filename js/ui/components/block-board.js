@@ -52,7 +52,16 @@ const PASS_TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
 
 function ensureBoardState() {
   if (!state.blockBoard) {
-    state.blockBoard = { collapsedBlocks: [], showDensity: true };
+    state.blockBoard = { collapsedBlocks: [], hiddenTimelines: [] };
+  }
+  if (!Array.isArray(state.blockBoard.collapsedBlocks)) {
+    state.blockBoard.collapsedBlocks = [];
+  }
+  if (!Array.isArray(state.blockBoard.hiddenTimelines)) {
+    state.blockBoard.hiddenTimelines = [];
+    if (state.blockBoard.showDensity === false && !state.blockBoard.hiddenTimelines.includes('__all__')) {
+      state.blockBoard.hiddenTimelines.push('__all__');
+    }
   }
   return state.blockBoard;
 }
@@ -557,15 +566,26 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
     refresh();
   });
   controls.appendChild(collapseBtn);
-  const densityBtn = document.createElement('button');
-  densityBtn.type = 'button';
-  densityBtn.className = 'btn secondary';
-  densityBtn.textContent = boardState.showDensity ? 'Hide timeline' : 'Show timeline';
-  densityBtn.addEventListener('click', () => {
-    setBlockBoardState({ showDensity: !ensureBoardState().showDensity });
+  const hiddenTimelineSet = new Set((boardState.hiddenTimelines || []).map(id => String(id)));
+  const blockKey = String(block?.blockId ?? '');
+  const timelineHidden = hiddenTimelineSet.has('__all__') || hiddenTimelineSet.has(blockKey);
+  const timelineBtn = document.createElement('button');
+  timelineBtn.type = 'button';
+  timelineBtn.className = 'btn secondary';
+  timelineBtn.textContent = timelineHidden ? 'Show timeline' : 'Hide timeline';
+  timelineBtn.addEventListener('click', () => {
+    const current = ensureBoardState();
+    const nextHidden = new Set((current.hiddenTimelines || []).map(id => String(id)));
+    nextHidden.delete('__all__');
+    if (timelineHidden) {
+      nextHidden.delete(blockKey);
+    } else {
+      nextHidden.add(blockKey);
+    }
+    setBlockBoardState({ hiddenTimelines: Array.from(nextHidden) });
     refresh();
   });
-  controls.appendChild(densityBtn);
+  controls.appendChild(timelineBtn);
   header.appendChild(controls);
   wrapper.appendChild(header);
 
@@ -579,7 +599,7 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
   });
   unscheduledEntries.forEach(entry => blockEntries.push(entry));
 
-  if (boardState.showDensity) {
+  if (!timelineHidden) {
     const dayStats = days.map(day => {
       const entries = assignments.get(day) || [];
       const breakdown = new Map();
