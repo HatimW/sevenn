@@ -223,7 +223,7 @@ export async function openEditor(kind, onSave, existing = null) {
   form.appendChild(colorLabel);
   colorInput.addEventListener('input', markDirty);
 
-  const catalog = await loadBlockCatalog();
+  const catalog = await loadBlockCatalog({ force: true });
   const blocks = (catalog.blocks || []).map(block => ({
     ...block,
     lectures: (catalog.lectureLists?.[block.blockId] || []).map(lecture => ({ ...lecture }))
@@ -234,7 +234,8 @@ export async function openEditor(kind, onSave, existing = null) {
   const lectSet = new Set();
   existing?.lectures?.forEach(l => {
     blockSet.add(l.blockId);
-    weekSet.add(`${l.blockId}|${l.week}`);
+    const weekKey = l.week == null || l.week === '' ? UNSCHEDULED_KEY : l.week;
+    weekSet.add(`${l.blockId}|${weekKey}`);
     lectSet.add(`${l.blockId}|${l.id}`);
   });
 
@@ -252,6 +253,8 @@ export async function openEditor(kind, onSave, existing = null) {
   const blockPanels = document.createElement('div');
   blockPanels.className = 'editor-block-panels';
   blockWrap.appendChild(blockPanels);
+
+  const UNSCHEDULED_KEY = '__unscheduled';
 
   function createTagChip(label, variant, active = false) {
     const chip = document.createElement('button');
@@ -341,27 +344,41 @@ export async function openEditor(kind, onSave, existing = null) {
         if (typeof l.week === 'number') weekNumbers.add(l.week);
       });
       const sortedWeeks = Array.from(weekNumbers).sort((a, b) => a - b);
+      const unscheduledLectures = (block.lectures || []).filter(l => l.week == null || l.week === '');
+      const weekGroups = sortedWeeks.map(weekNumber => ({
+        key: `${blockId}|${weekNumber}`,
+        label: `Week ${weekNumber}`,
+        lectures: (block.lectures || []).filter(l => l.week === weekNumber)
+      }));
+      if (unscheduledLectures.length) {
+        weekGroups.push({
+          key: `${blockId}|${UNSCHEDULED_KEY}`,
+          label: 'No week',
+          lectures: unscheduledLectures,
+          unscheduled: true
+        });
+      }
 
-      if (!sortedWeeks.length) {
+      if (!weekGroups.length) {
         const noWeeks = document.createElement('div');
         noWeeks.className = 'editor-tags-empty subtle';
         noWeeks.textContent = 'Add weeks or lectures to this block to start tagging.';
         weekList.appendChild(noWeeks);
       } else {
-        sortedWeeks.forEach(w => {
-          const weekKey = `${blockId}|${w}`;
+        weekGroups.forEach(group => {
+          const { key: weekKey, label, lectures, unscheduled } = group;
           const section = document.createElement('div');
           section.className = 'editor-week-section';
           if (weekSet.has(weekKey)) section.classList.add('active');
 
-          const weekChip = createTagChip(`Week ${w}`, 'week', weekSet.has(weekKey));
+          const weekChip = createTagChip(label, 'week', weekSet.has(weekKey));
           weekChip.addEventListener('click', () => {
             const wasActive = weekSet.has(weekKey);
             if (wasActive) {
               weekSet.delete(weekKey);
               section.classList.remove('active');
               lectureWrap.classList.add('collapsed');
-              (block.lectures || []).filter(l => l.week === w).forEach(l => {
+              lectures.forEach(l => {
                 const key = `${blockId}|${l.id}`;
                 lectSet.delete(key);
                 const chip = lectureWrap.querySelector(`[data-lecture='${key}']`);
@@ -381,11 +398,12 @@ export async function openEditor(kind, onSave, existing = null) {
           lectureWrap.className = 'editor-lecture-list';
           if (!weekSet.has(weekKey)) lectureWrap.classList.add('collapsed');
 
-          const lectures = (block.lectures || []).filter(l => l.week === w);
           if (!lectures.length) {
             const empty = document.createElement('div');
             empty.className = 'editor-tags-empty subtle';
-            empty.textContent = 'No lectures linked to this week yet.';
+            empty.textContent = unscheduled
+              ? 'No unscheduled lectures yet.'
+              : 'No lectures linked to this week yet.';
             lectureWrap.appendChild(empty);
           } else {
             lectures.forEach(l => {
@@ -462,7 +480,15 @@ export async function openEditor(kind, onSave, existing = null) {
     })).filter(ex => ex.title || ex.body);
     item.facts = [];
     item.blocks = Array.from(blockSet);
-    const weekNums = new Set(Array.from(weekSet).map(k => Number(k.split('|')[1])));
+    const weekNums = new Set();
+    for (const key of weekSet) {
+      const parts = key.split('|');
+      const raw = parts[1];
+      const numeric = Number(raw);
+      if (Number.isFinite(numeric)) {
+        weekNums.add(numeric);
+      }
+    }
     item.weeks = Array.from(weekNums);
     const lectures = [];
     for (const key of lectSet) {

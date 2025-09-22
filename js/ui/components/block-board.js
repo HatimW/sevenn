@@ -8,6 +8,7 @@ import {
   deriveLectureStatus,
   calculateNextDue
 } from '../../lectures/scheduler.js';
+import { findActiveBlockId } from '../../utils.js';
 
 let loadCatalog = loadBlockCatalog;
 let fetchLectures = listAllLectures;
@@ -687,7 +688,20 @@ export async function renderBlockBoard(container, refresh) {
   container.innerHTML = '';
   container.classList.add('block-board-container');
 
+  const boardState = ensureBoardState();
   const { blocks } = await loadCatalog();
+  if ((!Array.isArray(boardState.collapsedBlocks) || boardState.collapsedBlocks.length === 0) && Array.isArray(blocks)) {
+    const activeBlockId = findActiveBlockId(blocks);
+    if (activeBlockId) {
+      const collapsedDefaults = blocks
+        .map(block => String(block?.blockId ?? ''))
+        .filter(id => id && id !== activeBlockId);
+      if (collapsedDefaults.length) {
+        setBlockBoardState({ collapsedBlocks: collapsedDefaults });
+        boardState.collapsedBlocks = collapsedDefaults;
+      }
+    }
+  }
   const lectures = await fetchLectures();
   const fallbackDays = collectDefaultBoardDays();
 
