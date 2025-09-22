@@ -7,7 +7,6 @@ import {
   deriveLectureStatus,
   calculateNextDue
 } from '../../lectures/scheduler.js';
-import { findActiveBlockId } from '../../utils.js';
 import { passColorForOrder, setPassColorPalette } from './pass-colors.js';
 
 let loadCatalog = loadBlockCatalog;
@@ -50,9 +49,21 @@ const PASS_TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
   minute: '2-digit'
 });
 
+function isBlockActiveOnDate(block, now = Date.now()) {
+  const today = startOfDay(now);
+  const start = parseBlockDate(block?.startDate);
+  const end = parseBlockDate(block?.endDate);
+  const hasStart = start instanceof Date && !Number.isNaN(start.getTime());
+  const hasEnd = end instanceof Date && !Number.isNaN(end.getTime());
+  if (hasStart && hasEnd) return start.getTime() <= today && today <= end.getTime();
+  if (hasStart) return start.getTime() <= today;
+  if (hasEnd) return today <= end.getTime();
+  return true;
+}
+
 function ensureBoardState() {
   if (!state.blockBoard) {
-    state.blockBoard = { collapsedBlocks: [], hiddenTimelines: [] };
+    state.blockBoard = { collapsedBlocks: [], hiddenTimelines: [], autoCollapsed: [], autoHidden: [] };
   }
   if (!Array.isArray(state.blockBoard.collapsedBlocks)) {
     state.blockBoard.collapsedBlocks = [];
@@ -62,6 +73,12 @@ function ensureBoardState() {
     if (state.blockBoard.showDensity === false && !state.blockBoard.hiddenTimelines.includes('__all__')) {
       state.blockBoard.hiddenTimelines.push('__all__');
     }
+  }
+  if (!Array.isArray(state.blockBoard.autoCollapsed)) {
+    state.blockBoard.autoCollapsed = [];
+  }
+  if (!Array.isArray(state.blockBoard.autoHidden)) {
+    state.blockBoard.autoHidden = [];
   }
   return state.blockBoard;
 }
@@ -319,6 +336,7 @@ function collectTimelineSegments(blockLectures, days) {
   });
   return days.map(day => {
     const entries = (dayMap.get(day) || []).slice().sort((a, b) => {
+      if (a.completed !== b.completed) return a.completed ? 1 : -1;
       const orderA = Number.isFinite(a.order) ? a.order : Number.POSITIVE_INFINITY;
       const orderB = Number.isFinite(b.order) ? b.order : Number.POSITIVE_INFINITY;
       if (orderA !== orderB) return orderA - orderB;
@@ -553,33 +571,14 @@ function createPassCard(entry, onDrag) {
     setTimeout(scheduleMarquee, 0);
   }
 
-  const details = document.createElement('div');
-  details.className = 'block-board-pass-details';
-
   const passLabel = entry?.pass?.label || (entry?.pass?.order != null ? `Pass ${entry.pass.order}` : 'Pass');
-  const passOrder = document.createElement('span');
-  passOrder.className = 'block-board-pass-order';
-  passOrder.textContent = passLabel;
-  if (entry?.pass?.action) {
-    passOrder.setAttribute('data-action', entry.pass.action);
-    passOrder.title = entry.pass.action;
-  }
-  details.appendChild(passOrder);
-
   const dueFullLabel = Number.isFinite(entry?.pass?.due)
     ? formatPassDueLabel(entry.pass.due)
     : 'Unscheduled';
-  const dueDateLabel = Number.isFinite(entry?.pass?.due)
-    ? PASS_DUE_FORMAT.format(new Date(entry.pass.due))
-    : 'Unscheduled';
-  const due = document.createElement('span');
-  due.className = 'block-board-pass-date';
-  due.textContent = dueDateLabel;
-  due.setAttribute('title', dueFullLabel);
-  due.setAttribute('aria-label', dueFullLabel);
-  details.appendChild(due);
-
-  card.appendChild(details);
+  const passOrder = document.createElement('span');
+  passOrder.className = 'block-board-pass-pill-order';
+  passOrder.textContent = passLabel;
+  card.appendChild(passOrder);
 
   const descriptionParts = [lectureName, passLabel];
   if (entry?.pass?.action) descriptionParts.push(entry.pass.action);
@@ -624,6 +623,20 @@ function createDayColumn(dayTs) {
     column.classList.remove('dropping');
   });
   return column;
+}
+
+function sortPassEntries(entries) {
+  return entries.slice().sort((a, b) => {
+    const aComplete = Number.isFinite(a?.pass?.completedAt);
+    const bComplete = Number.isFinite(b?.pass?.completedAt);
+    if (aComplete !== bComplete) return aComplete ? 1 : -1;
+    const orderA = Number.isFinite(a?.pass?.order) ? a.pass.order : Number.POSITIVE_INFINITY;
+    const orderB = Number.isFinite(b?.pass?.order) ? b.pass.order : Number.POSITIVE_INFINITY;
+    if (orderA !== orderB) return orderA - orderB;
+    const nameA = a?.lecture?.name || '';
+    const nameB = b?.lecture?.name || '';
+    return nameA.localeCompare(nameB);
+  });
 }
 
 async function updateLectureSchedule(lecture, updateFn) {
@@ -807,12 +820,12 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
   wrapper.appendChild(header);
 
   const assignments = buildDayAssignments(blockLectures, days);
-  const unscheduledEntries = assignments.get('unscheduled') || [];
+  const unscheduledEntries = sortPassEntries(assignments.get('unscheduled') || []);
   assignments.delete('unscheduled');
 
   const blockEntries = [];
   assignments.forEach(entries => {
-    entries.forEach(entry => blockEntries.push(entry));
+    sortPassEntries(entries).forEach(entry => blockEntries.push(entry));
   });
   unscheduledEntries.forEach(entry => blockEntries.push(entry));
 
@@ -939,7 +952,7 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
 
   days.forEach(day => {
     const column = createDayColumn(day);
-    const entries = assignments.get(day) || [];
+    const entries = sortPassEntries(assignments.get(day) || []);
     entries.forEach(entry => {
       const card = createPassCard(entry);
       column.querySelector('.block-board-day-list').appendChild(card);
@@ -953,6 +966,8 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
 }
 
 export async function renderBlockBoard(container, refresh) {
+  if (!container) return;
+  const scrollSnapshot = captureBoardScrollState(container);
   container.innerHTML = '';
   container.classList.add('block-board-container');
 
@@ -969,16 +984,70 @@ export async function renderBlockBoard(container, refresh) {
   }
   const { blocks } = catalog;
   setPassColorPalette(settings?.plannerDefaults?.passColors);
-  if ((!Array.isArray(boardState.collapsedBlocks) || boardState.collapsedBlocks.length === 0) && Array.isArray(blocks)) {
-    const activeBlockId = findActiveBlockId(blocks);
-    if (activeBlockId) {
-      const collapsedDefaults = blocks
-        .map(block => String(block?.blockId ?? ''))
-        .filter(id => id && id !== activeBlockId);
-      if (collapsedDefaults.length) {
-        setBlockBoardState({ collapsedBlocks: collapsedDefaults });
-        boardState.collapsedBlocks = collapsedDefaults;
+  if (Array.isArray(blocks) && blocks.length) {
+    const normalizedCollapsed = new Set((boardState.collapsedBlocks || []).map(id => String(id)));
+    const normalizedHidden = new Set((boardState.hiddenTimelines || []).map(id => String(id)));
+    normalizedHidden.delete('__all__');
+    const autoCollapsed = new Set((boardState.autoCollapsed || []).map(id => String(id)));
+    const autoHidden = new Set((boardState.autoHidden || []).map(id => String(id)));
+    const today = Date.now();
+    let collapsedChanged = false;
+    let hiddenChanged = false;
+    let autoCollapsedChanged = false;
+    let autoHiddenChanged = false;
+    blocks.forEach(block => {
+      if (!block || block.blockId == null) return;
+      const blockId = String(block.blockId);
+      const active = isBlockActiveOnDate(block, today);
+      if (active) {
+        if (autoCollapsed.has(blockId) && normalizedCollapsed.has(blockId)) {
+          normalizedCollapsed.delete(blockId);
+          collapsedChanged = true;
+        }
+        if (autoCollapsed.delete(blockId)) {
+          autoCollapsedChanged = true;
+        }
+        if (autoHidden.has(blockId) && normalizedHidden.has(blockId)) {
+          normalizedHidden.delete(blockId);
+          hiddenChanged = true;
+        }
+        if (autoHidden.delete(blockId)) {
+          autoHiddenChanged = true;
+        }
+      } else {
+        if (!normalizedCollapsed.has(blockId)) {
+          normalizedCollapsed.add(blockId);
+          collapsedChanged = true;
+        }
+        if (!autoCollapsed.has(blockId)) {
+          autoCollapsed.add(blockId);
+          autoCollapsedChanged = true;
+        }
+        if (!normalizedHidden.has(blockId)) {
+          normalizedHidden.add(blockId);
+          hiddenChanged = true;
+        }
+        if (!autoHidden.has(blockId)) {
+          autoHidden.add(blockId);
+          autoHiddenChanged = true;
+        }
       }
+    });
+    if (collapsedChanged || hiddenChanged || autoCollapsedChanged || autoHiddenChanged) {
+      const collapsedArr = Array.from(normalizedCollapsed);
+      const hiddenArr = Array.from(normalizedHidden);
+      const autoCollapsedArr = Array.from(autoCollapsed);
+      const autoHiddenArr = Array.from(autoHidden);
+      setBlockBoardState({
+        collapsedBlocks: collapsedArr,
+        hiddenTimelines: hiddenArr,
+        autoCollapsed: autoCollapsedArr,
+        autoHidden: autoHiddenArr
+      });
+      boardState.collapsedBlocks = collapsedArr;
+      boardState.hiddenTimelines = hiddenArr;
+      boardState.autoCollapsed = autoCollapsedArr;
+      boardState.autoHidden = autoHiddenArr;
     }
   }
   const fallbackDays = collectDefaultBoardDays();
@@ -1040,4 +1109,78 @@ export async function renderBlockBoard(container, refresh) {
     renderBlockBoardBlock(blockList, block, blockLectures, daysForBlock, refreshBoard);
   });
   container.appendChild(blockList);
+  restoreBoardScrollState(container, scrollSnapshot);
+}
+
+function captureBoardScrollState(container) {
+  if (!container || typeof container !== 'object') return null;
+  const dayScroll = [];
+  container.querySelectorAll('.block-board-day-list').forEach(list => {
+    const column = list.closest('.block-board-day-column');
+    const block = list.closest('.block-board-block');
+    const blockId = block?.dataset?.blockId ?? '';
+    const day = column?.dataset?.day ?? '';
+    if (blockId && day) {
+      dayScroll.push({ key: `${blockId}::${day}`, top: list.scrollTop });
+    }
+  });
+  const snapshot = {
+    containerTop: container.scrollTop,
+    containerLeft: container.scrollLeft,
+    dayScroll,
+    windowX: typeof window !== 'undefined' ? window.scrollX : null,
+    windowY: typeof window !== 'undefined' ? window.scrollY : null
+  };
+  return snapshot;
+}
+
+function restoreBoardScrollState(container, snapshot) {
+  if (!container || !snapshot) return;
+  const apply = () => {
+    if (typeof container.scrollTo === 'function') {
+      container.scrollTo(snapshot.containerLeft ?? 0, snapshot.containerTop ?? 0);
+    } else {
+      container.scrollLeft = snapshot.containerLeft ?? 0;
+      container.scrollTop = snapshot.containerTop ?? 0;
+    }
+    if (snapshot.windowX != null && snapshot.windowY != null && typeof window !== 'undefined') {
+      const nav = typeof navigator !== 'undefined'
+        ? navigator
+        : typeof window.navigator !== 'undefined'
+          ? window.navigator
+          : null;
+      const ua = nav && typeof nav.userAgent === 'string'
+        ? nav.userAgent.toLowerCase()
+        : '';
+      const shouldRestoreWindow = !ua.includes('jsdom') && typeof window.scrollTo === 'function';
+      if (shouldRestoreWindow) {
+        try {
+          window.scrollTo(snapshot.windowX, snapshot.windowY);
+        } catch (err) {
+          /* ignore unsupported scroll restoration */
+        }
+      }
+    }
+    const dayEntries = Array.isArray(snapshot.dayScroll) ? snapshot.dayScroll : [];
+    const dayScrollMap = new Map(dayEntries.map(entry => [entry.key, entry.top]));
+    if (dayScrollMap.size) {
+      container.querySelectorAll('.block-board-block').forEach(blockEl => {
+        const blockId = blockEl?.dataset?.blockId ?? '';
+        if (!blockId) return;
+        blockEl.querySelectorAll('.block-board-day-column').forEach(column => {
+          const day = column?.dataset?.day ?? '';
+          if (!day) return;
+          const key = `${blockId}::${day}`;
+          if (!dayScrollMap.has(key)) return;
+          const list = column.querySelector('.block-board-day-list');
+          if (list) list.scrollTop = dayScrollMap.get(key) ?? 0;
+        });
+      });
+    }
+  };
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(apply);
+  } else {
+    setTimeout(apply, 0);
+  }
 }
