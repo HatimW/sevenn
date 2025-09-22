@@ -1,31 +1,4 @@
-var Sevenn = (() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-    }
-    return to;
-  };
-  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
-  // js/main.js
-  var main_exports = {};
-  __export(main_exports, {
-    render: () => renderApp,
-    renderApp: () => renderApp,
-    resolveListKind: () => resolveListKind,
-    tabs: () => tabs
-  });
-
+(() => {
   // js/state.js
   var state = {
     tab: "Block Board",
@@ -12063,12 +12036,17 @@ var Sevenn = (() => {
       if (!container || !inner) return;
       const available = container.clientWidth;
       const content = inner.scrollWidth;
-      if (available > 0 && content > available) {
+      const overflow = Math.round(content - available);
+      if (available > 0 && overflow > 8) {
+        const distance = overflow + 24;
+        const duration = Math.min(22, Math.max(8, distance / 24));
         container.classList.add("is-animated");
-        container.style.setProperty("--marquee-distance", `${content - available + 16}px`);
+        container.style.setProperty("--marquee-distance", `${distance}px`);
+        container.style.setProperty("--marquee-duration", `${duration}s`);
       } else {
         container.classList.remove("is-animated");
         container.style.removeProperty("--marquee-distance");
+        container.style.removeProperty("--marquee-duration");
       }
     };
     if (typeof requestAnimationFrame === "function") {
@@ -12123,6 +12101,30 @@ var Sevenn = (() => {
       column.classList.remove("dropping");
     });
     return column;
+  }
+  function scrollGridToToday(grid) {
+    if (!grid) return;
+    const todayColumn = grid.querySelector(".block-board-day-column.today");
+    if (!todayColumn) return;
+    if (grid.scrollWidth <= grid.clientWidth + 1) return;
+    const apply = () => {
+      const columnRect = todayColumn.getBoundingClientRect();
+      const gridRect = grid.getBoundingClientRect();
+      const relativeLeft = columnRect.left - gridRect.left + grid.scrollLeft;
+      const halfWidth = Math.max(0, (grid.clientWidth - todayColumn.clientWidth) / 2);
+      const maxScroll = Math.max(0, grid.scrollWidth - grid.clientWidth);
+      const target = Math.max(0, Math.min(maxScroll, relativeLeft - halfWidth));
+      if (typeof grid.scrollTo === "function") {
+        grid.scrollTo({ left: target, behavior: "auto" });
+      } else {
+        grid.scrollLeft = target;
+      }
+    };
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(apply);
+    } else {
+      setTimeout(apply, 0);
+    }
   }
   function sortPassEntries(entries) {
     return entries.slice().sort((a, b) => {
@@ -12226,7 +12228,7 @@ var Sevenn = (() => {
       await refresh();
     });
   }
-  function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
+  function renderBlockBoardBlock(container, block, blockLectures, days, refresh, gridScrollState = /* @__PURE__ */ new Map()) {
     const boardState = ensureBoardState();
     const wrapper = document.createElement("section");
     wrapper.className = "block-board-block";
@@ -12429,6 +12431,10 @@ var Sevenn = (() => {
       board.appendChild(column);
     });
     wrapper.appendChild(board);
+    const blockId = String(block?.blockId ?? "");
+    if (blockId && !gridScrollState.has(blockId)) {
+      scrollGridToToday(board);
+    }
     container.appendChild(wrapper);
   }
   async function renderBlockBoard(container, refresh) {
@@ -12551,6 +12557,14 @@ var Sevenn = (() => {
       }
     });
     container.appendChild(urgentHost);
+    const previousGridScroll = /* @__PURE__ */ new Map();
+    const gridEntries = Array.isArray(scrollSnapshot?.gridScroll) ? scrollSnapshot.gridScroll : [];
+    gridEntries.forEach((entry) => {
+      if (!entry) return;
+      const blockId = entry?.blockId;
+      if (blockId == null) return;
+      previousGridScroll.set(String(blockId), Number(entry?.left) || 0);
+    });
     const blockList = document.createElement("div");
     blockList.className = "block-board-list";
     const refreshBoard = async () => {
@@ -12566,7 +12580,7 @@ var Sevenn = (() => {
       const blockLectures = lecturesByBlock.get(String(block.blockId)) || [];
       const blockDays = collectDaysForBlock(block, blockLectures);
       const daysForBlock = blockDays.length ? blockDays : fallbackDays;
-      renderBlockBoardBlock(blockList, block, blockLectures, daysForBlock, refreshBoard);
+      renderBlockBoardBlock(blockList, block, blockLectures, daysForBlock, refreshBoard, previousGridScroll);
     });
     container.appendChild(blockList);
     restoreBoardScrollState(container, scrollSnapshot);
@@ -12583,10 +12597,19 @@ var Sevenn = (() => {
         dayScroll.push({ key: `${blockId}::${day}`, top: list.scrollTop });
       }
     });
+    const gridScroll = [];
+    container.querySelectorAll(".block-board-block").forEach((blockEl) => {
+      const blockId = blockEl?.dataset?.blockId ?? "";
+      if (!blockId) return;
+      const grid = blockEl.querySelector(".block-board-grid");
+      if (!grid) return;
+      gridScroll.push({ blockId, left: grid.scrollLeft });
+    });
     const snapshot = {
       containerTop: container.scrollTop,
       containerLeft: container.scrollLeft,
       dayScroll,
+      gridScroll,
       windowX: typeof window !== "undefined" ? window.scrollX : null,
       windowY: typeof window !== "undefined" ? window.scrollY : null
     };
@@ -12626,6 +12649,22 @@ var Sevenn = (() => {
             const list = column.querySelector(".block-board-day-list");
             if (list) list.scrollTop = dayScrollMap.get(key) ?? 0;
           });
+        });
+      }
+      const gridEntries = Array.isArray(snapshot.gridScroll) ? snapshot.gridScroll : [];
+      if (gridEntries.length) {
+        const gridScrollMap = new Map(gridEntries.map((entry) => [String(entry.blockId ?? ""), Number(entry.left) || 0]));
+        container.querySelectorAll(".block-board-block").forEach((blockEl) => {
+          const blockId = blockEl?.dataset?.blockId ?? "";
+          if (!blockId || !gridScrollMap.has(blockId)) return;
+          const grid = blockEl.querySelector(".block-board-grid");
+          if (!grid) return;
+          const target = gridScrollMap.get(blockId);
+          if (typeof grid.scrollTo === "function") {
+            grid.scrollTo({ left: target, behavior: "auto" });
+          } else {
+            grid.scrollLeft = target;
+          }
         });
       }
     };
@@ -16877,5 +16916,4 @@ var Sevenn = (() => {
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
-  return __toCommonJS(main_exports);
 })();

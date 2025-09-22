@@ -6491,6 +6491,7 @@ body.map-toolbox-dragging {
   min-width: 0;
   flex: 1;
   --marquee-distance: 0px;
+  --marquee-duration: 9s;
 }
 
 .block-board-pass-title-inner {
@@ -6501,7 +6502,7 @@ body.map-toolbox-dragging {
 }
 
 .block-board-pass-title.is-animated .block-board-pass-title-inner {
-  animation: block-board-pass-marquee 9s ease-in-out infinite alternate;
+  animation: block-board-pass-marquee var(--marquee-duration, 9s) linear infinite;
 }
 
 .block-board-pass-title.is-animated:hover .block-board-pass-title-inner {
