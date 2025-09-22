@@ -1,6 +1,6 @@
 import { state, setBlockBoardState } from '../../state.js';
 import { loadBlockCatalog } from '../../storage/block-catalog.js';
-import { listAllLectures, saveLecture } from '../../storage/storage.js';
+import { getSettings, listAllLectures, saveLecture } from '../../storage/storage.js';
 import {
   groupLectureQueues,
   markPassCompleted,
@@ -8,30 +8,21 @@ import {
   calculateNextDue
 } from '../../lectures/scheduler.js';
 import { findActiveBlockId } from '../../utils.js';
+import { passColorForOrder, setPassColorPalette } from './pass-colors.js';
 
 let loadCatalog = loadBlockCatalog;
 let fetchLectures = listAllLectures;
 let persistLecture = saveLecture;
+let fetchSettings = getSettings;
 
-export function __setBlockBoardDeps({ loadBlockCatalog: loadFn, listAllLectures: listFn, saveLecture: saveFn } = {}) {
+export function __setBlockBoardDeps({ loadBlockCatalog: loadFn, listAllLectures: listFn, saveLecture: saveFn, getSettings: settingsFn } = {}) {
   loadCatalog = typeof loadFn === 'function' ? loadFn : loadBlockCatalog;
   fetchLectures = typeof listFn === 'function' ? listFn : listAllLectures;
   persistLecture = typeof saveFn === 'function' ? saveFn : saveLecture;
+  fetchSettings = typeof settingsFn === 'function' ? settingsFn : getSettings;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const PASS_COLORS = [
-  'var(--pink)',
-  'var(--blue)',
-  'var(--green)',
-  'var(--orange)',
-  'var(--purple)',
-  'var(--teal)',
-  'var(--yellow)',
-  'var(--rose)',
-  'var(--indigo)',
-  'var(--cyan)'
-];
 const DEFAULT_BOARD_DAYS = 14;
 const SHIFT_OFFSET_UNITS = [
   { id: 'minutes', label: 'minutes', minutes: 1 },
@@ -39,9 +30,9 @@ const SHIFT_OFFSET_UNITS = [
   { id: 'days', label: 'days', minutes: 60 * 24 },
   { id: 'weeks', label: 'weeks', minutes: 60 * 24 * 7 }
 ];
-const TIMELINE_BASE_UNIT_HEIGHT = 8;
+const TIMELINE_BASE_UNIT_HEIGHT = 20;
 const TIMELINE_MAX_BAR_HEIGHT = 200;
-const TIMELINE_MIN_SEGMENT_HEIGHT = 3;
+const TIMELINE_MIN_SEGMENT_HEIGHT = 12;
 
 const BLOCK_RANGE_FORMAT = new Intl.DateTimeFormat(undefined, {
   month: 'short',
@@ -76,9 +67,7 @@ function ensureBoardState() {
 }
 
 function passColor(order = 1) {
-  if (!Number.isFinite(order)) return PASS_COLORS[0];
-  const idx = Math.max(0, Math.floor(order) - 1) % PASS_COLORS.length;
-  return PASS_COLORS[idx];
+  return passColorForOrder(order);
 }
 
 function startOfDay(timestamp) {
@@ -846,7 +835,7 @@ function renderBlockBoardBlock(container, block, blockLectures, days, refresh) {
 
       const count = entries.length;
       if (count > 0) {
-        const gap = 2;
+        const gap = 0;
         let segmentHeight = TIMELINE_BASE_UNIT_HEIGHT;
         const gapTotal = gap * Math.max(0, count - 1);
         let totalHeight = segmentHeight * count + gapTotal;
@@ -938,7 +927,18 @@ export async function renderBlockBoard(container, refresh) {
   container.classList.add('block-board-container');
 
   const boardState = ensureBoardState();
-  const { blocks } = await loadCatalog();
+  const [catalog, lectures] = await Promise.all([
+    loadCatalog(),
+    fetchLectures()
+  ]);
+  let settings = null;
+  try {
+    settings = await fetchSettings();
+  } catch (err) {
+    settings = null;
+  }
+  const { blocks } = catalog;
+  setPassColorPalette(settings?.plannerDefaults?.passColors);
   if ((!Array.isArray(boardState.collapsedBlocks) || boardState.collapsedBlocks.length === 0) && Array.isArray(blocks)) {
     const activeBlockId = findActiveBlockId(blocks);
     if (activeBlockId) {
@@ -951,7 +951,6 @@ export async function renderBlockBoard(container, refresh) {
       }
     }
   }
-  const lectures = await fetchLectures();
   const fallbackDays = collectDefaultBoardDays();
 
   const queues = groupLectureQueues(lectures);

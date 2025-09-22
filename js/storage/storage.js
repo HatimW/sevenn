@@ -216,7 +216,10 @@ export async function saveSettings(patch) {
     },
     passes: Array.isArray(patchPlanner.passes) && patchPlanner.passes.length
       ? patchPlanner.passes
-      : basePlanner?.passes || DEFAULT_APP_SETTINGS.plannerDefaults?.passes
+      : basePlanner?.passes || DEFAULT_APP_SETTINGS.plannerDefaults?.passes,
+    passColors: Array.isArray(patchPlanner.passColors) && patchPlanner.passColors.length
+      ? patchPlanner.passColors
+      : basePlanner?.passColors || DEFAULT_APP_SETTINGS.plannerDefaults?.passColors
   });
   const next = {
     ...current,

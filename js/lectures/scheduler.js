@@ -1,6 +1,19 @@
 const DAY_MINUTES = 24 * 60;
 const MINUTE_MS = 60 * 1000;
 
+export const DEFAULT_PASS_COLORS = [
+  '#ef4444',
+  '#facc15',
+  '#fb923c',
+  '#22c55e',
+  '#3b82f6',
+  '#a855f7',
+  '#14b8a6',
+  '#ec4899',
+  '#6366f1',
+  '#0ea5e9'
+];
+
 function clone(value) {
   if (value == null) return value;
   return JSON.parse(JSON.stringify(value));
@@ -75,7 +88,8 @@ export const DEFAULT_PLANNER_DEFAULTS = {
     label: entry.label,
     offsetMinutes: entry.offsetMinutes,
     anchor: entry.anchor
-  }))
+  })),
+  passColors: DEFAULT_PASS_COLORS
 };
 
 export function normalizePassPlan(plan) {
@@ -123,6 +137,18 @@ export function normalizePlannerDefaults(raw) {
     : DEFAULT_PLANNER_DEFAULTS.passes;
   const normalizedPlan = normalizePassPlan({ schedule: passesSource });
 
+  const paletteSource = Array.isArray(source.passColors) && source.passColors.length
+    ? source.passColors
+    : DEFAULT_PASS_COLORS;
+  const passColors = paletteSource.map((color, index) => {
+    if (typeof color === 'string') {
+      const trimmed = color.trim();
+      if (trimmed) return trimmed;
+    }
+    return DEFAULT_PASS_COLORS[index % DEFAULT_PASS_COLORS.length];
+  });
+  const palette = passColors.length ? passColors : DEFAULT_PASS_COLORS.slice();
+
   return {
     anchorOffsets,
     passes: normalizedPlan.schedule.map(step => ({
@@ -131,7 +157,8 @@ export function normalizePlannerDefaults(raw) {
       offsetMinutes: step.offsetMinutes,
       anchor: step.anchor,
       action: step.action
-    }))
+    })),
+    passColors: palette
   };
 }
 
