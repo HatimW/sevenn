@@ -16,6 +16,8 @@ const MODE_KEY = {
 
 
 let lectureSource = {};
+let builderBlockOrder = [];
+let builderWeekMap = new Map();
 
 function setLectureSource(map) {
   lectureSource = {};
@@ -85,6 +87,32 @@ function drawBuilder(container, blocks, redraw) {
   }
   const rerender = () => drawBuilder(container, blocks, redraw);
 
+  const contexts = blocks.map(block => {
+    const blockId = block.blockId;
+    const lectures = lectureListFor(blockId);
+    lectures.sort((a, b) => {
+      const weekDiff = (a.week ?? 0) - (b.week ?? 0);
+      if (weekDiff !== 0) return weekDiff;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+    const weeks = groupByWeek(lectures);
+    return { block, lectures, weeks };
+  });
+
+  builderBlockOrder = contexts.map(ctx => ctx.block.blockId);
+  builderWeekMap = new Map();
+  contexts.forEach(ctx => {
+    const blockId = ctx.block.blockId;
+    const entries = ctx.weeks.map(({ week }) => ({
+      key: weekKeyFor(blockId, week),
+      week
+    }));
+    builderWeekMap.set(blockId, entries);
+  });
+
+  const activeBlockId = ensureActiveBlock(contexts);
+  ensureWeekForBlock(activeBlockId);
+
   const layout = document.createElement('div');
   layout.className = 'builder-layout';
   container.appendChild(layout);
@@ -92,23 +120,170 @@ function drawBuilder(container, blocks, redraw) {
   const blockColumn = document.createElement('div');
   blockColumn.className = 'builder-blocks';
   layout.appendChild(blockColumn);
-  blocks.forEach(block => {
-    blockColumn.appendChild(renderBlockPanel(block, rerender));
+  contexts.forEach(context => {
+    blockColumn.appendChild(renderBlockPanel(context, rerender));
   });
 
   const controls = renderControls(rerender, redraw);
   layout.appendChild(controls);
 }
 
-function renderBlockPanel(block, rerender) {
-  const blockId = block.blockId;
-  const lectures = lectureListFor(blockId);
-  lectures.sort((a, b) => {
-    const weekDiff = (a.week ?? 0) - (b.week ?? 0);
-    if (weekDiff !== 0) return weekDiff;
-    return (a.name || '').localeCompare(b.name || '');
+function ensureActiveBlock(contexts) {
+  if (!Array.isArray(contexts) || !contexts.length) {
+    if (
+      state.builder.activeBlockId ||
+      (state.builder.collapsedBlocks && state.builder.collapsedBlocks.length) ||
+      state.builder.activeWeekKey ||
+      (state.builder.collapsedWeeks && state.builder.collapsedWeeks.length)
+    ) {
+      setBuilder({ activeBlockId: '', collapsedBlocks: [], activeWeekKey: '', collapsedWeeks: [] });
+    }
+    return '';
+  }
+  const blockIds = builderBlockOrder;
+  let activeBlockId = state.builder.activeBlockId;
+  if (!activeBlockId || !blockIds.includes(activeBlockId)) {
+    activeBlockId = chooseDefaultBlock(contexts);
+  }
+  if (!activeBlockId && blockIds.length) {
+    activeBlockId = blockIds[0];
+  }
+  setActiveBlock(activeBlockId);
+  return activeBlockId;
+}
+
+function chooseDefaultBlock(contexts) {
+  const lectureSelections = Array.isArray(state.builder.lectures) ? state.builder.lectures : [];
+  if (lectureSelections.length) {
+    const last = lectureSelections[lectureSelections.length - 1];
+    const [blockId] = last.split('|');
+    if (blockId && builderBlockOrder.includes(blockId)) return blockId;
+  }
+  const selectedBlocks = Array.isArray(state.builder.blocks) ? state.builder.blocks : [];
+  const blockMatch = selectedBlocks.find(id => builderBlockOrder.includes(id));
+  if (blockMatch) return blockMatch;
+  const withLectures = contexts.find(ctx => ctx.block.blockId !== '__unlabeled' && ctx.lectures.length);
+  if (withLectures) return withLectures.block.blockId;
+  return contexts[0]?.block.blockId || '';
+}
+
+function ensureWeekForBlock(blockId) {
+  if (!blockId) {
+    return;
+  }
+  const entries = builderWeekMap.get(blockId) || [];
+  if (!entries.length) {
+    clearActiveWeek(blockId);
+    return;
+  }
+  const currentKey = state.builder.activeWeekKey;
+  if (currentKey && currentKey.startsWith(`${blockId}|`)) {
+    const hasCurrent = entries.some(entry => entry.key === currentKey);
+    if (hasCurrent) {
+      applyWeekSelection(blockId, currentKey, entries);
+      return;
+    }
+  }
+  applyWeekSelection(blockId, entries[0].key, entries);
+}
+
+function setActiveBlock(blockId) {
+  if (!blockId || !builderBlockOrder.includes(blockId)) return;
+  const collapsed = builderBlockOrder.filter(id => id !== blockId);
+  const patch = {};
+  if (!arraysEqual(collapsed, state.builder.collapsedBlocks || [])) {
+    patch.collapsedBlocks = collapsed;
+  }
+  if (state.builder.activeBlockId !== blockId) {
+    patch.activeBlockId = blockId;
+  }
+  if (patch.activeBlockId && state.builder.activeWeekKey && !state.builder.activeWeekKey.startsWith(`${blockId}|`)) {
+    patch.activeWeekKey = '';
+  }
+  if (Object.keys(patch).length) {
+    setBuilder(patch);
+  }
+}
+
+function setActiveWeek(blockId, week) {
+  if (!blockId) return;
+  const entries = builderWeekMap.get(blockId) || [];
+  if (!entries.length) {
+    clearActiveWeek(blockId);
+    return;
+  }
+  const normalizedWeek = week != null ? week : -1;
+  const target = entries.find(entry => entry.week === normalizedWeek) || entries[0];
+  applyWeekSelection(blockId, target.key, entries);
+}
+
+function applyWeekSelection(blockId, key, entries) {
+  if (!key || !Array.isArray(entries)) return;
+  const collapsed = new Set(state.builder.collapsedWeeks || []);
+  const validKeys = entries.map(entry => entry.key);
+  for (const value of Array.from(collapsed)) {
+    if (value.startsWith(`${blockId}|`) && !validKeys.includes(value) && value !== key) {
+      collapsed.delete(value);
+    }
+  }
+  entries.forEach(entry => {
+    if (entry.key === key) {
+      collapsed.delete(entry.key);
+    } else {
+      collapsed.add(entry.key);
+    }
   });
-  const weeks = groupByWeek(lectures);
+  const patch = {};
+  const collapsedArr = Array.from(collapsed);
+  if (!arraysEqual(collapsedArr, state.builder.collapsedWeeks || [])) {
+    patch.collapsedWeeks = collapsedArr;
+  }
+  if (state.builder.activeWeekKey !== key) {
+    patch.activeWeekKey = key;
+  }
+  if (Object.keys(patch).length) {
+    setBuilder(patch);
+  }
+}
+
+function clearActiveWeek(blockId) {
+  if (!blockId) return;
+  const prefix = `${blockId}|`;
+  const nextCollapsed = (state.builder.collapsedWeeks || []).filter(key => !key.startsWith(prefix));
+  const patch = {};
+  if (!arraysEqual(nextCollapsed, state.builder.collapsedWeeks || [])) {
+    patch.collapsedWeeks = nextCollapsed;
+  }
+  if (state.builder.activeWeekKey && state.builder.activeWeekKey.startsWith(prefix)) {
+    patch.activeWeekKey = '';
+  }
+  if (Object.keys(patch).length) {
+    setBuilder(patch);
+  }
+}
+
+function findNextBlock(currentId) {
+  if (!builderBlockOrder.length) return null;
+  const index = builderBlockOrder.indexOf(currentId);
+  if (index === -1) return builderBlockOrder[0] || null;
+  for (let offset = 1; offset < builderBlockOrder.length; offset += 1) {
+    const candidate = builderBlockOrder[(index + offset) % builderBlockOrder.length];
+    if (candidate) return candidate;
+  }
+  return currentId || null;
+}
+
+function arraysEqual(a = [], b = []) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function renderBlockPanel(context, rerender) {
+  const { block, lectures, weeks } = context;
+  const blockId = block.blockId;
   const hasLectureSelection = hasAnyLectureSelected(blockId, lectures);
   const blockFullySelected = isBlockFullySelected(block, lectures);
   const blockCollapsed = isBlockCollapsed(blockId);
@@ -673,6 +848,8 @@ function selectEntireBlock(block) {
     blockSet.add(blockId);
   }
 
+  setActiveBlock(blockId);
+  ensureWeekForBlock(blockId);
   notifyBuilderChanged();
   setBuilder({
     blocks: Array.from(blockSet),
@@ -688,6 +865,8 @@ function clearBlock(blockId) {
     if (key.startsWith(`${blockId}|`)) lectureSet.delete(key);
   }
   blockSet.delete(blockId);
+  setActiveBlock(blockId);
+  ensureWeekForBlock(blockId);
   notifyBuilderChanged();
   setBuilder({
     blocks: Array.from(blockSet),
@@ -707,6 +886,8 @@ function selectWeek(block, week) {
     }
   });
   syncBlockWithLectureSelection(blockSet, lectureSet, block);
+  setActiveBlock(blockId);
+  setActiveWeek(blockId, week);
   notifyBuilderChanged();
   setBuilder({
     lectures: Array.from(lectureSet),
@@ -726,6 +907,8 @@ function clearWeek(block, week) {
     }
   });
   syncBlockWithLectureSelection(blockSet, lectureSet, block);
+  setActiveBlock(blockId);
+  setActiveWeek(blockId, week);
   notifyBuilderChanged();
   setBuilder({
     lectures: Array.from(lectureSet),
@@ -744,6 +927,8 @@ function toggleLecture(block, lecture) {
     lectureSet.add(key);
   }
   syncBlockWithLectureSelection(blockSet, lectureSet, block);
+  setActiveBlock(block.blockId);
+  setActiveWeek(block.blockId, lecture.week != null ? lecture.week : -1);
   notifyBuilderChanged();
   setBuilder({
     lectures: Array.from(lectureSet),
@@ -760,32 +945,56 @@ function toggleType(type) {
 }
 
 function isBlockCollapsed(blockId) {
+  if (state.builder.activeBlockId) {
+    return state.builder.activeBlockId !== blockId;
+  }
   return (state.builder.collapsedBlocks || []).includes(blockId);
 }
 
 function toggleBlockCollapsed(blockId) {
-  const collapsed = new Set(state.builder.collapsedBlocks || []);
-  if (collapsed.has(blockId)) {
-    collapsed.delete(blockId);
-  } else {
-    collapsed.add(blockId);
+  if (!blockId) return;
+  if (isBlockCollapsed(blockId)) {
+    setActiveBlock(blockId);
+    ensureWeekForBlock(blockId);
+    return;
   }
-  setBuilder({ collapsedBlocks: Array.from(collapsed) });
+  const fallback = findNextBlock(blockId);
+  if (!fallback || fallback === blockId) {
+    return;
+  }
+  setActiveBlock(fallback);
+  ensureWeekForBlock(fallback);
 }
 
 function isWeekCollapsed(blockId, week) {
-  return (state.builder.collapsedWeeks || []).includes(weekKeyFor(blockId, week));
+  const activeBlockId = state.builder.activeBlockId;
+  if (!activeBlockId) {
+    return (state.builder.collapsedWeeks || []).includes(weekKeyFor(blockId, week));
+  }
+  if (blockId !== activeBlockId) return true;
+  const activeWeekKey = state.builder.activeWeekKey;
+  const entries = builderWeekMap.get(blockId) || [];
+  if (!entries.length) return true;
+  const key = weekKeyFor(blockId, week);
+  if (!activeWeekKey) {
+    return key !== entries[0].key;
+  }
+  return activeWeekKey !== key;
 }
 
 function toggleWeekCollapsed(blockId, week) {
-  const key = weekKeyFor(blockId, week);
-  const collapsed = new Set(state.builder.collapsedWeeks || []);
-  if (collapsed.has(key)) {
-    collapsed.delete(key);
-  } else {
-    collapsed.add(key);
+  const normalizedWeek = week;
+  if (isWeekCollapsed(blockId, normalizedWeek)) {
+    setActiveBlock(blockId);
+    setActiveWeek(blockId, normalizedWeek);
+    ensureWeekForBlock(blockId);
+    return;
   }
-  setBuilder({ collapsedWeeks: Array.from(collapsed) });
+  const entries = builderWeekMap.get(blockId) || [];
+  const currentKey = weekKeyFor(blockId, normalizedWeek);
+  const fallback = entries.find(entry => entry.key !== currentKey);
+  if (!fallback) return;
+  setActiveWeek(blockId, fallback.week);
 }
 
 function isBlockFullySelected(block, lectures) {
@@ -817,7 +1026,15 @@ function groupByWeek(lectures) {
     map.get(week).push(lecture);
   });
   return Array.from(map.entries())
-    .sort((a, b) => a[0] - b[0])
+    .sort((a, b) => {
+      const [weekA, weekB] = [a[0], b[0]];
+      const specialA = weekA == null || weekA < 0;
+      const specialB = weekB == null || weekB < 0;
+      if (specialA && specialB) return 0;
+      if (specialA) return 1;
+      if (specialB) return -1;
+      return weekB - weekA;
+    })
     .map(([week, items]) => ({ week, items }));
 }
 

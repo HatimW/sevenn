@@ -48,6 +48,7 @@ function escapeHtml(str = '') {
 export async function openEditor(kind, onSave, existing = null) {
   let isDirty = false;
   let status;
+  let statusFadeTimer = null;
   let autoSaveTimer = null;
   const AUTOSAVE_DELAY = 2000;
 
@@ -109,7 +110,14 @@ export async function openEditor(kind, onSave, existing = null) {
 
   const markDirty = () => {
     isDirty = true;
-    if (status) status.textContent = '';
+    if (status) {
+      if (statusFadeTimer) {
+        clearTimeout(statusFadeTimer);
+        statusFadeTimer = null;
+      }
+      status.textContent = '';
+      status.classList.remove('editor-status-muted');
+    }
     queueAutoSave();
   };
 
@@ -597,9 +605,11 @@ export async function openEditor(kind, onSave, existing = null) {
       }
       return false;
     }
-    if (!silent) {
+    if (!silent && status) {
+      status.classList.remove('editor-status-muted');
       status.textContent = 'Saving…';
     }
+    const wasNew = !existing;
     const item = existing || { id: uid(), kind };
     item[titleKey] = trimmed;
     fieldMap[kind].forEach(([field]) => {
@@ -636,17 +646,41 @@ export async function openEditor(kind, onSave, existing = null) {
       await upsertItem(item);
     } catch (err) {
       console.error(err);
-      status.textContent = silent ? 'Autosave failed' : 'Failed to save.';
+      if (status) {
+        if (statusFadeTimer) {
+          clearTimeout(statusFadeTimer);
+          statusFadeTimer = null;
+        }
+        status.classList.remove('editor-status-muted');
+        status.textContent = silent ? 'Autosave failed' : 'Failed to save.';
+      }
       throw err;
     }
     existing = item;
     updateTitle();
     isDirty = false;
-    if (onSave) onSave();
+    const shouldNotify = onSave && (!silent || wasNew);
+    if (shouldNotify) onSave();
     if (closeAfter) {
       win.close('saved');
     } else {
-      status.textContent = silent ? 'Autosaved' : 'Saved';
+      if (statusFadeTimer) {
+        clearTimeout(statusFadeTimer);
+        statusFadeTimer = null;
+      }
+      if (status) {
+        if (silent) {
+          status.textContent = 'Autosaved';
+          status.classList.add('editor-status-muted');
+          statusFadeTimer = setTimeout(() => {
+            status.classList.remove('editor-status-muted');
+            statusFadeTimer = null;
+          }, 1800);
+        } else {
+          status.textContent = 'Saved';
+          status.classList.remove('editor-status-muted');
+        }
+      }
     }
     return true;
   }
