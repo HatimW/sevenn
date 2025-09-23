@@ -10,6 +10,24 @@ let keyHandler = null;
 let keyHandlerSession = null;
 let lastExamStatusMessage = '';
 
+function setTimerElement(sess, element) {
+  if (!sess) return;
+  sess.__timerElement = element || null;
+  if (element) {
+    updateTimerElement(sess);
+  }
+}
+
+function updateTimerElement(sess) {
+  if (!sess) return;
+  const el = sess.__timerElement;
+  if (!el) return;
+  const remaining = typeof sess.remainingMs === 'number'
+    ? Math.max(0, sess.remainingMs)
+    : totalExamTimeMs(sess.exam);
+  el.textContent = formatCountdown(remaining);
+}
+
 function ensureQuestionStats(sess) {
   const questionCount = sess?.exam?.questions?.length || 0;
   if (!sess) return;
@@ -333,6 +351,7 @@ function stopTimer(sess) {
       sess.remainingMs = Math.max(0, sess.remainingMs - delta);
     }
     sess.startedAt = null;
+    updateTimerElement(sess);
   }
 }
 
@@ -355,7 +374,7 @@ function ensureTimer(sess, render) {
       stopTimer(sess);
       finalizeExam(sess, render, { autoSubmit: true });
     } else {
-      render();
+      updateTimerElement(sess);
     }
   }, 1000);
   timerHandles.set(sess, handle);
@@ -1213,7 +1232,10 @@ export function renderExamRunner(root, render) {
     timerEl.className = 'exam-timer';
     const remainingMs = typeof sess.remainingMs === 'number' ? sess.remainingMs : totalExamTimeMs(sess.exam);
     timerEl.textContent = formatCountdown(remainingMs);
+    setTimerElement(sess, timerEl);
     top.appendChild(timerEl);
+  } else {
+    setTimerElement(sess, null);
   }
   main.appendChild(top);
 
