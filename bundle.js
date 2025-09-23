@@ -14231,6 +14231,20 @@ var Sevenn = (() => {
   var keyHandler = null;
   var keyHandlerSession = null;
   var lastExamStatusMessage = "";
+  function setTimerElement(sess, element) {
+    if (!sess) return;
+    sess.__timerElement = element || null;
+    if (element) {
+      updateTimerElement(sess);
+    }
+  }
+  function updateTimerElement(sess) {
+    if (!sess) return;
+    const el = sess.__timerElement;
+    if (!el) return;
+    const remaining = typeof sess.remainingMs === "number" ? Math.max(0, sess.remainingMs) : totalExamTimeMs(sess.exam);
+    el.textContent = formatCountdown(remaining);
+  }
   function ensureQuestionStats(sess) {
     const questionCount = sess?.exam?.questions?.length || 0;
     if (!sess) return;
@@ -14512,6 +14526,7 @@ var Sevenn = (() => {
         sess.remainingMs = Math.max(0, sess.remainingMs - delta);
       }
       sess.startedAt = null;
+      updateTimerElement(sess);
     }
   }
   function ensureTimer(sess, render) {
@@ -14533,7 +14548,7 @@ var Sevenn = (() => {
         stopTimer(sess);
         finalizeExam(sess, render, { autoSubmit: true });
       } else {
-        render();
+        updateTimerElement(sess);
       }
     }, 1e3);
     timerHandles.set(sess, handle);
@@ -15335,7 +15350,10 @@ var Sevenn = (() => {
       timerEl.className = "exam-timer";
       const remainingMs = typeof sess.remainingMs === "number" ? sess.remainingMs : totalExamTimeMs(sess.exam);
       timerEl.textContent = formatCountdown(remainingMs);
+      setTimerElement(sess, timerEl);
       top.appendChild(timerEl);
+    } else {
+      setTimerElement(sess, null);
     }
     main.appendChild(top);
     const stem = document.createElement("div");
