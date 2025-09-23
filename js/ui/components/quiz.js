@@ -304,6 +304,7 @@ export function renderQuiz(root, redraw) {
 
   const status = document.createElement('span');
   status.className = 'quiz-rating-status';
+  status.textContent = 'Optional: rate your confidence after answering.';
   ratingRow.appendChild(status);
 
   const ratingId = ratingKey(item, '__overall__');
@@ -493,13 +494,13 @@ export function renderQuiz(root, redraw) {
   function updateNavState() {
     const currentAnswer = session.answers[session.idx];
     const solved = Boolean(currentAnswer && currentAnswer.checked && (currentAnswer.isCorrect || currentAnswer.revealed));
-    const hasRating = !sections.length || Boolean(selectedRating);
-    nextBtn.disabled = !(solved && hasRating);
+    nextBtn.disabled = !solved;
     Array.from(options.querySelectorAll('button')).forEach(btn => {
       btn.disabled = !solved;
     });
     if (!solved) {
-      status.textContent = '';
+      status.classList.remove('is-error');
+      status.textContent = 'Optional: rate your confidence after answering.';
     } else {
       revealBtn.hidden = true;
     }

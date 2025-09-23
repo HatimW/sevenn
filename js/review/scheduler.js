@@ -4,6 +4,46 @@ import { DEFAULT_REVIEW_STEPS, REVIEW_RATINGS, RETIRE_RATING } from './constants
 import { normalizeReviewSteps } from './settings.js';
 import { SR_VERSION, defaultSectionState, normalizeSectionRecord, normalizeSrRecord } from './sr-data.js';
 
+const UNASSIGNED_LECTURE_TOKEN = '__unassigned|__none';
+
+function digestContent(value) {
+  if (value == null) return null;
+  const str = typeof value === 'string' ? value : JSON.stringify(value);
+  if (!str) return null;
+  let hash = 0;
+  for (let i = 0; i < str.length; i += 1) {
+    hash = (hash * 31 + str.charCodeAt(i)) >>> 0; // eslint-disable-line no-bitwise
+  }
+  return hash.toString(16);
+}
+
+function normalizeLectureScope(scope) {
+  if (!Array.isArray(scope) || !scope.length) return [];
+  const normalized = scope
+    .map(entry => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter(Boolean);
+  return Array.from(new Set(normalized)).sort();
+}
+
+function computeLectureScope(item) {
+  if (!item || !Array.isArray(item.lectures) || !item.lectures.length) {
+    return [UNASSIGNED_LECTURE_TOKEN];
+  }
+  const tokens = item.lectures.map(lecture => {
+    if (!lecture || typeof lecture !== 'object') return '';
+    const blockId = lecture.blockId == null ? '' : String(lecture.blockId);
+    const id = lecture.id == null ? '' : String(lecture.id);
+    return `${blockId}|${id}`.trim();
+  });
+  return normalizeLectureScope(tokens);
+}
+
+function computeSectionDigest(item, key) {
+  if (!item || !key) return null;
+  const raw = item[key];
+  return digestContent(raw);
+}
+
 let cachedDurations = null;
 
 export async function getReviewDurations() {
@@ -48,7 +88,25 @@ export function getSectionStateSnapshot(item, key) {
   if (!sr || typeof sr !== 'object') return null;
   const entry = sr.sections && typeof sr.sections === 'object' ? sr.sections[key] : null;
   if (!entry || typeof entry !== 'object') return null;
-  return normalizeSectionRecord(entry);
+  const normalized = normalizeSectionRecord(entry);
+  const digest = computeSectionDigest(item, key);
+  const scope = computeLectureScope(item);
+  const storedDigest = normalized.contentDigest;
+  const storedScope = normalizeLectureScope(normalized.lectureScope);
+  const removedLectures = storedScope.length ? storedScope.some(token => !scope.includes(token)) : false;
+  const contentChanged = storedDigest != null && digest != null && storedDigest !== digest;
+  if (contentChanged || removedLectures) {
+    const nowTs = Date.now();
+    normalized.streak = 0;
+    normalized.lastRating = null;
+    normalized.last = nowTs;
+    normalized.due = nowTs;
+    normalized.retired = false;
+  }
+  normalized.contentDigest = digest;
+  normalized.lectureScope = scope;
+  sr.sections[key] = normalized;
+  return normalized;
 }
 
 export function rateSection(item, key, rating, durations, now = Date.now()) {
@@ -61,10 +119,14 @@ export function rateSection(item, key, rating, durations, now = Date.now()) {
     section.last = now;
     section.due = Number.MAX_SAFE_INTEGER;
     section.retired = true;
+    section.contentDigest = computeSectionDigest(item, key);
+    section.lectureScope = computeLectureScope(item);
     return section;
   }
   const normalizedRating = REVIEW_RATINGS.includes(rating) ? rating : 'good';
   const section = ensureSectionState(item, key);
+  section.contentDigest = computeSectionDigest(item, key);
+  section.lectureScope = computeLectureScope(item);
   let streak = Number.isFinite(section.streak) ? section.streak : 0;
   switch (normalizedRating) {
     case 'again':

@@ -1532,7 +1532,9 @@ var Sevenn = (() => {
       lastRating: null,
       last: 0,
       due: 0,
-      retired: false
+      retired: false,
+      contentDigest: null,
+      lectureScope: []
     };
   }
   function normalizeSectionRecord(record) {
@@ -1550,6 +1552,13 @@ var Sevenn = (() => {
     base.last = sanitizeNumber(record.last, 0);
     base.due = sanitizeNumber(record.due, 0);
     base.retired = Boolean(record.retired);
+    if (typeof record.contentDigest === "string" && record.contentDigest) {
+      base.contentDigest = record.contentDigest;
+    }
+    if (Array.isArray(record.lectureScope) && record.lectureScope.length) {
+      const normalizedScope = record.lectureScope.map((entry) => typeof entry === "string" ? entry.trim() : "").filter(Boolean);
+      base.lectureScope = Array.from(new Set(normalizedScope)).sort();
+    }
     return base;
   }
   function normalizeSrRecord(sr) {
@@ -7740,6 +7749,39 @@ var Sevenn = (() => {
   }
 
   // js/review/scheduler.js
+  var UNASSIGNED_LECTURE_TOKEN = "__unassigned|__none";
+  function digestContent(value) {
+    if (value == null) return null;
+    const str = typeof value === "string" ? value : JSON.stringify(value);
+    if (!str) return null;
+    let hash = 0;
+    for (let i = 0; i < str.length; i += 1) {
+      hash = hash * 31 + str.charCodeAt(i) >>> 0;
+    }
+    return hash.toString(16);
+  }
+  function normalizeLectureScope(scope) {
+    if (!Array.isArray(scope) || !scope.length) return [];
+    const normalized2 = scope.map((entry) => typeof entry === "string" ? entry.trim() : "").filter(Boolean);
+    return Array.from(new Set(normalized2)).sort();
+  }
+  function computeLectureScope(item) {
+    if (!item || !Array.isArray(item.lectures) || !item.lectures.length) {
+      return [UNASSIGNED_LECTURE_TOKEN];
+    }
+    const tokens = item.lectures.map((lecture) => {
+      if (!lecture || typeof lecture !== "object") return "";
+      const blockId = lecture.blockId == null ? "" : String(lecture.blockId);
+      const id = lecture.id == null ? "" : String(lecture.id);
+      return `${blockId}|${id}`.trim();
+    });
+    return normalizeLectureScope(tokens);
+  }
+  function computeSectionDigest(item, key) {
+    if (!item || !key) return null;
+    const raw = item[key];
+    return digestContent(raw);
+  }
   var cachedDurations = null;
   async function getReviewDurations() {
     if (cachedDurations) return cachedDurations;
@@ -7776,7 +7818,25 @@ var Sevenn = (() => {
     if (!sr || typeof sr !== "object") return null;
     const entry = sr.sections && typeof sr.sections === "object" ? sr.sections[key] : null;
     if (!entry || typeof entry !== "object") return null;
-    return normalizeSectionRecord(entry);
+    const normalized2 = normalizeSectionRecord(entry);
+    const digest = computeSectionDigest(item, key);
+    const scope = computeLectureScope(item);
+    const storedDigest = normalized2.contentDigest;
+    const storedScope = normalizeLectureScope(normalized2.lectureScope);
+    const removedLectures = storedScope.length ? storedScope.some((token) => !scope.includes(token)) : false;
+    const contentChanged = storedDigest != null && digest != null && storedDigest !== digest;
+    if (contentChanged || removedLectures) {
+      const nowTs = Date.now();
+      normalized2.streak = 0;
+      normalized2.lastRating = null;
+      normalized2.last = nowTs;
+      normalized2.due = nowTs;
+      normalized2.retired = false;
+    }
+    normalized2.contentDigest = digest;
+    normalized2.lectureScope = scope;
+    sr.sections[key] = normalized2;
+    return normalized2;
   }
   function rateSection(item, key, rating, durations, now = Date.now()) {
     if (!item || !key) return null;
@@ -7788,10 +7848,14 @@ var Sevenn = (() => {
       section2.last = now;
       section2.due = Number.MAX_SAFE_INTEGER;
       section2.retired = true;
+      section2.contentDigest = computeSectionDigest(item, key);
+      section2.lectureScope = computeLectureScope(item);
       return section2;
     }
     const normalizedRating = REVIEW_RATINGS.includes(rating) ? rating : "good";
     const section = ensureSectionState(item, key);
+    section.contentDigest = computeSectionDigest(item, key);
+    section.lectureScope = computeLectureScope(item);
     let streak = Number.isFinite(section.streak) ? section.streak : 0;
     switch (normalizedRating) {
       case "again":
@@ -12716,6 +12780,7 @@ var Sevenn = (() => {
     ratingRow.appendChild(options);
     const status = document.createElement("span");
     status.className = "quiz-rating-status";
+    status.textContent = "Optional: rate your confidence after answering.";
     ratingRow.appendChild(status);
     const ratingId = ratingKey2(item, "__overall__");
     let selectedRating = session.ratings[ratingId] || null;
@@ -12886,13 +12951,13 @@ var Sevenn = (() => {
     function updateNavState() {
       const currentAnswer = session.answers[session.idx];
       const solved = Boolean(currentAnswer && currentAnswer.checked && (currentAnswer.isCorrect || currentAnswer.revealed));
-      const hasRating = !sections.length || Boolean(selectedRating);
-      nextBtn.disabled = !(solved && hasRating);
+      nextBtn.disabled = !solved;
       Array.from(options.querySelectorAll("button")).forEach((btn) => {
         btn.disabled = !solved;
       });
       if (!solved) {
-        status.textContent = "";
+        status.classList.remove("is-error");
+        status.textContent = "Optional: rate your confidence after answering.";
       } else {
         revealBtn.hidden = true;
       }
