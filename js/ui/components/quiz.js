@@ -88,23 +88,11 @@ function renderCompletion(root, session, redraw) {
 
 export function renderQuiz(root, redraw) {
   const session = state.quizSession;
-  if (!session) {
-    if (root?.dataset) delete root.dataset.questionIdx;
-    return;
-  }
+  if (!session) return;
   ensureSessionDefaults(session);
-
-  const hasWindow = typeof window !== 'undefined';
-  const docScroller = typeof document !== 'undefined' ? (document.scrollingElement || document.documentElement) : null;
-  const previousIdxRaw = root?.dataset?.questionIdx;
-  const previousIdx = previousIdxRaw !== undefined && previousIdxRaw !== '' && !Number.isNaN(Number(previousIdxRaw))
-    ? Number(previousIdxRaw)
-    : null;
-  const prevScrollY = hasWindow ? window.scrollY : docScroller ? docScroller.scrollTop : 0;
 
   const pool = Array.isArray(session.pool) ? session.pool : [];
   root.innerHTML = '';
-  if (root?.dataset) delete root.dataset.questionIdx;
 
   if (!pool.length) {
     const empty = document.createElement('div');
@@ -441,27 +429,6 @@ export function renderQuiz(root, redraw) {
   card.appendChild(footer);
 
   updateNavState();
-
-  if (root?.dataset) root.dataset.questionIdx = String(session.idx);
-  const shouldRestore = previousIdx === session.idx;
-  const targetY = shouldRestore ? prevScrollY : 0;
-  const canRestore = hasWindow || docScroller;
-  if (canRestore) {
-    const applyScroll = () => {
-      if (hasWindow && typeof window.scrollTo === 'function') {
-        window.scrollTo({ left: 0, top: targetY, behavior: 'auto' });
-      } else if (docScroller) {
-        docScroller.scrollTop = targetY;
-      }
-    };
-    if (hasWindow && typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(applyScroll);
-    } else if (typeof setTimeout === 'function') {
-      setTimeout(applyScroll, 0);
-    } else {
-      applyScroll();
-    }
-  }
 
   function gradeAnswer() {
     const guess = input.value.trim();
