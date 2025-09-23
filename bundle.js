@@ -1,4 +1,31 @@
-(() => {
+var Sevenn = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // js/main.js
+  var main_exports = {};
+  __export(main_exports, {
+    render: () => renderApp,
+    renderApp: () => renderApp,
+    resolveListKind: () => resolveListKind,
+    tabs: () => tabs
+  });
+
   // js/state.js
   var state = {
     tab: "Block Board",
@@ -9764,10 +9791,7 @@
     toggleIcon.className = "lecture-pass-chip-toggle-icon";
     toggleIcon.setAttribute("aria-hidden", "true");
     toggleIcon.textContent = "\u2713";
-    const toggleLabel = document.createElement("span");
-    toggleLabel.className = "lecture-pass-chip-toggle-label";
-    toggleLabel.textContent = "Done";
-    toggleButton.append(toggleIcon, toggleLabel);
+    toggleButton.append(toggleIcon);
     statusWrap.appendChild(toggleButton);
     chip.appendChild(statusWrap);
     const body = document.createElement("div");
@@ -19165,4 +19189,5 @@
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
+  return __toCommonJS(main_exports);
 })();
