@@ -80,6 +80,48 @@ function ensureScrollPositions(sess) {
   }
 }
 
+function resolveScrollContainer(root) {
+  const hasDocument = typeof document !== 'undefined';
+  if (root && typeof root.closest === 'function') {
+    const scoped = root.closest('main');
+    if (scoped) return scoped;
+  }
+  if (hasDocument) {
+    const main = document.querySelector('main');
+    if (main) return main;
+  }
+  if (typeof window !== 'undefined') return window;
+  return null;
+}
+
+function isWindowScroller(scroller) {
+  return typeof window !== 'undefined' && scroller === window;
+}
+
+function readScrollPosition(scroller) {
+  if (!scroller) return 0;
+  if (isWindowScroller(scroller)) {
+    return window.scrollY || window.pageYOffset || 0;
+  }
+  return scroller.scrollTop || 0;
+}
+
+function applyScrollPosition(scroller, value) {
+  if (!scroller) return;
+  const top = Number.isFinite(value) ? value : 0;
+  if (isWindowScroller(scroller)) {
+    if (typeof window.scrollTo === 'function') {
+      window.scrollTo({ left: 0, top, behavior: 'auto' });
+    }
+    return;
+  }
+  if (typeof scroller.scrollTo === 'function') {
+    scroller.scrollTo({ left: 0, top, behavior: 'auto' });
+  } else {
+    scroller.scrollTop = top;
+  }
+}
+
 function storeScrollPosition(sess, idx, value) {
   if (!sess || typeof idx !== 'number') return;
   ensureScrollPositions(sess);
@@ -101,8 +143,10 @@ function navigateToQuestion(sess, nextIdx, render) {
   if (!total) return;
   const clamped = Math.min(Math.max(nextIdx, 0), Math.max(0, total - 1));
   if (clamped === sess.idx) return;
-  if (typeof window !== 'undefined' && typeof sess.idx === 'number') {
-    storeScrollPosition(sess, sess.idx, window.scrollY || 0);
+  if (typeof sess.idx === 'number') {
+    const scroller = resolveScrollContainer();
+    const scrollPos = readScrollPosition(scroller);
+    storeScrollPosition(sess, sess.idx, scrollPos);
   }
   if (sess.mode === 'taking') {
     finalizeActiveQuestionTiming(sess);
@@ -1064,8 +1108,9 @@ export function renderExamRunner(root, render) {
   const hasWindow = typeof window !== 'undefined';
   const prevIdx = sess.__lastRenderedIdx;
   const prevMode = sess.__lastRenderedMode;
-  const prevScrollY = hasWindow ? window.scrollY : 0;
-  if (hasWindow) {
+  const scroller = resolveScrollContainer(root);
+  const prevScrollY = readScrollPosition(scroller);
+  if (scroller) {
     if (typeof prevIdx === 'number') {
       storeScrollPosition(sess, prevIdx, prevScrollY);
     } else if (typeof sess.idx === 'number') {
@@ -1443,11 +1488,23 @@ export function renderExamRunner(root, render) {
   const sameQuestion = prevIdx === sess.idx && prevMode === sess.mode;
   sess.__lastRenderedIdx = sess.idx;
   sess.__lastRenderedMode = sess.mode;
-  if (hasWindow && typeof window.scrollTo === 'function') {
+  const queueFrame = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
+    ? cb => window.requestAnimationFrame(cb)
+    : cb => setTimeout(cb, 0);
+  if (scroller) {
     if (sameQuestion) {
+      const targetY = typeof sess.idx === 'number'
+        ? (getStoredScroll(sess, sess.idx) ?? prevScrollY)
+        : prevScrollY;
       if (typeof sess.idx === 'number') {
-        storeScrollPosition(sess, sess.idx, prevScrollY);
+        storeScrollPosition(sess, sess.idx, targetY);
       }
+      const restore = () => {
+        if (Math.abs(readScrollPosition(scroller) - targetY) > 1) {
+          applyScrollPosition(scroller, targetY);
+        }
+      };
+      queueFrame(restore);
     } else {
       const storedScroll = getStoredScroll(sess, sess.idx);
       const targetY = storedScroll ?? 0;
@@ -1455,13 +1512,9 @@ export function renderExamRunner(root, render) {
         storeScrollPosition(sess, sess.idx, targetY);
       }
       const restore = () => {
-        window.scrollTo({ left: 0, top: targetY, behavior: 'auto' });
+        applyScrollPosition(scroller, targetY);
       };
-      if (typeof window.requestAnimationFrame === 'function') {
-        window.requestAnimationFrame(restore);
-      } else {
-        setTimeout(restore, 0);
-      }
+      queueFrame(restore);
     }
   }
 }
