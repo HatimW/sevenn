@@ -165,7 +165,8 @@ const mapState = {
   searchFeedback: null,
   searchInput: null,
   searchFeedbackEl: null,
-  paletteSearch: ''
+  paletteSearch: '',
+  nodeRadii: null
 };
 
 function normalizeMapTab(tab = {}) {
@@ -198,6 +199,36 @@ function normalizeMapTab(tab = {}) {
     normalized.filter.week = '';
   }
   return normalized;
+}
+
+function deriveItemGroupKeys(item) {
+  const groups = [];
+  const lectures = Array.isArray(item?.lectures) ? item.lectures : [];
+  if (lectures.length) {
+    lectures.forEach(lecture => {
+      const blockKey = lecture.blockId ? `block:${lecture.blockId}` : 'block:__';
+      const lectureId = lecture.id != null ? `lec:${lecture.id}` : '';
+      const lectureName = lecture.name ? `name:${lecture.name}` : '';
+      const week = Number.isFinite(lecture.week) ? `week:${lecture.week}` : '';
+      const key = [blockKey, week, lectureId || lectureName].filter(Boolean).join('|');
+      groups.push(key || blockKey);
+    });
+  } else if (Array.isArray(item?.blocks) && item.blocks.length) {
+    item.blocks.forEach(blockId => {
+      groups.push(`block-only:${blockId}`);
+    });
+  }
+  if (!groups.length) {
+    groups.push(`kind:${item?.kind || 'concept'}`);
+  }
+  return groups;
+}
+
+function getPrimaryGroupKey(item, keys = deriveItemGroupKeys(item)) {
+  if (Array.isArray(keys) && keys.length) {
+    return keys[0];
+  }
+  return `kind:${item?.kind || 'concept'}`;
 }
 
 function normalizeMapConfig(config = null) {
@@ -964,6 +995,11 @@ export async function renderMap(root) {
   const visibleItems = applyTabFilters(items, activeTab);
   mapState.visibleItems = visibleItems;
 
+  const itemGroupCache = new Map();
+  visibleItems.forEach(it => {
+    itemGroupCache.set(it.id, deriveItemGroupKeys(it));
+  });
+
   const base = 1000;
   const size = Math.max(base, visibleItems.length * 150);
   const viewport = base;
@@ -1185,6 +1221,15 @@ export async function renderMap(root) {
   const allowLegacyPositions = Boolean(activeTab && activeTab.layoutSeeded !== true);
   let layoutDirty = false;
   let legacyImported = false;
+
+  const nodeRadii = new Map();
+  visibleItems.forEach(it => {
+    const degree = linkCounts[it.id] || 0;
+    const baseRadius = minRadius + ((maxRadius - minRadius) * degree) / maxLinks;
+    nodeRadii.set(it.id, baseRadius);
+  });
+  mapState.nodeRadii = nodeRadii;
+
   visibleItems.forEach(it => {
     if (layout && layout[it.id]) {
       positions[it.id] = { ...layout[it.id] };
@@ -1208,20 +1253,137 @@ export async function renderMap(root) {
       }
       return;
     }
-    newItems.push(it);
+    const groups = itemGroupCache.get(it.id) || deriveItemGroupKeys(it);
+    const primaryGroup = getPrimaryGroupKey(it, groups);
+    newItems.push({ item: it, primaryGroup, degree: linkCounts[it.id] || 0 });
   });
 
-  newItems.sort((a, b) => (linkCounts[b.id] || 0) - (linkCounts[a.id] || 0));
-  const step = (2 * Math.PI) / Math.max(newItems.length, 1);
-  newItems.forEach((it, idx) => {
-    const angle = idx * step;
-    const degree = linkCounts[it.id] || 0;
-    const dist = 100 - (degree / maxLinks) * 50;
-    const x = center + dist * Math.cos(angle);
-    const y = center + dist * Math.sin(angle);
-    positions[it.id] = { x, y };
+  const existingGroupInfo = new Map();
+  Object.entries(positions).forEach(([id, pos]) => {
+    if (!pos) return;
+    const groups = itemGroupCache.get(id) || [];
+    groups.forEach(key => {
+      const info = existingGroupInfo.get(key) || {
+        minX: pos.x,
+        maxX: pos.x,
+        minY: pos.y,
+        maxY: pos.y,
+        count: 0
+      };
+      info.count += 1;
+      info.minX = Math.min(info.minX, pos.x);
+      info.maxX = Math.max(info.maxX, pos.x);
+      info.minY = Math.min(info.minY, pos.y);
+      info.maxY = Math.max(info.maxY, pos.y);
+      existingGroupInfo.set(key, info);
+    });
+  });
+
+  const pendingCounts = new Map();
+  newItems.forEach(entry => {
+    pendingCounts.set(entry.primaryGroup, (pendingCounts.get(entry.primaryGroup) || 0) + 1);
+  });
+
+  const clusterOrigins = new Map();
+  const seenGroups = new Set();
+  const newGroupOrder = [];
+  newItems.forEach(entry => {
+    const key = entry.primaryGroup;
+    if (existingGroupInfo.has(key)) return;
+    if (seenGroups.has(key)) return;
+    seenGroups.add(key);
+    newGroupOrder.push(key);
+  });
+
+  if (newGroupOrder.length) {
+    const clusterCols = Math.ceil(Math.sqrt(newGroupOrder.length));
+    const clusterRows = Math.ceil(newGroupOrder.length / clusterCols);
+    const clusterSpacing = 320;
+    newGroupOrder.forEach((key, index) => {
+      const col = index % clusterCols;
+      const row = Math.floor(index / clusterCols);
+      const offsetX = (col - (clusterCols - 1) / 2) * clusterSpacing;
+      const offsetY = (row - (clusterRows - 1) / 2) * clusterSpacing;
+      clusterOrigins.set(key, {
+        x: center + offsetX,
+        y: center + offsetY
+      });
+    });
+  }
+
+  const groupPlacement = new Map();
+
+  function ensureGroupPlacement(key) {
+    if (groupPlacement.has(key)) {
+      return groupPlacement.get(key);
+    }
+    const existing = existingGroupInfo.get(key);
+    const pending = pendingCounts.get(key) || 0;
+    const total = (existing?.count || 0) + pending;
+    const columns = Math.max(2, Math.ceil(Math.sqrt(Math.max(total, 1))));
+    const rows = Math.max(1, Math.ceil(Math.max(total, 1) / columns));
+    const origin = existing
+      ? {
+          x: (existing.minX + existing.maxX) / 2,
+          y: (existing.minY + existing.maxY) / 2
+        }
+      : clusterOrigins.get(key) || { x: center, y: center };
+    let spacing = 200;
+    if (existing?.count > 1) {
+      const spread = Math.max(existing.maxX - existing.minX, existing.maxY - existing.minY);
+      spacing = Math.max(160, spread / Math.max(1, existing.count - 1) + 100);
+    } else if (existing?.count === 1) {
+      spacing = 180;
+    } else if (clusterOrigins.has(key)) {
+      spacing = 220;
+    }
+    const info = { origin, columns, rows, spacing, index: existing?.count || 0 };
+    groupPlacement.set(key, info);
+    return info;
+  }
+
+  function allocateGroupPosition(key) {
+    const info = ensureGroupPlacement(key);
+    const maxAttempts = 400;
+    for (let offset = 0; offset < maxAttempts; offset += 1) {
+      const idx = info.index + offset;
+      const col = idx % info.columns;
+      const row = Math.floor(idx / info.columns);
+      const neededRows = Math.max(info.rows, row + 1);
+      const colCenter = (info.columns - 1) / 2;
+      const rowCenter = (neededRows - 1) / 2;
+      const x = info.origin.x + (col - colCenter) * info.spacing;
+      const y = info.origin.y + (row - rowCenter) * info.spacing;
+      let collision = false;
+      for (const existingId in positions) {
+        const other = positions[existingId];
+        if (!other) continue;
+        if (Math.hypot(other.x - x, other.y - y) < info.spacing * 0.7) {
+          collision = true;
+          break;
+        }
+      }
+      if (!collision) {
+        info.index = idx + 1;
+        info.rows = Math.max(info.rows, neededRows);
+        groupPlacement.set(key, info);
+        return { x, y };
+      }
+    }
+    info.index += maxAttempts;
+    groupPlacement.set(key, info);
+    return {
+      x: info.origin.x + (Math.random() - 0.5) * info.spacing,
+      y: info.origin.y + (Math.random() - 0.5) * info.spacing
+    };
+  }
+
+  newItems.sort((a, b) => b.degree - a.degree);
+  newItems.forEach(entry => {
+    const pos = allocateGroupPosition(entry.primaryGroup);
+    positions[entry.item.id] = pos;
     if (layout) {
-      layout[it.id] = { x, y };
+      layout[entry.item.id] = { ...pos };
       layoutDirty = true;
     }
   });
@@ -1295,7 +1457,10 @@ export async function renderMap(root) {
     const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     circle.setAttribute('cx', pos.x);
     circle.setAttribute('cy', pos.y);
-    const baseR = minRadius + ((maxRadius - minRadius) * (linkCounts[it.id] || 0) / maxLinks);
+    const cachedRadius = mapState.nodeRadii?.get(it.id);
+    const baseR = typeof cachedRadius === 'number'
+      ? cachedRadius
+      : minRadius + ((maxRadius - minRadius) * (linkCounts[it.id] || 0)) / maxLinks;
     circle.setAttribute('r', baseR);
     circle.dataset.radius = baseR;
     circle.setAttribute('class', 'map-node');
@@ -2397,6 +2562,9 @@ function adjustScale() {
   });
 
   svg.querySelectorAll('.map-edge').forEach(line => {
+    if (line.dataset.a && line.dataset.b) {
+      line.setAttribute('d', calcPath(line.dataset.a, line.dataset.b));
+    }
     updateLineStrokeWidth(line);
     syncLineDecoration(line);
   });
@@ -2414,31 +2582,77 @@ function pointToSegment(px, py, x1, y1, x2, y2) {
   return Math.hypot(px - projX, py - projY);
 }
 
-function calcPath(aId, bId) {
-  const positions = mapState.positions;
+function getNodeBaseRadius(id) {
+  if (mapState.nodeRadii && mapState.nodeRadii.has(id)) {
+    return mapState.nodeRadii.get(id);
+  }
+  const entry = mapState.elements?.get(id);
+  if (entry?.circle) {
+    return Number(entry.circle.dataset.radius) || 20;
+  }
+  return 20;
+}
+
+function getNodeRadius(id) {
+  const base = getNodeBaseRadius(id);
+  const scales = getCurrentScales();
+  return base * (scales.nodeScale || 1);
+}
+
+function computeTrimmedSegment(aId, bId) {
+  const positions = mapState.positions || {};
   const a = positions[aId];
   const b = positions[bId];
-  if (!a || !b) return '';
-  const x1 = a.x, y1 = a.y;
-  const x2 = b.x, y2 = b.y;
-  let cx = (x1 + x2) / 2;
-  let cy = (y1 + y2) / 2;
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const len = Math.hypot(dx, dy) || 1;
+  if (!a || !b) return null;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (!len) return null;
+  const ux = dx / len;
+  const uy = dy / len;
+  const trimA = Math.min(getNodeRadius(aId) + 6, len / 2);
+  const trimB = Math.min(getNodeRadius(bId) + 6, len / 2);
+  const startX = a.x + ux * trimA;
+  const startY = a.y + uy * trimA;
+  const endX = b.x - ux * trimB;
+  const endY = b.y - uy * trimB;
+  const trimmedLength = Math.hypot(endX - startX, endY - startY);
+  return {
+    startX,
+    startY,
+    endX,
+    endY,
+    ux,
+    uy,
+    trimmedLength: trimmedLength || 0
+  };
+}
+
+function calcPath(aId, bId) {
+  const segment = computeTrimmedSegment(aId, bId);
+  if (!segment) return '';
+  const { startX, startY, endX, endY, ux, uy } = segment;
+  const trimmedLength = segment.trimmedLength || Math.hypot(endX - startX, endY - startY) || 1;
+  let cx = (startX + endX) / 2;
+  let cy = (startY + endY) / 2;
+  const nx = -uy;
+  const ny = ux;
+  const clearance = Math.max(40, trimmedLength * 0.2);
+  const positions = mapState.positions || {};
   for (const id in positions) {
     if (id === aId || id === bId) continue;
     const p = positions[id];
-    if (pointToSegment(p.x, p.y, x1, y1, x2, y2) < 40) {
-      const nx = -dy / len;
-      const ny = dx / len;
-      const side = ((p.x - x1) * nx + (p.y - y1) * ny) > 0 ? 1 : -1;
-      cx += nx * 80 * side;
-      cy += ny * 80 * side;
+    if (!p) continue;
+    const otherRadius = getNodeRadius(id);
+    if (pointToSegment(p.x, p.y, startX, startY, endX, endY) < clearance + otherRadius * 0.5) {
+      const side = ((p.x - startX) * nx + (p.y - startY) * ny) > 0 ? 1 : -1;
+      const bump = Math.min(140, Math.max(60, trimmedLength * 0.3));
+      cx += nx * bump * side;
+      cy += ny * bump * side;
       break;
     }
   }
-  return `M${x1} ${y1} Q${cx} ${cy} ${x2} ${y2}`;
+  return `M${startX} ${startY} Q${cx} ${cy} ${endX} ${endY}`;
 }
 
 function applyLineStyle(line, info = {}) {
@@ -2574,15 +2788,14 @@ function removeLineOverlay(line) {
 
 function updateBlockedOverlay(line, overlay) {
   if (!line || !overlay) return;
-  const a = mapState.positions[line.dataset.a];
-  const b = mapState.positions[line.dataset.b];
-  if (!a || !b) return;
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
+  const segment = computeTrimmedSegment(line.dataset.a, line.dataset.b);
+  if (!segment) return;
+  const dx = segment.endX - segment.startX;
+  const dy = segment.endY - segment.startY;
   const len = Math.hypot(dx, dy);
   if (!len) return;
-  const midX = (a.x + b.x) / 2;
-  const midY = (a.y + b.y) / 2;
+  const midX = segment.startX + dx / 2;
+  const midY = segment.startY + dy / 2;
   const tx = dx / len;
   const ty = dy / len;
   const nx = -ty;
