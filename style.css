@@ -2554,8 +2554,7 @@ input[type="checkbox"]:checked::after {
   gap: var(--pad-lg);
 }
 
-.builder-filter-card,
-.builder-summary-card {
+.builder-filter-card {
   display: flex;
   flex-direction: column;
   gap: var(--pad);
@@ -2582,11 +2581,7 @@ input[type="checkbox"]:checked::after {
   color: var(--gray);
 }
 
-.builder-count {
-  font-weight: 600;
-}
-
-.builder-summary-actions {
+.builder-filter-actions {
   display: flex;
   flex-direction: column;
   gap: var(--pad-sm);
@@ -2597,6 +2592,32 @@ input[type="checkbox"]:checked::after {
   display: flex;
   flex-direction: column;
   gap: var(--pad);
+}
+
+.builder-mode-status {
+  font-size: 0.9rem;
+  color: var(--gray);
+}
+
+.builder-mode-status.is-error {
+  color: var(--pink);
+}
+
+.builder-mode-status.is-warning {
+  color: var(--yellow);
+}
+
+.builder-mode-count {
+  font-size: 0.85rem;
+  color: var(--gray);
+}
+
+.builder-mode-count.is-loading {
+  font-style: italic;
+}
+
+.builder-mode-count.is-error {
+  color: var(--pink);
 }
 
 .builder-mode-layout {

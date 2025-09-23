@@ -19,6 +19,63 @@ let lectureSource = {};
 let builderBlockOrder = [];
 let builderWeekMap = new Map();
 
+let pendingCohortUpdate = null;
+let lastAppliedSelectionSignature = null;
+
+function snapshotSelection() {
+  const types = Array.isArray(state.builder.types) ? [...state.builder.types] : [];
+  const blocks = Array.isArray(state.builder.blocks) ? [...state.builder.blocks] : [];
+  const lectures = Array.isArray(state.builder.lectures) ? [...state.builder.lectures] : [];
+  return {
+    types,
+    blocks,
+    lectures,
+    onlyFav: Boolean(state.builder.onlyFav)
+  };
+}
+
+function selectionSignature(selection) {
+  if (!selection || typeof selection !== 'object') return '';
+  const types = Array.isArray(selection.types) ? [...selection.types].sort() : [];
+  const blocks = Array.isArray(selection.blocks) ? [...selection.blocks].sort() : [];
+  const lectures = Array.isArray(selection.lectures) ? [...selection.lectures].sort() : [];
+  const onlyFav = selection.onlyFav ? 1 : 0;
+  return JSON.stringify({ types, blocks, lectures, onlyFav });
+}
+
+function ensureCohortSync({ force = false } = {}) {
+  const selection = snapshotSelection();
+  const signature = selectionSignature(selection);
+  if (!force && signature === lastAppliedSelectionSignature && Array.isArray(state.cohort)) {
+    return Promise.resolve(state.cohort);
+  }
+  if (pendingCohortUpdate && pendingCohortUpdate.signature === signature) {
+    return pendingCohortUpdate.promise;
+  }
+  const promise = gatherItems(selection)
+    .then(items => {
+      const currentSignature = selectionSignature(snapshotSelection());
+      if (currentSignature !== signature) {
+        return ensureCohortSync({ force: true });
+      }
+      setCohort(items);
+      resetBlockMode();
+      lastAppliedSelectionSignature = signature;
+      return items;
+    })
+    .catch(err => {
+      console.warn('Failed to assemble study cohort', err);
+      throw err;
+    })
+    .finally(() => {
+      if (pendingCohortUpdate && pendingCohortUpdate.signature === signature) {
+        pendingCohortUpdate = null;
+      }
+    });
+  pendingCohortUpdate = { promise, signature };
+  return promise;
+}
+
 function setLectureSource(map) {
   lectureSource = {};
   for (const [blockId, list] of Object.entries(map || {})) {
@@ -46,8 +103,13 @@ function collectReviewCount(items) {
 }
 
 
-function notifyBuilderChanged() {
+function notifyBuilderChanged({ selectionChanged = false } = {}) {
   removeAllStudySessions().catch(err => console.warn('Failed to clear saved sessions', err));
+  if (selectionChanged) {
+    Promise.resolve()
+      .then(() => ensureCohortSync({ force: true }))
+      .catch(err => console.warn('Failed to refresh study selection', err));
+  }
 }
 
 export async function renderBuilder(root, redraw) {
@@ -454,7 +516,6 @@ function renderControls(rerender, redraw) {
   aside.className = 'builder-controls';
 
   aside.appendChild(renderFilterCard(rerender));
-  aside.appendChild(renderSummaryCard(rerender, redraw));
   aside.appendChild(renderModeCard(rerender, redraw));
   aside.appendChild(renderReviewCard(redraw));
 
@@ -489,21 +550,10 @@ function renderFilterCard(rerender) {
 
   const favToggle = createPill(state.builder.onlyFav, 'Only favorites', () => {
     setBuilder({ onlyFav: !state.builder.onlyFav });
-    notifyBuilderChanged();
+    notifyBuilderChanged({ selectionChanged: true });
     rerender();
   }, 'small outline');
   card.appendChild(favToggle);
-
-  return card;
-}
-
-function renderSummaryCard(rerender, redraw) {
-  const card = document.createElement('div');
-  card.className = 'card builder-summary-card';
-
-  const title = document.createElement('h3');
-  title.textContent = 'Study set';
-  card.appendChild(title);
 
   const selectionMeta = document.createElement('div');
   selectionMeta.className = 'builder-selection-meta';
@@ -515,24 +565,8 @@ function renderSummaryCard(rerender, redraw) {
   `;
   card.appendChild(selectionMeta);
 
-  const count = document.createElement('div');
-  count.className = 'builder-count';
-  count.textContent = `Set size: ${state.cohort.length}`;
-  card.appendChild(count);
-
   const actions = document.createElement('div');
-  actions.className = 'builder-summary-actions';
-
-  const buildBtn = document.createElement('button');
-  buildBtn.type = 'button';
-  buildBtn.className = 'btn';
-  buildBtn.textContent = 'Build set';
-  buildBtn.addEventListener('click', async () => {
-    await buildSet(buildBtn, count, rerender);
-    await removeAllStudySessions().catch(err => console.warn('Failed to clear saved sessions', err));
-    redraw();
-  });
-  actions.appendChild(buildBtn);
+  actions.className = 'builder-filter-actions';
 
   const clearBtn = document.createElement('button');
   clearBtn.type = 'button';
@@ -541,12 +575,13 @@ function renderSummaryCard(rerender, redraw) {
   clearBtn.disabled = !hasAnySelection();
   clearBtn.addEventListener('click', () => {
     setBuilder({ blocks: [], weeks: [], lectures: [] });
-    notifyBuilderChanged();
+    notifyBuilderChanged({ selectionChanged: true });
     rerender();
   });
   actions.appendChild(clearBtn);
 
   card.appendChild(actions);
+
   return card;
 }
 
@@ -560,31 +595,15 @@ function renderModeCard(rerender, redraw) {
 
   const layout = document.createElement('div');
   layout.className = 'builder-mode-layout';
-
-  const controls = document.createElement('div');
-  controls.className = 'builder-mode-controls';
-
-  const status = document.createElement('div');
-  status.className = 'builder-mode-status';
-  controls.appendChild(status);
-
-  const actions = document.createElement('div');
-  actions.className = 'builder-mode-actions';
-
-  const startBtn = document.createElement('button');
-  startBtn.type = 'button';
-  startBtn.className = 'btn builder-start-btn';
-
-  const resumeBtn = document.createElement('button');
-  resumeBtn.type = 'button';
-  resumeBtn.className = 'btn builder-resume-btn';
-  resumeBtn.textContent = 'Resume';
-
-  const modes = ['Flashcards', 'Quiz', 'Blocks'];
-  const selected = state.study?.selectedMode || 'Flashcards';
+  card.appendChild(layout);
 
   const modeColumn = document.createElement('div');
   modeColumn.className = 'builder-mode-option-column';
+  layout.appendChild(modeColumn);
+
+  const controls = document.createElement('div');
+  controls.className = 'builder-mode-controls';
+  layout.appendChild(controls);
 
   const modeLabel = document.createElement('div');
   modeLabel.className = 'builder-mode-options-title';
@@ -593,6 +612,34 @@ function renderModeCard(rerender, redraw) {
 
   const modeRow = document.createElement('div');
   modeRow.className = 'builder-mode-options';
+  modeColumn.appendChild(modeRow);
+
+  const status = document.createElement('div');
+  status.className = 'builder-mode-status';
+  controls.appendChild(status);
+
+  const countInfo = document.createElement('div');
+  countInfo.className = 'builder-mode-count';
+  controls.appendChild(countInfo);
+
+  const actions = document.createElement('div');
+  actions.className = 'builder-mode-actions';
+  controls.appendChild(actions);
+
+  const startBtn = document.createElement('button');
+  startBtn.type = 'button';
+  startBtn.className = 'btn builder-start-btn';
+  startBtn.textContent = 'Start';
+  actions.appendChild(startBtn);
+
+  const resumeBtn = document.createElement('button');
+  resumeBtn.type = 'button';
+  resumeBtn.className = 'btn builder-resume-btn';
+  resumeBtn.textContent = 'Resume';
+  actions.appendChild(resumeBtn);
+
+  const modes = ['Flashcards', 'Quiz', 'Blocks'];
+  const selected = state.study?.selectedMode || 'Flashcards';
   modes.forEach(mode => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -609,67 +656,142 @@ function renderModeCard(rerender, redraw) {
     });
     modeRow.appendChild(btn);
   });
-  modeColumn.appendChild(modeRow);
 
   const storageKey = MODE_KEY[selected] || null;
   const savedEntry = storageKey ? getStudySessionEntry(storageKey) : null;
   const hasSaved = !!(savedEntry && savedEntry.session);
-  const cohort = Array.isArray(state.cohort) ? state.cohort : [];
-  const hasCohort = cohort.length > 0;
-  const canStart = selected === 'Blocks' ? hasCohort : hasCohort;
-  const labelTitle = selected.toLowerCase();
-
-  startBtn.textContent = 'Start';
-  startBtn.disabled = !canStart;
-  startBtn.classList.toggle('is-ready', canStart);
-
+  const savedCount = hasSaved && Array.isArray(savedEntry.cohort) ? savedEntry.cohort.length : 0;
   resumeBtn.disabled = !hasSaved;
   resumeBtn.classList.toggle('is-ready', hasSaved);
 
-  if (hasSaved) {
-    const count = Array.isArray(savedEntry?.cohort) ? savedEntry.cohort.length : 0;
-    status.textContent = `Saved ${labelTitle} session${count ? ` • ${count} cards` : ''}`;
-  } else if (!hasCohort && selected !== 'Blocks') {
-    status.textContent = 'Build a study set to enable this mode.';
-  } else if (selected === 'Blocks' && !hasCohort) {
-    status.textContent = 'Assemble a study set to open Blocks mode.';
-  } else {
-    status.textContent = `Ready to start ${labelTitle}.`;
-  }
-
+  const labelTitle = selected.toLowerCase();
   const handleError = (err) => console.warn('Failed to update study session state', err);
 
-  startBtn.addEventListener('click', async () => {
-    if (!canStart) return;
-    setStudySelectedMode(selected);
-    const key = MODE_KEY[selected];
+  let latestCount = Array.isArray(state.cohort) ? state.cohort.length : 0;
 
-    if (selected === 'Blocks') {
-      if (key) {
-        await removeStudySession(key).catch(handleError);
-      }
-      resetBlockMode();
-      setSubtab('Study', 'Blocks');
-      setTab('Block Board');
-      redraw();
+  const updateStatus = (count = latestCount, { error = false } = {}) => {
+    status.classList.remove('is-error', 'is-warning');
+    if (error) {
+      status.classList.add('is-error');
+      status.textContent = 'Unable to load selected cards.';
       return;
     }
-
-    if (!key) return;
-
-    await removeStudySession(key).catch(handleError);
-    if (!cohort.length) return;
-
-    if (selected === 'Flashcards') {
-      setFlashSession({ idx: 0, pool: cohort, ratings: {}, mode: 'study' });
-    } else if (selected === 'Quiz') {
-      setQuizSession({ idx: 0, score: 0, pool: cohort });
+    if (hasSaved) {
+      status.textContent = `Saved ${labelTitle} session${savedCount ? ` • ${savedCount} cards` : ''}`;
+      return;
     }
-    setSubtab('Study', 'Builder');
-    setTab('Study');
-    redraw();
-  });
+    if (!count) {
+      status.textContent = selected === 'Blocks'
+        ? 'Select study cards to open Blocks mode.'
+        : 'Choose lectures or filters to add study cards.';
+      return;
+    }
+    status.textContent = `Ready to start ${labelTitle}.`;
+  };
 
+  const updateCountDisplay = (count, { pending = false, error = false } = {}) => {
+    latestCount = count;
+    countInfo.classList.remove('is-error', 'is-loading');
+    if (error) {
+      countInfo.classList.add('is-error');
+      countInfo.textContent = 'Unable to load selected cards';
+      startBtn.disabled = true;
+      startBtn.classList.remove('is-ready');
+      updateStatus(count, { error: true });
+      return;
+    }
+    if (pending) {
+      countInfo.classList.add('is-loading');
+      countInfo.textContent = 'Updating selection…';
+      startBtn.disabled = true;
+      startBtn.classList.remove('is-ready');
+      if (!hasSaved) {
+        status.textContent = 'Updating selection…';
+        status.classList.remove('is-error', 'is-warning');
+      }
+      return;
+    }
+    const ready = count > 0;
+    countInfo.textContent = ready ? `${count} card${count === 1 ? '' : 's'} selected` : 'No cards selected';
+    startBtn.disabled = !ready;
+    startBtn.classList.toggle('is-ready', ready);
+    updateStatus(count);
+  };
+
+  const selection = snapshotSelection();
+  const signature = selectionSignature(selection);
+  const needsSync = signature !== lastAppliedSelectionSignature;
+  if (!latestCount && needsSync) {
+    updateCountDisplay(latestCount, { pending: true });
+  } else {
+    updateCountDisplay(latestCount);
+  }
+
+  ensureCohortSync({ force: needsSync })
+    .then(items => {
+      const currentSignature = selectionSignature(snapshotSelection());
+      if (currentSignature === signature) {
+        const count = Array.isArray(items) ? items.length : 0;
+        updateCountDisplay(count);
+      } else {
+        const currentCount = Array.isArray(state.cohort) ? state.cohort.length : 0;
+        updateCountDisplay(currentCount);
+      }
+    })
+    .catch(() => {
+      const fallbackCount = Array.isArray(state.cohort) ? state.cohort.length : 0;
+      updateCountDisplay(fallbackCount, { error: true });
+    });
+
+  startBtn.addEventListener('click', async () => {
+    if (startBtn.disabled) return;
+    const original = startBtn.textContent;
+    startBtn.disabled = true;
+    startBtn.textContent = 'Preparing…';
+    status.classList.remove('is-error', 'is-warning');
+    status.textContent = `Preparing ${labelTitle}…`;
+    try {
+      const pool = await ensureCohortSync({ force: true });
+      const cohortItems = Array.isArray(pool) ? pool : (Array.isArray(state.cohort) ? state.cohort : []);
+      if (!cohortItems.length) {
+        updateCountDisplay(0);
+        status.classList.add('is-warning');
+        status.textContent = 'No cards selected. Adjust the filters above to add cards.';
+        return;
+      }
+      setStudySelectedMode(selected);
+      const key = MODE_KEY[selected];
+      if (selected === 'Blocks') {
+        if (key) {
+          await removeStudySession(key).catch(handleError);
+        }
+        resetBlockMode();
+        setSubtab('Study', 'Blocks');
+        setTab('Block Board');
+        redraw();
+        return;
+      }
+      if (!key) return;
+      await removeStudySession(key).catch(handleError);
+      if (selected === 'Flashcards') {
+        setFlashSession({ idx: 0, pool: cohortItems, ratings: {}, mode: 'study' });
+      } else if (selected === 'Quiz') {
+        setQuizSession({ idx: 0, score: 0, pool: cohortItems });
+      }
+      setSubtab('Study', 'Builder');
+      setTab('Study');
+      redraw();
+    } catch (err) {
+      handleError(err);
+      status.classList.add('is-error');
+      status.textContent = 'Unable to start. Please try again.';
+    } finally {
+      startBtn.textContent = original;
+      const hasCards = Array.isArray(state.cohort) && state.cohort.length > 0;
+      startBtn.disabled = !hasCards;
+      startBtn.classList.toggle('is-ready', hasCards);
+    }
+  });
 
   resumeBtn.addEventListener('click', async () => {
     if (!hasSaved || !storageKey || !savedEntry) return;
@@ -687,8 +809,6 @@ function renderModeCard(rerender, redraw) {
       redraw();
       return;
     }
-
-
     if (selected === 'Flashcards') {
       setFlashSession(savedEntry.session);
     } else if (selected === 'Quiz') {
@@ -699,16 +819,6 @@ function renderModeCard(rerender, redraw) {
     redraw();
   });
 
-
-  actions.appendChild(startBtn);
-  actions.appendChild(resumeBtn);
-
-  controls.appendChild(actions);
-
-  layout.appendChild(modeColumn);
-  layout.appendChild(controls);
-
-  card.appendChild(layout);
   return card;
 }
 
@@ -790,42 +900,40 @@ function renderReviewCard(redraw) {
 }
 
 
-async function buildSet(button, countEl, rerender) {
-  const original = button.textContent;
-  button.disabled = true;
-  button.textContent = 'Building…';
-  try {
-    const items = await gatherItems();
-    setCohort(items);
-    resetBlockMode();
-    countEl.textContent = `Set size: ${items.length}`;
-  } finally {
-    button.disabled = false;
-    button.textContent = original;
-  }
-  rerender();
-}
-
-async function gatherItems() {
-  let items = [];
-  for (const kind of state.builder.types) {
-    const byKind = await listItemsByKind(kind);
-    items = items.concat(byKind);
-  }
-  return items.filter(item => {
-    if (state.builder.onlyFav && !item.favorite) return false;
-    if (state.builder.blocks.length) {
-      const wantUnlabeled = state.builder.blocks.includes('__unlabeled');
-      const hasBlockMatch = item.blocks?.some(b => state.builder.blocks.includes(b));
+async function gatherItems(selection = snapshotSelection()) {
+  const types = Array.isArray(selection.types) && selection.types.length ? selection.types : [];
+  if (!types.length) return [];
+  const results = await Promise.all(types.map(async kind => {
+    try {
+      const list = await listItemsByKind(kind);
+      return Array.isArray(list) ? list : [];
+    } catch (err) {
+      console.warn('Failed to load cards for kind', kind, err);
+      return [];
+    }
+  }));
+  const combined = results.flat();
+  const blockSet = new Set(Array.isArray(selection.blocks) ? selection.blocks : []);
+  const lectureSet = new Set(Array.isArray(selection.lectures) ? selection.lectures : []);
+  const wantUnlabeled = blockSet.has('__unlabeled');
+  return combined.filter(item => {
+    if (selection.onlyFav && !item.favorite) return false;
+    if (blockSet.size) {
+      const blocks = Array.isArray(item.blocks) ? item.blocks : [];
+      const hasBlockMatch = blocks.some(b => blockSet.has(b));
       if (!hasBlockMatch) {
-        const isUnlabeled = !item.blocks || !item.blocks.length;
+        const isUnlabeled = !blocks.length;
         if (!(wantUnlabeled && isUnlabeled)) return false;
       }
     }
-    if (state.builder.lectures.length) {
-      const ok = item.lectures?.some(lecture => {
-        const key = lectureKeyFor(lecture.blockId, lecture.id);
-        return state.builder.lectures.includes(key);
+    if (lectureSet.size) {
+      const lectures = Array.isArray(item.lectures) ? item.lectures : [];
+      const ok = lectures.some(lecture => {
+        const blockId = lecture?.blockId;
+        const lectureId = lecture?.id ?? lecture?.lectureId;
+        if (blockId == null || lectureId == null) return false;
+        const key = lectureKeyFor(blockId, lectureId);
+        return lectureSet.has(key);
       });
       if (!ok) return false;
     }
@@ -850,12 +958,12 @@ function selectEntireBlock(block) {
 
   setActiveBlock(blockId);
   ensureWeekForBlock(blockId);
-  notifyBuilderChanged();
   setBuilder({
     blocks: Array.from(blockSet),
     lectures: Array.from(lectureSet),
     weeks: []
   });
+  notifyBuilderChanged({ selectionChanged: true });
 }
 
 function clearBlock(blockId) {
@@ -867,12 +975,12 @@ function clearBlock(blockId) {
   blockSet.delete(blockId);
   setActiveBlock(blockId);
   ensureWeekForBlock(blockId);
-  notifyBuilderChanged();
   setBuilder({
     blocks: Array.from(blockSet),
     lectures: Array.from(lectureSet),
     weeks: []
   });
+  notifyBuilderChanged({ selectionChanged: true });
 }
 
 function selectWeek(block, week) {
@@ -888,12 +996,12 @@ function selectWeek(block, week) {
   syncBlockWithLectureSelection(blockSet, lectureSet, block);
   setActiveBlock(blockId);
   setActiveWeek(blockId, week);
-  notifyBuilderChanged();
   setBuilder({
     lectures: Array.from(lectureSet),
     blocks: Array.from(blockSet),
     weeks: []
   });
+  notifyBuilderChanged({ selectionChanged: true });
 }
 
 function clearWeek(block, week) {
@@ -909,12 +1017,12 @@ function clearWeek(block, week) {
   syncBlockWithLectureSelection(blockSet, lectureSet, block);
   setActiveBlock(blockId);
   setActiveWeek(blockId, week);
-  notifyBuilderChanged();
   setBuilder({
     lectures: Array.from(lectureSet),
     blocks: Array.from(blockSet),
     weeks: []
   });
+  notifyBuilderChanged({ selectionChanged: true });
 }
 
 function toggleLecture(block, lecture) {
@@ -929,19 +1037,19 @@ function toggleLecture(block, lecture) {
   syncBlockWithLectureSelection(blockSet, lectureSet, block);
   setActiveBlock(block.blockId);
   setActiveWeek(block.blockId, lecture.week != null ? lecture.week : -1);
-  notifyBuilderChanged();
   setBuilder({
     lectures: Array.from(lectureSet),
     blocks: Array.from(blockSet),
     weeks: []
   });
+  notifyBuilderChanged({ selectionChanged: true });
 }
 
 function toggleType(type) {
   const types = new Set(state.builder.types);
   if (types.has(type)) types.delete(type); else types.add(type);
-  notifyBuilderChanged();
   setBuilder({ types: Array.from(types) });
+  notifyBuilderChanged({ selectionChanged: true });
 }
 
 function isBlockCollapsed(blockId) {

@@ -108,7 +108,7 @@ export function renderQuiz(root, redraw) {
 
   if (!pool.length) {
     const empty = document.createElement('div');
-    empty.textContent = 'No questions available. Build a study set to begin.';
+    empty.textContent = 'No questions available. Select study cards to begin.';
     root.appendChild(empty);
     return;
   }
