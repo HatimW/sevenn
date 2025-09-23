@@ -8361,43 +8361,84 @@ body.map-toolbox-dragging {
   padding: 0.2rem 0 1rem;
 }
 
-.lectures-week-table {
+.lectures-week-list {
+  display: flex;
+  flex-direction: column;
   width: 100%;
-  border-collapse: collapse;
-  font-size: 0.88rem;
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: rgba(8, 12, 22, 0.78);
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.55);
-  table-layout: fixed;
 }
 
-.lectures-week-table th,
-.lectures-week-table td {
-  padding: 0.65rem 0.95rem;
+.lecture-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.1fr) minmax(0, 2fr) minmax(130px, 0.7fr);
+  gap: 1rem;
+  align-items: stretch;
+  padding: 0.9rem 1rem;
   border-bottom: 1px solid color-mix(in srgb, var(--surface-3) 88%, transparent);
-  vertical-align: top;
+  font-size: 0.9rem;
+  background: rgba(8, 12, 22, 0.78);
 }
 
-.lectures-week-table thead th {
-  border-bottom: 1px solid color-mix(in srgb, var(--surface-3) 94%, transparent);
-  background: color-mix(in srgb, rgba(11, 18, 30, 0.9) 82%, rgba(45, 64, 89, 0.4));
-  backdrop-filter: blur(10px);
-}
-
-.lectures-week-table tbody tr:last-child td {
+.lecture-row:last-child {
   border-bottom: none;
 }
 
-.lectures-week-table thead th {
+.lecture-row:not(.lecture-row-header):hover {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.lecture-row-header {
+  padding: 0.75rem 1rem;
+  background: color-mix(in srgb, rgba(11, 18, 30, 0.9) 82%, rgba(45, 64, 89, 0.4));
+  backdrop-filter: blur(10px);
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: color-mix(in srgb, var(--text-muted) 80%, white 12%);
+  font-weight: 600;
 }
 
-.lectures-week-table tbody tr:hover {
-  background: rgba(148, 163, 184, 0.08);
+.lecture-row-header .lecture-col {
+  display: flex;
+  align-items: center;
+}
+
+.lecture-row-header:hover {
+  background: color-mix(in srgb, rgba(11, 18, 30, 0.9) 82%, rgba(45, 64, 89, 0.4));
+}
+
+.lecture-col {
+  min-width: 0;
+}
+
+.lecture-col-lecture {
+  display: flex;
+}
+
+.lecture-col-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.lecture-row-header .lecture-col-actions {
+  text-align: right;
+}
+
+@media (max-width: 1080px) {
+  .lecture-row {
+    grid-template-columns: minmax(200px, 1fr) minmax(0, 1.8fr) minmax(120px, 0.65fr);
+  }
+}
+
+@media (max-width: 860px) {
+  .lecture-row {
+    grid-template-columns: minmax(180px, 1fr) minmax(0, 1.6fr) minmax(110px, 0.6fr);
+    gap: 0.75rem;
+  }
 }
 
 .lecture-overview {
@@ -8499,28 +8540,9 @@ body.map-toolbox-dragging {
   color: color-mix(in srgb, var(--text-muted) 82%, white 10%);
 }
 
-.lectures-col-passes {
-  width: 55%;
-}
-
-.lectures-col-actions {
-  width: 12%;
-  text-align: right;
-}
-
-.lectures-week-table .lectures-col-lecture,
-.lectures-week-table td.lecture-overview {
-  width: 33%;
-}
-
-.lectures-week-table .lectures-col-passes,
-.lectures-week-table td.lecture-passes-cell {
-  width: 45%;
-}
-
-.lectures-week-table .lectures-col-actions,
-.lectures-week-table td.lecture-actions {
-  width: 22%;
+.lecture-col-passes {
+  display: flex;
+  flex-direction: column;
 }
 
 .lecture-passes-cell {
@@ -8553,6 +8575,7 @@ body.map-toolbox-dragging {
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 0.5rem;
+  align-items: center;
 }
 
 .lecture-actions .btn {
@@ -8609,78 +8632,76 @@ body.map-toolbox-dragging {
   min-width: 0;
 }
 
-.lecture-pass-chip-check {
-  position: relative;
+.lecture-pass-chip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.38rem 0.9rem;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--chip-accent) 68%, rgba(148, 163, 184, 0.4));
+  background: color-mix(in srgb, var(--chip-accent) 28%, rgba(8, 14, 24, 0.92));
+  color: color-mix(in srgb, #e2e8f0 80%, rgba(148, 163, 184, 0.45));
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.lecture-pass-chip-toggle-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 1.4em;
+  height: 1.4em;
   border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--chip-accent) 72%, rgba(255, 255, 255, 0.22));
-  background: color-mix(in srgb, var(--chip-accent) 30%, rgba(8, 14, 24, 0.92));
-  cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
-}
-
-.lecture-pass-chip-checkbox {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.lecture-pass-chip-checkmark {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  font-size: 0.75rem;
-  font-weight: 700;
+  border: 2px solid color-mix(in srgb, var(--chip-accent) 72%, rgba(148, 163, 184, 0.5));
+  background: rgba(8, 14, 24, 0.88);
   color: transparent;
-  background: transparent;
-  overflow: hidden;
-  transition: background 0.25s ease, box-shadow 0.25s ease;
+  font-size: 0.9em;
+  font-weight: 700;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 
-.lecture-pass-chip-checkmark::after {
-  content: '';
-  position: absolute;
-
-  inset: 6px;
-
-  border-radius: 50%;
-  background: transparent;
-  opacity: 0;
-  transform: scale(0.25);
-
-  transition: opacity 0.25s ease, transform 0.25s ease, background 0.25s ease, inset 0.25s ease;
-
+.lecture-pass-chip-toggle-label {
+  pointer-events: none;
 }
 
-.lecture-pass-chip-check:hover {
-  background: color-mix(in srgb, var(--chip-accent) 38%, rgba(8, 14, 24, 0.88));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--chip-accent) 42%, transparent);
+.lecture-pass-chip-toggle:hover:not(:disabled),
+.lecture-pass-chip-toggle:focus-visible {
+  border-color: color-mix(in srgb, var(--chip-accent) 80%, rgba(148, 163, 184, 0.4));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--chip-accent) 45%, transparent);
 }
 
-.lecture-pass-chip-checkbox:focus-visible + .lecture-pass-chip-checkmark {
+.lecture-pass-chip-toggle:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--chip-accent) 55%, transparent);
-  outline-offset: 2px;
+  outline-offset: 3px;
 }
 
-.lecture-pass-chip-checkbox:checked + .lecture-pass-chip-checkmark {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--chip-accent) 82%, white 16%), color-mix(in srgb, var(--chip-accent) 65%, rgba(6, 15, 28, 0.25)));
-  box-shadow: inset 0 0 0 2px rgba(6, 12, 22, 0.55), 0 10px 22px color-mix(in srgb, var(--chip-accent) 38%, transparent);
+.lecture-pass-chip-toggle.is-active,
+.lecture-pass-chip-toggle[aria-pressed='true'] {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--chip-accent) 86%, white 20%),
+    color-mix(in srgb, var(--chip-accent) 68%, rgba(6, 12, 22, 0.22))
+  );
+  color: color-mix(in srgb, #0b1220 65%, white 30%);
+  border-color: color-mix(in srgb, var(--chip-accent) 82%, rgba(148, 163, 184, 0.55));
+  box-shadow: inset 0 0 0 1px rgba(6, 12, 22, 0.45), 0 12px 24px color-mix(in srgb, var(--chip-accent) 38%, transparent);
 }
 
-.lecture-pass-chip-checkbox:checked + .lecture-pass-chip-checkmark::after {
-  inset: 3px;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--chip-accent) 90%, white 20%), color-mix(in srgb, var(--chip-accent) 68%, rgba(6, 12, 22, 0.2)));
-  opacity: 1;
-  transform: scale(1);
+.lecture-pass-chip-toggle.is-active .lecture-pass-chip-toggle-icon,
+.lecture-pass-chip-toggle[aria-pressed='true'] .lecture-pass-chip-toggle-icon {
+  background: color-mix(in srgb, #0b1220 55%, white 25%);
+  color: color-mix(in srgb, var(--chip-accent) 85%, white 20%);
+  border-color: color-mix(in srgb, var(--chip-accent) 86%, rgba(148, 163, 184, 0.45));
+}
+
+.lecture-pass-chip-toggle:disabled {
+  opacity: 0.6;
+  cursor: wait;
+  box-shadow: none;
 }
 
 .lecture-pass-chip-header {
@@ -8744,22 +8765,23 @@ body.map-toolbox-dragging {
   background: rgba(148, 163, 184, 0.22);
   color: rgba(15, 23, 42, 0.8);
 }
-
-.lecture-pass-chip.is-complete .lecture-pass-chip-check {
-  background: color-mix(in srgb, var(--chip-accent) 28%, rgba(12, 19, 30, 0.88));
-  border-color: color-mix(in srgb, var(--chip-accent) 54%, rgba(148, 163, 184, 0.26));
+.lecture-pass-chip.is-complete .lecture-pass-chip-toggle,
+.lecture-pass-chip.is-complete .lecture-pass-chip-toggle.is-active,
+.lecture-pass-chip.is-complete .lecture-pass-chip-toggle[aria-pressed='true'] {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--chip-accent) 86%, white 18%),
+    color-mix(in srgb, var(--chip-accent) 68%, rgba(6, 12, 22, 0.24))
+  );
+  color: color-mix(in srgb, #0b1220 65%, white 30%);
+  border-color: color-mix(in srgb, var(--chip-accent) 82%, rgba(148, 163, 184, 0.5));
+  box-shadow: inset 0 0 0 1px rgba(6, 12, 22, 0.45), 0 12px 24px color-mix(in srgb, var(--chip-accent) 32%, transparent);
 }
 
-.lecture-pass-chip.is-complete .lecture-pass-chip-checkmark {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--chip-accent) 82%, white 16%), color-mix(in srgb, var(--chip-accent) 65%, rgba(6, 15, 28, 0.25)));
-  box-shadow: inset 0 0 0 2px rgba(6, 12, 22, 0.55), 0 10px 22px color-mix(in srgb, var(--chip-accent) 38%, transparent);
-}
-
-.lecture-pass-chip.is-complete .lecture-pass-chip-checkmark::after {
-  inset: 3px;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--chip-accent) 90%, white 20%), color-mix(in srgb, var(--chip-accent) 68%, rgba(6, 12, 22, 0.2)));
-  opacity: 1;
-  transform: scale(1);
+.lecture-pass-chip.is-complete .lecture-pass-chip-toggle-icon {
+  background: color-mix(in srgb, #0b1220 55%, white 25%);
+  color: color-mix(in srgb, var(--chip-accent) 85%, white 20%);
+  border-color: color-mix(in srgb, var(--chip-accent) 86%, rgba(148, 163, 184, 0.45));
 }
 
 .lecture-pass-chip.is-overdue {
@@ -8769,6 +8791,10 @@ body.map-toolbox-dragging {
 .lecture-pass-chip.is-pending {
   opacity: 0.6;
   pointer-events: none;
+}
+
+.lecture-pass-chip.is-pending .lecture-pass-chip-toggle {
+  cursor: wait;
 }
 
 .lecture-pass-chip:hover:not(.is-pending),
