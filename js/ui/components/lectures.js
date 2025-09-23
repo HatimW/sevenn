@@ -806,15 +806,104 @@ function labelForWeekKey(weekKey) {
   return formatWeekLabel(weekKey);
 }
 
-function sortLecturesForDisplay(lectures) {
-  return (Array.isArray(lectures) ? lectures : []).slice().sort((a, b) => {
-    const posA = Number(a?.position);
-    const posB = Number(b?.position);
-    const posAValid = Number.isFinite(posA);
-    const posBValid = Number.isFinite(posB);
-    if (posAValid && posBValid && posA !== posB) return posA - posB;
-    if (posAValid && !posBValid) return -1;
-    if (!posAValid && posBValid) return 1;
+const LECTURE_SORT_FIELDS = ['position', 'created', 'nextDue'];
+const DEFAULT_LECTURE_SORT = { field: 'position', direction: 'asc' };
+
+function normalizeLectureSort(value) {
+  if (!value) return { ...DEFAULT_LECTURE_SORT };
+  let field = DEFAULT_LECTURE_SORT.field;
+  let direction = DEFAULT_LECTURE_SORT.direction;
+  if (typeof value === 'string') {
+    const parts = value.split('-');
+    if (parts.length === 1) {
+      field = parts[0];
+    } else if (parts.length >= 2) {
+      [field, direction] = parts;
+    }
+  } else if (typeof value === 'object') {
+    if (typeof value.field === 'string') field = value.field;
+    if (value.direction === 'asc' || value.direction === 'desc') direction = value.direction;
+  }
+  if (!LECTURE_SORT_FIELDS.includes(field)) {
+    field = DEFAULT_LECTURE_SORT.field;
+  }
+  direction = direction === 'desc' ? 'desc' : 'asc';
+  return { field, direction };
+}
+
+function formatLectureSortValue(sort) {
+  const normalized = normalizeLectureSort(sort);
+  return `${normalized.field}-${normalized.direction}`;
+}
+
+function describeSortDirectionLabel(field, direction) {
+  if (field === 'created') {
+    return direction === 'desc' ? 'Newest first' : 'Oldest first';
+  }
+  if (field === 'nextDue') {
+    return direction === 'asc' ? 'Soonest due' : 'Latest due';
+  }
+  return direction === 'desc' ? 'High → Low' : 'Low → High';
+}
+
+function describeSortDirectionAria(field, direction) {
+  if (field === 'created') {
+    return `Toggle sort order (currently ${direction === 'desc' ? 'newest first' : 'oldest first'})`;
+  }
+  if (field === 'nextDue') {
+    return `Toggle sort order (currently ${direction === 'asc' ? 'soonest due first' : 'latest due first'})`;
+  }
+  return `Toggle sort order (currently ${direction === 'asc' ? 'ascending' : 'descending'})`;
+}
+
+function sortLecturesForDisplay(lectures, sort) {
+  const { field, direction } = normalizeLectureSort(sort);
+  const multiplier = direction === 'desc' ? -1 : 1;
+  const list = Array.isArray(lectures) ? lectures.slice() : [];
+  return list.sort((a, b) => {
+    let comparison = 0;
+    if (field === 'created') {
+      const aValue = Number(a?.createdAt);
+      const bValue = Number(b?.createdAt);
+      const aRank = Number.isFinite(aValue)
+        ? aValue
+        : direction === 'desc' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+      const bRank = Number.isFinite(bValue)
+        ? bValue
+        : direction === 'desc' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+      if (aRank !== bRank) {
+        comparison = aRank < bRank ? -1 : 1;
+      }
+    } else if (field === 'nextDue') {
+      const aDue = resolveNextDueAt(a);
+      const bDue = resolveNextDueAt(b);
+      const aRank = Number.isFinite(aDue)
+        ? aDue
+        : direction === 'desc' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+      const bRank = Number.isFinite(bDue)
+        ? bDue
+        : direction === 'desc' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+      if (aRank !== bRank) {
+        comparison = aRank < bRank ? -1 : 1;
+      }
+    } else {
+      const posA = Number(a?.position);
+      const posB = Number(b?.position);
+      const posAValid = Number.isFinite(posA);
+      const posBValid = Number.isFinite(posB);
+      if (posAValid && posBValid && posA !== posB) {
+        comparison = posA < posB ? -1 : 1;
+      } else if (posAValid && !posBValid) {
+        comparison = -1;
+      } else if (!posAValid && posBValid) {
+        comparison = 1;
+      }
+    }
+
+    if (comparison !== 0) {
+      return comparison * multiplier;
+    }
+
     const nameA = (a?.name || '').toLowerCase();
     const nameB = (b?.name || '').toLowerCase();
     if (nameA && nameB && nameA !== nameB) return nameA.localeCompare(nameB);
@@ -1006,6 +1095,7 @@ function renderLectureTable(
   const blockFilter = String(filters?.blockId || '').trim();
   const weekFilter = String(filters?.week || '').trim();
   const now = Date.now();
+  const sortConfig = normalizeLectureSort(filters?.sort);
 
   const blockGroups = new Map();
 
@@ -1108,10 +1198,10 @@ function renderLectureTable(
       if (bKey === '__no-week') return -1;
       const aNum = Number(aKey);
       const bNum = Number(bKey);
-      if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return aNum - bNum;
+      if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return bNum - aNum;
       if (Number.isFinite(aNum) && !Number.isFinite(bNum)) return -1;
       if (!Number.isFinite(aNum) && Number.isFinite(bNum)) return 1;
-      return String(aKey).localeCompare(String(bKey));
+      return String(bKey).localeCompare(String(aKey));
     });
 
     const normalizedGroupId = String(group.blockId ?? '');
@@ -1183,7 +1273,7 @@ function renderLectureTable(
       table.appendChild(thead);
 
       const tbody = document.createElement('tbody');
-      sortLecturesForDisplay(weekLectures).forEach(entry => {
+      sortLecturesForDisplay(weekLectures, sortConfig).forEach(entry => {
         const row = renderLectureWeekRow(
           entry,
           onEdit,
@@ -1329,6 +1419,52 @@ function buildToolbar(blocks, lectures, lectureLists, redraw, defaultPassPlan, o
     debouncedSearch(e.target.value);
   });
   filterGroup.appendChild(search);
+
+  const sortState = normalizeLectureSort(filters.sort);
+  const sortControls = document.createElement('div');
+  sortControls.className = 'lectures-sort-controls';
+
+  const sortSelect = document.createElement('select');
+  sortSelect.className = 'input lectures-sort-field';
+  sortSelect.setAttribute('aria-label', 'Sort lectures');
+  [
+    { value: 'position', label: 'Manual order' },
+    { value: 'created', label: 'Date added' },
+    { value: 'nextDue', label: 'Next pass due' }
+  ].forEach(option => {
+    const opt = document.createElement('option');
+    opt.value = option.value;
+    opt.textContent = option.label;
+    sortSelect.appendChild(opt);
+  });
+  sortSelect.value = sortState.field;
+  sortSelect.addEventListener('change', () => {
+    sortState.field = sortSelect.value;
+    syncDirectionControl();
+    setLecturesState({ sort: formatLectureSortValue(sortState) });
+    redraw();
+  });
+  sortControls.appendChild(sortSelect);
+
+  const directionBtn = document.createElement('button');
+  directionBtn.type = 'button';
+  directionBtn.className = 'btn secondary lectures-sort-direction';
+  directionBtn.addEventListener('click', () => {
+    sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+    syncDirectionControl();
+    setLecturesState({ sort: formatLectureSortValue(sortState) });
+    redraw();
+  });
+
+  function syncDirectionControl() {
+    directionBtn.dataset.direction = sortState.direction;
+    directionBtn.textContent = describeSortDirectionLabel(sortState.field, sortState.direction);
+    directionBtn.setAttribute('aria-label', describeSortDirectionAria(sortState.field, sortState.direction));
+  }
+
+  syncDirectionControl();
+  sortControls.appendChild(directionBtn);
+  filterGroup.appendChild(sortControls);
 
   const blockSelect = document.createElement('select');
   blockSelect.className = 'input lectures-filter';

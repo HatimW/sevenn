@@ -12,7 +12,7 @@ export const state = {
   },
   query: "",
   filters: { types:["disease","drug","concept"], block:"", week:"", onlyFav:false, sort:"updated-desc" },
-  lectures: { query: '', blockId: '', week: '', status: '', tag: '' },
+  lectures: { query: '', blockId: '', week: '', status: '', tag: '', sort: 'position-asc' },
   entryLayout: { mode: 'list', columns: 3, scale: 1, controlsVisible: false },
   blockBoard: { collapsedBlocks: [], hiddenTimelines: [] },
   builder: {
@@ -94,7 +94,7 @@ export function setBlockBoardState(patch) {
 export function setLecturesState(patch) {
   if (!patch) return;
   if (!state.lectures) {
-    state.lectures = { query: '', blockId: '', week: '', status: '', tag: '' };
+    state.lectures = { query: '', blockId: '', week: '', status: '', tag: '', sort: 'position-asc' };
   }
   const next = { ...state.lectures };
   if (Object.prototype.hasOwnProperty.call(patch, 'query')) {
@@ -112,11 +112,21 @@ export function setLecturesState(patch) {
   if (Object.prototype.hasOwnProperty.call(patch, 'tag')) {
     next.tag = String(patch.tag ?? '');
   }
+  if (Object.prototype.hasOwnProperty.call(patch, 'sort')) {
+    const value = patch.sort;
+    if (typeof value === 'string') {
+      next.sort = value;
+    } else if (value && typeof value === 'object') {
+      const field = typeof value.field === 'string' && value.field.trim() ? value.field.trim() : 'position';
+      const direction = value.direction === 'desc' ? 'desc' : 'asc';
+      next.sort = `${field}-${direction}`;
+    }
+  }
   state.lectures = next;
 }
 
 export function resetLecturesState() {
-  state.lectures = { query: '', blockId: '', week: '', status: '', tag: '' };
+  state.lectures = { query: '', blockId: '', week: '', status: '', tag: '', sort: 'position-asc' };
 }
 export function setCardsState(patch){
   if (!patch) return;

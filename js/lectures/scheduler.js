@@ -2,16 +2,16 @@ const DAY_MINUTES = 24 * 60;
 const MINUTE_MS = 60 * 1000;
 
 export const DEFAULT_PASS_COLORS = [
-  '#ef4444',
-  '#facc15',
+  '#38bdf8',
+  '#22d3ee',
+  '#34d399',
+  '#4ade80',
+  '#fbbf24',
   '#fb923c',
-  '#22c55e',
-  '#3b82f6',
+  '#f472b6',
   '#a855f7',
-  '#14b8a6',
-  '#ec4899',
   '#6366f1',
-  '#0ea5e9'
+  '#14b8a6'
 ];
 
 function clone(value) {
@@ -79,7 +79,7 @@ export const DEFAULT_PASS_PLAN = {
 
 export const DEFAULT_PLANNER_DEFAULTS = {
   anchorOffsets: {
-    today: 8 * 60,
+    today: 0,
     tomorrow: 8 * 60,
     upcoming: 8 * 60
   },
