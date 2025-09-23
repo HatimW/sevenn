@@ -100,15 +100,27 @@ const DEFAULT_LINE_STYLE = 'solid';
 const DEFAULT_LINE_THICKNESS = 'regular';
 
 const LINE_STYLE_OPTIONS = [
-  { value: 'solid', label: 'Solid' },
+  { value: 'solid', label: 'Smooth' },
   { value: 'dashed', label: 'Dashed' },
   { value: 'dotted', label: 'Dotted' },
-  { value: 'arrow-end', label: 'Arrow →' },
-  { value: 'arrow-start', label: 'Arrow ←' },
-  { value: 'arrow-both', label: 'Double arrow ↔' },
-  { value: 'glow', label: 'Glow highlight' },
+  { value: 'arrow-end', label: 'Arrowhead →' },
+  { value: 'arrow-start', label: 'Arrowhead ←' },
+  { value: 'arrow-both', label: 'Twin arrows ↔' },
   { value: 'blocked', label: 'Blocked ✕' },
-  { value: 'inhibit', label: 'Inhibit ⊣' }
+  { value: 'inhibit', label: 'Inhibit ⊣' },
+  { value: 'glow', label: 'Glow highlight' }
+];
+
+const LINE_STYLE_CLASSNAMES = [
+  'map-edge--solid',
+  'map-edge--dashed',
+  'map-edge--dotted',
+  'map-edge--arrow-end',
+  'map-edge--arrow-start',
+  'map-edge--arrow-both',
+  'map-edge--blocked',
+  'map-edge--inhibit',
+  'map-edge--glow'
 ];
 
 const LINE_STYLE_VALUE_SET = new Set(LINE_STYLE_OPTIONS.map(option => option.value));
@@ -1612,7 +1624,7 @@ export async function renderMap(root) {
       drawn.add(key);
 
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', calcPath(it.id, l.id));
+      path.setAttribute('d', calcPath(it.id, l.id, path, l));
       path.setAttribute('fill', 'none');
       path.setAttribute('class', 'map-edge');
       path.setAttribute('vector-effect', 'non-scaling-stroke');
@@ -1795,21 +1807,25 @@ function buildLineMarkers(defs) {
   const configs = [
     {
       id: 'arrow-end',
-      viewBox: '0 0 12 12',
-      refX: 12,
-      refY: 6,
-      markerWidth: 12,
-      markerHeight: 12,
-      path: 'M0,0 L12,6 L0,12 Z'
+      viewBox: '0 0 6 6',
+      refX: 4.6,
+      refY: 3,
+      markerWidth: 4.6,
+      markerHeight: 4.6,
+      path: 'M0,0 L4.6,3 L0,6 Z',
+      units: 'strokeWidth',
+      scaleMode: 'stroke'
     },
     {
       id: 'arrow-start',
-      viewBox: '0 0 12 12',
-      refX: 0,
-      refY: 6,
-      markerWidth: 12,
-      markerHeight: 12,
-      path: 'M12,0 L0,6 L12,12 Z'
+      viewBox: '0 0 6 6',
+      refX: 1.4,
+      refY: 3,
+      markerWidth: 4.6,
+      markerHeight: 4.6,
+      path: 'M4.6,0 L0,3 L4.6,6 Z',
+      units: 'strokeWidth',
+      scaleMode: 'stroke'
     }
   ];
   if (!mapState.lineMarkers) {
@@ -1825,12 +1841,13 @@ function buildLineMarkers(defs) {
     marker.dataset.baseRefY = String(cfg.refY);
     marker.dataset.baseWidth = String(cfg.markerWidth);
     marker.dataset.baseHeight = String(cfg.markerHeight);
+    marker.dataset.scaleMode = cfg.scaleMode || 'absolute';
     marker.setAttribute('refX', String(cfg.refX));
     marker.setAttribute('refY', String(cfg.refY));
     marker.setAttribute('markerWidth', String(cfg.markerWidth));
     marker.setAttribute('markerHeight', String(cfg.markerHeight));
-    marker.setAttribute('orient', 'auto');
-    marker.setAttribute('markerUnits', 'userSpaceOnUse');
+    marker.setAttribute('orient', 'auto-start-reverse');
+    marker.setAttribute('markerUnits', cfg.units || 'userSpaceOnUse');
     marker.setAttribute('class', 'map-marker');
     const path = document.createElementNS(svgNS, 'path');
     path.setAttribute('d', cfg.path);
@@ -1855,12 +1872,20 @@ function updateMarkerSizes() {
     const baseHeight = Number(marker.dataset.baseHeight) || 12;
     const baseRefX = Number(marker.dataset.baseRefX) || 0;
     const baseRefY = Number(marker.dataset.baseRefY) || 0;
-    const width = baseWidth * ratio * strokeScale;
-    const height = baseHeight * ratio * strokeScale;
-    marker.setAttribute('markerWidth', String(width));
-    marker.setAttribute('markerHeight', String(height));
-    marker.setAttribute('refX', String(baseRefX * ratio * strokeScale));
-    marker.setAttribute('refY', String(baseRefY * ratio * strokeScale));
+    const scaleMode = marker.dataset.scaleMode || 'absolute';
+    if (scaleMode === 'stroke') {
+      marker.setAttribute('markerWidth', String(baseWidth));
+      marker.setAttribute('markerHeight', String(baseHeight));
+      marker.setAttribute('refX', String(baseRefX));
+      marker.setAttribute('refY', String(baseRefY));
+    } else {
+      const width = baseWidth * ratio * strokeScale;
+      const height = baseHeight * ratio * strokeScale;
+      marker.setAttribute('markerWidth', String(width));
+      marker.setAttribute('markerHeight', String(height));
+      marker.setAttribute('refX', String(baseRefX * ratio * strokeScale));
+      marker.setAttribute('refY', String(baseRefY * ratio * strokeScale));
+    }
   });
 }
 
@@ -2231,7 +2256,7 @@ function updatePendingHighlight() {
 function updateEdgesFor(id) {
   if (!mapState.g) return;
   mapState.g.querySelectorAll(`path[data-a='${id}'], path[data-b='${id}']`).forEach(edge => {
-    edge.setAttribute('d', calcPath(edge.dataset.a, edge.dataset.b));
+    edge.setAttribute('d', calcPath(edge.dataset.a, edge.dataset.b, edge));
     syncLineDecoration(edge);
   });
 }
@@ -2795,7 +2820,7 @@ function adjustScale() {
 
   svg.querySelectorAll('.map-edge').forEach(line => {
     if (line.dataset.a && line.dataset.b) {
-      line.setAttribute('d', calcPath(line.dataset.a, line.dataset.b));
+      line.setAttribute('d', calcPath(line.dataset.a, line.dataset.b, line));
     }
     updateLineStrokeWidth(line);
     syncLineDecoration(line);
@@ -2819,7 +2844,7 @@ function getNodeRadius(id) {
   return base * (scales.nodeScale || 1);
 }
 
-function computeTrimmedSegment(aId, bId) {
+function computeTrimmedSegment(aId, bId, options = {}) {
   const positions = mapState.positions || {};
   const a = positions[aId];
   const b = positions[bId];
@@ -2830,8 +2855,10 @@ function computeTrimmedSegment(aId, bId) {
   if (!len) return null;
   const ux = dx / len;
   const uy = dy / len;
-  const trimA = Math.min(getNodeRadius(aId) + 6, len / 2);
-  const trimB = Math.min(getNodeRadius(bId) + 6, len / 2);
+  const extraA = Number(options.trimA) || 0;
+  const extraB = Number(options.trimB) || 0;
+  const trimA = Math.min(getNodeRadius(aId) + 6 + extraA, len / 2);
+  const trimB = Math.min(getNodeRadius(bId) + 6 + extraB, len / 2);
   const startX = a.x + ux * trimA;
   const startY = a.y + uy * trimA;
   const endX = b.x - ux * trimB;
@@ -2903,9 +2930,24 @@ function computeCurveOffset(aId, bId, segment) {
   return offset;
 }
 
-function calcPath(aId, bId) {
-  const segment = computeTrimmedSegment(aId, bId);
-  if (!segment) return '';
+function computeStyleTrim(style, baseWidth) {
+  const arrowAllowance = Math.max(12, baseWidth * 2.7);
+  const inhibitAllowance = Math.max(10, baseWidth * 2.2);
+  let trimA = 0;
+  let trimB = 0;
+  if (style === 'arrow-start' || style === 'arrow-both') {
+    trimA += arrowAllowance;
+  }
+  if (style === 'arrow-end' || style === 'arrow-both') {
+    trimB += arrowAllowance;
+  }
+  if (style === 'inhibit') {
+    trimB += inhibitAllowance;
+  }
+  return { trimA, trimB };
+}
+
+function computeCurveControlPoint(aId, bId, segment) {
   const { startX, startY, endX, endY, ux, uy } = segment;
   const nx = -uy;
   const ny = ux;
@@ -2914,6 +2956,40 @@ function calcPath(aId, bId) {
   const offset = computeCurveOffset(aId, bId, segment);
   const cx = midX + nx * offset;
   const cy = midY + ny * offset;
+  return { cx, cy };
+}
+
+function getLineGeometry(aId, bId, options = {}) {
+  const line = options.line || null;
+  const style = normalizeLineStyle(options.style ?? line?.dataset?.style);
+  const thicknessKey = options.thickness ?? line?.dataset?.thickness ?? DEFAULT_LINE_THICKNESS;
+  const baseWidth = getLineThicknessValue(thicknessKey);
+  const trims = computeStyleTrim(style, baseWidth);
+  const segment = computeTrimmedSegment(aId, bId, trims);
+  if (!segment) return null;
+  const { cx, cy } = computeCurveControlPoint(aId, bId, segment);
+  return { ...segment, cx, cy, style, baseWidth };
+}
+
+function getQuadraticPoint(start, control, end, t) {
+  const mt = 1 - t;
+  const x = mt * mt * start.x + 2 * mt * t * control.x + t * t * end.x;
+  const y = mt * mt * start.y + 2 * mt * t * control.y + t * t * end.y;
+  return { x, y };
+}
+
+function getQuadraticTangent(start, control, end, t) {
+  const mt = 1 - t;
+  const dx = 2 * mt * (control.x - start.x) + 2 * t * (end.x - control.x);
+  const dy = 2 * mt * (control.y - start.y) + 2 * t * (end.y - control.y);
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: dx / len, y: dy / len };
+}
+
+function calcPath(aId, bId, line = null, info = {}) {
+  const geometry = getLineGeometry(aId, bId, { ...info, line });
+  if (!geometry) return '';
+  const { startX, startY, endX, endY, cx, cy } = geometry;
   return `M${startX} ${startY} Q${cx} ${cy} ${endX} ${endY}`;
 }
 
@@ -2934,6 +3010,11 @@ function applyLineStyle(line, info = {}) {
   line.dataset.baseWidth = String(getLineThicknessValue(thickness));
   line.dataset.label = label;
 
+  LINE_STYLE_CLASSNAMES.forEach(cls => line.classList.remove(cls));
+  if (style) {
+    line.classList.add(`map-edge--${style}`);
+  }
+
   line.style.stroke = color;
   line.style.color = color;
   line.setAttribute('stroke', color);
@@ -2944,6 +3025,10 @@ function applyLineStyle(line, info = {}) {
   line.removeAttribute('marker-mid');
   line.removeAttribute('stroke-dasharray');
   line.classList.remove('edge-glow');
+
+  if (line.dataset.a && line.dataset.b) {
+    line.setAttribute('d', calcPath(line.dataset.a, line.dataset.b, line, info));
+  }
 
   updateLineStrokeWidth(line);
 
@@ -3053,67 +3138,64 @@ function removeLineOverlay(line) {
   }
 }
 
+function normalizeVector(x, y) {
+  const len = Math.hypot(x, y) || 1;
+  return { x: x / len, y: y / len };
+}
+
 function updateBlockedOverlay(line, overlay) {
   if (!line || !overlay) return;
-  const segment = computeTrimmedSegment(line.dataset.a, line.dataset.b);
-  if (!segment) return;
-  const dx = segment.endX - segment.startX;
-  const dy = segment.endY - segment.startY;
-  const len = Math.hypot(dx, dy);
-  if (!len) return;
-  const midX = segment.startX + dx / 2;
-  const midY = segment.startY + dy / 2;
-  const tx = dx / len;
-  const ty = dy / len;
-  const nx = -ty;
-  const ny = tx;
-  const diag1x = tx + nx;
-  const diag1y = ty + ny;
-  const diag2x = tx - nx;
-  const diag2y = ty - ny;
-  const norm1 = Math.hypot(diag1x, diag1y) || 1;
-  const norm2 = Math.hypot(diag2x, diag2y) || 1;
+  const geometry = getLineGeometry(line.dataset.a, line.dataset.b, { line });
+  if (!geometry) return;
+  const start = { x: geometry.startX, y: geometry.startY };
+  const control = { x: geometry.cx, y: geometry.cy };
+  const end = { x: geometry.endX, y: geometry.endY };
+  const mid = getQuadraticPoint(start, control, end, 0.5);
+  const tangent = getQuadraticTangent(start, control, end, 0.5);
+  const normal = { x: -tangent.y, y: tangent.x };
+  const diag1 = normalizeVector(tangent.x + normal.x, tangent.y + normal.y);
+  const diag2 = normalizeVector(tangent.x - normal.x, tangent.y - normal.y);
   const { lineScale = 1 } = getCurrentScales();
-  const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
-  const scaledWidth = baseWidth * lineScale;
-  const armLength = Math.max(28, scaledWidth * 4.2);
-  const d = `M${midX - (diag1x / norm1) * armLength} ${midY - (diag1y / norm1) * armLength}`
-    + ` L${midX + (diag1x / norm1) * armLength} ${midY + (diag1y / norm1) * armLength}`
-    + ` M${midX - (diag2x / norm2) * armLength} ${midY - (diag2y / norm2) * armLength}`
-    + ` L${midX + (diag2x / norm2) * armLength} ${midY + (diag2y / norm2) * armLength}`;
-  overlay.setAttribute('d', d);
-  const overlayBase = baseWidth * 1.45;
+  const scaledWidth = geometry.baseWidth * lineScale;
+  const armLength = Math.max(26, scaledWidth * 3.8);
+  const pathData =
+    `M${mid.x - diag1.x * armLength} ${mid.y - diag1.y * armLength}`
+    + ` L${mid.x + diag1.x * armLength} ${mid.y + diag1.y * armLength}`
+    + ` M${mid.x - diag2.x * armLength} ${mid.y - diag2.y * armLength}`
+    + ` L${mid.x + diag2.x * armLength} ${mid.y + diag2.y * armLength}`;
+  overlay.setAttribute('d', pathData);
+  const overlayBase = Math.max(geometry.baseWidth * 1.35, 2.8);
   overlay.dataset.baseWidth = String(overlayBase);
   overlay.dataset.decoration = 'blocked';
-  overlay.setAttribute('stroke', '#ef4444');
+  overlay.setAttribute('stroke', '#f43f5e');
   overlay.setAttribute('stroke-width', overlayBase * lineScale);
 }
 
 function updateInhibitOverlay(line, overlay) {
   if (!line || !overlay) return;
-  const segment = computeTrimmedSegment(line.dataset.a, line.dataset.b);
-  if (!segment) return;
+  const geometry = getLineGeometry(line.dataset.a, line.dataset.b, { line });
+  if (!geometry) return;
+  const start = { x: geometry.startX, y: geometry.startY };
+  const control = { x: geometry.cx, y: geometry.cy };
+  const end = { x: geometry.endX, y: geometry.endY };
+  const tangent = getQuadraticTangent(start, control, end, 1);
   const { lineScale = 1 } = getCurrentScales();
-  const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
-  const scaledWidth = baseWidth * lineScale;
-  const stemLength = Math.max(24, scaledWidth * 4.5);
+  const scaledWidth = geometry.baseWidth * lineScale;
+  const stemLength = Math.max(24, scaledWidth * 4.4);
   const barLength = Math.max(22, scaledWidth * 3.2);
-  const retreat = Math.max(8, scaledWidth * 1.2);
-  const tipX = segment.endX;
-  const tipY = segment.endY;
-  const stemStartX = tipX - segment.ux * stemLength;
-  const stemStartY = tipY - segment.uy * stemLength;
-  const midX = tipX - segment.ux * retreat;
-  const midY = tipY - segment.uy * retreat;
-  const nx = -segment.uy;
-  const ny = segment.ux;
+  const retreat = Math.max(8, scaledWidth * 1.35);
+  const tip = { x: end.x, y: end.y };
+  const stemStart = { x: tip.x - tangent.x * stemLength, y: tip.y - tangent.y * stemLength };
+  const mid = { x: tip.x - tangent.x * retreat, y: tip.y - tangent.y * retreat };
+  const normal = { x: -tangent.y, y: tangent.x };
   const halfBar = barLength / 2;
-  const barAX = midX + nx * halfBar;
-  const barAY = midY + ny * halfBar;
-  const barBX = midX - nx * halfBar;
-  const barBY = midY - ny * halfBar;
-  overlay.setAttribute('d', `M${stemStartX} ${stemStartY} L${tipX} ${tipY} M${barAX} ${barAY} L${barBX} ${barBY}`);
-  const overlayBase = baseWidth * 0.95;
+  const barA = { x: mid.x + normal.x * halfBar, y: mid.y + normal.y * halfBar };
+  const barB = { x: mid.x - normal.x * halfBar, y: mid.y - normal.y * halfBar };
+  overlay.setAttribute(
+    'd',
+    `M${stemStart.x} ${stemStart.y} L${tip.x} ${tip.y} M${barA.x} ${barA.y} L${barB.x} ${barB.y}`
+  );
+  const overlayBase = Math.max(geometry.baseWidth * 0.95, 2.6);
   overlay.dataset.baseWidth = String(overlayBase);
   overlay.dataset.decoration = 'inhibit';
   const color = line.dataset.color || line.getAttribute('stroke') || DEFAULT_LINK_COLOR;
