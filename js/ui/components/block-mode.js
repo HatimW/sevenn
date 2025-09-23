@@ -16,7 +16,7 @@ function drawBlockMode(shell, globalRedraw) {
   const items = state.cohort || [];
 
   if (!items.length) {
-    shell.appendChild(messageCard('Build a study set to unlock Blocks mode. Use the filters above to assemble a cohort.'));
+    shell.appendChild(messageCard('Select study cards to unlock Blocks mode. Use the filters above to assemble a cohort.'));
     return;
   }
 

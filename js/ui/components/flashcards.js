@@ -122,7 +122,7 @@ export function renderFlashcards(root, redraw) {
 
   if (!items.length) {
     const msg = document.createElement('div');
-    msg.textContent = 'No items in cohort.';
+    msg.textContent = 'No cards selected. Adjust the filters above to add cards.';
     root.appendChild(msg);
     return;
   }
@@ -178,11 +178,6 @@ export function renderFlashcards(root, redraw) {
     const alreadyQueued = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
     const requiresRating = isReview || !alreadyQueued;
     sectionRequirements.set(key, requiresRating);
-    if (!requiresRating && !ratedSections.has(key)) {
-      const recorded = snapshot?.lastRating || 'queued';
-      ratedSections.set(key, recorded);
-    }
-
     const sec = document.createElement('div');
     sec.className = 'flash-section';
     sec.setAttribute('role', 'button');
