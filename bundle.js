@@ -14420,26 +14420,6 @@ var Sevenn = (() => {
     });
     return count;
   }
-  function answerForIndex(answers, idx) {
-    if (answers == null) return null;
-    const numericIdx = Number(idx);
-    if (Number.isInteger(numericIdx) && numericIdx >= 0) {
-      if (Array.isArray(answers)) {
-        return answers[numericIdx] ?? null;
-      }
-      if (typeof Map !== "undefined" && answers instanceof Map) {
-        if (answers.has(numericIdx)) return answers.get(numericIdx);
-        if (answers.has(String(numericIdx))) return answers.get(String(numericIdx));
-        return null;
-      }
-      if (typeof answers === "object") {
-        if (numericIdx in answers && answers[numericIdx] != null) return answers[numericIdx];
-        const key = String(numericIdx);
-        if (key in answers && answers[key] != null) return answers[key];
-      }
-    }
-    return null;
-  }
   function summarizeAnswerChanges(questionStats, exam, answers = {}) {
     let rightToWrong = 0;
     let wrongToRight = 0;
@@ -14448,7 +14428,7 @@ var Sevenn = (() => {
     questionStats.forEach((stat, idx) => {
       const question = exam?.questions?.[idx];
       if (!question) return;
-      const finalAnswer = answerForIndex(answers, idx);
+      const finalAnswer = answers[idx];
       const details = analyzeAnswerChange(stat, question, finalAnswer);
       const meaningfulChanges = countMeaningfulAnswerChanges(stat);
       if (meaningfulChanges > 0) {
@@ -14493,36 +14473,6 @@ var Sevenn = (() => {
       sess.startedAt = null;
     }
   }
-  function trackTimerDisplay(sess, element, variant = "compact") {
-    if (!sess || !element) return;
-    if (!Array.isArray(sess.__timerDisplays)) {
-      sess.__timerDisplays = [];
-    } else {
-      sess.__timerDisplays = sess.__timerDisplays.filter((entry) => {
-        const el = entry?.element;
-        return el && typeof el === "object" && "isConnected" in el ? el.isConnected : Boolean(el);
-      });
-    }
-    sess.__timerDisplays.push({ element, variant });
-  }
-  function updateTimerDisplays(sess) {
-    if (!sess || !Array.isArray(sess.__timerDisplays) || !sess.__timerDisplays.length) return;
-    const remainingBase = typeof sess.remainingMs === "number" ? Math.max(0, sess.remainingMs) : totalExamTimeMs(sess.exam);
-    const formatted = formatCountdown(remainingBase);
-    sess.__timerDisplays = sess.__timerDisplays.filter((entry) => {
-      const el = entry?.element;
-      if (!el || typeof el !== "object") return false;
-      if ("isConnected" in el && !el.isConnected) return false;
-      if ("innerHTML" in el) {
-        if (entry.variant === "detailed") {
-          el.innerHTML = `<strong>Time Remaining:</strong> ${formatted}`;
-        } else {
-          el.textContent = formatted;
-        }
-      }
-      return true;
-    });
-  }
   function ensureTimer(sess, render) {
     if (!sess || sess.mode !== "taking" || sess.exam.timerMode !== "timed") return;
     if (timerHandles.has(sess)) return;
@@ -14542,7 +14492,7 @@ var Sevenn = (() => {
         stopTimer(sess);
         finalizeExam(sess, render, { autoSubmit: true });
       } else {
-        updateTimerDisplays(sess);
+        render();
       }
     }, 1e3);
     timerHandles.set(sess, handle);
@@ -15136,9 +15086,9 @@ var Sevenn = (() => {
     const grid = document.createElement("div");
     grid.className = "exam-palette-grid";
     const isReview = sess.mode === "review";
-    const answersSource = isReview ? sess.result?.answers : sess.answers;
+    const answers = isReview ? sess.result?.answers || {} : sess.answers || {};
     const statsList = isReview ? Array.isArray(sess.result?.questionStats) ? sess.result.questionStats : [] : Array.isArray(sess.questionStats) ? sess.questionStats : [];
-    const summary = isReview ? summarizeAnswerChanges(statsList, sess.exam, answersSource) : null;
+    const summary = isReview ? summarizeAnswerChanges(statsList, sess.exam, answers) : null;
     if (isReview && sess.result) {
       sess.result.changeSummary = summary;
     }
@@ -15149,7 +15099,7 @@ var Sevenn = (() => {
       btn.textContent = String(idx + 1);
       btn.className = "palette-button";
       setToggleState(btn, sess.idx === idx);
-      const answer = answerForIndex(answersSource, idx);
+      const answer = answers[idx];
       const answered = answer != null && question.options.some((opt) => opt.id === answer);
       const tooltipParts = [];
       let status = "unanswered";
@@ -15304,8 +15254,8 @@ var Sevenn = (() => {
     sidebar.className = "exam-sidebar";
     container.appendChild(sidebar);
     const question = sess.exam.questions[sess.idx];
-    const answersSource = sess.mode === "review" ? sess.result?.answers : sess.answers;
-    const selected = answerForIndex(answersSource, sess.idx);
+    const answers = sess.mode === "review" ? sess.result.answers || {} : sess.answers || {};
+    const selected = answers[sess.idx];
     const isInstantCheck = sess.mode === "taking" && sess.exam.timerMode !== "timed" && Boolean(sess.checked?.[sess.idx]);
     const showReview = sess.mode === "review" || isInstantCheck;
     const top = document.createElement("div");
@@ -15335,7 +15285,6 @@ var Sevenn = (() => {
       timerEl.className = "exam-timer";
       const remainingMs = typeof sess.remainingMs === "number" ? sess.remainingMs : totalExamTimeMs(sess.exam);
       timerEl.textContent = formatCountdown(remainingMs);
-      trackTimerDisplay(sess, timerEl, "compact");
       top.appendChild(timerEl);
     }
     main.appendChild(top);
@@ -15583,10 +15532,13 @@ var Sevenn = (() => {
         duration.innerHTML = `<strong>Duration:</strong> ${formatDuration(sess.result.durationMs)}`;
         info.appendChild(duration);
       }
-      const summary = changeSummary || (sess.result ? summarizeAnswerChanges(sess.result.questionStats || [], sess.exam, sess.result.answers) : null);
+      const summary = changeSummary || (sess.result ? summarizeAnswerChanges(sess.result.questionStats || [], sess.exam, sess.result.answers || {}) : null);
       if (summary) {
         const changeMeta = document.createElement("div");
-        changeMeta.innerHTML = `<strong>Answer switches:</strong> ${summary.switched || 0} (Returned: ${summary.returnedToOriginal || 0}, Right \u2192 Wrong: ${summary.rightToWrong || 0}, Wrong \u2192 Right: ${summary.wrongToRight || 0})`;
+        changeMeta.innerHTML = `
+        <strong>Answer switches:</strong> ${summary.switched || 0}
+        (Returned: ${summary.returnedToOriginal || 0}, Right \u2192 Wrong: ${summary.rightToWrong || 0}, Wrong \u2192 Right: ${summary.wrongToRight || 0})
+      `;
         info.appendChild(changeMeta);
       }
     } else if (sess.mode === "taking") {
@@ -15594,7 +15546,6 @@ var Sevenn = (() => {
         const remaining = typeof sess.remainingMs === "number" ? sess.remainingMs : totalExamTimeMs(sess.exam);
         const timer = document.createElement("div");
         timer.innerHTML = `<strong>Time Remaining:</strong> ${formatCountdown(remaining)}`;
-        trackTimerDisplay(sess, timer, "detailed");
         info.appendChild(timer);
         const pace = document.createElement("div");
         pace.innerHTML = `<strong>Pace:</strong> ${sess.exam.secondsPerQuestion}s/question`;

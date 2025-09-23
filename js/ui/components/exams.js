@@ -225,27 +225,6 @@ function countMeaningfulAnswerChanges(stat) {
   return count;
 }
 
-function answerForIndex(answers, idx) {
-  if (answers == null) return null;
-  const numericIdx = Number(idx);
-  if (Number.isInteger(numericIdx) && numericIdx >= 0) {
-    if (Array.isArray(answers)) {
-      return answers[numericIdx] ?? null;
-    }
-    if (typeof Map !== 'undefined' && answers instanceof Map) {
-      if (answers.has(numericIdx)) return answers.get(numericIdx);
-      if (answers.has(String(numericIdx))) return answers.get(String(numericIdx));
-      return null;
-    }
-    if (typeof answers === 'object') {
-      if (numericIdx in answers && answers[numericIdx] != null) return answers[numericIdx];
-      const key = String(numericIdx);
-      if (key in answers && answers[key] != null) return answers[key];
-    }
-  }
-  return null;
-}
-
 function summarizeAnswerChanges(questionStats, exam, answers = {}) {
   let rightToWrong = 0;
   let wrongToRight = 0;
@@ -254,7 +233,7 @@ function summarizeAnswerChanges(questionStats, exam, answers = {}) {
   questionStats.forEach((stat, idx) => {
     const question = exam?.questions?.[idx];
     if (!question) return;
-    const finalAnswer = answerForIndex(answers, idx);
+    const finalAnswer = answers[idx];
     const details = analyzeAnswerChange(stat, question, finalAnswer);
     const meaningfulChanges = countMeaningfulAnswerChanges(stat);
     if (meaningfulChanges > 0) {
@@ -303,40 +282,6 @@ function stopTimer(sess) {
   }
 }
 
-function trackTimerDisplay(sess, element, variant = 'compact') {
-  if (!sess || !element) return;
-  if (!Array.isArray(sess.__timerDisplays)) {
-    sess.__timerDisplays = [];
-  } else {
-    sess.__timerDisplays = sess.__timerDisplays.filter(entry => {
-      const el = entry?.element;
-      return el && typeof el === 'object' && 'isConnected' in el ? el.isConnected : Boolean(el);
-    });
-  }
-  sess.__timerDisplays.push({ element, variant });
-}
-
-function updateTimerDisplays(sess) {
-  if (!sess || !Array.isArray(sess.__timerDisplays) || !sess.__timerDisplays.length) return;
-  const remainingBase = typeof sess.remainingMs === 'number'
-    ? Math.max(0, sess.remainingMs)
-    : totalExamTimeMs(sess.exam);
-  const formatted = formatCountdown(remainingBase);
-  sess.__timerDisplays = sess.__timerDisplays.filter(entry => {
-    const el = entry?.element;
-    if (!el || typeof el !== 'object') return false;
-    if ('isConnected' in el && !el.isConnected) return false;
-    if ('innerHTML' in el) {
-      if (entry.variant === 'detailed') {
-        el.innerHTML = `<strong>Time Remaining:</strong> ${formatted}`;
-      } else {
-        el.textContent = formatted;
-      }
-    }
-    return true;
-  });
-}
-
 function ensureTimer(sess, render) {
   if (!sess || sess.mode !== 'taking' || sess.exam.timerMode !== 'timed') return;
   if (timerHandles.has(sess)) return;
@@ -356,7 +301,7 @@ function ensureTimer(sess, render) {
       stopTimer(sess);
       finalizeExam(sess, render, { autoSubmit: true });
     } else {
-      updateTimerDisplays(sess);
+      render();
     }
   }, 1000);
   timerHandles.set(sess, handle);
@@ -978,11 +923,11 @@ function renderPalette(sidebar, sess, render) {
   grid.className = 'exam-palette-grid';
 
   const isReview = sess.mode === 'review';
-  const answersSource = isReview ? sess.result?.answers : sess.answers;
+  const answers = isReview ? sess.result?.answers || {} : sess.answers || {};
   const statsList = isReview
     ? (Array.isArray(sess.result?.questionStats) ? sess.result.questionStats : [])
     : (Array.isArray(sess.questionStats) ? sess.questionStats : []);
-  const summary = isReview ? summarizeAnswerChanges(statsList, sess.exam, answersSource) : null;
+  const summary = isReview ? summarizeAnswerChanges(statsList, sess.exam, answers) : null;
   if (isReview && sess.result) {
     sess.result.changeSummary = summary;
   }
@@ -996,7 +941,7 @@ function renderPalette(sidebar, sess, render) {
     btn.textContent = String(idx + 1);
     btn.className = 'palette-button';
     setToggleState(btn, sess.idx === idx);
-    const answer = answerForIndex(answersSource, idx);
+    const answer = answers[idx];
     const answered = answer != null && question.options.some(opt => opt.id === answer);
 
     const tooltipParts = [];
@@ -1169,8 +1114,8 @@ export function renderExamRunner(root, render) {
   container.appendChild(sidebar);
 
   const question = sess.exam.questions[sess.idx];
-  const answersSource = sess.mode === 'review' ? sess.result?.answers : sess.answers;
-  const selected = answerForIndex(answersSource, sess.idx);
+  const answers = sess.mode === 'review' ? sess.result.answers || {} : sess.answers || {};
+  const selected = answers[sess.idx];
   const isInstantCheck = sess.mode === 'taking' && sess.exam.timerMode !== 'timed' && Boolean(sess.checked?.[sess.idx]);
   const showReview = sess.mode === 'review' || isInstantCheck;
 
@@ -1205,7 +1150,6 @@ export function renderExamRunner(root, render) {
     timerEl.className = 'exam-timer';
     const remainingMs = typeof sess.remainingMs === 'number' ? sess.remainingMs : totalExamTimeMs(sess.exam);
     timerEl.textContent = formatCountdown(remainingMs);
-    trackTimerDisplay(sess, timerEl, 'compact');
     top.appendChild(timerEl);
   }
   main.appendChild(top);
@@ -1476,7 +1420,7 @@ function renderSidebarMeta(sidebar, sess, changeSummary) {
       info.appendChild(duration);
     }
     const summary = changeSummary
-      || (sess.result ? summarizeAnswerChanges(sess.result.questionStats || [], sess.exam, sess.result.answers) : null);
+      || (sess.result ? summarizeAnswerChanges(sess.result.questionStats || [], sess.exam, sess.result.answers || {}) : null);
     if (summary) {
       const changeMeta = document.createElement('div');
       changeMeta.innerHTML = `<strong>Answer switches:</strong> ${summary.switched || 0} (Returned: ${summary.returnedToOriginal || 0}, Right → Wrong: ${summary.rightToWrong || 0}, Wrong → Right: ${summary.wrongToRight || 0})`;
@@ -1487,7 +1431,6 @@ function renderSidebarMeta(sidebar, sess, changeSummary) {
       const remaining = typeof sess.remainingMs === 'number' ? sess.remainingMs : totalExamTimeMs(sess.exam);
       const timer = document.createElement('div');
       timer.innerHTML = `<strong>Time Remaining:</strong> ${formatCountdown(remaining)}`;
-      trackTimerDisplay(sess, timer, 'detailed');
       info.appendChild(timer);
 
       const pace = document.createElement('div');
