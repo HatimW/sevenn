@@ -9752,25 +9752,23 @@
     chip.dataset.passOrder = String(info?.order ?? "");
     chip.setAttribute("role", "button");
     chip.tabIndex = 0;
-    if (Number.isFinite(info?.completedAt)) chip.classList.add("is-complete");
-    if (!Number.isFinite(info?.completedAt) && Number.isFinite(info?.due) && info.due < now) {
-      chip.classList.add("is-overdue");
-    }
     const passTitle = info?.action || info?.label || `Pass ${info?.order ?? ""}`;
     const statusWrap = document.createElement("div");
     statusWrap.className = "lecture-pass-chip-status";
-    const check = document.createElement("label");
-    check.className = "lecture-pass-chip-check";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.className = "lecture-pass-chip-checkbox";
-    checkbox.checked = Number.isFinite(info?.completedAt);
-    checkbox.setAttribute("aria-label", `Toggle completion for ${passTitle}`);
-    const faux = document.createElement("span");
-    faux.className = "lecture-pass-chip-checkmark";
-    faux.setAttribute("aria-hidden", "true");
-    check.append(checkbox, faux);
-    statusWrap.appendChild(check);
+    const toggleButton = document.createElement("button");
+    toggleButton.type = "button";
+    toggleButton.className = "lecture-pass-chip-toggle";
+    toggleButton.setAttribute("aria-label", `Mark ${passTitle} as complete`);
+    toggleButton.setAttribute("aria-pressed", "false");
+    const toggleIcon = document.createElement("span");
+    toggleIcon.className = "lecture-pass-chip-toggle-icon";
+    toggleIcon.setAttribute("aria-hidden", "true");
+    toggleIcon.textContent = "\u2713";
+    const toggleLabel = document.createElement("span");
+    toggleLabel.className = "lecture-pass-chip-toggle-label";
+    toggleLabel.textContent = "Done";
+    toggleButton.append(toggleIcon, toggleLabel);
+    statusWrap.appendChild(toggleButton);
     chip.appendChild(statusWrap);
     const body = document.createElement("div");
     body.className = "lecture-pass-chip-body";
@@ -9797,28 +9795,40 @@
     countdown.className = "lecture-pass-chip-countdown";
     countdown.textContent = describePassCountdown(info?.due, now);
     body.appendChild(countdown);
+    const isInitiallyComplete = Number.isFinite(info?.completedAt);
+    const dueTimestamp = Number.isFinite(info?.due) ? info.due : null;
+    function applyCompletionState(complete) {
+      chip.classList.toggle("is-complete", complete);
+      const overdue = !complete && Number.isFinite(dueTimestamp) && dueTimestamp < now;
+      chip.classList.toggle("is-overdue", overdue);
+      toggleButton.classList.toggle("is-active", complete);
+      toggleButton.setAttribute("aria-pressed", complete ? "true" : "false");
+      toggleButton.setAttribute(
+        "aria-label",
+        complete ? `Mark ${passTitle} as incomplete` : `Mark ${passTitle} as complete`
+      );
+    }
+    applyCompletionState(isInitiallyComplete);
     let busy = false;
-    checkbox.addEventListener("change", async (event) => {
+    toggleButton.addEventListener("click", async () => {
       if (typeof onToggle !== "function") return;
-      if (busy) {
-        event.preventDefault();
-        checkbox.checked = !checkbox.checked;
-        return;
-      }
-      const desired = checkbox.checked;
+      if (busy) return;
+      const desired = !toggleButton.classList.contains("is-active");
       busy = true;
       chip.classList.add("is-pending");
+      toggleButton.disabled = true;
       try {
         await onToggle(desired);
+        applyCompletionState(desired);
       } catch (err) {
         console.error(err);
-        checkbox.checked = !desired;
       }
       chip.classList.remove("is-pending");
+      toggleButton.disabled = false;
       busy = false;
     });
     chip.addEventListener("click", (event) => {
-      if (event.target instanceof Element && event.target.closest(".lecture-pass-chip-check")) {
+      if (event.target instanceof Element && event.target.closest(".lecture-pass-chip-toggle")) {
         return;
       }
       if (typeof onOpen === "function") {
@@ -10122,14 +10132,15 @@
     return "pending";
   }
   function renderLectureWeekRow(lecture, onEdit, onDelete, onEditPass, onTogglePass, onExport, now = Date.now()) {
-    const row = document.createElement("tr");
+    const row = document.createElement("div");
+    row.className = "lecture-row";
     row.dataset.lectureRow = "true";
     row.dataset.lectureId = String(lecture.id);
     row.dataset.blockId = String(lecture.blockId ?? "");
     const stats = computeLecturePassStats(lecture);
     const stateLabel = getLectureState(lecture, stats);
-    const overviewCell = document.createElement("td");
-    overviewCell.className = "lecture-overview";
+    const overviewCell = document.createElement("div");
+    overviewCell.className = "lecture-col lecture-overview lecture-col-lecture";
     const header = document.createElement("div");
     header.className = "lecture-overview-header";
     const name = document.createElement("span");
@@ -10176,8 +10187,8 @@
     metrics.appendChild(remainingMetric);
     overviewCell.appendChild(metrics);
     row.appendChild(overviewCell);
-    const passesCell = document.createElement("td");
-    passesCell.className = "lecture-passes-cell";
+    const passesCell = document.createElement("div");
+    passesCell.className = "lecture-col lecture-passes-cell lecture-col-passes";
     const passScroller = document.createElement("div");
     passScroller.className = "lecture-pass-scroller";
     const passList = buildPassDisplayList(lecture);
@@ -10197,8 +10208,8 @@
     }
     passesCell.appendChild(passScroller);
     row.appendChild(passesCell);
-    const actions = document.createElement("td");
-    actions.className = "lecture-actions";
+    const actions = document.createElement("div");
+    actions.className = "lecture-col lecture-actions lecture-col-actions";
     const editBtn = document.createElement("button");
     editBtn.type = "button";
     editBtn.className = "btn secondary";
@@ -10380,23 +10391,21 @@
         weekDetails.appendChild(weekSummary);
         const weekBody = document.createElement("div");
         weekBody.className = "lectures-week-body";
-        const table = document.createElement("table");
-        table.className = "lectures-week-table";
-        const thead = document.createElement("thead");
-        const headerRow = document.createElement("tr");
+        const list = document.createElement("div");
+        list.className = "lectures-week-list";
+        const headerRow = document.createElement("div");
+        headerRow.className = "lecture-row lecture-row-header";
         [
-          { label: "Lecture", className: "lectures-col-lecture" },
-          { label: "Passes", className: "lectures-col-passes" },
-          { label: "Actions", className: "lectures-col-actions" }
+          { label: "Lecture", className: "lecture-col-lecture" },
+          { label: "Passes", className: "lecture-col-passes" },
+          { label: "Actions", className: "lecture-col-actions" }
         ].forEach((column) => {
-          const th = document.createElement("th");
-          th.textContent = column.label;
-          if (column.className) th.classList.add(column.className);
-          headerRow.appendChild(th);
+          const cell = document.createElement("div");
+          cell.className = `lecture-col ${column.className}`;
+          cell.textContent = column.label;
+          headerRow.appendChild(cell);
         });
-        thead.appendChild(headerRow);
-        table.appendChild(thead);
-        const tbody = document.createElement("tbody");
+        list.appendChild(headerRow);
         sortLecturesForDisplay(weekLectures, sortConfig).forEach((entry) => {
           const row = renderLectureWeekRow(
             entry,
@@ -10407,10 +10416,9 @@
             (lecture) => onExportLecture?.(lecture, group.block),
             now
           );
-          tbody.appendChild(row);
+          list.appendChild(row);
         });
-        table.appendChild(tbody);
-        weekBody.appendChild(table);
+        weekBody.appendChild(list);
         weekDetails.appendChild(weekBody);
         weekWrapper.appendChild(weekDetails);
       });
