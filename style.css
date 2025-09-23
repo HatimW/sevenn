@@ -909,17 +909,33 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(
 }
 
 .quiz-suggestions li {
+  padding: 0;
+}
+
+.quiz-suggestion-btn {
+  display: block;
+  width: 100%;
   background: rgba(30, 41, 59, 0.85);
   border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: var(--radius-sm);
   padding: 6px 10px;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  transition: background 0.2s ease, border-color 0.2s ease, outline-color 0.2s ease;
 }
 
-.quiz-suggestions li:hover {
+.quiz-suggestion-btn:hover,
+.quiz-suggestion-btn:focus-visible,
+.quiz-suggestion-btn[aria-selected='true'] {
   background: rgba(56, 189, 248, 0.18);
   border-color: rgba(56, 189, 248, 0.36);
+}
+
+.quiz-suggestion-btn:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.6);
+  outline-offset: 0;
 }
 
 .quiz-answer-actions {
