@@ -162,6 +162,20 @@ function analyzeAnswerChange(stat, question, finalAnswer) {
   };
 }
 
+function countMeaningfulAnswerChanges(stat) {
+  if (!stat || !Array.isArray(stat.changes)) return 0;
+  let count = 0;
+  stat.changes.forEach(change => {
+    if (!change) return;
+    const from = change.from ?? null;
+    const to = change.to ?? null;
+    if (from == null) return;
+    if (from === to) return;
+    count += 1;
+  });
+  return count;
+}
+
 function summarizeAnswerChanges(questionStats, exam, answers = {}) {
   let rightToWrong = 0;
   let wrongToRight = 0;
@@ -884,6 +898,7 @@ function renderPalette(sidebar, sess, render) {
 
       const stat = statsList[idx];
       const changeDetails = analyzeAnswerChange(stat, question, answer);
+      const meaningfulChanges = countMeaningfulAnswerChanges(stat);
       if (changeDetails.changed) {
         let changeTitle = 'Changed answer';
         if (changeDetails.direction === 'right-to-wrong') {
@@ -896,6 +911,8 @@ function renderPalette(sidebar, sess, render) {
           btn.dataset.changeDirection = 'changed';
         }
         tooltipParts.push(changeTitle);
+      } else if (meaningfulChanges > 0) {
+        tooltipParts.push('Changed answers but returned to start');
       }
     } else {
       status = answered ? 'answered' : 'unanswered';
@@ -915,6 +932,7 @@ function renderPalette(sidebar, sess, render) {
     }
 
     btn.dataset.status = status;
+    btn.dataset.mode = sess.mode || '';
 
     if (flaggedSet.has(idx)) {
       btn.classList.add('flagged');
@@ -1169,7 +1187,7 @@ export function renderExamRunner(root, render) {
         timeSpent.innerHTML = `<strong>Time spent:</strong> ${formatDuration(stats.timeMs)}`;
         insights.appendChild(timeSpent);
 
-        const recordedChanges = Array.isArray(stats.changes) ? stats.changes.length : 0;
+        const meaningfulChanges = countMeaningfulAnswerChanges(stats);
         const finalAnswer = sess.result?.answers?.[sess.idx];
         const changeDetails = analyzeAnswerChange(stats, question, finalAnswer);
 
@@ -1184,7 +1202,7 @@ export function renderExamRunner(root, render) {
             message = 'You changed your answer but it remained incorrect.';
           }
           changeInfo.innerHTML = `<strong>Answer change:</strong> ${message}`;
-        } else if (recordedChanges > 0) {
+        } else if (meaningfulChanges > 0) {
           changeInfo.innerHTML = '<strong>Answer change:</strong> You changed answers but ended on your original choice.';
         } else {
           changeInfo.innerHTML = '<strong>Answer change:</strong> None';
