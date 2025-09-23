@@ -303,7 +303,12 @@ export async function renderCards(container, items, onChange) {
           };
         })
         .filter(week => week.totalCards > 0)
-        .sort((a, b) => (a.order - b.order) || a.label.localeCompare(b.label));
+        .sort((a, b) => {
+          const aValue = Number.isFinite(a.value) ? a.value : -Infinity;
+          const bValue = Number.isFinite(b.value) ? b.value : -Infinity;
+          if (aValue !== bValue) return bValue - aValue;
+          return a.label.localeCompare(b.label);
+        });
       const totalCards = weeks.reduce((sum, week) => sum + week.totalCards, 0);
       const lectureCount = weeks.reduce((sum, week) => sum + week.lectureCount, 0);
       return {

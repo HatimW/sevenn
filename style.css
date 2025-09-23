@@ -4765,21 +4765,23 @@ button.builder-pill.builder-pill-outline {
   background: rgba(15, 23, 42, 0.42);
 }
 
+
 .map-search-container {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .map-search {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .map-search-input {
-  min-width: 220px;
+  min-width: 200px;
+  padding-block: 6px;
   background: rgba(15, 23, 42, 0.6);
   color: #f8fafc;
   border-color: rgba(148, 163, 184, 0.5);
@@ -4796,7 +4798,8 @@ button.builder-pill.builder-pill-outline {
 }
 
 .map-search-btn {
-  padding: 8px 14px;
+  padding: 6px 12px;
+  border-radius: 999px;
 }
 
 .map-search-feedback {
@@ -4818,12 +4821,12 @@ button.builder-pill.builder-pill-outline {
   top: 24px;
   left: 50%;
   transform: translateX(-50%);
-  padding: 14px 18px;
-  min-width: 260px;
-  border-radius: 999px;
+  padding: 9px 14px;
+  min-width: 0;
+  border-radius: 32px;
   background: rgba(15, 23, 42, 0.75);
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  box-shadow: 0 18px 40px rgba(2, 6, 23, 0.55);
   backdrop-filter: blur(10px);
   pointer-events: auto;
   z-index: 2;

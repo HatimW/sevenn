@@ -1,31 +1,4 @@
-var Sevenn = (() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-    }
-    return to;
-  };
-  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
-  // js/main.js
-  var main_exports = {};
-  __export(main_exports, {
-    render: () => renderApp,
-    renderApp: () => renderApp,
-    resolveListKind: () => resolveListKind,
-    tabs: () => tabs
-  });
-
+(() => {
   // js/state.js
   var state = {
     tab: "Block Board",
@@ -6970,7 +6943,12 @@ var Sevenn = (() => {
           totalCards: totalCards2,
           lectureCount: lectures.length
         };
-      }).filter((week) => week.totalCards > 0).sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
+      }).filter((week) => week.totalCards > 0).sort((a, b) => {
+        const aValue = Number.isFinite(a.value) ? a.value : -Infinity;
+        const bValue = Number.isFinite(b.value) ? b.value : -Infinity;
+        if (aValue !== bValue) return bValue - aValue;
+        return a.label.localeCompare(b.label);
+      });
       const totalCards = weeks.reduce((sum, week) => sum + week.totalCards, 0);
       const lectureCount = weeks.reduce((sum, week) => sum + week.lectureCount, 0);
       return {
@@ -7664,6 +7642,95 @@ var Sevenn = (() => {
   function clone4(value) {
     return JSON.parse(JSON.stringify(value ?? null));
   }
+  function safeClone(value, fallback = null) {
+    try {
+      const result = clone4(value);
+      if (result === null && fallback !== void 0) {
+        return clone4(fallback ?? null);
+      }
+      return result;
+    } catch (err) {
+      console.warn("Failed to clone study session value", err);
+      if (fallback === void 0) return null;
+      try {
+        return clone4(fallback ?? null);
+      } catch (_) {
+        if (Array.isArray(fallback)) return [];
+        if (fallback && typeof fallback === "object") return {};
+        return fallback ?? null;
+      }
+    }
+  }
+  function sanitizeRatings(map) {
+    if (!map || typeof map !== "object" || Array.isArray(map)) return {};
+    const next = {};
+    Object.entries(map).forEach(([key, value]) => {
+      if (typeof key !== "string") return;
+      if (typeof value === "string") {
+        next[key] = value;
+      }
+    });
+    return next;
+  }
+  function sanitizeAnswers(map) {
+    if (!map || typeof map !== "object" || Array.isArray(map)) return {};
+    const next = {};
+    Object.entries(map).forEach(([key, value]) => {
+      if (typeof key !== "string" || !value || typeof value !== "object") return;
+      const entry = {
+        value: typeof value.value === "string" ? value.value : "",
+        isCorrect: Boolean(value.isCorrect),
+        checked: Boolean(value.checked),
+        revealed: Boolean(value.revealed)
+      };
+      next[key] = entry;
+    });
+    return next;
+  }
+  function sanitizePoolEntry(entry) {
+    if (entry === null || entry === void 0) return null;
+    if (typeof entry !== "object") return entry;
+    return safeClone(entry, {});
+  }
+  function sanitizeSession(mode, session) {
+    const source = safeClone(session, {});
+    const next = source && typeof source === "object" ? source : {};
+    delete next.dict;
+    if (Array.isArray(next.pool)) {
+      next.pool = next.pool.map((item) => sanitizePoolEntry(item)).filter((item) => item !== null && item !== void 0);
+    } else {
+      next.pool = [];
+    }
+    if (typeof next.idx !== "number" || Number.isNaN(next.idx)) {
+      next.idx = 0;
+    }
+    next.idx = next.pool.length ? Math.max(0, Math.min(Math.floor(next.idx), next.pool.length - 1)) : 0;
+    if (next.answers && typeof next.answers === "object" && !Array.isArray(next.answers)) {
+      next.answers = sanitizeAnswers(next.answers);
+    } else if (next.answers !== void 0) {
+      next.answers = {};
+    }
+    if (next.ratings && typeof next.ratings === "object" && !Array.isArray(next.ratings)) {
+      next.ratings = sanitizeRatings(next.ratings);
+    } else {
+      next.ratings = {};
+    }
+    if (mode === "review") {
+      next.mode = "review";
+    } else if (typeof next.mode !== "string" || next.mode !== "review") {
+      next.mode = "study";
+    }
+    return next;
+  }
+  function sanitizeCohort(list) {
+    const cloned = safeClone(list, []);
+    if (!Array.isArray(cloned)) return [];
+    return cloned.map((item) => sanitizePoolEntry(item)).filter((item) => item !== null && item !== void 0);
+  }
+  function sanitizeMetadata(meta) {
+    const cloned = safeClone(meta, {});
+    return cloned && typeof cloned === "object" && !Array.isArray(cloned) ? cloned : {};
+  }
   async function hydrateStudySessions(force = false) {
     if (!force && state.studySessionsLoaded) {
       return state.studySessions || {};
@@ -7673,7 +7740,13 @@ var Sevenn = (() => {
         const map = {};
         entries.forEach((entry) => {
           if (entry && entry.mode) {
-            map[entry.mode] = entry;
+            map[entry.mode] = {
+              mode: entry.mode,
+              updatedAt: entry.updatedAt || Date.now(),
+              session: sanitizeSession(entry.mode, entry.session),
+              cohort: sanitizeCohort(entry.cohort),
+              metadata: sanitizeMetadata(entry.metadata)
+            };
           }
         });
         setStudySessions(map);
@@ -7697,9 +7770,9 @@ var Sevenn = (() => {
     const entry = {
       mode,
       updatedAt: Date.now(),
-      session: clone4(payload?.session ?? {}),
-      cohort: clone4(payload?.cohort ?? []),
-      metadata: clone4(payload?.metadata ?? {})
+      session: sanitizeSession(mode, payload?.session ?? {}),
+      cohort: sanitizeCohort(payload?.cohort ?? []),
+      metadata: sanitizeMetadata(payload?.metadata ?? {})
     };
     await saveStudySessionRecord(entry);
     setStudySessionEntry(mode, entry);
@@ -12682,12 +12755,19 @@ var Sevenn = (() => {
     const input = document.createElement("input");
     input.type = "text";
     input.autocomplete = "off";
+    input.spellcheck = false;
     input.placeholder = "Type your answer";
     input.value = answer.value || "";
     form.appendChild(input);
     const suggestions = document.createElement("ul");
     suggestions.className = "quiz-suggestions";
+    const suggestionId = `quiz-suggestions-${session.idx}`;
+    suggestions.id = suggestionId;
+    suggestions.setAttribute("role", "listbox");
     form.appendChild(suggestions);
+    input.setAttribute("aria-controls", suggestionId);
+    input.setAttribute("aria-autocomplete", "list");
+    input.setAttribute("aria-expanded", "false");
     const actions = document.createElement("div");
     actions.className = "quiz-answer-actions";
     const checkBtn = document.createElement("button");
@@ -12718,7 +12798,85 @@ var Sevenn = (() => {
     }
     form.appendChild(feedback);
     card.appendChild(form);
-    input.addEventListener("input", () => {
+    const suggestionButtons = [];
+    const setActiveSuggestion = (target = null) => {
+      suggestionButtons.forEach((btn) => {
+        btn.setAttribute("aria-selected", btn === target ? "true" : "false");
+      });
+    };
+    const clearSuggestions = () => {
+      suggestionButtons.splice(0, suggestionButtons.length);
+      suggestions.innerHTML = "";
+      input.setAttribute("aria-expanded", "false");
+      setActiveSuggestion(null);
+    };
+    const commitSuggestion = (value) => {
+      input.value = value;
+      clearSuggestions();
+      checkBtn.disabled = !input.value.trim();
+      input.focus();
+    };
+    const focusSuggestion = (index) => {
+      const target = suggestionButtons[index];
+      if (target) {
+        target.focus();
+        setActiveSuggestion(target);
+      }
+    };
+    const renderSuggestions = (matches) => {
+      clearSuggestions();
+      if (!matches.length) return;
+      const fragment = document.createDocumentFragment();
+      matches.forEach((entry, idx) => {
+        const li = document.createElement("li");
+        li.setAttribute("role", "presentation");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "quiz-suggestion-btn";
+        btn.textContent = entry.title;
+        btn.dataset.index = String(idx);
+        btn.setAttribute("role", "option");
+        btn.setAttribute("aria-selected", "false");
+        btn.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          commitSuggestion(entry.title);
+        });
+        btn.addEventListener("keydown", (event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            focusSuggestion(Math.min(suggestionButtons.length - 1, idx + 1));
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            if (idx === 0) {
+              input.focus();
+            } else {
+              focusSuggestion(Math.max(0, idx - 1));
+            }
+          } else if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            commitSuggestion(entry.title);
+          }
+        });
+        btn.addEventListener("focus", () => {
+          setActiveSuggestion(btn);
+        });
+        btn.addEventListener("blur", () => {
+          if (typeof document !== "undefined") {
+            const active = document.activeElement;
+            if (active instanceof HTMLElement && suggestionButtons.includes(active) && active.closest(`#${suggestionId}`)) {
+              return;
+            }
+          }
+          setActiveSuggestion(null);
+        });
+        li.appendChild(btn);
+        fragment.appendChild(li);
+        suggestionButtons.push(btn);
+      });
+      suggestions.appendChild(fragment);
+      input.setAttribute("aria-expanded", "true");
+    };
+    const updateSuggestions = () => {
       checkBtn.disabled = !input.value.trim();
       const v = input.value.toLowerCase();
       const existing = session.answers[session.idx];
@@ -12735,19 +12893,36 @@ var Sevenn = (() => {
         tally.textContent = `Score: ${session.score}`;
         updateNavState();
       }
-      suggestions.innerHTML = "";
-      if (!v) return;
-      const starts = session.dict.filter((d) => d.lower.startsWith(v));
-      const contains = session.dict.filter((d) => !d.lower.startsWith(v) && d.lower.includes(v));
-      [...starts, ...contains].slice(0, 5).forEach((d) => {
-        const li = document.createElement("li");
-        li.textContent = d.title;
-        li.addEventListener("mousedown", () => {
-          input.value = d.title;
-          suggestions.innerHTML = "";
-        });
-        suggestions.appendChild(li);
-      });
+      if (!v) {
+        clearSuggestions();
+        return;
+      }
+      const seen = /* @__PURE__ */ new Set();
+      const orderedMatches = [];
+      const consider = (entry) => {
+        if (!entry || seen.has(entry.id || entry.title)) return;
+        seen.add(entry.id || entry.title);
+        orderedMatches.push(entry);
+      };
+      session.dict.filter((d) => d.lower.startsWith(v)).forEach(consider);
+      session.dict.filter((d) => !d.lower.startsWith(v) && d.lower.includes(v)).forEach(consider);
+      renderSuggestions(orderedMatches.slice(0, 5));
+    };
+    input.addEventListener("input", updateSuggestions);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" && suggestionButtons.length) {
+        event.preventDefault();
+        focusSuggestion(0);
+      }
+    });
+    input.addEventListener("blur", () => {
+      setTimeout(() => {
+        if (typeof document !== "undefined") {
+          const active = document.activeElement;
+          if (active instanceof HTMLElement && active.closest(`#${suggestionId}`)) return;
+        }
+        clearSuggestions();
+      }, 0);
     });
     revealBtn.addEventListener("click", () => {
       const revealValue = titleOf3(item);
@@ -12760,7 +12935,7 @@ var Sevenn = (() => {
       feedback.classList.remove("is-correct");
       feedback.classList.add("is-incorrect");
       revealBtn.hidden = true;
-      suggestions.innerHTML = "";
+      clearSuggestions();
       tally.textContent = `Score: ${session.score}`;
       updateNavState();
     });
@@ -12940,7 +13115,7 @@ var Sevenn = (() => {
       feedback.textContent = isCorrect ? "Correct!" : "Incorrect. Try again or reveal the answer.";
       feedback.classList.remove("is-correct", "is-incorrect");
       feedback.classList.add(isCorrect ? "is-correct" : "is-incorrect");
-      suggestions.innerHTML = "";
+      clearSuggestions();
       revealBtn.hidden = isCorrect;
       if (!isCorrect) {
         revealBtn.disabled = false;
@@ -16718,7 +16893,8 @@ var Sevenn = (() => {
     searchFeedback: null,
     searchInput: null,
     searchFeedbackEl: null,
-    paletteSearch: ""
+    paletteSearch: "",
+    nodeRadii: null
   };
   function normalizeMapTab(tab = {}) {
     const filter = tab.filter && typeof tab.filter === "object" ? tab.filter : {};
@@ -16750,6 +16926,34 @@ var Sevenn = (() => {
       normalized2.filter.week = "";
     }
     return normalized2;
+  }
+  function deriveItemGroupKeys(item) {
+    const groups = [];
+    const lectures = Array.isArray(item?.lectures) ? item.lectures : [];
+    if (lectures.length) {
+      lectures.forEach((lecture) => {
+        const blockKey = lecture.blockId ? `block:${lecture.blockId}` : "block:__";
+        const lectureId = lecture.id != null ? `lec:${lecture.id}` : "";
+        const lectureName = lecture.name ? `name:${lecture.name}` : "";
+        const week = Number.isFinite(lecture.week) ? `week:${lecture.week}` : "";
+        const key = [blockKey, week, lectureId || lectureName].filter(Boolean).join("|");
+        groups.push(key || blockKey);
+      });
+    } else if (Array.isArray(item?.blocks) && item.blocks.length) {
+      item.blocks.forEach((blockId) => {
+        groups.push(`block-only:${blockId}`);
+      });
+    }
+    if (!groups.length) {
+      groups.push(`kind:${item?.kind || "concept"}`);
+    }
+    return groups;
+  }
+  function getPrimaryGroupKey(item, keys = deriveItemGroupKeys(item)) {
+    if (Array.isArray(keys) && keys.length) {
+      return keys[0];
+    }
+    return `kind:${item?.kind || "concept"}`;
   }
   function normalizeMapConfig(config = null) {
     const base = config && typeof config === "object" ? { ...config } : {};
@@ -17437,6 +17641,10 @@ var Sevenn = (() => {
     const activeTab = getActiveTab();
     const visibleItems = applyTabFilters(items, activeTab);
     mapState.visibleItems = visibleItems;
+    const itemGroupCache = /* @__PURE__ */ new Map();
+    visibleItems.forEach((it) => {
+      itemGroupCache.set(it.id, deriveItemGroupKeys(it));
+    });
     const base = 1e3;
     const size = Math.max(base, visibleItems.length * 150);
     const viewport = base;
@@ -17619,6 +17827,13 @@ var Sevenn = (() => {
     const allowLegacyPositions = Boolean(activeTab && activeTab.layoutSeeded !== true);
     let layoutDirty = false;
     let legacyImported = false;
+    const nodeRadii = /* @__PURE__ */ new Map();
+    visibleItems.forEach((it) => {
+      const degree = linkCounts[it.id] || 0;
+      const baseRadius = minRadius + (maxRadius - minRadius) * degree / maxLinks;
+      nodeRadii.set(it.id, baseRadius);
+    });
+    mapState.nodeRadii = nodeRadii;
     visibleItems.forEach((it) => {
       if (layout && layout[it.id]) {
         positions[it.id] = { ...layout[it.id] };
@@ -17636,19 +17851,127 @@ var Sevenn = (() => {
         }
         return;
       }
-      newItems.push(it);
+      const groups = itemGroupCache.get(it.id) || deriveItemGroupKeys(it);
+      const primaryGroup = getPrimaryGroupKey(it, groups);
+      newItems.push({ item: it, primaryGroup, degree: linkCounts[it.id] || 0 });
     });
-    newItems.sort((a, b) => (linkCounts[b.id] || 0) - (linkCounts[a.id] || 0));
-    const step = 2 * Math.PI / Math.max(newItems.length, 1);
-    newItems.forEach((it, idx) => {
-      const angle = idx * step;
-      const degree = linkCounts[it.id] || 0;
-      const dist = 100 - degree / maxLinks * 50;
-      const x = center + dist * Math.cos(angle);
-      const y = center + dist * Math.sin(angle);
-      positions[it.id] = { x, y };
+    const existingGroupInfo = /* @__PURE__ */ new Map();
+    Object.entries(positions).forEach(([id, pos]) => {
+      if (!pos) return;
+      const groups = itemGroupCache.get(id) || [];
+      groups.forEach((key) => {
+        const info = existingGroupInfo.get(key) || {
+          minX: pos.x,
+          maxX: pos.x,
+          minY: pos.y,
+          maxY: pos.y,
+          count: 0
+        };
+        info.count += 1;
+        info.minX = Math.min(info.minX, pos.x);
+        info.maxX = Math.max(info.maxX, pos.x);
+        info.minY = Math.min(info.minY, pos.y);
+        info.maxY = Math.max(info.maxY, pos.y);
+        existingGroupInfo.set(key, info);
+      });
+    });
+    const pendingCounts = /* @__PURE__ */ new Map();
+    newItems.forEach((entry) => {
+      pendingCounts.set(entry.primaryGroup, (pendingCounts.get(entry.primaryGroup) || 0) + 1);
+    });
+    const clusterOrigins = /* @__PURE__ */ new Map();
+    const seenGroups = /* @__PURE__ */ new Set();
+    const newGroupOrder = [];
+    newItems.forEach((entry) => {
+      const key = entry.primaryGroup;
+      if (existingGroupInfo.has(key)) return;
+      if (seenGroups.has(key)) return;
+      seenGroups.add(key);
+      newGroupOrder.push(key);
+    });
+    if (newGroupOrder.length) {
+      const clusterCols = Math.ceil(Math.sqrt(newGroupOrder.length));
+      const clusterRows = Math.ceil(newGroupOrder.length / clusterCols);
+      const clusterSpacing = 320;
+      newGroupOrder.forEach((key, index) => {
+        const col = index % clusterCols;
+        const row = Math.floor(index / clusterCols);
+        const offsetX = (col - (clusterCols - 1) / 2) * clusterSpacing;
+        const offsetY = (row - (clusterRows - 1) / 2) * clusterSpacing;
+        clusterOrigins.set(key, {
+          x: center + offsetX,
+          y: center + offsetY
+        });
+      });
+    }
+    const groupPlacement = /* @__PURE__ */ new Map();
+    function ensureGroupPlacement(key) {
+      if (groupPlacement.has(key)) {
+        return groupPlacement.get(key);
+      }
+      const existing = existingGroupInfo.get(key);
+      const pending2 = pendingCounts.get(key) || 0;
+      const total = (existing?.count || 0) + pending2;
+      const columns = Math.max(2, Math.ceil(Math.sqrt(Math.max(total, 1))));
+      const rows = Math.max(1, Math.ceil(Math.max(total, 1) / columns));
+      const origin = existing ? {
+        x: (existing.minX + existing.maxX) / 2,
+        y: (existing.minY + existing.maxY) / 2
+      } : clusterOrigins.get(key) || { x: center, y: center };
+      let spacing = 200;
+      if (existing?.count > 1) {
+        const spread = Math.max(existing.maxX - existing.minX, existing.maxY - existing.minY);
+        spacing = Math.max(160, spread / Math.max(1, existing.count - 1) + 100);
+      } else if (existing?.count === 1) {
+        spacing = 180;
+      } else if (clusterOrigins.has(key)) {
+        spacing = 220;
+      }
+      const info = { origin, columns, rows, spacing, index: existing?.count || 0 };
+      groupPlacement.set(key, info);
+      return info;
+    }
+    function allocateGroupPosition(key) {
+      const info = ensureGroupPlacement(key);
+      const maxAttempts = 400;
+      for (let offset = 0; offset < maxAttempts; offset += 1) {
+        const idx = info.index + offset;
+        const col = idx % info.columns;
+        const row = Math.floor(idx / info.columns);
+        const neededRows = Math.max(info.rows, row + 1);
+        const colCenter = (info.columns - 1) / 2;
+        const rowCenter = (neededRows - 1) / 2;
+        const x = info.origin.x + (col - colCenter) * info.spacing;
+        const y = info.origin.y + (row - rowCenter) * info.spacing;
+        let collision = false;
+        for (const existingId in positions) {
+          const other = positions[existingId];
+          if (!other) continue;
+          if (Math.hypot(other.x - x, other.y - y) < info.spacing * 0.7) {
+            collision = true;
+            break;
+          }
+        }
+        if (!collision) {
+          info.index = idx + 1;
+          info.rows = Math.max(info.rows, neededRows);
+          groupPlacement.set(key, info);
+          return { x, y };
+        }
+      }
+      info.index += maxAttempts;
+      groupPlacement.set(key, info);
+      return {
+        x: info.origin.x + (Math.random() - 0.5) * info.spacing,
+        y: info.origin.y + (Math.random() - 0.5) * info.spacing
+      };
+    }
+    newItems.sort((a, b) => b.degree - a.degree);
+    newItems.forEach((entry) => {
+      const pos = allocateGroupPosition(entry.primaryGroup);
+      positions[entry.item.id] = pos;
       if (layout) {
-        layout[it.id] = { x, y };
+        layout[entry.item.id] = { ...pos };
         layoutDirty = true;
       }
     });
@@ -17713,7 +18036,8 @@ var Sevenn = (() => {
       const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       circle.setAttribute("cx", pos.x);
       circle.setAttribute("cy", pos.y);
-      const baseR = minRadius + (maxRadius - minRadius) * (linkCounts[it.id] || 0) / maxLinks;
+      const cachedRadius = mapState.nodeRadii?.get(it.id);
+      const baseR = typeof cachedRadius === "number" ? cachedRadius : minRadius + (maxRadius - minRadius) * (linkCounts[it.id] || 0) / maxLinks;
       circle.setAttribute("r", baseR);
       circle.dataset.radius = baseR;
       circle.setAttribute("class", "map-node");
@@ -18714,6 +19038,9 @@ var Sevenn = (() => {
       updateNodeGeometry(id, entry);
     });
     svg.querySelectorAll(".map-edge").forEach((line) => {
+      if (line.dataset.a && line.dataset.b) {
+        line.setAttribute("d", calcPath(line.dataset.a, line.dataset.b));
+      }
       updateLineStrokeWidth(line);
       syncLineDecoration(line);
     });
@@ -18729,31 +19056,74 @@ var Sevenn = (() => {
     const projY = y1 + t * dy;
     return Math.hypot(px - projX, py - projY);
   }
-  function calcPath(aId, bId) {
-    const positions = mapState.positions;
+  function getNodeBaseRadius(id) {
+    if (mapState.nodeRadii && mapState.nodeRadii.has(id)) {
+      return mapState.nodeRadii.get(id);
+    }
+    const entry = mapState.elements?.get(id);
+    if (entry?.circle) {
+      return Number(entry.circle.dataset.radius) || 20;
+    }
+    return 20;
+  }
+  function getNodeRadius(id) {
+    const base = getNodeBaseRadius(id);
+    const scales = getCurrentScales();
+    return base * (scales.nodeScale || 1);
+  }
+  function computeTrimmedSegment(aId, bId) {
+    const positions = mapState.positions || {};
     const a = positions[aId];
     const b = positions[bId];
-    if (!a || !b) return "";
-    const x1 = a.x, y1 = a.y;
-    const x2 = b.x, y2 = b.y;
-    let cx = (x1 + x2) / 2;
-    let cy = (y1 + y2) / 2;
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const len = Math.hypot(dx, dy) || 1;
+    if (!a || !b) return null;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (!len) return null;
+    const ux = dx / len;
+    const uy = dy / len;
+    const trimA = Math.min(getNodeRadius(aId) + 6, len / 2);
+    const trimB = Math.min(getNodeRadius(bId) + 6, len / 2);
+    const startX = a.x + ux * trimA;
+    const startY = a.y + uy * trimA;
+    const endX = b.x - ux * trimB;
+    const endY = b.y - uy * trimB;
+    const trimmedLength = Math.hypot(endX - startX, endY - startY);
+    return {
+      startX,
+      startY,
+      endX,
+      endY,
+      ux,
+      uy,
+      trimmedLength: trimmedLength || 0
+    };
+  }
+  function calcPath(aId, bId) {
+    const segment = computeTrimmedSegment(aId, bId);
+    if (!segment) return "";
+    const { startX, startY, endX, endY, ux, uy } = segment;
+    const trimmedLength = segment.trimmedLength || Math.hypot(endX - startX, endY - startY) || 1;
+    let cx = (startX + endX) / 2;
+    let cy = (startY + endY) / 2;
+    const nx = -uy;
+    const ny = ux;
+    const clearance = Math.max(40, trimmedLength * 0.2);
+    const positions = mapState.positions || {};
     for (const id in positions) {
       if (id === aId || id === bId) continue;
       const p = positions[id];
-      if (pointToSegment(p.x, p.y, x1, y1, x2, y2) < 40) {
-        const nx = -dy / len;
-        const ny = dx / len;
-        const side = (p.x - x1) * nx + (p.y - y1) * ny > 0 ? 1 : -1;
-        cx += nx * 80 * side;
-        cy += ny * 80 * side;
+      if (!p) continue;
+      const otherRadius = getNodeRadius(id);
+      if (pointToSegment(p.x, p.y, startX, startY, endX, endY) < clearance + otherRadius * 0.5) {
+        const side = (p.x - startX) * nx + (p.y - startY) * ny > 0 ? 1 : -1;
+        const bump = Math.min(140, Math.max(60, trimmedLength * 0.3));
+        cx += nx * bump * side;
+        cy += ny * bump * side;
         break;
       }
     }
-    return `M${x1} ${y1} Q${cx} ${cy} ${x2} ${y2}`;
+    return `M${startX} ${startY} Q${cx} ${cy} ${endX} ${endY}`;
   }
   function applyLineStyle(line, info = {}) {
     const previousColor = line.dataset.color;
@@ -18872,15 +19242,14 @@ var Sevenn = (() => {
   }
   function updateBlockedOverlay(line, overlay) {
     if (!line || !overlay) return;
-    const a = mapState.positions[line.dataset.a];
-    const b = mapState.positions[line.dataset.b];
-    if (!a || !b) return;
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
+    const segment = computeTrimmedSegment(line.dataset.a, line.dataset.b);
+    if (!segment) return;
+    const dx = segment.endX - segment.startX;
+    const dy = segment.endY - segment.startY;
     const len = Math.hypot(dx, dy);
     if (!len) return;
-    const midX = (a.x + b.x) / 2;
-    const midY = (a.y + b.y) / 2;
+    const midX = segment.startX + dx / 2;
+    const midY = segment.startY + dy / 2;
     const tx = dx / len;
     const ty = dy / len;
     const nx = -ty;
@@ -19361,5 +19730,4 @@ var Sevenn = (() => {
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
-  return __toCommonJS(main_exports);
 })();
