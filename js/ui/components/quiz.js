@@ -192,13 +192,20 @@ export function renderQuiz(root, redraw) {
   const input = document.createElement('input');
   input.type = 'text';
   input.autocomplete = 'off';
+  input.spellcheck = false;
   input.placeholder = 'Type your answer';
   input.value = answer.value || '';
   form.appendChild(input);
 
   const suggestions = document.createElement('ul');
   suggestions.className = 'quiz-suggestions';
+  const suggestionId = `quiz-suggestions-${session.idx}`;
+  suggestions.id = suggestionId;
+  suggestions.setAttribute('role', 'listbox');
   form.appendChild(suggestions);
+  input.setAttribute('aria-controls', suggestionId);
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-expanded', 'false');
 
   const actions = document.createElement('div');
   actions.className = 'quiz-answer-actions';
@@ -236,7 +243,91 @@ export function renderQuiz(root, redraw) {
 
   card.appendChild(form);
 
-  input.addEventListener('input', () => {
+  const suggestionButtons = [];
+
+  const setActiveSuggestion = (target = null) => {
+    suggestionButtons.forEach(btn => {
+      btn.setAttribute('aria-selected', btn === target ? 'true' : 'false');
+    });
+  };
+
+  const clearSuggestions = () => {
+    suggestionButtons.splice(0, suggestionButtons.length);
+    suggestions.innerHTML = '';
+    input.setAttribute('aria-expanded', 'false');
+    setActiveSuggestion(null);
+  };
+
+  const commitSuggestion = (value) => {
+    input.value = value;
+    clearSuggestions();
+    checkBtn.disabled = !input.value.trim();
+    input.focus();
+  };
+
+  const focusSuggestion = (index) => {
+    const target = suggestionButtons[index];
+    if (target) {
+      target.focus();
+      setActiveSuggestion(target);
+    }
+  };
+
+  const renderSuggestions = (matches) => {
+    clearSuggestions();
+    if (!matches.length) return;
+    const fragment = document.createDocumentFragment();
+    matches.forEach((entry, idx) => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'presentation');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'quiz-suggestion-btn';
+      btn.textContent = entry.title;
+      btn.dataset.index = String(idx);
+      btn.setAttribute('role', 'option');
+      btn.setAttribute('aria-selected', 'false');
+      btn.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        commitSuggestion(entry.title);
+      });
+      btn.addEventListener('keydown', (event) => {
+        if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          focusSuggestion(Math.min(suggestionButtons.length - 1, idx + 1));
+        } else if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          if (idx === 0) {
+            input.focus();
+          } else {
+            focusSuggestion(Math.max(0, idx - 1));
+          }
+        } else if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          commitSuggestion(entry.title);
+        }
+      });
+      btn.addEventListener('focus', () => {
+        setActiveSuggestion(btn);
+      });
+      btn.addEventListener('blur', () => {
+        if (typeof document !== 'undefined') {
+          const active = document.activeElement;
+          if (active instanceof HTMLElement && suggestionButtons.includes(active) && active.closest(`#${suggestionId}`)) {
+            return;
+          }
+        }
+        setActiveSuggestion(null);
+      });
+      li.appendChild(btn);
+      fragment.appendChild(li);
+      suggestionButtons.push(btn);
+    });
+    suggestions.appendChild(fragment);
+    input.setAttribute('aria-expanded', 'true');
+  };
+
+  const updateSuggestions = () => {
     checkBtn.disabled = !input.value.trim();
     const v = input.value.toLowerCase();
     const existing = session.answers[session.idx];
@@ -253,19 +344,37 @@ export function renderQuiz(root, redraw) {
       tally.textContent = `Score: ${session.score}`;
       updateNavState();
     }
-    suggestions.innerHTML = '';
-    if (!v) return;
-    const starts = session.dict.filter(d => d.lower.startsWith(v));
-    const contains = session.dict.filter(d => !d.lower.startsWith(v) && d.lower.includes(v));
-    [...starts, ...contains].slice(0, 5).forEach(d => {
-      const li = document.createElement('li');
-      li.textContent = d.title;
-      li.addEventListener('mousedown', () => {
-        input.value = d.title;
-        suggestions.innerHTML = '';
-      });
-      suggestions.appendChild(li);
-    });
+    if (!v) {
+      clearSuggestions();
+      return;
+    }
+    const seen = new Set();
+    const orderedMatches = [];
+    const consider = (entry) => {
+      if (!entry || seen.has(entry.id || entry.title)) return;
+      seen.add(entry.id || entry.title);
+      orderedMatches.push(entry);
+    };
+    session.dict.filter(d => d.lower.startsWith(v)).forEach(consider);
+    session.dict.filter(d => !d.lower.startsWith(v) && d.lower.includes(v)).forEach(consider);
+    renderSuggestions(orderedMatches.slice(0, 5));
+  };
+
+  input.addEventListener('input', updateSuggestions);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown' && suggestionButtons.length) {
+      event.preventDefault();
+      focusSuggestion(0);
+    }
+  });
+  input.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (typeof document !== 'undefined') {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && active.closest(`#${suggestionId}`)) return;
+      }
+      clearSuggestions();
+    }, 0);
   });
 
   revealBtn.addEventListener('click', () => {
@@ -279,7 +388,7 @@ export function renderQuiz(root, redraw) {
     feedback.classList.remove('is-correct');
     feedback.classList.add('is-incorrect');
     revealBtn.hidden = true;
-    suggestions.innerHTML = '';
+    clearSuggestions();
     tally.textContent = `Score: ${session.score}`;
     updateNavState();
   });
@@ -482,7 +591,7 @@ export function renderQuiz(root, redraw) {
     feedback.textContent = isCorrect ? 'Correct!' : 'Incorrect. Try again or reveal the answer.';
     feedback.classList.remove('is-correct', 'is-incorrect');
     feedback.classList.add(isCorrect ? 'is-correct' : 'is-incorrect');
-    suggestions.innerHTML = '';
+    clearSuggestions();
     revealBtn.hidden = isCorrect;
     if (!isCorrect) {
       revealBtn.disabled = false;
