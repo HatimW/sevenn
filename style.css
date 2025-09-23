@@ -5878,76 +5878,85 @@ body.map-toolbox-dragging {
   gap: 8px;
 }
 
+
 .palette-button {
   position: relative;
-  background: linear-gradient(135deg, rgba(148, 163, 184, 0.35), rgba(100, 116, 139, 0.4));
-  border: 2px solid rgba(148, 163, 184, 0.5);
+  background: #e2e8f0;
+  border: 2px solid rgba(148, 163, 184, 0.55);
   border-radius: var(--radius);
   padding: 10px 0;
   cursor: pointer;
-  color: rgba(15, 23, 42, 0.75);
+  color: rgba(15, 23, 42, 0.78);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 600;
   line-height: 1;
   min-height: 44px;
-  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
-  box-shadow: none;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: inset 0 -1px 0 rgba(148, 163, 184, 0.2);
 }
 
 .palette-button:hover {
   transform: none;
-  box-shadow: none;
-  border-color: rgba(148, 163, 184, 0.7);
+  box-shadow: inset 0 -1px 0 rgba(148, 163, 184, 0.3), 0 0 0 2px rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.75);
 }
 
 .palette-button.active {
   border-color: #ffffff;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
 }
 
 .palette-button.unanswered,
 .palette-button[data-status='unanswered'] {
-  background: linear-gradient(135deg, rgba(148, 163, 184, 0.12), rgba(100, 116, 139, 0.18));
-  border-color: rgba(100, 116, 139, 0.28);
+  background: #e2e8f0;
+  border-color: rgba(148, 163, 184, 0.35);
   color: rgba(15, 23, 42, 0.45);
-  filter: saturate(0.7);
+  opacity: 0.55;
+  filter: saturate(0.55) brightness(0.96);
 }
 
 .palette-button.review-unanswered,
 .palette-button[data-status='review-unanswered'] {
-  background: linear-gradient(135deg, rgba(148, 163, 184, 0.08), rgba(71, 85, 105, 0.16));
-  border-color: rgba(71, 85, 105, 0.22);
-  color: rgba(15, 23, 42, 0.38);
-  filter: saturate(0.6);
+  background: #dbe3ef;
+  border-color: rgba(100, 116, 139, 0.28);
+  color: rgba(15, 23, 42, 0.4);
+  opacity: 0.6;
+  filter: saturate(0.5);
 }
 
 .palette-button.answered,
 .palette-button[data-status='answered'] {
   background: linear-gradient(135deg, #60a5fa 0%, #2563eb 100%);
-  border-color: rgba(37, 99, 235, 0.75);
+  border-color: rgba(37, 99, 235, 0.8);
   color: #f8fafc;
-  font-weight: 600;
+  font-weight: 700;
   text-shadow: 0 1px 2px rgba(15, 23, 42, 0.25);
+  opacity: 1;
+  filter: none;
 }
 
 .palette-button.correct,
 .palette-button[data-status='correct'] {
-  background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
-  border-color: rgba(22, 163, 74, 0.75);
-  color: #ecfdf5;
-  box-shadow: inset 0 0 0 1px rgba(236, 253, 245, 0.3);
+  background: linear-gradient(135deg, #22c55e 0%, #15803d 100%);
+  border-color: rgba(21, 128, 61, 0.85);
+  color: #f0fdf4;
+  box-shadow: inset 0 0 0 1px rgba(240, 253, 244, 0.45);
   text-shadow: 0 1px 2px rgba(4, 47, 46, 0.35);
+  opacity: 1;
+  filter: none;
 }
 
 .palette-button.incorrect,
 .palette-button[data-status='incorrect'] {
-  background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
-  border-color: rgba(239, 68, 68, 0.8);
+  background: linear-gradient(135deg, #f97316 0%, #dc2626 55%, #991b1b 100%);
+  border-color: rgba(220, 38, 38, 0.85);
   color: #fee2e2;
-  box-shadow: inset 0 0 0 1px rgba(254, 226, 226, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(254, 226, 226, 0.45);
   text-shadow: 0 1px 2px rgba(76, 5, 25, 0.35);
+  opacity: 1;
+  filter: none;
 }
 
 .palette-button.flagged[data-mode='taking'] {
@@ -5999,15 +6008,18 @@ body.map-toolbox-dragging {
 }
 
 .palette-button[data-mode='taking'][data-status='unanswered'] {
-  background: linear-gradient(135deg, rgba(148, 163, 184, 0.06), rgba(100, 116, 139, 0.12));
-  border-color: rgba(100, 116, 139, 0.2);
-  color: rgba(15, 23, 42, 0.32);
-  filter: saturate(0.45);
-  opacity: 0.82;
+  background: #e2e8f0;
+  border-color: rgba(148, 163, 184, 0.3);
+  color: rgba(15, 23, 42, 0.4);
+  filter: saturate(0.45) brightness(0.95);
+  opacity: 0.58;
 }
 
 .palette-button[data-mode='review'][data-status='review-unanswered'] {
-  opacity: 0.85;
+  background: #d8dee8;
+  border-color: rgba(100, 116, 139, 0.3);
+  color: rgba(15, 23, 42, 0.42);
+  opacity: 0.6;
 }
 
 .palette-button[data-change-direction]::after {

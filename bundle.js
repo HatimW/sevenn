@@ -14206,7 +14206,13 @@ var Sevenn = (() => {
     const questionCount = sess?.exam?.questions?.length || 0;
     if (!sess) return;
     if (!Array.isArray(sess.questionStats)) {
-      sess.questionStats = Array.from({ length: questionCount }, () => ({ timeMs: 0, changes: [], enteredAt: null }));
+      sess.questionStats = Array.from({ length: questionCount }, () => ({
+        timeMs: 0,
+        changes: [],
+        enteredAt: null,
+        initialAnswer: null,
+        initialAnswerAt: null
+      }));
       return;
     }
     if (sess.questionStats.length !== questionCount) {
@@ -14215,7 +14221,9 @@ var Sevenn = (() => {
         return {
           timeMs: Number.isFinite(prev.timeMs) ? prev.timeMs : 0,
           changes: Array.isArray(prev.changes) ? [...prev.changes] : [],
-          enteredAt: null
+          enteredAt: null,
+          initialAnswer: prev.initialAnswer ?? null,
+          initialAnswerAt: prev.initialAnswerAt ?? null
         };
       });
       sess.questionStats = next;
@@ -14226,6 +14234,8 @@ var Sevenn = (() => {
       if (!Array.isArray(stat.changes)) stat.changes = [];
       if (!Number.isFinite(stat.timeMs)) stat.timeMs = 0;
       if (stat.enteredAt == null) stat.enteredAt = null;
+      if (!("initialAnswer" in stat)) stat.initialAnswer = null;
+      if (!("initialAnswerAt" in stat)) stat.initialAnswerAt = null;
     });
   }
   function beginQuestionTiming(sess, idx) {
@@ -14251,12 +14261,34 @@ var Sevenn = (() => {
     if (!sess || typeof sess.idx !== "number") return;
     finalizeQuestionTiming(sess, sess.idx);
   }
+  function ensureScrollPositions(sess) {
+    if (!sess) return;
+    if (!sess.scrollPositions || typeof sess.scrollPositions !== "object") {
+      sess.scrollPositions = {};
+    }
+  }
+  function storeScrollPosition(sess, idx, value) {
+    if (!sess || typeof idx !== "number") return;
+    ensureScrollPositions(sess);
+    const numeric = Number.isFinite(value) ? value : 0;
+    sess.scrollPositions[idx] = numeric;
+  }
+  function getStoredScroll(sess, idx) {
+    if (!sess || typeof idx !== "number") return null;
+    const store2 = sess.scrollPositions;
+    if (!store2 || typeof store2 !== "object") return null;
+    const value = store2[idx];
+    return Number.isFinite(value) ? value : null;
+  }
   function navigateToQuestion(sess, nextIdx, render) {
     if (!sess || typeof nextIdx !== "number") return;
     const total = sess.exam?.questions?.length || 0;
     if (!total) return;
     const clamped = Math.min(Math.max(nextIdx, 0), Math.max(0, total - 1));
     if (clamped === sess.idx) return;
+    if (typeof window !== "undefined" && typeof sess.idx === "number") {
+      storeScrollPosition(sess, sess.idx, window.scrollY || 0);
+    }
     if (sess.mode === "taking") {
       finalizeActiveQuestionTiming(sess);
     }
@@ -14273,6 +14305,13 @@ var Sevenn = (() => {
     if (!stat) return;
     const prev = sess.answers?.[idx];
     if (prev === nextAnswer) return;
+    if (prev == null) {
+      if (nextAnswer != null && stat.initialAnswer == null) {
+        stat.initialAnswer = nextAnswer;
+        stat.initialAnswerAt = Date.now();
+      }
+      return;
+    }
     const change = {
       at: Date.now(),
       from: prev ?? null,
@@ -14287,7 +14326,9 @@ var Sevenn = (() => {
     ensureQuestionStats(sess);
     return (sess.questionStats || []).map((stat) => ({
       timeMs: Number.isFinite(stat?.timeMs) ? stat.timeMs : 0,
-      changes: Array.isArray(stat?.changes) ? stat.changes.map((change) => ({ ...change })) : []
+      changes: Array.isArray(stat?.changes) ? stat.changes.map((change) => ({ ...change })) : [],
+      initialAnswer: stat?.initialAnswer ?? null,
+      initialAnswerAt: stat?.initialAnswerAt ?? null
     }));
   }
   function analyzeAnswerChange(stat, question, finalAnswer) {
@@ -14312,8 +14353,9 @@ var Sevenn = (() => {
         break;
       }
     }
-    const initialAnswer = firstRecorded?.to ?? null;
-    const resolvedFinalAnswer = finalAnswer != null ? finalAnswer : lastRecorded?.to ?? null;
+    const storedInitialAnswer = stat?.initialAnswer ?? null;
+    const initialAnswer = storedInitialAnswer != null ? storedInitialAnswer : firstRecorded?.to ?? null;
+    const resolvedFinalAnswer = finalAnswer != null ? finalAnswer : lastRecorded?.to ?? initialAnswer;
     const initialCorrect = initialAnswer != null ? initialAnswer === answerId : null;
     const finalCorrect = resolvedFinalAnswer != null ? resolvedFinalAnswer === answerId : null;
     const changed = initialAnswer != null && resolvedFinalAnswer != null && initialAnswer !== resolvedFinalAnswer;
@@ -14336,22 +14378,47 @@ var Sevenn = (() => {
       direction
     };
   }
+  function countMeaningfulAnswerChanges(stat) {
+    if (!stat || !Array.isArray(stat.changes)) return 0;
+    let count = 0;
+    stat.changes.forEach((change) => {
+      if (!change) return;
+      const from = change.from ?? null;
+      const to = change.to ?? null;
+      if (from == null) return;
+      if (from === to) return;
+      count += 1;
+    });
+    return count;
+  }
   function summarizeAnswerChanges(questionStats, exam, answers = {}) {
     let rightToWrong = 0;
     let wrongToRight = 0;
-    let totalChanges = 0;
+    let switched = 0;
+    let endedDifferent = 0;
     questionStats.forEach((stat, idx) => {
       const question = exam?.questions?.[idx];
       if (!question) return;
       const finalAnswer = answers[idx];
       const details = analyzeAnswerChange(stat, question, finalAnswer);
+      const meaningfulChanges = countMeaningfulAnswerChanges(stat);
+      if (meaningfulChanges > 0) {
+        switched += 1;
+      }
       if (details.changed) {
-        totalChanges += 1;
+        endedDifferent += 1;
         if (details.direction === "right-to-wrong") rightToWrong += 1;
         if (details.direction === "wrong-to-right") wrongToRight += 1;
       }
     });
-    return { rightToWrong, wrongToRight, totalChanges };
+    return {
+      rightToWrong,
+      wrongToRight,
+      switched,
+      endedDifferent,
+      returnedToOriginal: Math.max(0, switched - endedDifferent),
+      totalChanges: switched
+    };
   }
   function clone6(value) {
     return value ? JSON.parse(JSON.stringify(value)) : value;
@@ -15018,6 +15085,7 @@ var Sevenn = (() => {
         }
         const stat = statsList[idx];
         const changeDetails = analyzeAnswerChange(stat, question, answer);
+        const meaningfulChanges = countMeaningfulAnswerChanges(stat);
         if (changeDetails.changed) {
           let changeTitle = "Changed answer";
           if (changeDetails.direction === "right-to-wrong") {
@@ -15030,6 +15098,8 @@ var Sevenn = (() => {
             btn.dataset.changeDirection = "changed";
           }
           tooltipParts.push(changeTitle);
+        } else if (meaningfulChanges > 0) {
+          tooltipParts.push("Changed answers but returned to start");
         }
       } else {
         status = answered ? "answered" : "unanswered";
@@ -15047,6 +15117,7 @@ var Sevenn = (() => {
         btn.classList.add("unanswered");
       }
       btn.dataset.status = status;
+      btn.dataset.mode = sess.mode || "";
       if (flaggedSet.has(idx)) {
         btn.classList.add("flagged");
         btn.dataset.flagged = "true";
@@ -15072,7 +15143,8 @@ var Sevenn = (() => {
       const metaStats = document.createElement("div");
       metaStats.className = "exam-palette-summary-stats";
       metaStats.innerHTML = `
-      <span><strong>${summary.totalChanges}</strong> changed</span>
+      <span><strong>${summary.switched}</strong> switched</span>
+      <span><strong>${summary.returnedToOriginal}</strong> returned</span>
       <span><strong>${summary.rightToWrong}</strong> right \u2192 wrong</span>
       <span><strong>${summary.wrongToRight}</strong> wrong \u2192 right</span>
     `;
@@ -15093,6 +15165,13 @@ var Sevenn = (() => {
     const prevMode = sess.__lastRenderedMode;
     const prevScrollX = hasWindow ? window.scrollX : 0;
     const prevScrollY = hasWindow ? window.scrollY : 0;
+    if (hasWindow) {
+      if (typeof prevIdx === "number") {
+        storeScrollPosition(sess, prevIdx, prevScrollY);
+      } else if (typeof sess.idx === "number") {
+        storeScrollPosition(sess, sess.idx, prevScrollY);
+      }
+    }
     root.innerHTML = "";
     root.className = "exam-session";
     if (sess.mode === "summary") {
@@ -15100,6 +15179,7 @@ var Sevenn = (() => {
       renderSummary(root, render, sess);
       return;
     }
+    ensureScrollPositions(sess);
     setupKeyboardNavigation(sess, render);
     if (!sess.answers) sess.answers = {};
     if (!sess.flagged) sess.flagged = {};
@@ -15271,26 +15351,26 @@ var Sevenn = (() => {
           const timeSpent = document.createElement("div");
           timeSpent.innerHTML = `<strong>Time spent:</strong> ${formatDuration(stats.timeMs)}`;
           insights.appendChild(timeSpent);
-          const recordedChanges = Array.isArray(stats.changes) ? stats.changes.length : 0;
+          const meaningfulChanges = countMeaningfulAnswerChanges(stats);
           const finalAnswer = sess.result?.answers?.[sess.idx];
           const changeDetails = analyzeAnswerChange(stats, question, finalAnswer);
-          const changeInfo = document.createElement("div");
-          if (changeDetails.changed) {
-            let message = "You changed your answer.";
-            if (changeDetails.direction === "right-to-wrong") {
-              message = "You changed your answer from correct to incorrect.";
-            } else if (changeDetails.direction === "wrong-to-right") {
-              message = "You changed your answer from incorrect to correct.";
-            } else if (changeDetails.initialCorrect === false && changeDetails.finalCorrect === false) {
-              message = "You changed your answer but it remained incorrect.";
+          if (meaningfulChanges > 0) {
+            const changeInfo = document.createElement("div");
+            if (changeDetails.changed) {
+              let message = "You changed your answer.";
+              if (changeDetails.direction === "right-to-wrong") {
+                message = "You changed your answer from correct to incorrect.";
+              } else if (changeDetails.direction === "wrong-to-right") {
+                message = "You changed your answer from incorrect to correct.";
+              } else if (changeDetails.initialCorrect === false && changeDetails.finalCorrect === false) {
+                message = "You changed your answer but it remained incorrect.";
+              }
+              changeInfo.innerHTML = `<strong>Answer change:</strong> ${message}`;
+            } else {
+              changeInfo.innerHTML = "<strong>Answer change:</strong> You changed answers but ended on your original choice.";
             }
-            changeInfo.innerHTML = `<strong>Answer change:</strong> ${message}`;
-          } else if (recordedChanges > 0) {
-            changeInfo.innerHTML = "<strong>Answer change:</strong> You changed answers but ended on your original choice.";
-          } else {
-            changeInfo.innerHTML = "<strong>Answer change:</strong> None";
+            insights.appendChild(changeInfo);
           }
-          insights.appendChild(changeInfo);
           main.appendChild(insights);
         }
       }
@@ -15395,12 +15475,14 @@ var Sevenn = (() => {
     sess.__lastRenderedIdx = sess.idx;
     sess.__lastRenderedMode = sess.mode;
     if (hasWindow && typeof window.scrollTo === "function") {
+      const storedScroll = getStoredScroll(sess, sess.idx);
+      const targetY = sameQuestion ? prevScrollY : storedScroll ?? 0;
+      const targetX = sameQuestion ? prevScrollX : 0;
+      if (typeof sess.idx === "number") {
+        storeScrollPosition(sess, sess.idx, targetY);
+      }
       const restore = () => {
-        if (sameQuestion) {
-          window.scrollTo(prevScrollX, prevScrollY);
-        } else {
-          window.scrollTo({ left: 0, top: 0, behavior: "auto" });
-        }
+        window.scrollTo({ left: targetX, top: targetY, behavior: "auto" });
       };
       if (typeof window.requestAnimationFrame === "function") {
         window.requestAnimationFrame(restore);
@@ -15424,7 +15506,10 @@ var Sevenn = (() => {
       const summary = changeSummary || (sess.result ? summarizeAnswerChanges(sess.result.questionStats || [], sess.exam, sess.result.answers || {}) : null);
       if (summary) {
         const changeMeta = document.createElement("div");
-        changeMeta.innerHTML = `<strong>Answer changes:</strong> ${summary.totalChanges || 0} (Right \u2192 Wrong: ${summary.rightToWrong || 0}, Wrong \u2192 Right: ${summary.wrongToRight || 0})`;
+        changeMeta.innerHTML = `
+        <strong>Answer switches:</strong> ${summary.switched || 0}
+        (Returned: ${summary.returnedToOriginal || 0}, Right \u2192 Wrong: ${summary.rightToWrong || 0}, Wrong \u2192 Right: ${summary.wrongToRight || 0})
+      `;
         info.appendChild(changeMeta);
       }
     } else if (sess.mode === "taking") {

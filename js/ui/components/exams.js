@@ -14,7 +14,13 @@ function ensureQuestionStats(sess) {
   const questionCount = sess?.exam?.questions?.length || 0;
   if (!sess) return;
   if (!Array.isArray(sess.questionStats)) {
-    sess.questionStats = Array.from({ length: questionCount }, () => ({ timeMs: 0, changes: [], enteredAt: null }));
+    sess.questionStats = Array.from({ length: questionCount }, () => ({
+      timeMs: 0,
+      changes: [],
+      enteredAt: null,
+      initialAnswer: null,
+      initialAnswerAt: null
+    }));
     return;
   }
   if (sess.questionStats.length !== questionCount) {
@@ -23,7 +29,9 @@ function ensureQuestionStats(sess) {
       return {
         timeMs: Number.isFinite(prev.timeMs) ? prev.timeMs : 0,
         changes: Array.isArray(prev.changes) ? [...prev.changes] : [],
-        enteredAt: null
+        enteredAt: null,
+        initialAnswer: prev.initialAnswer ?? null,
+        initialAnswerAt: prev.initialAnswerAt ?? null
       };
     });
     sess.questionStats = next;
@@ -34,6 +42,8 @@ function ensureQuestionStats(sess) {
     if (!Array.isArray(stat.changes)) stat.changes = [];
     if (!Number.isFinite(stat.timeMs)) stat.timeMs = 0;
     if (stat.enteredAt == null) stat.enteredAt = null;
+    if (!('initialAnswer' in stat)) stat.initialAnswer = null;
+    if (!('initialAnswerAt' in stat)) stat.initialAnswerAt = null;
   });
 }
 
@@ -63,12 +73,37 @@ function finalizeActiveQuestionTiming(sess) {
   finalizeQuestionTiming(sess, sess.idx);
 }
 
+function ensureScrollPositions(sess) {
+  if (!sess) return;
+  if (!sess.scrollPositions || typeof sess.scrollPositions !== 'object') {
+    sess.scrollPositions = {};
+  }
+}
+
+function storeScrollPosition(sess, idx, value) {
+  if (!sess || typeof idx !== 'number') return;
+  ensureScrollPositions(sess);
+  const numeric = Number.isFinite(value) ? value : 0;
+  sess.scrollPositions[idx] = numeric;
+}
+
+function getStoredScroll(sess, idx) {
+  if (!sess || typeof idx !== 'number') return null;
+  const store = sess.scrollPositions;
+  if (!store || typeof store !== 'object') return null;
+  const value = store[idx];
+  return Number.isFinite(value) ? value : null;
+}
+
 function navigateToQuestion(sess, nextIdx, render) {
   if (!sess || typeof nextIdx !== 'number') return;
   const total = sess.exam?.questions?.length || 0;
   if (!total) return;
   const clamped = Math.min(Math.max(nextIdx, 0), Math.max(0, total - 1));
   if (clamped === sess.idx) return;
+  if (typeof window !== 'undefined' && typeof sess.idx === 'number') {
+    storeScrollPosition(sess, sess.idx, window.scrollY || 0);
+  }
   if (sess.mode === 'taking') {
     finalizeActiveQuestionTiming(sess);
   }
@@ -86,6 +121,13 @@ function recordAnswerChange(sess, idx, question, nextAnswer) {
   if (!stat) return;
   const prev = sess.answers?.[idx];
   if (prev === nextAnswer) return;
+  if (prev == null) {
+    if (nextAnswer != null && stat.initialAnswer == null) {
+      stat.initialAnswer = nextAnswer;
+      stat.initialAnswerAt = Date.now();
+    }
+    return;
+  }
   const change = {
     at: Date.now(),
     from: prev ?? null,
@@ -101,7 +143,9 @@ function snapshotQuestionStats(sess) {
   ensureQuestionStats(sess);
   return (sess.questionStats || []).map(stat => ({
     timeMs: Number.isFinite(stat?.timeMs) ? stat.timeMs : 0,
-    changes: Array.isArray(stat?.changes) ? stat.changes.map(change => ({ ...change })) : []
+    changes: Array.isArray(stat?.changes) ? stat.changes.map(change => ({ ...change })) : [],
+    initialAnswer: stat?.initialAnswer ?? null,
+    initialAnswerAt: stat?.initialAnswerAt ?? null
   }));
 }
 
@@ -130,8 +174,13 @@ function analyzeAnswerChange(stat, question, finalAnswer) {
     }
   }
 
-  const initialAnswer = firstRecorded?.to ?? null;
-  const resolvedFinalAnswer = finalAnswer != null ? finalAnswer : lastRecorded?.to ?? null;
+  const storedInitialAnswer = stat?.initialAnswer ?? null;
+  const initialAnswer = storedInitialAnswer != null
+    ? storedInitialAnswer
+    : firstRecorded?.to ?? null;
+  const resolvedFinalAnswer = finalAnswer != null
+    ? finalAnswer
+    : lastRecorded?.to ?? initialAnswer;
 
   const initialCorrect = initialAnswer != null ? initialAnswer === answerId : null;
   const finalCorrect = resolvedFinalAnswer != null ? resolvedFinalAnswer === answerId : null;
@@ -179,19 +228,31 @@ function countMeaningfulAnswerChanges(stat) {
 function summarizeAnswerChanges(questionStats, exam, answers = {}) {
   let rightToWrong = 0;
   let wrongToRight = 0;
-  let totalChanges = 0;
+  let switched = 0;
+  let endedDifferent = 0;
   questionStats.forEach((stat, idx) => {
     const question = exam?.questions?.[idx];
     if (!question) return;
     const finalAnswer = answers[idx];
     const details = analyzeAnswerChange(stat, question, finalAnswer);
+    const meaningfulChanges = countMeaningfulAnswerChanges(stat);
+    if (meaningfulChanges > 0) {
+      switched += 1;
+    }
     if (details.changed) {
-      totalChanges += 1;
+      endedDifferent += 1;
       if (details.direction === 'right-to-wrong') rightToWrong += 1;
       if (details.direction === 'wrong-to-right') wrongToRight += 1;
     }
   });
-  return { rightToWrong, wrongToRight, totalChanges };
+  return {
+    rightToWrong,
+    wrongToRight,
+    switched,
+    endedDifferent,
+    returnedToOriginal: Math.max(0, switched - endedDifferent),
+    totalChanges: switched
+  };
 }
 
 function clone(value) {
@@ -962,7 +1023,8 @@ function renderPalette(sidebar, sess, render) {
     const metaStats = document.createElement('div');
     metaStats.className = 'exam-palette-summary-stats';
     metaStats.innerHTML = `
-      <span><strong>${summary.totalChanges}</strong> changed</span>
+      <span><strong>${summary.switched}</strong> switched</span>
+      <span><strong>${summary.returnedToOriginal}</strong> returned</span>
       <span><strong>${summary.rightToWrong}</strong> right → wrong</span>
       <span><strong>${summary.wrongToRight}</strong> wrong → right</span>
     `;
@@ -985,6 +1047,13 @@ export function renderExamRunner(root, render) {
   const prevMode = sess.__lastRenderedMode;
   const prevScrollX = hasWindow ? window.scrollX : 0;
   const prevScrollY = hasWindow ? window.scrollY : 0;
+  if (hasWindow) {
+    if (typeof prevIdx === 'number') {
+      storeScrollPosition(sess, prevIdx, prevScrollY);
+    } else if (typeof sess.idx === 'number') {
+      storeScrollPosition(sess, sess.idx, prevScrollY);
+    }
+  }
   root.innerHTML = '';
   root.className = 'exam-session';
 
@@ -994,6 +1063,7 @@ export function renderExamRunner(root, render) {
     return;
   }
 
+  ensureScrollPositions(sess);
   setupKeyboardNavigation(sess, render);
 
   if (!sess.answers) sess.answers = {};
@@ -1191,23 +1261,23 @@ export function renderExamRunner(root, render) {
         const finalAnswer = sess.result?.answers?.[sess.idx];
         const changeDetails = analyzeAnswerChange(stats, question, finalAnswer);
 
-        const changeInfo = document.createElement('div');
-        if (changeDetails.changed) {
-          let message = 'You changed your answer.';
-          if (changeDetails.direction === 'right-to-wrong') {
-            message = 'You changed your answer from correct to incorrect.';
-          } else if (changeDetails.direction === 'wrong-to-right') {
-            message = 'You changed your answer from incorrect to correct.';
-          } else if (changeDetails.initialCorrect === false && changeDetails.finalCorrect === false) {
-            message = 'You changed your answer but it remained incorrect.';
+        if (meaningfulChanges > 0) {
+          const changeInfo = document.createElement('div');
+          if (changeDetails.changed) {
+            let message = 'You changed your answer.';
+            if (changeDetails.direction === 'right-to-wrong') {
+              message = 'You changed your answer from correct to incorrect.';
+            } else if (changeDetails.direction === 'wrong-to-right') {
+              message = 'You changed your answer from incorrect to correct.';
+            } else if (changeDetails.initialCorrect === false && changeDetails.finalCorrect === false) {
+              message = 'You changed your answer but it remained incorrect.';
+            }
+            changeInfo.innerHTML = `<strong>Answer change:</strong> ${message}`;
+          } else {
+            changeInfo.innerHTML = '<strong>Answer change:</strong> You changed answers but ended on your original choice.';
           }
-          changeInfo.innerHTML = `<strong>Answer change:</strong> ${message}`;
-        } else if (meaningfulChanges > 0) {
-          changeInfo.innerHTML = '<strong>Answer change:</strong> You changed answers but ended on your original choice.';
-        } else {
-          changeInfo.innerHTML = '<strong>Answer change:</strong> None';
+          insights.appendChild(changeInfo);
         }
-        insights.appendChild(changeInfo);
         main.appendChild(insights);
       }
     }
@@ -1319,12 +1389,14 @@ export function renderExamRunner(root, render) {
   sess.__lastRenderedIdx = sess.idx;
   sess.__lastRenderedMode = sess.mode;
   if (hasWindow && typeof window.scrollTo === 'function') {
+    const storedScroll = getStoredScroll(sess, sess.idx);
+    const targetY = sameQuestion ? prevScrollY : (storedScroll ?? 0);
+    const targetX = sameQuestion ? prevScrollX : 0;
+    if (typeof sess.idx === 'number') {
+      storeScrollPosition(sess, sess.idx, targetY);
+    }
     const restore = () => {
-      if (sameQuestion) {
-        window.scrollTo(prevScrollX, prevScrollY);
-      } else {
-        window.scrollTo({ left: 0, top: 0, behavior: 'auto' });
-      }
+      window.scrollTo({ left: targetX, top: targetY, behavior: 'auto' });
     };
     if (typeof window.requestAnimationFrame === 'function') {
       window.requestAnimationFrame(restore);
@@ -1351,7 +1423,7 @@ function renderSidebarMeta(sidebar, sess, changeSummary) {
       || (sess.result ? summarizeAnswerChanges(sess.result.questionStats || [], sess.exam, sess.result.answers || {}) : null);
     if (summary) {
       const changeMeta = document.createElement('div');
-      changeMeta.innerHTML = `<strong>Answer changes:</strong> ${summary.totalChanges || 0} (Right → Wrong: ${summary.rightToWrong || 0}, Wrong → Right: ${summary.wrongToRight || 0})`;
+      changeMeta.innerHTML = `<strong>Answer switches:</strong> ${summary.switched || 0} (Returned: ${summary.returnedToOriginal || 0}, Right → Wrong: ${summary.rightToWrong || 0}, Wrong → Right: ${summary.wrongToRight || 0})`;
       info.appendChild(changeMeta);
     }
   } else if (sess.mode === 'taking') {
