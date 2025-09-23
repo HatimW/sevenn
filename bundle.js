@@ -1,31 +1,4 @@
-var Sevenn = (() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-    }
-    return to;
-  };
-  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
-  // js/main.js
-  var main_exports = {};
-  __export(main_exports, {
-    render: () => renderApp,
-    renderApp: () => renderApp,
-    resolveListKind: () => resolveListKind,
-    tabs: () => tabs
-  });
-
+(() => {
   // js/state.js
   var state = {
     tab: "Block Board",
@@ -42,7 +15,7 @@ var Sevenn = (() => {
     },
     query: "",
     filters: { types: ["disease", "drug", "concept"], block: "", week: "", onlyFav: false, sort: "updated-desc" },
-    lectures: { query: "", blockId: "", week: "", status: "", tag: "" },
+    lectures: { query: "", blockId: "", week: "", status: "", tag: "", sort: "position-asc" },
     entryLayout: { mode: "list", columns: 3, scale: 1, controlsVisible: false },
     blockBoard: { collapsedBlocks: [], hiddenTimelines: [] },
     builder: {
@@ -133,7 +106,7 @@ var Sevenn = (() => {
   function setLecturesState(patch) {
     if (!patch) return;
     if (!state.lectures) {
-      state.lectures = { query: "", blockId: "", week: "", status: "", tag: "" };
+      state.lectures = { query: "", blockId: "", week: "", status: "", tag: "", sort: "position-asc" };
     }
     const next = { ...state.lectures };
     if (Object.prototype.hasOwnProperty.call(patch, "query")) {
@@ -150,6 +123,16 @@ var Sevenn = (() => {
     }
     if (Object.prototype.hasOwnProperty.call(patch, "tag")) {
       next.tag = String(patch.tag ?? "");
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "sort")) {
+      const value = patch.sort;
+      if (typeof value === "string") {
+        next.sort = value;
+      } else if (value && typeof value === "object") {
+        const field = typeof value.field === "string" && value.field.trim() ? value.field.trim() : "position";
+        const direction = value.direction === "desc" ? "desc" : "asc";
+        next.sort = `${field}-${direction}`;
+      }
     }
     state.lectures = next;
   }
@@ -241,16 +224,16 @@ var Sevenn = (() => {
   var DAY_MINUTES = 24 * 60;
   var MINUTE_MS = 60 * 1e3;
   var DEFAULT_PASS_COLORS = [
-    "#ef4444",
-    "#facc15",
+    "#38bdf8",
+    "#22d3ee",
+    "#34d399",
+    "#4ade80",
+    "#fbbf24",
     "#fb923c",
-    "#22c55e",
-    "#3b82f6",
+    "#f472b6",
     "#a855f7",
-    "#14b8a6",
-    "#ec4899",
     "#6366f1",
-    "#0ea5e9"
+    "#14b8a6"
   ];
   function clone(value) {
     if (value == null) return value;
@@ -307,7 +290,7 @@ var Sevenn = (() => {
   };
   var DEFAULT_PLANNER_DEFAULTS = {
     anchorOffsets: {
-      today: 8 * 60,
+      today: 0,
       tomorrow: 8 * 60,
       upcoming: 8 * 60
     },
@@ -10026,15 +10009,89 @@ var Sevenn = (() => {
     if (weekKey === "__no-week") return "No week assigned";
     return formatWeekLabel3(weekKey);
   }
-  function sortLecturesForDisplay(lectures) {
-    return (Array.isArray(lectures) ? lectures : []).slice().sort((a, b) => {
-      const posA = Number(a?.position);
-      const posB = Number(b?.position);
-      const posAValid = Number.isFinite(posA);
-      const posBValid = Number.isFinite(posB);
-      if (posAValid && posBValid && posA !== posB) return posA - posB;
-      if (posAValid && !posBValid) return -1;
-      if (!posAValid && posBValid) return 1;
+  var LECTURE_SORT_FIELDS = ["position", "created", "nextDue"];
+  var DEFAULT_LECTURE_SORT = { field: "position", direction: "asc" };
+  function normalizeLectureSort(value) {
+    if (!value) return { ...DEFAULT_LECTURE_SORT };
+    let field = DEFAULT_LECTURE_SORT.field;
+    let direction = DEFAULT_LECTURE_SORT.direction;
+    if (typeof value === "string") {
+      const parts = value.split("-");
+      if (parts.length === 1) {
+        field = parts[0];
+      } else if (parts.length >= 2) {
+        [field, direction] = parts;
+      }
+    } else if (typeof value === "object") {
+      if (typeof value.field === "string") field = value.field;
+      if (value.direction === "asc" || value.direction === "desc") direction = value.direction;
+    }
+    if (!LECTURE_SORT_FIELDS.includes(field)) {
+      field = DEFAULT_LECTURE_SORT.field;
+    }
+    direction = direction === "desc" ? "desc" : "asc";
+    return { field, direction };
+  }
+  function formatLectureSortValue(sort) {
+    const normalized2 = normalizeLectureSort(sort);
+    return `${normalized2.field}-${normalized2.direction}`;
+  }
+  function describeSortDirectionLabel(field, direction) {
+    if (field === "created") {
+      return direction === "desc" ? "Newest first" : "Oldest first";
+    }
+    if (field === "nextDue") {
+      return direction === "asc" ? "Soonest due" : "Latest due";
+    }
+    return direction === "desc" ? "High \u2192 Low" : "Low \u2192 High";
+  }
+  function describeSortDirectionAria(field, direction) {
+    if (field === "created") {
+      return `Toggle sort order (currently ${direction === "desc" ? "newest first" : "oldest first"})`;
+    }
+    if (field === "nextDue") {
+      return `Toggle sort order (currently ${direction === "asc" ? "soonest due first" : "latest due first"})`;
+    }
+    return `Toggle sort order (currently ${direction === "asc" ? "ascending" : "descending"})`;
+  }
+  function sortLecturesForDisplay(lectures, sort) {
+    const { field, direction } = normalizeLectureSort(sort);
+    const multiplier = direction === "desc" ? -1 : 1;
+    const list = Array.isArray(lectures) ? lectures.slice() : [];
+    return list.sort((a, b) => {
+      let comparison = 0;
+      if (field === "created") {
+        const aValue = Number(a?.createdAt);
+        const bValue = Number(b?.createdAt);
+        const aRank = Number.isFinite(aValue) ? aValue : direction === "desc" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+        const bRank = Number.isFinite(bValue) ? bValue : direction === "desc" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+        if (aRank !== bRank) {
+          comparison = aRank < bRank ? -1 : 1;
+        }
+      } else if (field === "nextDue") {
+        const aDue = resolveNextDueAt(a);
+        const bDue = resolveNextDueAt(b);
+        const aRank = Number.isFinite(aDue) ? aDue : direction === "desc" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+        const bRank = Number.isFinite(bDue) ? bDue : direction === "desc" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+        if (aRank !== bRank) {
+          comparison = aRank < bRank ? -1 : 1;
+        }
+      } else {
+        const posA = Number(a?.position);
+        const posB = Number(b?.position);
+        const posAValid = Number.isFinite(posA);
+        const posBValid = Number.isFinite(posB);
+        if (posAValid && posBValid && posA !== posB) {
+          comparison = posA < posB ? -1 : 1;
+        } else if (posAValid && !posBValid) {
+          comparison = -1;
+        } else if (!posAValid && posBValid) {
+          comparison = 1;
+        }
+      }
+      if (comparison !== 0) {
+        return comparison * multiplier;
+      }
       const nameA = (a?.name || "").toLowerCase();
       const nameB = (b?.name || "").toLowerCase();
       if (nameA && nameB && nameA !== nameB) return nameA.localeCompare(nameB);
@@ -10187,6 +10244,7 @@ var Sevenn = (() => {
     const blockFilter = String(filters?.blockId || "").trim();
     const weekFilter = String(filters?.week || "").trim();
     const now = Date.now();
+    const sortConfig = normalizeLectureSort(filters?.sort);
     const blockGroups = /* @__PURE__ */ new Map();
     lectures.forEach((lecture) => {
       if (!lecture) return;
@@ -10276,10 +10334,10 @@ var Sevenn = (() => {
         if (bKey === "__no-week") return -1;
         const aNum = Number(aKey);
         const bNum = Number(bKey);
-        if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return aNum - bNum;
+        if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return bNum - aNum;
         if (Number.isFinite(aNum) && !Number.isFinite(bNum)) return -1;
         if (!Number.isFinite(aNum) && Number.isFinite(bNum)) return 1;
-        return String(aKey).localeCompare(String(bKey));
+        return String(bKey).localeCompare(String(aKey));
       });
       const normalizedGroupId = String(group.blockId ?? "");
       const shouldOpenBlock = blockFilter ? blockFilter === normalizedGroupId : defaultBlockId === normalizedGroupId;
@@ -10336,7 +10394,7 @@ var Sevenn = (() => {
         thead.appendChild(headerRow);
         table.appendChild(thead);
         const tbody = document.createElement("tbody");
-        sortLecturesForDisplay(weekLectures).forEach((entry) => {
+        sortLecturesForDisplay(weekLectures, sortConfig).forEach((entry) => {
           const row = renderLectureWeekRow(
             entry,
             onEdit,
@@ -10462,6 +10520,47 @@ var Sevenn = (() => {
       debouncedSearch(e.target.value);
     });
     filterGroup.appendChild(search);
+    const sortState = normalizeLectureSort(filters.sort);
+    const sortControls = document.createElement("div");
+    sortControls.className = "lectures-sort-controls";
+    const sortSelect = document.createElement("select");
+    sortSelect.className = "input lectures-sort-field";
+    sortSelect.setAttribute("aria-label", "Sort lectures");
+    [
+      { value: "position", label: "Manual order" },
+      { value: "created", label: "Date added" },
+      { value: "nextDue", label: "Next pass due" }
+    ].forEach((option) => {
+      const opt = document.createElement("option");
+      opt.value = option.value;
+      opt.textContent = option.label;
+      sortSelect.appendChild(opt);
+    });
+    sortSelect.value = sortState.field;
+    sortSelect.addEventListener("change", () => {
+      sortState.field = sortSelect.value;
+      syncDirectionControl();
+      setLecturesState({ sort: formatLectureSortValue(sortState) });
+      redraw();
+    });
+    sortControls.appendChild(sortSelect);
+    const directionBtn = document.createElement("button");
+    directionBtn.type = "button";
+    directionBtn.className = "btn secondary lectures-sort-direction";
+    directionBtn.addEventListener("click", () => {
+      sortState.direction = sortState.direction === "asc" ? "desc" : "asc";
+      syncDirectionControl();
+      setLecturesState({ sort: formatLectureSortValue(sortState) });
+      redraw();
+    });
+    function syncDirectionControl() {
+      directionBtn.dataset.direction = sortState.direction;
+      directionBtn.textContent = describeSortDirectionLabel(sortState.field, sortState.direction);
+      directionBtn.setAttribute("aria-label", describeSortDirectionAria(sortState.field, sortState.direction));
+    }
+    syncDirectionControl();
+    sortControls.appendChild(directionBtn);
+    filterGroup.appendChild(sortControls);
     const blockSelect = document.createElement("select");
     blockSelect.className = "input lectures-filter";
     blockSelect.setAttribute("aria-label", "Filter by block");
@@ -19055,5 +19154,4 @@ var Sevenn = (() => {
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
-  return __toCommonJS(main_exports);
 })();
