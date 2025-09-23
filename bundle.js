@@ -1,4 +1,31 @@
-(() => {
+var Sevenn = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // js/main.js
+  var main_exports = {};
+  __export(main_exports, {
+    render: () => renderApp,
+    renderApp: () => renderApp,
+    resolveListKind: () => resolveListKind,
+    tabs: () => tabs
+  });
+
   // js/state.js
   var state = {
     tab: "Block Board",
@@ -14263,19 +14290,66 @@
       changes: Array.isArray(stat?.changes) ? stat.changes.map((change) => ({ ...change })) : []
     }));
   }
-  function summarizeAnswerChanges(questionStats, exam) {
+  function analyzeAnswerChange(stat, question, finalAnswer) {
+    if (!question) {
+      return {
+        initialAnswer: null,
+        finalAnswer: null,
+        initialCorrect: null,
+        finalCorrect: null,
+        changed: false,
+        direction: null
+      };
+    }
+    const answerId = question.answer;
+    const changes = Array.isArray(stat?.changes) ? stat.changes : [];
+    const firstRecorded = changes.find((change) => change && change.to != null) || null;
+    let lastRecorded = null;
+    for (let i = changes.length - 1; i >= 0; i -= 1) {
+      const change = changes[i];
+      if (change && change.to != null) {
+        lastRecorded = change;
+        break;
+      }
+    }
+    const initialAnswer = firstRecorded?.to ?? null;
+    const resolvedFinalAnswer = finalAnswer != null ? finalAnswer : lastRecorded?.to ?? null;
+    const initialCorrect = initialAnswer != null ? initialAnswer === answerId : null;
+    const finalCorrect = resolvedFinalAnswer != null ? resolvedFinalAnswer === answerId : null;
+    const changed = initialAnswer != null && resolvedFinalAnswer != null && initialAnswer !== resolvedFinalAnswer;
+    let direction = null;
+    if (changed) {
+      if (initialCorrect === true && finalCorrect === false) {
+        direction = "right-to-wrong";
+      } else if (initialCorrect === false && finalCorrect === true) {
+        direction = "wrong-to-right";
+      } else {
+        direction = "neutral";
+      }
+    }
+    return {
+      initialAnswer,
+      finalAnswer: resolvedFinalAnswer,
+      initialCorrect,
+      finalCorrect,
+      changed,
+      direction
+    };
+  }
+  function summarizeAnswerChanges(questionStats, exam, answers = {}) {
     let rightToWrong = 0;
     let wrongToRight = 0;
     let totalChanges = 0;
     questionStats.forEach((stat, idx) => {
       const question = exam?.questions?.[idx];
       if (!question) return;
-      const changes = Array.isArray(stat?.changes) ? stat.changes : [];
-      totalChanges += changes.length;
-      changes.forEach((change) => {
-        if (change?.fromCorrect === true && change?.toCorrect === false) rightToWrong += 1;
-        if (change?.fromCorrect === false && change?.toCorrect === true) wrongToRight += 1;
-      });
+      const finalAnswer = answers[idx];
+      const details = analyzeAnswerChange(stat, question, finalAnswer);
+      if (details.changed) {
+        totalChanges += 1;
+        if (details.direction === "right-to-wrong") rightToWrong += 1;
+        if (details.direction === "wrong-to-right") wrongToRight += 1;
+      }
     });
     return { rightToWrong, wrongToRight, totalChanges };
   }
@@ -14915,7 +14989,13 @@
     palette2.appendChild(title);
     const grid = document.createElement("div");
     grid.className = "exam-palette-grid";
-    const answers = sess.mode === "review" ? sess.result.answers || {} : sess.answers || {};
+    const isReview = sess.mode === "review";
+    const answers = isReview ? sess.result?.answers || {} : sess.answers || {};
+    const statsList = isReview ? Array.isArray(sess.result?.questionStats) ? sess.result.questionStats : [] : Array.isArray(sess.questionStats) ? sess.questionStats : [];
+    const summary = isReview ? summarizeAnswerChanges(statsList, sess.exam, answers) : null;
+    if (isReview && sess.result) {
+      sess.result.changeSummary = summary;
+    }
     const flaggedSet = new Set(sess.mode === "review" ? sess.result.flagged || [] : Object.entries(sess.flagged || {}).filter(([_, v]) => v).map(([idx]) => Number(idx)));
     sess.exam.questions.forEach((question, idx) => {
       const btn = document.createElement("button");
@@ -14925,25 +15005,67 @@
       setToggleState(btn, sess.idx === idx);
       const answer = answers[idx];
       const answered = answer != null && question.options.some((opt) => opt.id === answer);
-      if (sess.mode === "review") {
+      const tooltipParts = [];
+      if (isReview) {
         if (answered) {
-          btn.classList.add(answer === question.answer ? "correct" : "incorrect");
+          const isCorrect = answer === question.answer;
+          btn.classList.add(isCorrect ? "correct" : "incorrect");
+          tooltipParts.push(isCorrect ? "Answered correctly" : "Answered incorrectly");
         } else {
-          btn.classList.add("incorrect", "unanswered");
+          btn.classList.add("unanswered", "review-unanswered");
+          tooltipParts.push("Not answered");
+        }
+        const stat = statsList[idx];
+        const changeDetails = analyzeAnswerChange(stat, question, answer);
+        if (changeDetails.changed) {
+          let changeTitle = "Changed answer";
+          if (changeDetails.direction === "right-to-wrong") {
+            changeTitle = "Changed from correct to incorrect";
+            btn.dataset.changeDirection = "right-to-wrong";
+          } else if (changeDetails.direction === "wrong-to-right") {
+            changeTitle = "Changed from incorrect to correct";
+            btn.dataset.changeDirection = "wrong-to-right";
+          } else {
+            btn.dataset.changeDirection = "changed";
+          }
+          tooltipParts.push(changeTitle);
         }
       } else if (answered) {
         btn.classList.add("answered");
+        tooltipParts.push("Answered");
       } else {
         btn.classList.add("unanswered");
+        tooltipParts.push("Not answered");
       }
       if (flaggedSet.has(idx)) btn.classList.add("flagged");
+      if (tooltipParts.length) {
+        btn.title = tooltipParts.join(" \xB7 ");
+      }
       btn.addEventListener("click", () => {
         navigateToQuestion(sess, idx, render);
       });
       grid.appendChild(btn);
     });
     palette2.appendChild(grid);
+    if (summary) {
+      const meta = document.createElement("div");
+      meta.className = "exam-palette-summary";
+      const metaTitle = document.createElement("div");
+      metaTitle.className = "exam-palette-summary-title";
+      metaTitle.textContent = "Answer changes";
+      meta.appendChild(metaTitle);
+      const metaStats = document.createElement("div");
+      metaStats.className = "exam-palette-summary-stats";
+      metaStats.innerHTML = `
+      <span><strong>${summary.totalChanges}</strong> changed</span>
+      <span><strong>${summary.rightToWrong}</strong> right \u2192 wrong</span>
+      <span><strong>${summary.wrongToRight}</strong> wrong \u2192 right</span>
+    `;
+      meta.appendChild(metaStats);
+      palette2.appendChild(meta);
+    }
     sidebar.appendChild(palette2);
+    return summary;
   }
   function renderExamRunner(root, render) {
     const sess = state.examSession;
@@ -15129,15 +15251,24 @@
           const timeSpent = document.createElement("div");
           timeSpent.innerHTML = `<strong>Time spent:</strong> ${formatDuration(stats.timeMs)}`;
           insights.appendChild(timeSpent);
-          const changes = Array.isArray(stats.changes) ? stats.changes : [];
-          const changeCount = changes.length;
-          const rightToWrong = changes.filter((change) => change?.fromCorrect === true && change?.toCorrect === false).length;
-          const wrongToRight = changes.filter((change) => change?.fromCorrect === false && change?.toCorrect === true).length;
+          const recordedChanges = Array.isArray(stats.changes) ? stats.changes.length : 0;
+          const finalAnswer = sess.result?.answers?.[sess.idx];
+          const changeDetails = analyzeAnswerChange(stats, question, finalAnswer);
           const changeInfo = document.createElement("div");
-          if (changeCount) {
-            changeInfo.innerHTML = `<strong>Answer changes:</strong> ${changeCount} (Right \u2192 Wrong: ${rightToWrong}, Wrong \u2192 Right: ${wrongToRight})`;
+          if (changeDetails.changed) {
+            let message = "You changed your answer.";
+            if (changeDetails.direction === "right-to-wrong") {
+              message = "You changed your answer from correct to incorrect.";
+            } else if (changeDetails.direction === "wrong-to-right") {
+              message = "You changed your answer from incorrect to correct.";
+            } else if (changeDetails.initialCorrect === false && changeDetails.finalCorrect === false) {
+              message = "You changed your answer but it remained incorrect.";
+            }
+            changeInfo.innerHTML = `<strong>Answer change:</strong> ${message}`;
+          } else if (recordedChanges > 0) {
+            changeInfo.innerHTML = "<strong>Answer change:</strong> You changed answers but ended on your original choice.";
           } else {
-            changeInfo.innerHTML = "<strong>Answer changes:</strong> None";
+            changeInfo.innerHTML = "<strong>Answer change:</strong> None";
           }
           insights.appendChild(changeInfo);
           main.appendChild(insights);
@@ -15155,8 +15286,8 @@
         main.appendChild(explain);
       }
     }
-    renderPalette(sidebar, sess, render);
-    renderSidebarMeta(sidebar, sess);
+    const paletteSummary = renderPalette(sidebar, sess, render);
+    renderSidebarMeta(sidebar, sess, paletteSummary);
     const nav = document.createElement("div");
     nav.className = "exam-nav";
     const prev = document.createElement("button");
@@ -15241,7 +15372,7 @@
     }
     root.appendChild(nav);
   }
-  function renderSidebarMeta(sidebar, sess) {
+  function renderSidebarMeta(sidebar, sess, changeSummary) {
     const info = document.createElement("div");
     info.className = "exam-sidebar-info";
     const attempts = document.createElement("div");
@@ -15253,7 +15384,7 @@
         duration.innerHTML = `<strong>Duration:</strong> ${formatDuration(sess.result.durationMs)}`;
         info.appendChild(duration);
       }
-      const summary = sess.result?.changeSummary;
+      const summary = changeSummary || (sess.result ? summarizeAnswerChanges(sess.result.questionStats || [], sess.exam, sess.result.answers || {}) : null);
       if (summary) {
         const changeMeta = document.createElement("div");
         changeMeta.innerHTML = `<strong>Answer changes:</strong> ${summary.totalChanges || 0} (Right \u2192 Wrong: ${summary.rightToWrong || 0}, Wrong \u2192 Right: ${summary.wrongToRight || 0})`;
@@ -15322,7 +15453,7 @@
     });
     const flagged = Object.entries(sess.flagged || {}).filter(([_, val]) => Boolean(val)).map(([idx]) => Number(idx));
     const questionStats = snapshotQuestionStats(sess);
-    const changeSummary = summarizeAnswerChanges(questionStats, sess.exam);
+    const changeSummary = summarizeAnswerChanges(questionStats, sess.exam, answers);
     const result = {
       id: uid(),
       when: Date.now(),
@@ -18669,4 +18800,5 @@
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
+  return __toCommonJS(main_exports);
 })();
