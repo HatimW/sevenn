@@ -14,7 +14,9 @@ export function defaultSectionState() {
     lastRating: null,
     last: 0,
     due: 0,
-    retired: false
+    retired: false,
+    contentDigest: null,
+    lectureScope: []
   };
 }
 
@@ -33,6 +35,15 @@ export function normalizeSectionRecord(record) {
   base.last = sanitizeNumber(record.last, 0);
   base.due = sanitizeNumber(record.due, 0);
   base.retired = Boolean(record.retired);
+  if (typeof record.contentDigest === 'string' && record.contentDigest) {
+    base.contentDigest = record.contentDigest;
+  }
+  if (Array.isArray(record.lectureScope) && record.lectureScope.length) {
+    const normalizedScope = record.lectureScope
+      .map(entry => (typeof entry === 'string' ? entry.trim() : ''))
+      .filter(Boolean);
+    base.lectureScope = Array.from(new Set(normalizedScope)).sort();
+  }
   return base;
 }
 

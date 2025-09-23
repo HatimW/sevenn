@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { rateSection, collectDueSections, collectUpcomingSections } from '../js/review/scheduler.js';
+import { rateSection, collectDueSections, collectUpcomingSections, getSectionStateSnapshot } from '../js/review/scheduler.js';
 import { DEFAULT_REVIEW_STEPS, RETIRE_RATING } from '../js/review/constants.js';
 
 const baseDurations = { ...DEFAULT_REVIEW_STEPS };
 
-function createItem({ id, kind = 'disease', fields = {}, sr = null }) {
+function createItem({ id, kind = 'disease', fields = {}, sr = null, lectures = [] }) {
   return {
     id,
     kind,
@@ -21,7 +21,7 @@ function createItem({ id, kind = 'disease', fields = {}, sr = null }) {
     ...fields,
     sr: sr || { version: 2, sections: {} },
     blocks: [],
-    lectures: []
+    lectures
   };
 }
 
@@ -133,4 +133,64 @@ test('collectUpcomingSections lists future reviews in order', () => {
   const limited = collectUpcomingSections([soon, later, overdue], { now, limit: 1 });
   assert.equal(limited.length, 1);
   assert.equal(limited[0].itemId, 'future-soon');
+});
+
+test('rateSection records content metadata for lectures', () => {
+  const now = Date.now();
+  const item = createItem({
+    id: 'meta-card',
+    fields: { etiology: '<p>initial</p>' },
+    lectures: [{ blockId: 'cardio', id: 101 }]
+  });
+  const state = rateSection(item, 'etiology', 'good', baseDurations, now);
+  assert.equal(state.lastRating, 'good');
+  assert.ok(state.contentDigest);
+  assert.deepEqual(state.lectureScope, ['cardio|101']);
+  assert.equal(item.sr.sections.etiology.contentDigest, state.contentDigest);
+});
+
+test('content changes reset existing review scheduling', () => {
+  const now = Date.now();
+  const item = createItem({
+    id: 'update-card',
+    fields: { etiology: '<p>first</p>' },
+    lectures: [{ blockId: 'renal', id: 5 }]
+  });
+  rateSection(item, 'etiology', 'good', baseDurations, now);
+  item.etiology = '<p>second</p>';
+  const snapshot = getSectionStateSnapshot(item, 'etiology');
+  assert.equal(snapshot.lastRating, null);
+  assert.ok(snapshot.last >= now);
+  assert.ok(snapshot.due >= snapshot.last);
+  assert.ok(snapshot.contentDigest);
+  const afterUpdate = Date.now() + 10;
+  const due = collectDueSections([item], { now: afterUpdate });
+  assert.equal(due.length, 1);
+  assert.equal(due[0].itemId, 'update-card');
+});
+
+test('removing a lecture resets ratings but additions do not', () => {
+  const now = Date.now();
+  const item = createItem({
+    id: 'lecture-move',
+    fields: { etiology: '<p>stable</p>' },
+    lectures: [{ blockId: 'heme', id: 1 }]
+  });
+  rateSection(item, 'etiology', 'good', baseDurations, now);
+  const futureDue = now + 60 * 60 * 1000;
+  item.sr.sections.etiology.due = futureDue;
+
+  item.lectures = [{ blockId: 'heme', id: 1 }, { blockId: 'heme', id: 2 }];
+  const snapshotAdd = getSectionStateSnapshot(item, 'etiology');
+  assert.equal(snapshotAdd.lastRating, 'good');
+  assert.deepEqual(snapshotAdd.lectureScope, ['heme|1', 'heme|2']);
+
+  item.lectures = [{ blockId: 'heme', id: 2 }];
+  const snapshotRemoved = getSectionStateSnapshot(item, 'etiology');
+  assert.equal(snapshotRemoved.lastRating, null);
+  assert.ok(snapshotRemoved.due <= Date.now());
+  const afterRemoval = Date.now() + 10;
+  const dueEntries = collectDueSections([item], { now: afterRemoval });
+  assert.equal(dueEntries.length, 1);
+  assert.equal(dueEntries[0].itemId, 'lecture-move');
 });
