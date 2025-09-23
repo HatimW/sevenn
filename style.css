@@ -5911,19 +5911,19 @@ body.map-toolbox-dragging {
 .palette-button.unanswered,
 .palette-button[data-status='unanswered'] {
   background: #e2e8f0;
-  border-color: rgba(148, 163, 184, 0.35);
-  color: rgba(15, 23, 42, 0.45);
-  opacity: 0.55;
-  filter: saturate(0.55) brightness(0.96);
+  border-color: rgba(148, 163, 184, 0.45);
+  color: rgba(15, 23, 42, 0.64);
+  opacity: 1;
+  filter: none;
 }
 
 .palette-button.review-unanswered,
 .palette-button[data-status='review-unanswered'] {
   background: #dbe3ef;
-  border-color: rgba(100, 116, 139, 0.28);
-  color: rgba(15, 23, 42, 0.4);
-  opacity: 0.6;
-  filter: saturate(0.5);
+  border-color: rgba(100, 116, 139, 0.34);
+  color: rgba(15, 23, 42, 0.5);
+  opacity: 0.85;
+  filter: none;
 }
 
 .palette-button.answered,
@@ -6009,17 +6009,17 @@ body.map-toolbox-dragging {
 
 .palette-button[data-mode='taking'][data-status='unanswered'] {
   background: #e2e8f0;
-  border-color: rgba(148, 163, 184, 0.3);
-  color: rgba(15, 23, 42, 0.4);
-  filter: saturate(0.45) brightness(0.95);
-  opacity: 0.58;
+  border-color: rgba(148, 163, 184, 0.45);
+  color: rgba(15, 23, 42, 0.64);
+  filter: none;
+  opacity: 1;
 }
 
 .palette-button[data-mode='review'][data-status='review-unanswered'] {
   background: #d8dee8;
-  border-color: rgba(100, 116, 139, 0.3);
-  color: rgba(15, 23, 42, 0.42);
-  opacity: 0.6;
+  border-color: rgba(100, 116, 139, 0.32);
+  color: rgba(15, 23, 42, 0.5);
+  opacity: 0.85;
 }
 
 .palette-button[data-change-direction]::after {
