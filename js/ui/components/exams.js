@@ -1498,6 +1498,7 @@ export function renderExamRunner(root, render) {
         : prevScrollY;
       if (typeof sess.idx === 'number') {
         storeScrollPosition(sess, sess.idx, targetY);
+
       }
       const restore = () => {
         if (Math.abs(readScrollPosition(scroller) - targetY) > 1) {
