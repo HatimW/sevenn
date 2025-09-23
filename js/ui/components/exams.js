@@ -1445,8 +1445,21 @@ export function renderExamRunner(root, render) {
   sess.__lastRenderedMode = sess.mode;
   if (hasWindow && typeof window.scrollTo === 'function') {
     if (sameQuestion) {
+      const targetY = typeof sess.idx === 'number'
+        ? (getStoredScroll(sess, sess.idx) ?? prevScrollY)
+        : prevScrollY;
       if (typeof sess.idx === 'number') {
-        storeScrollPosition(sess, sess.idx, prevScrollY);
+        storeScrollPosition(sess, sess.idx, targetY);
+      }
+      const restore = () => {
+        if (Math.abs((window.scrollY || 0) - targetY) > 1) {
+          window.scrollTo({ left: 0, top: targetY, behavior: 'auto' });
+        }
+      };
+      if (typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(restore);
+      } else {
+        setTimeout(restore, 0);
       }
     } else {
       const storedScroll = getStoredScroll(sess, sess.idx);
