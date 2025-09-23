@@ -473,11 +473,8 @@ function createPassChipDisplay(info, now = Date.now(), options = {}) {
   toggleIcon.className = 'lecture-pass-chip-toggle-icon';
   toggleIcon.setAttribute('aria-hidden', 'true');
   toggleIcon.textContent = '✓';
-  const toggleLabel = document.createElement('span');
-  toggleLabel.className = 'lecture-pass-chip-toggle-label';
-  toggleLabel.textContent = 'Done';
 
-  toggleButton.append(toggleIcon, toggleLabel);
+  toggleButton.append(toggleIcon);
   statusWrap.appendChild(toggleButton);
   chip.appendChild(statusWrap);
 
