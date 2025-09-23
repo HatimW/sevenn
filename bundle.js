@@ -16841,6 +16841,8 @@ var Sevenn = (() => {
     sliders: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 7h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M6 12h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M6 17h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><circle cx="16" cy="7" r="2.5" stroke="currentColor" stroke-width="1.6" /><circle cx="11" cy="12" r="2.5" stroke="currentColor" stroke-width="1.6" /><circle cx="19" cy="17" r="2.5" stroke="currentColor" stroke-width="1.6" /></svg>',
     close: '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>',
     plus: '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>',
+    search: '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="9" cy="9" r="5.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><path d="M12.8 12.8L16.5 16.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>',
+    arrowRight: '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 10h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /><path d="M10 6l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>',
     gear: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z" stroke="currentColor" stroke-width="1.6" /><path d="M4.5 12.5l1.8.52c.26.08.46.28.54.54l.52 1.8a.9.9 0 0 0 1.47.41l1.43-1.08a.9.9 0 0 1 .99-.07l1.63.82a.9.9 0 0 0 1.22-.41l.73-1.66a.9.9 0 0 1 .73-.52l1.88-.2a.9.9 0 0 0 .78-1.07l-.39-1.85a.9.9 0 0 1 .25-.83l1.29-1.29a.9.9 0 0 0-.01-1.27l-1.29-1.29a.9.9 0 0 0-.83-.25l-1.85.39a.9.9 0 0 1-1.07-.78l-.2-1.88A.9.9 0 0 0 13.3 2h-2.6a.9.9 0 0 0-.9.78l-.2 1.88a.9.9 0 0 1-1.07.78l-1.85-.39a.9.9 0 0 0-.83.25L4.56 6.59a.9.9 0 0 0-.01 1.27l1.29 1.29c.22.22.31.54.25.83l-.39 1.85a.9.9 0 0 0 .7 1.07z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /></svg>',
     trash: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 7h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><path d="M9 7V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><path d="M18 7v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /><path d="M10 11v6M14 11v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>'
   };
@@ -16920,9 +16922,15 @@ var Sevenn = (() => {
     searchValue: "",
     searchFeedback: null,
     searchInput: null,
+    searchFieldEl: null,
     searchFeedbackEl: null,
+    searchSuggestions: [],
+    searchSuggestionsEl: null,
+    searchActiveIndex: -1,
+    searchSuggestionTimer: null,
     paletteSearch: "",
-    nodeRadii: null
+    nodeRadii: null,
+    lineMarkers: /* @__PURE__ */ new Map()
   };
   function normalizeMapTab(tab = {}) {
     const filter = tab.filter && typeof tab.filter === "object" ? tab.filter : {};
@@ -17107,10 +17115,116 @@ var Sevenn = (() => {
       el.className = "map-search-feedback";
     }
   }
+  function updateSearchSuggestions(query) {
+    const container = mapState.searchSuggestionsEl;
+    if (!container) return;
+    if (mapState.searchSuggestionTimer) {
+      clearTimeout(mapState.searchSuggestionTimer);
+      mapState.searchSuggestionTimer = null;
+    }
+    container.innerHTML = "";
+    mapState.searchSuggestions = [];
+    mapState.searchActiveIndex = -1;
+    const field = mapState.searchFieldEl;
+    const trimmed = (query || "").trim();
+    if (!trimmed) {
+      container.classList.remove("visible");
+      if (field) field.classList.remove("has-suggestions");
+      return;
+    }
+    const lower = trimmed.toLowerCase();
+    const items = (mapState.visibleItems || []).map((item) => ({ id: item.id, label: titleOf4(item) || "" })).filter((entry) => entry.label && entry.label.toLowerCase().includes(lower));
+    if (!items.length) {
+      container.classList.remove("visible");
+      if (field) field.classList.remove("has-suggestions");
+      return;
+    }
+    const seen = /* @__PURE__ */ new Set();
+    const unique = [];
+    items.forEach((entry) => {
+      if (!entry.id || seen.has(entry.id)) return;
+      seen.add(entry.id);
+      unique.push(entry);
+    });
+    unique.sort((a, b) => {
+      const aIndex = a.label.toLowerCase().indexOf(lower);
+      const bIndex = b.label.toLowerCase().indexOf(lower);
+      if (aIndex !== bIndex) return aIndex - bIndex;
+      return a.label.localeCompare(b.label);
+    });
+    const limited = unique.slice(0, 6);
+    if (!limited.length) {
+      container.classList.remove("visible");
+      if (field) field.classList.remove("has-suggestions");
+      return;
+    }
+    mapState.searchSuggestions = limited;
+    limited.forEach((entry, index) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "map-search-suggestion";
+      option.textContent = entry.label;
+      option.addEventListener("mousedown", (evt) => {
+        evt.preventDefault();
+      });
+      option.addEventListener("click", () => {
+        applySearchSuggestion(index);
+      });
+      container.appendChild(option);
+    });
+    container.classList.add("visible");
+    if (field) field.classList.add("has-suggestions");
+  }
+  function clearSearchSuggestions() {
+    const container = mapState.searchSuggestionsEl;
+    if (mapState.searchSuggestionTimer) {
+      clearTimeout(mapState.searchSuggestionTimer);
+      mapState.searchSuggestionTimer = null;
+    }
+    if (container) {
+      container.innerHTML = "";
+      container.classList.remove("visible");
+    }
+    mapState.searchSuggestions = [];
+    mapState.searchActiveIndex = -1;
+    const field = mapState.searchFieldEl;
+    if (field) {
+      field.classList.remove("has-suggestions");
+    }
+  }
+  function highlightSearchSuggestion(index) {
+    const container = mapState.searchSuggestionsEl;
+    if (!container) return;
+    const options = Array.from(container.querySelectorAll(".map-search-suggestion"));
+    if (!options.length) return;
+    const clamped = (index % options.length + options.length) % options.length;
+    options.forEach((option, i) => {
+      option.classList.toggle("active", i === clamped);
+      if (i === clamped) {
+        option.scrollIntoView({ block: "nearest" });
+      }
+    });
+    mapState.searchActiveIndex = clamped;
+  }
+  function applySearchSuggestion(index) {
+    const suggestion = mapState.searchSuggestions?.[index];
+    if (!suggestion) return;
+    if (mapState.searchInput) {
+      mapState.searchInput.value = suggestion.label;
+      mapState.searchValue = suggestion.label;
+      mapState.searchInput.focus();
+    }
+    clearSearchSuggestions();
+    handleSearchSubmit(suggestion.label);
+  }
   function setSearchInputState({ notFound = false } = {}) {
     const input = mapState.searchInput;
-    if (!input) return;
-    input.classList.toggle("not-found", Boolean(notFound));
+    if (input) {
+      input.classList.toggle("not-found", Boolean(notFound));
+    }
+    if (mapState.searchFieldEl) {
+      mapState.searchFieldEl.classList.toggle("not-found", Boolean(notFound));
+    }
   }
   function createMapTabsPanel(activeTab) {
     const config = mapState.mapConfig || { tabs: [] };
@@ -17170,6 +17284,12 @@ var Sevenn = (() => {
       evt.preventDefault();
       handleSearchSubmit(input.value);
     });
+    const field = document.createElement("div");
+    field.className = "map-search-field";
+    const icon = document.createElement("span");
+    icon.className = "map-search-icon";
+    icon.innerHTML = ICONS.search;
+    field.appendChild(icon);
     const input = document.createElement("input");
     input.type = "search";
     input.className = "input map-search-input";
@@ -17181,20 +17301,65 @@ var Sevenn = (() => {
       if (!input.value.trim()) {
         updateSearchFeedback("", "");
       }
+      updateSearchSuggestions(input.value);
     });
-    form.appendChild(input);
+    input.addEventListener("focus", () => {
+      if (mapState.searchSuggestionTimer) {
+        clearTimeout(mapState.searchSuggestionTimer);
+        mapState.searchSuggestionTimer = null;
+      }
+      updateSearchSuggestions(input.value);
+    });
+    input.addEventListener("blur", () => {
+      if (mapState.searchSuggestionTimer) {
+        clearTimeout(mapState.searchSuggestionTimer);
+      }
+      mapState.searchSuggestionTimer = setTimeout(() => {
+        clearSearchSuggestions();
+      }, 120);
+    });
+    input.addEventListener("keydown", (evt) => {
+      if (!mapState.searchSuggestions || mapState.searchSuggestions.length === 0) return;
+      if (evt.key === "ArrowDown") {
+        evt.preventDefault();
+        const next = (mapState.searchActiveIndex + 1) % mapState.searchSuggestions.length;
+        highlightSearchSuggestion(next);
+      } else if (evt.key === "ArrowUp") {
+        evt.preventDefault();
+        const total = mapState.searchSuggestions.length;
+        const next = (mapState.searchActiveIndex - 1 + total) % total;
+        highlightSearchSuggestion(next);
+      } else if (evt.key === "Enter") {
+        if (mapState.searchActiveIndex >= 0 && mapState.searchActiveIndex < mapState.searchSuggestions.length) {
+          evt.preventDefault();
+          applySearchSuggestion(mapState.searchActiveIndex);
+        }
+      } else if (evt.key === "Escape") {
+        clearSearchSuggestions();
+      }
+    });
+    field.appendChild(input);
     const submit = document.createElement("button");
     submit.type = "submit";
-    submit.className = "map-search-btn";
-    submit.textContent = "Go";
-    form.appendChild(submit);
+    submit.className = "map-search-submit";
+    submit.innerHTML = `${ICONS.arrowRight}<span class="sr-only">Search</span>`;
+    field.appendChild(submit);
+    form.appendChild(field);
+    const suggestions = document.createElement("div");
+    suggestions.className = "map-search-suggestions";
+    form.appendChild(suggestions);
     searchWrap.appendChild(form);
     const feedback = document.createElement("div");
     feedback.className = "map-search-feedback";
     searchWrap.appendChild(feedback);
     mapState.searchInput = input;
+    mapState.searchFieldEl = field;
     mapState.searchFeedbackEl = feedback;
+    mapState.searchSuggestionsEl = suggestions;
+    mapState.searchSuggestions = [];
+    mapState.searchActiveIndex = -1;
     applyStoredSearchFeedback();
+    updateSearchSuggestions(input.value);
     return searchWrap;
   }
   function createMapControlsPanel(activeTab) {
@@ -17486,6 +17651,7 @@ var Sevenn = (() => {
     return palette2;
   }
   function handleSearchSubmit(rawQuery) {
+    clearSearchSuggestions();
     const query = (rawQuery || "").trim();
     if (!query) {
       mapState.searchValue = "";
@@ -17642,13 +17808,26 @@ var Sevenn = (() => {
     mapState.nodeWasDragged = false;
     mapState.justCompletedSelection = false;
     mapState.searchInput = null;
+    mapState.searchFieldEl = null;
     mapState.searchFeedbackEl = null;
+    mapState.searchSuggestions = [];
+    mapState.searchSuggestionsEl = null;
+    mapState.searchActiveIndex = -1;
+    if (mapState.searchSuggestionTimer) {
+      clearTimeout(mapState.searchSuggestionTimer);
+      mapState.searchSuggestionTimer = null;
+    }
     stopToolboxDrag();
     mapState.toolboxEl = null;
     mapState.toolboxContainer = null;
     mapState.cursorOverride = null;
     mapState.hoveredEdge = null;
     mapState.hoveredEdgePointer = { x: 0, y: 0 };
+    if (mapState.lineMarkers) {
+      mapState.lineMarkers.clear();
+    } else {
+      mapState.lineMarkers = /* @__PURE__ */ new Map();
+    }
     stopAutoPan();
     setAreaInteracting(false);
     ensureListeners();
@@ -18193,8 +18372,8 @@ var Sevenn = (() => {
         viewBox: "0 0 12 12",
         refX: 12,
         refY: 6,
-        markerWidth: 8,
-        markerHeight: 8,
+        markerWidth: 12,
+        markerHeight: 12,
         path: "M0,0 L12,6 L0,12 Z"
       },
       {
@@ -18202,21 +18381,30 @@ var Sevenn = (() => {
         viewBox: "0 0 12 12",
         refX: 0,
         refY: 6,
-        markerWidth: 8,
-        markerHeight: 8,
+        markerWidth: 12,
+        markerHeight: 12,
         path: "M12,0 L0,6 L12,12 Z"
       }
     ];
+    if (!mapState.lineMarkers) {
+      mapState.lineMarkers = /* @__PURE__ */ new Map();
+    } else {
+      mapState.lineMarkers.clear();
+    }
     configs.forEach((cfg) => {
       const marker = document.createElementNS(svgNS, "marker");
       marker.setAttribute("id", cfg.id);
       marker.setAttribute("viewBox", cfg.viewBox);
+      marker.dataset.baseRefX = String(cfg.refX);
+      marker.dataset.baseRefY = String(cfg.refY);
+      marker.dataset.baseWidth = String(cfg.markerWidth);
+      marker.dataset.baseHeight = String(cfg.markerHeight);
       marker.setAttribute("refX", String(cfg.refX));
       marker.setAttribute("refY", String(cfg.refY));
       marker.setAttribute("markerWidth", String(cfg.markerWidth));
       marker.setAttribute("markerHeight", String(cfg.markerHeight));
       marker.setAttribute("orient", "auto");
-      marker.setAttribute("markerUnits", "strokeWidth");
+      marker.setAttribute("markerUnits", "userSpaceOnUse");
       marker.setAttribute("class", "map-marker");
       const path = document.createElementNS(svgNS, "path");
       path.setAttribute("d", cfg.path);
@@ -18225,6 +18413,27 @@ var Sevenn = (() => {
       path.setAttribute("stroke-linejoin", "round");
       marker.appendChild(path);
       defs.appendChild(marker);
+      mapState.lineMarkers.set(cfg.id, marker);
+    });
+    updateMarkerSizes();
+  }
+  function updateMarkerSizes() {
+    const markers = mapState.lineMarkers;
+    if (!markers || markers.size === 0) return;
+    const { zoomRatio = 1, lineScale = 1 } = getCurrentScales();
+    const ratio = Number.isFinite(zoomRatio) && zoomRatio > 0 ? zoomRatio : 1;
+    const strokeScale = Number.isFinite(lineScale) && lineScale > 0 ? lineScale : 1;
+    markers.forEach((marker) => {
+      const baseWidth = Number(marker.dataset.baseWidth) || 12;
+      const baseHeight = Number(marker.dataset.baseHeight) || 12;
+      const baseRefX = Number(marker.dataset.baseRefX) || 0;
+      const baseRefY = Number(marker.dataset.baseRefY) || 0;
+      const width = baseWidth * ratio * strokeScale;
+      const height = baseHeight * ratio * strokeScale;
+      marker.setAttribute("markerWidth", String(width));
+      marker.setAttribute("markerHeight", String(height));
+      marker.setAttribute("refX", String(baseRefX * ratio * strokeScale));
+      marker.setAttribute("refY", String(baseRefY * ratio * strokeScale));
     });
   }
   function attachSvgEvents(svg) {
@@ -19064,6 +19273,7 @@ var Sevenn = (() => {
     const labelScale = clamp2(Math.pow(zoomRatio, 0.25), 1, 2.6);
     const lineScale = clamp2(Math.pow(zoomRatio, 0.06), 0.9, 1.2);
     mapState.currentScales = { nodeScale, labelScale, lineScale, zoomRatio };
+    updateMarkerSizes();
     mapState.elements.forEach((entry, id) => {
       updateNodeGeometry(id, entry);
     });
