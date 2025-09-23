@@ -149,6 +149,31 @@ function snapshotQuestionStats(sess) {
   }));
 }
 
+function extractAnswerSequence(stat, finalAnswer) {
+  const sequence = [];
+  const push = value => {
+    if (value == null) return;
+    if (sequence[sequence.length - 1] === value) return;
+    sequence.push(value);
+  };
+
+  if (stat && stat.initialAnswer != null) {
+    push(stat.initialAnswer);
+  }
+
+  const changes = Array.isArray(stat?.changes) ? stat.changes : [];
+  changes.forEach(change => {
+    if (!change) return;
+    if (change.to != null) push(change.to);
+  });
+
+  if (finalAnswer != null) {
+    push(finalAnswer);
+  }
+
+  return sequence;
+}
+
 function analyzeAnswerChange(stat, question, finalAnswer) {
   if (!question) {
     return {
@@ -157,38 +182,22 @@ function analyzeAnswerChange(stat, question, finalAnswer) {
       initialCorrect: null,
       finalCorrect: null,
       changed: false,
-      direction: null
+      direction: null,
+      switched: false,
+      sequence: []
     };
   }
 
   const answerId = question.answer;
-  const changes = Array.isArray(stat?.changes) ? stat.changes : [];
-
-  const firstRecorded = changes.find(change => change && change.to != null) || null;
-  let lastRecorded = null;
-  for (let i = changes.length - 1; i >= 0; i -= 1) {
-    const change = changes[i];
-    if (change && change.to != null) {
-      lastRecorded = change;
-      break;
-    }
-  }
-
-  const storedInitialAnswer = stat?.initialAnswer ?? null;
-  const initialAnswer = storedInitialAnswer != null
-    ? storedInitialAnswer
-    : firstRecorded?.to ?? null;
-  const resolvedFinalAnswer = finalAnswer != null
-    ? finalAnswer
-    : lastRecorded?.to ?? initialAnswer;
+  const sequence = extractAnswerSequence(stat, finalAnswer);
+  const initialAnswer = sequence.length ? sequence[0] : (stat?.initialAnswer ?? null);
+  const resolvedFinalAnswer = sequence.length ? sequence[sequence.length - 1] : (finalAnswer ?? null);
 
   const initialCorrect = initialAnswer != null ? initialAnswer === answerId : null;
   const finalCorrect = resolvedFinalAnswer != null ? resolvedFinalAnswer === answerId : null;
 
-  const changed =
-    initialAnswer != null &&
-    resolvedFinalAnswer != null &&
-    initialAnswer !== resolvedFinalAnswer;
+  const switched = sequence.length > 1;
+  const changed = switched && initialAnswer != null && resolvedFinalAnswer != null && initialAnswer !== resolvedFinalAnswer;
 
   let direction = null;
   if (changed) {
@@ -207,7 +216,9 @@ function analyzeAnswerChange(stat, question, finalAnswer) {
     initialCorrect,
     finalCorrect,
     changed,
-    direction
+    direction,
+    switched,
+    sequence
   };
 }
 
@@ -235,8 +246,7 @@ function summarizeAnswerChanges(questionStats, exam, answers = {}) {
     if (!question) return;
     const finalAnswer = answers[idx];
     const details = analyzeAnswerChange(stat, question, finalAnswer);
-    const meaningfulChanges = countMeaningfulAnswerChanges(stat);
-    if (meaningfulChanges > 0) {
+    if (details.switched) {
       switched += 1;
     }
     if (details.changed) {
@@ -482,7 +492,13 @@ function createTakingSession(exam) {
     startedAt: Date.now(),
     elapsedMs: 0,
     remainingMs: totalMs,
-    questionStats: snapshot.questions.map(() => ({ timeMs: 0, changes: [], enteredAt: null }))
+    questionStats: snapshot.questions.map(() => ({
+      timeMs: 0,
+      changes: [],
+      enteredAt: null,
+      initialAnswer: null,
+      initialAnswerAt: null
+    }))
   };
 }
 
@@ -510,7 +526,9 @@ function hydrateSavedSession(saved, fallbackExam) {
       return {
         timeMs: Number.isFinite(stat.timeMs) ? stat.timeMs : 0,
         changes: Array.isArray(stat.changes) ? stat.changes.map(change => ({ ...change })) : [],
-        enteredAt: null
+        enteredAt: null,
+        initialAnswer: stat.initialAnswer ?? null,
+        initialAnswerAt: Number.isFinite(stat.initialAnswerAt) ? stat.initialAnswerAt : null
       };
     })
   };
@@ -959,7 +977,7 @@ function renderPalette(sidebar, sess, render) {
 
       const stat = statsList[idx];
       const changeDetails = analyzeAnswerChange(stat, question, answer);
-      const meaningfulChanges = countMeaningfulAnswerChanges(stat);
+      delete btn.dataset.changeDirection;
       if (changeDetails.changed) {
         let changeTitle = 'Changed answer';
         if (changeDetails.direction === 'right-to-wrong') {
@@ -972,7 +990,8 @@ function renderPalette(sidebar, sess, render) {
           btn.dataset.changeDirection = 'changed';
         }
         tooltipParts.push(changeTitle);
-      } else if (meaningfulChanges > 0) {
+      } else if (changeDetails.switched) {
+        btn.dataset.changeDirection = 'returned';
         tooltipParts.push('Changed answers but returned to start');
       }
     } else {
@@ -1045,7 +1064,6 @@ export function renderExamRunner(root, render) {
   const hasWindow = typeof window !== 'undefined';
   const prevIdx = sess.__lastRenderedIdx;
   const prevMode = sess.__lastRenderedMode;
-  const prevScrollX = hasWindow ? window.scrollX : 0;
   const prevScrollY = hasWindow ? window.scrollY : 0;
   if (hasWindow) {
     if (typeof prevIdx === 'number') {
@@ -1257,25 +1275,62 @@ export function renderExamRunner(root, render) {
         timeSpent.innerHTML = `<strong>Time spent:</strong> ${formatDuration(stats.timeMs)}`;
         insights.appendChild(timeSpent);
 
-        const meaningfulChanges = countMeaningfulAnswerChanges(stats);
         const finalAnswer = sess.result?.answers?.[sess.idx];
         const changeDetails = analyzeAnswerChange(stats, question, finalAnswer);
 
-        if (meaningfulChanges > 0) {
+        if (changeDetails.switched) {
           const changeInfo = document.createElement('div');
+          const label = document.createElement('strong');
+          label.textContent = 'Answer change:';
+          changeInfo.appendChild(label);
+          changeInfo.append(' ');
+
+          const joinChoices = list => {
+            if (!list.length) return '';
+            if (list.length === 1) return list[0];
+            return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+          };
+
+          const formatChoice = (answerId, fallback) => {
+            if (answerId == null) return fallback;
+            const label = optionText(question, answerId);
+            if (label) return `"${label}"`;
+            return fallback;
+          };
+          const initialDisplay = formatChoice(changeDetails.initialAnswer, 'your original choice');
+          const finalDisplay = formatChoice(changeDetails.finalAnswer, 'no answer');
+          let message = '';
+
           if (changeDetails.changed) {
-            let message = 'You changed your answer.';
             if (changeDetails.direction === 'right-to-wrong') {
-              message = 'You changed your answer from correct to incorrect.';
+              message = `You changed from ${initialDisplay} (correct) to ${finalDisplay} (incorrect).`;
             } else if (changeDetails.direction === 'wrong-to-right') {
-              message = 'You changed your answer from incorrect to correct.';
+              message = `You changed from ${initialDisplay} (incorrect) to ${finalDisplay} (correct).`;
             } else if (changeDetails.initialCorrect === false && changeDetails.finalCorrect === false) {
-              message = 'You changed your answer but it remained incorrect.';
+              message = `You changed from ${initialDisplay} to ${finalDisplay}, but both choices were incorrect.`;
+            } else {
+              message = `You changed from ${initialDisplay} to ${finalDisplay}.`;
             }
-            changeInfo.innerHTML = `<strong>Answer change:</strong> ${message}`;
           } else {
-            changeInfo.innerHTML = '<strong>Answer change:</strong> You changed answers but ended on your original choice.';
+            const intermediateIds = [];
+            changeDetails.sequence.slice(1, -1).forEach(id => {
+              if (id == null) return;
+              if (id === changeDetails.initialAnswer) return;
+              if (!intermediateIds.includes(id)) intermediateIds.push(id);
+            });
+            const intermediateLabels = intermediateIds
+              .map(id => optionText(question, id))
+              .filter(label => label && label.trim().length)
+              .map(label => `"${label}"`);
+            if (intermediateLabels.length) {
+              const joined = joinChoices(intermediateLabels);
+              message = `You tried ${joined} but returned to ${initialDisplay}.`;
+            } else {
+              message = `You briefly changed your answer but returned to ${initialDisplay}.`;
+            }
           }
+
+          changeInfo.append(message);
           insights.appendChild(changeInfo);
         }
         main.appendChild(insights);
@@ -1389,19 +1444,24 @@ export function renderExamRunner(root, render) {
   sess.__lastRenderedIdx = sess.idx;
   sess.__lastRenderedMode = sess.mode;
   if (hasWindow && typeof window.scrollTo === 'function') {
-    const storedScroll = getStoredScroll(sess, sess.idx);
-    const targetY = sameQuestion ? prevScrollY : (storedScroll ?? 0);
-    const targetX = sameQuestion ? prevScrollX : 0;
-    if (typeof sess.idx === 'number') {
-      storeScrollPosition(sess, sess.idx, targetY);
-    }
-    const restore = () => {
-      window.scrollTo({ left: targetX, top: targetY, behavior: 'auto' });
-    };
-    if (typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(restore);
+    if (sameQuestion) {
+      if (typeof sess.idx === 'number') {
+        storeScrollPosition(sess, sess.idx, prevScrollY);
+      }
     } else {
-      setTimeout(restore, 0);
+      const storedScroll = getStoredScroll(sess, sess.idx);
+      const targetY = storedScroll ?? 0;
+      if (typeof sess.idx === 'number' && storedScroll == null) {
+        storeScrollPosition(sess, sess.idx, targetY);
+      }
+      const restore = () => {
+        window.scrollTo({ left: 0, top: targetY, behavior: 'auto' });
+      };
+      if (typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(restore);
+      } else {
+        setTimeout(restore, 0);
+      }
     }
   }
 }
