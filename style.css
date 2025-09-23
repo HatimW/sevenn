@@ -8359,7 +8359,6 @@ body.map-toolbox-dragging {
 
 .lectures-week-body {
   padding: 0.2rem 0 1rem;
-  overflow-x: auto;
 }
 
 .lectures-week-table {
@@ -8370,6 +8369,7 @@ body.map-toolbox-dragging {
   overflow: hidden;
   background: rgba(8, 12, 22, 0.78);
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.55);
+  table-layout: fixed;
 }
 
 .lectures-week-table th,
@@ -8508,6 +8508,21 @@ body.map-toolbox-dragging {
   text-align: right;
 }
 
+.lectures-week-table .lectures-col-lecture,
+.lectures-week-table td.lecture-overview {
+  width: 33%;
+}
+
+.lectures-week-table .lectures-col-passes,
+.lectures-week-table td.lecture-passes-cell {
+  width: 45%;
+}
+
+.lectures-week-table .lectures-col-actions,
+.lectures-week-table td.lecture-actions {
+  width: 22%;
+}
+
 .lecture-passes-cell {
   padding-right: 0;
 }
@@ -8520,6 +8535,8 @@ body.map-toolbox-dragging {
   padding-right: 0.15rem;
   scroll-snap-type: x proximity;
   max-width: 100%;
+  width: 100%;
+  scrollbar-gutter: stable;
 }
 
 .lecture-pass-scroller::-webkit-scrollbar {
@@ -8562,7 +8579,7 @@ body.map-toolbox-dragging {
 
 .lecture-pass-chip {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 0.45rem;
   flex: 0 0 210px;
   min-width: 0;
@@ -8578,6 +8595,13 @@ body.map-toolbox-dragging {
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease, filter 0.2s ease;
 }
 
+.lecture-pass-chip-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
 .lecture-pass-chip-body {
   display: flex;
   flex-direction: column;
@@ -8590,8 +8614,8 @@ body.map-toolbox-dragging {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   border: 2px solid color-mix(in srgb, var(--chip-accent) 72%, rgba(255, 255, 255, 0.22));
   background: color-mix(in srgb, var(--chip-accent) 30%, rgba(8, 14, 24, 0.92));
