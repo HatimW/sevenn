@@ -1,4 +1,31 @@
-(() => {
+var Sevenn = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // js/main.js
+  var main_exports = {};
+  __export(main_exports, {
+    render: () => renderApp,
+    renderApp: () => renderApp,
+    resolveListKind: () => resolveListKind,
+    tabs: () => tabs
+  });
+
   // js/state.js
   var state = {
     tab: "Block Board",
@@ -16828,7 +16855,8 @@
     { value: "arrow-start", label: "Arrow \u2190" },
     { value: "arrow-both", label: "Double arrow \u2194" },
     { value: "glow", label: "Glow highlight" },
-    { value: "blocked", label: "Blocked \u2715" }
+    { value: "blocked", label: "Blocked \u2715" },
+    { value: "inhibit", label: "Inhibit \u22A3" }
   ];
   var LINE_STYLE_VALUE_SET = new Set(LINE_STYLE_OPTIONS.map((option) => option.value));
   var LINE_THICKNESS_VALUES = {
@@ -18189,9 +18217,12 @@
       marker.setAttribute("markerHeight", String(cfg.markerHeight));
       marker.setAttribute("orient", "auto");
       marker.setAttribute("markerUnits", "strokeWidth");
+      marker.setAttribute("class", "map-marker");
       const path = document.createElementNS(svgNS, "path");
       path.setAttribute("d", cfg.path);
-      path.setAttribute("fill", "currentColor");
+      path.setAttribute("fill", "context-stroke");
+      path.setAttribute("stroke", "context-stroke");
+      path.setAttribute("stroke-linejoin", "round");
       marker.appendChild(path);
       defs.appendChild(marker);
     });
@@ -19028,12 +19059,11 @@
     const [, , w] = vb.split(" ").map(Number);
     if (!Number.isFinite(w) || w <= 0) return;
     const defaultSize = Number.isFinite(mapState.defaultViewSize) ? mapState.defaultViewSize : w;
-    const zoomInRatio = defaultSize / w;
-    const zoomOutRatio = w / defaultSize;
-    const nodeScale = clamp2(Math.pow(zoomInRatio, 0.5), 0.65, 2.6);
-    const labelScale = clamp2(Math.pow(zoomOutRatio, 0.4), 1.2, 3.2);
-    const lineScale = clamp2(Math.pow(zoomInRatio, 0.33), 0.7, 2.4);
-    mapState.currentScales = { nodeScale, labelScale, lineScale };
+    const zoomRatio = w / defaultSize;
+    const nodeScale = clamp2(Math.pow(zoomRatio, 0.08), 0.88, 1.3);
+    const labelScale = clamp2(Math.pow(zoomRatio, 0.25), 1, 2.6);
+    const lineScale = clamp2(Math.pow(zoomRatio, 0.06), 0.9, 1.2);
+    mapState.currentScales = { nodeScale, labelScale, lineScale, zoomRatio };
     mapState.elements.forEach((entry, id) => {
       updateNodeGeometry(id, entry);
     });
@@ -19044,17 +19074,6 @@
       updateLineStrokeWidth(line);
       syncLineDecoration(line);
     });
-  }
-  function pointToSegment(px, py, x1, y1, x2, y2) {
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const l2 = dx * dx + dy * dy;
-    if (!l2) return Math.hypot(px - x1, py - y1);
-    let t = ((px - x1) * dx + (py - y1) * dy) / l2;
-    t = Math.max(0, Math.min(1, t));
-    const projX = x1 + t * dx;
-    const projY = y1 + t * dy;
-    return Math.hypot(px - projX, py - projY);
   }
   function getNodeBaseRadius(id) {
     if (mapState.nodeRadii && mapState.nodeRadii.has(id)) {
@@ -19099,30 +19118,65 @@
       trimmedLength: trimmedLength || 0
     };
   }
-  function calcPath(aId, bId) {
-    const segment = computeTrimmedSegment(aId, bId);
-    if (!segment) return "";
-    const { startX, startY, endX, endY, ux, uy } = segment;
-    const trimmedLength = segment.trimmedLength || Math.hypot(endX - startX, endY - startY) || 1;
-    let cx = (startX + endX) / 2;
-    let cy = (startY + endY) / 2;
-    const nx = -uy;
-    const ny = ux;
-    const clearance = Math.max(40, trimmedLength * 0.2);
+  function getPairCurveSeed(aId, bId) {
+    const key = [String(aId ?? ""), String(bId ?? "")].sort().join("|");
+    let hash = 2166136261;
+    for (let i = 0; i < key.length; i += 1) {
+      hash ^= key.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    const normalized2 = (hash >>> 0) / 4294967295;
+    return normalized2 * 2 - 1;
+  }
+  function signedDistanceToLine(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.hypot(dx, dy) || 1;
+    return ((px - x1) * dy - (py - y1) * dx) / len;
+  }
+  function computeCurveOffset(aId, bId, segment) {
+    const trimmedLength = segment.trimmedLength || Math.hypot(segment.endX - segment.startX, segment.endY - segment.startY) || 1;
+    const seed = getPairCurveSeed(aId, bId);
+    const baseMagnitude = Math.min(160, Math.max(48, trimmedLength * 0.24));
+    const magnitude = baseMagnitude * (0.6 + Math.min(1, Math.abs(seed)) * 0.8);
+    let offset = magnitude * (seed === 0 ? 1 : Math.sign(seed));
     const positions = mapState.positions || {};
+    const clearance = Math.max(36, trimmedLength * 0.18);
+    let bias = 0;
     for (const id in positions) {
       if (id === aId || id === bId) continue;
       const p = positions[id];
       if (!p) continue;
-      const otherRadius = getNodeRadius(id);
-      if (pointToSegment(p.x, p.y, startX, startY, endX, endY) < clearance + otherRadius * 0.5) {
-        const side = (p.x - startX) * nx + (p.y - startY) * ny > 0 ? 1 : -1;
-        const bump = Math.min(140, Math.max(60, trimmedLength * 0.3));
-        cx += nx * bump * side;
-        cy += ny * bump * side;
-        break;
-      }
+      const radius = getNodeRadius(id);
+      const distance = signedDistanceToLine(p.x, p.y, segment.startX, segment.startY, segment.endX, segment.endY);
+      const absDistance = Math.abs(distance);
+      if (absDistance >= clearance + radius) continue;
+      const weight = 1 - Math.min(1, absDistance / (clearance + radius));
+      bias += weight * (distance >= 0 ? 1 : -1);
     }
+    if (bias) {
+      const direction = bias > 0 ? 1 : -1;
+      offset = Math.abs(offset) * direction;
+      const amplification = Math.min(1.5, Math.abs(bias));
+      offset *= 1 + amplification * 0.45;
+    }
+    const minOffset = baseMagnitude * 0.35;
+    if (Math.abs(offset) < minOffset) {
+      offset = minOffset * (offset < 0 ? -1 : 1);
+    }
+    return offset;
+  }
+  function calcPath(aId, bId) {
+    const segment = computeTrimmedSegment(aId, bId);
+    if (!segment) return "";
+    const { startX, startY, endX, endY, ux, uy } = segment;
+    const nx = -uy;
+    const ny = ux;
+    const midX = (startX + endX) / 2;
+    const midY = (startY + endY) / 2;
+    const offset = computeCurveOffset(aId, bId, segment);
+    const cx = midX + nx * offset;
+    const cy = midY + ny * offset;
     return `M${startX} ${startY} Q${cx} ${cy} ${endX} ${endY}`;
   }
   function applyLineStyle(line, info = {}) {
@@ -19141,6 +19195,8 @@
     line.dataset.label = label;
     line.style.stroke = color;
     line.style.color = color;
+    line.setAttribute("stroke", color);
+    line.setAttribute("color", color);
     line.style.filter = "";
     line.removeAttribute("marker-start");
     line.removeAttribute("marker-end");
@@ -19211,6 +19267,9 @@
     if (style === "blocked") {
       const overlay = ensureLineOverlay(line);
       if (overlay) updateBlockedOverlay(line, overlay);
+    } else if (style === "inhibit") {
+      const overlay = ensureLineOverlay(line);
+      if (overlay) updateInhibitOverlay(line, overlay);
     } else {
       removeLineOverlay(line);
     }
@@ -19260,15 +19319,48 @@
     const diag2y = ty - ny;
     const norm1 = Math.hypot(diag1x, diag1y) || 1;
     const norm2 = Math.hypot(diag2x, diag2y) || 1;
+    const { lineScale = 1 } = getCurrentScales();
     const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
-    const armLength = Math.max(28, baseWidth * 4.2);
+    const scaledWidth = baseWidth * lineScale;
+    const armLength = Math.max(28, scaledWidth * 4.2);
     const d = `M${midX - diag1x / norm1 * armLength} ${midY - diag1y / norm1 * armLength} L${midX + diag1x / norm1 * armLength} ${midY + diag1y / norm1 * armLength} M${midX - diag2x / norm2 * armLength} ${midY - diag2y / norm2 * armLength} L${midX + diag2x / norm2 * armLength} ${midY + diag2y / norm2 * armLength}`;
     overlay.setAttribute("d", d);
-    const overlayBase = baseWidth * 1.6;
+    const overlayBase = baseWidth * 1.45;
     overlay.dataset.baseWidth = String(overlayBase);
-    const scales = getCurrentScales();
-    overlay.setAttribute("stroke", "#dc2626");
-    overlay.setAttribute("stroke-width", overlayBase * (scales.lineScale || 1));
+    overlay.dataset.decoration = "blocked";
+    overlay.setAttribute("stroke", "#ef4444");
+    overlay.setAttribute("stroke-width", overlayBase * lineScale);
+  }
+  function updateInhibitOverlay(line, overlay) {
+    if (!line || !overlay) return;
+    const segment = computeTrimmedSegment(line.dataset.a, line.dataset.b);
+    if (!segment) return;
+    const { lineScale = 1 } = getCurrentScales();
+    const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
+    const scaledWidth = baseWidth * lineScale;
+    const stemLength = Math.max(24, scaledWidth * 4.5);
+    const barLength = Math.max(22, scaledWidth * 3.2);
+    const retreat = Math.max(8, scaledWidth * 1.2);
+    const tipX = segment.endX;
+    const tipY = segment.endY;
+    const stemStartX = tipX - segment.ux * stemLength;
+    const stemStartY = tipY - segment.uy * stemLength;
+    const midX = tipX - segment.ux * retreat;
+    const midY = tipY - segment.uy * retreat;
+    const nx = -segment.uy;
+    const ny = segment.ux;
+    const halfBar = barLength / 2;
+    const barAX = midX + nx * halfBar;
+    const barAY = midY + ny * halfBar;
+    const barBX = midX - nx * halfBar;
+    const barBY = midY - ny * halfBar;
+    overlay.setAttribute("d", `M${stemStartX} ${stemStartY} L${tipX} ${tipY} M${barAX} ${barAY} L${barBX} ${barBY}`);
+    const overlayBase = baseWidth * 0.95;
+    overlay.dataset.baseWidth = String(overlayBase);
+    overlay.dataset.decoration = "inhibit";
+    const color = line.dataset.color || line.getAttribute("stroke") || DEFAULT_LINK_COLOR;
+    overlay.setAttribute("stroke", color);
+    overlay.setAttribute("stroke-width", overlayBase * lineScale);
   }
   async function setNodeHidden(id, hidden) {
     const item = await getItem(id);
@@ -19730,4 +19822,5 @@
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
+  return __toCommonJS(main_exports);
 })();
