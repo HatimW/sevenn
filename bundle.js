@@ -1,31 +1,4 @@
-var Sevenn = (() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-    }
-    return to;
-  };
-  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
-  // js/main.js
-  var main_exports = {};
-  __export(main_exports, {
-    render: () => renderApp,
-    renderApp: () => renderApp,
-    resolveListKind: () => resolveListKind,
-    tabs: () => tabs
-  });
-
+(() => {
   // js/state.js
   var state = {
     tab: "Block Board",
@@ -14202,6 +14175,110 @@ var Sevenn = (() => {
   var keyHandler = null;
   var keyHandlerSession = null;
   var lastExamStatusMessage = "";
+  function ensureQuestionStats(sess) {
+    const questionCount = sess?.exam?.questions?.length || 0;
+    if (!sess) return;
+    if (!Array.isArray(sess.questionStats)) {
+      sess.questionStats = Array.from({ length: questionCount }, () => ({ timeMs: 0, changes: [], enteredAt: null }));
+      return;
+    }
+    if (sess.questionStats.length !== questionCount) {
+      const next = Array.from({ length: questionCount }, (_, idx) => {
+        const prev = sess.questionStats[idx] || {};
+        return {
+          timeMs: Number.isFinite(prev.timeMs) ? prev.timeMs : 0,
+          changes: Array.isArray(prev.changes) ? [...prev.changes] : [],
+          enteredAt: null
+        };
+      });
+      sess.questionStats = next;
+      return;
+    }
+    sess.questionStats.forEach((stat) => {
+      if (!stat) return;
+      if (!Array.isArray(stat.changes)) stat.changes = [];
+      if (!Number.isFinite(stat.timeMs)) stat.timeMs = 0;
+      if (stat.enteredAt == null) stat.enteredAt = null;
+    });
+  }
+  function beginQuestionTiming(sess, idx) {
+    if (!sess || sess.mode !== "taking") return;
+    ensureQuestionStats(sess);
+    const stat = sess.questionStats?.[idx];
+    if (!stat) return;
+    if (stat.enteredAt == null) {
+      stat.enteredAt = Date.now();
+    }
+  }
+  function finalizeQuestionTiming(sess, idx) {
+    if (!sess || sess.mode !== "taking") return;
+    ensureQuestionStats(sess);
+    const stat = sess.questionStats?.[idx];
+    if (!stat || stat.enteredAt == null) return;
+    const now = Date.now();
+    const delta = Math.max(0, now - stat.enteredAt);
+    stat.timeMs = (Number.isFinite(stat.timeMs) ? stat.timeMs : 0) + delta;
+    stat.enteredAt = null;
+  }
+  function finalizeActiveQuestionTiming(sess) {
+    if (!sess || typeof sess.idx !== "number") return;
+    finalizeQuestionTiming(sess, sess.idx);
+  }
+  function navigateToQuestion(sess, nextIdx, render) {
+    if (!sess || typeof nextIdx !== "number") return;
+    const total = sess.exam?.questions?.length || 0;
+    if (!total) return;
+    const clamped = Math.min(Math.max(nextIdx, 0), Math.max(0, total - 1));
+    if (clamped === sess.idx) return;
+    if (sess.mode === "taking") {
+      finalizeActiveQuestionTiming(sess);
+    }
+    sess.idx = clamped;
+    if (sess.mode === "taking") {
+      beginQuestionTiming(sess, clamped);
+    }
+    render();
+  }
+  function recordAnswerChange(sess, idx, question, nextAnswer) {
+    if (!sess || sess.mode !== "taking") return;
+    ensureQuestionStats(sess);
+    const stat = sess.questionStats?.[idx];
+    if (!stat) return;
+    const prev = sess.answers?.[idx];
+    if (prev === nextAnswer) return;
+    const change = {
+      at: Date.now(),
+      from: prev ?? null,
+      to: nextAnswer ?? null
+    };
+    if (prev != null) change.fromCorrect = prev === question.answer;
+    if (nextAnswer != null) change.toCorrect = nextAnswer === question.answer;
+    if (!Array.isArray(stat.changes)) stat.changes = [];
+    stat.changes.push(change);
+  }
+  function snapshotQuestionStats(sess) {
+    ensureQuestionStats(sess);
+    return (sess.questionStats || []).map((stat) => ({
+      timeMs: Number.isFinite(stat?.timeMs) ? stat.timeMs : 0,
+      changes: Array.isArray(stat?.changes) ? stat.changes.map((change) => ({ ...change })) : []
+    }));
+  }
+  function summarizeAnswerChanges(questionStats, exam) {
+    let rightToWrong = 0;
+    let wrongToRight = 0;
+    let totalChanges = 0;
+    questionStats.forEach((stat, idx) => {
+      const question = exam?.questions?.[idx];
+      if (!question) return;
+      const changes = Array.isArray(stat?.changes) ? stat.changes : [];
+      totalChanges += changes.length;
+      changes.forEach((change) => {
+        if (change?.fromCorrect === true && change?.toCorrect === false) rightToWrong += 1;
+        if (change?.fromCorrect === false && change?.toCorrect === true) wrongToRight += 1;
+      });
+    });
+    return { rightToWrong, wrongToRight, totalChanges };
+  }
   function clone6(value) {
     return value ? JSON.parse(JSON.stringify(value)) : value;
   }
@@ -14210,6 +14287,7 @@ var Sevenn = (() => {
     return seconds * (exam.questions?.length || 0) * 1e3;
   }
   function stopTimer(sess) {
+    finalizeActiveQuestionTiming(sess);
     const handle = timerHandles.get(sess);
     if (handle) {
       clearInterval(handle);
@@ -14274,14 +14352,12 @@ var Sevenn = (() => {
       if (event.key === "ArrowRight") {
         if (sess.idx < sess.exam.questions.length - 1) {
           event.preventDefault();
-          sess.idx += 1;
-          render();
+          navigateToQuestion(sess, sess.idx + 1, render);
         }
       } else if (event.key === "ArrowLeft") {
         if (sess.idx > 0) {
           event.preventDefault();
-          sess.idx -= 1;
-          render();
+          navigateToQuestion(sess, sess.idx - 1, render);
         }
       }
     };
@@ -14455,7 +14531,8 @@ var Sevenn = (() => {
       checked: {},
       startedAt: Date.now(),
       elapsedMs: 0,
-      remainingMs: totalMs
+      remainingMs: totalMs,
+      questionStats: snapshot.questions.map(() => ({ timeMs: 0, changes: [], enteredAt: null }))
     };
   }
   function hydrateSavedSession(saved, fallbackExam) {
@@ -14474,7 +14551,15 @@ var Sevenn = (() => {
       checked: saved?.checked ? { ...saved.checked } : {},
       startedAt: Date.now(),
       elapsedMs: elapsed,
-      remainingMs: remaining
+      remainingMs: remaining,
+      questionStats: exam.questions.map((_, questionIdx) => {
+        const stat = saved?.questionStats?.[questionIdx] || {};
+        return {
+          timeMs: Number.isFinite(stat.timeMs) ? stat.timeMs : 0,
+          changes: Array.isArray(stat.changes) ? stat.changes.map((change) => ({ ...change })) : [],
+          enteredAt: null
+        };
+      })
     };
   }
   async function renderExams(root, render) {
@@ -14777,7 +14862,7 @@ var Sevenn = (() => {
     return `${result.correct}/${result.total} \u2022 ${pct}%`;
   }
   function formatDuration(ms) {
-    if (!ms) return "\u2014";
+    if (ms == null) return "\u2014";
     const totalSeconds = Math.max(0, Math.round(ms / 1e3));
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor(totalSeconds % 3600 / 60);
@@ -14839,17 +14924,21 @@ var Sevenn = (() => {
       btn.className = "palette-button";
       setToggleState(btn, sess.idx === idx);
       const answer = answers[idx];
-      const hasAnswer = question.options.some((opt) => opt.id === answer);
-      if (hasAnswer) {
-        btn.classList.add("answered");
-        if (sess.mode === "review") {
+      const answered = answer != null && question.options.some((opt) => opt.id === answer);
+      if (sess.mode === "review") {
+        if (answered) {
           btn.classList.add(answer === question.answer ? "correct" : "incorrect");
+        } else {
+          btn.classList.add("incorrect", "unanswered");
         }
+      } else if (answered) {
+        btn.classList.add("answered");
+      } else {
+        btn.classList.add("unanswered");
       }
       if (flaggedSet.has(idx)) btn.classList.add("flagged");
       btn.addEventListener("click", () => {
-        sess.idx = idx;
-        render();
+        navigateToQuestion(sess, idx, render);
       });
       grid.appendChild(btn);
     });
@@ -14900,6 +14989,10 @@ var Sevenn = (() => {
     }
     if (sess.idx < 0) sess.idx = 0;
     if (sess.idx >= questionCount) sess.idx = questionCount - 1;
+    ensureQuestionStats(sess);
+    if (sess.mode === "taking") {
+      beginQuestionTiming(sess, sess.idx);
+    }
     const container = document.createElement("div");
     container.className = "exam-runner";
     root.appendChild(container);
@@ -14985,6 +15078,7 @@ var Sevenn = (() => {
       if (sess.mode === "taking") {
         setToggleState(choice, isSelected, "selected");
         choice.addEventListener("click", () => {
+          recordAnswerChange(sess, sess.idx, question, opt.id);
           sess.answers[sess.idx] = opt.id;
           if (sess.exam.timerMode !== "timed" && sess.checked) {
             delete sess.checked[sess.idx];
@@ -15027,6 +15121,28 @@ var Sevenn = (() => {
       const correct = optionText(question, question.answer);
       answerSummary.innerHTML = `<div><strong>Your answer:</strong> ${your || "\u2014"}</div><div><strong>Correct answer:</strong> ${correct || "\u2014"}</div>`;
       main.appendChild(answerSummary);
+      if (sess.mode === "review") {
+        const stats = sess.result?.questionStats?.[sess.idx];
+        if (stats) {
+          const insights = document.createElement("div");
+          insights.className = "exam-review-insights";
+          const timeSpent = document.createElement("div");
+          timeSpent.innerHTML = `<strong>Time spent:</strong> ${formatDuration(stats.timeMs)}`;
+          insights.appendChild(timeSpent);
+          const changes = Array.isArray(stats.changes) ? stats.changes : [];
+          const changeCount = changes.length;
+          const rightToWrong = changes.filter((change) => change?.fromCorrect === true && change?.toCorrect === false).length;
+          const wrongToRight = changes.filter((change) => change?.fromCorrect === false && change?.toCorrect === true).length;
+          const changeInfo = document.createElement("div");
+          if (changeCount) {
+            changeInfo.innerHTML = `<strong>Answer changes:</strong> ${changeCount} (Right \u2192 Wrong: ${rightToWrong}, Wrong \u2192 Right: ${wrongToRight})`;
+          } else {
+            changeInfo.innerHTML = "<strong>Answer changes:</strong> None";
+          }
+          insights.appendChild(changeInfo);
+          main.appendChild(insights);
+        }
+      }
       if (question.explanation) {
         const explain = document.createElement("div");
         explain.className = "exam-explanation";
@@ -15049,8 +15165,7 @@ var Sevenn = (() => {
     prev.disabled = sess.idx === 0;
     prev.addEventListener("click", () => {
       if (sess.idx > 0) {
-        sess.idx -= 1;
-        render();
+        navigateToQuestion(sess, sess.idx - 1, render);
       }
     });
     nav.appendChild(prev);
@@ -15084,8 +15199,7 @@ var Sevenn = (() => {
       nextBtn.disabled = sess.idx >= questionCount - 1;
       nextBtn.addEventListener("click", () => {
         if (sess.idx < questionCount - 1) {
-          sess.idx += 1;
-          render();
+          navigateToQuestion(sess, sess.idx + 1, render);
         }
       });
       nav.appendChild(nextBtn);
@@ -15103,8 +15217,7 @@ var Sevenn = (() => {
       nextBtn.disabled = sess.idx >= questionCount - 1;
       nextBtn.addEventListener("click", () => {
         if (sess.idx < questionCount - 1) {
-          sess.idx += 1;
-          render();
+          navigateToQuestion(sess, sess.idx + 1, render);
         }
       });
       nav.appendChild(nextBtn);
@@ -15134,10 +15247,18 @@ var Sevenn = (() => {
     const attempts = document.createElement("div");
     attempts.innerHTML = `<strong>Attempts:</strong> ${sess.exam.results?.length || 0}`;
     info.appendChild(attempts);
-    if (sess.mode === "review" && sess.result.durationMs) {
-      const duration = document.createElement("div");
-      duration.innerHTML = `<strong>Duration:</strong> ${formatDuration(sess.result.durationMs)}`;
-      info.appendChild(duration);
+    if (sess.mode === "review") {
+      if (sess.result.durationMs) {
+        const duration = document.createElement("div");
+        duration.innerHTML = `<strong>Duration:</strong> ${formatDuration(sess.result.durationMs)}`;
+        info.appendChild(duration);
+      }
+      const summary = sess.result?.changeSummary;
+      if (summary) {
+        const changeMeta = document.createElement("div");
+        changeMeta.innerHTML = `<strong>Answer changes:</strong> ${summary.totalChanges || 0} (Right \u2192 Wrong: ${summary.rightToWrong || 0}, Wrong \u2192 Right: ${summary.wrongToRight || 0})`;
+        info.appendChild(changeMeta);
+      }
     } else if (sess.mode === "taking") {
       if (sess.exam.timerMode === "timed") {
         const remaining = typeof sess.remainingMs === "number" ? sess.remainingMs : totalExamTimeMs(sess.exam);
@@ -15160,6 +15281,7 @@ var Sevenn = (() => {
   }
   async function saveProgressAndExit(sess, render) {
     stopTimer(sess);
+    const questionStats = snapshotQuestionStats(sess);
     const payload = {
       examId: sess.exam.id,
       exam: clone6(sess.exam),
@@ -15169,7 +15291,8 @@ var Sevenn = (() => {
       checked: { ...sess.checked || {} },
       remainingMs: typeof sess.remainingMs === "number" ? Math.max(0, sess.remainingMs) : null,
       elapsedMs: sess.elapsedMs || 0,
-      mode: "taking"
+      mode: "taking",
+      questionStats
     };
     await saveExamSessionProgress(payload);
     lastExamStatusMessage = "Attempt saved. You can resume later.";
@@ -15180,9 +15303,10 @@ var Sevenn = (() => {
   async function finalizeExam(sess, render, options = {}) {
     const isAuto = Boolean(options.autoSubmit);
     stopTimer(sess);
-    const unanswered = sess.exam.questions.filter((_, idx) => sess.answers[idx] == null);
+    const unanswered = sess.exam.questions.map((_, idx) => sess.answers[idx] == null ? idx + 1 : null).filter(Number.isFinite);
     if (!isAuto && unanswered.length) {
-      const confirm2 = await confirmModal(`You have ${unanswered.length} unanswered question${unanswered.length === 1 ? "" : "s"}. Submit anyway?`);
+      const list = unanswered.join(", ");
+      const confirm2 = await confirmModal(`You have ${unanswered.length} unanswered question${unanswered.length === 1 ? "" : "s"} (Question${unanswered.length === 1 ? "" : "s"}: ${list}). Submit anyway?`);
       if (!confirm2) return;
     }
     const answers = {};
@@ -15197,6 +15321,8 @@ var Sevenn = (() => {
       }
     });
     const flagged = Object.entries(sess.flagged || {}).filter(([_, val]) => Boolean(val)).map(([idx]) => Number(idx));
+    const questionStats = snapshotQuestionStats(sess);
+    const changeSummary = summarizeAnswerChanges(questionStats, sess.exam);
     const result = {
       id: uid(),
       when: Date.now(),
@@ -15205,7 +15331,9 @@ var Sevenn = (() => {
       answers,
       flagged,
       durationMs: sess.elapsedMs || 0,
-      answered: answeredCount
+      answered: answeredCount,
+      questionStats,
+      changeSummary
     };
     const updatedExam = clone6(sess.exam);
     updatedExam.results = [...updatedExam.results || [], result];
@@ -15277,6 +15405,19 @@ var Sevenn = (() => {
     overlay.className = "modal";
     const form = document.createElement("form");
     form.className = "card modal-form exam-editor";
+    let dirty = false;
+    const markDirty = () => {
+      dirty = true;
+    };
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "modal-close";
+    closeBtn.setAttribute("aria-label", "Close exam editor");
+    closeBtn.innerHTML = "&times;";
+    form.appendChild(closeBtn);
+    const removeOverlay = () => {
+      if (overlay.parentNode) document.body.removeChild(overlay);
+    };
     const { exam } = ensureExamShape(existing || {
       id: uid(),
       examTitle: "New Exam",
@@ -15298,6 +15439,7 @@ var Sevenn = (() => {
     titleInput.value = exam.examTitle;
     titleInput.addEventListener("input", () => {
       exam.examTitle = titleInput.value;
+      markDirty();
     });
     titleLabel.appendChild(titleInput);
     form.appendChild(titleLabel);
@@ -15317,6 +15459,7 @@ var Sevenn = (() => {
     modeSelect.addEventListener("change", () => {
       exam.timerMode = modeSelect.value;
       secondsLabel.style.display = exam.timerMode === "timed" ? "flex" : "none";
+      markDirty();
     });
     modeLabel.appendChild(modeSelect);
     timerRow.appendChild(modeLabel);
@@ -15329,7 +15472,10 @@ var Sevenn = (() => {
     secondsInput.value = String(exam.secondsPerQuestion);
     secondsInput.addEventListener("input", () => {
       const val = Number(secondsInput.value);
-      if (!Number.isNaN(val) && val > 0) exam.secondsPerQuestion = val;
+      if (!Number.isNaN(val) && val > 0) {
+        exam.secondsPerQuestion = val;
+        markDirty();
+      }
     });
     secondsLabel.appendChild(secondsInput);
     secondsLabel.style.display = exam.timerMode === "timed" ? "flex" : "none";
@@ -15348,6 +15494,7 @@ var Sevenn = (() => {
     addQuestion.textContent = "Add Question";
     addQuestion.addEventListener("click", () => {
       exam.questions.push(createBlankQuestion());
+      markDirty();
       renderQuestions();
     });
     questionsHeader.appendChild(qTitle);
@@ -15365,6 +15512,8 @@ var Sevenn = (() => {
       exam.questions.forEach((question, idx) => {
         const card = document.createElement("div");
         card.className = "exam-question-editor";
+        question.tags = Array.isArray(question.tags) ? question.tags : [];
+        if (!Array.isArray(question.options)) question.options = [];
         const header = document.createElement("div");
         header.className = "exam-question-editor-header";
         const title = document.createElement("h4");
@@ -15375,6 +15524,7 @@ var Sevenn = (() => {
         remove.textContent = "Remove";
         remove.addEventListener("click", () => {
           exam.questions.splice(idx, 1);
+          markDirty();
           renderQuestions();
         });
         header.appendChild(title);
@@ -15387,6 +15537,7 @@ var Sevenn = (() => {
         stemInput.value = question.stem;
         stemInput.addEventListener("input", () => {
           question.stem = stemInput.value;
+          markDirty();
         });
         stemLabel.appendChild(stemInput);
         card.appendChild(stemLabel);
@@ -15399,6 +15550,7 @@ var Sevenn = (() => {
         mediaInput.addEventListener("input", () => {
           question.media = mediaInput.value.trim();
           updatePreview();
+          markDirty();
         });
         mediaLabel.appendChild(mediaInput);
         const mediaUpload = document.createElement("input");
@@ -15407,11 +15559,13 @@ var Sevenn = (() => {
         mediaUpload.addEventListener("change", () => {
           const file = mediaUpload.files?.[0];
           if (!file) return;
+          markDirty();
           const reader = new FileReader();
           reader.onload = () => {
             question.media = typeof reader.result === "string" ? reader.result : "";
             mediaInput.value = question.media;
             updatePreview();
+            markDirty();
           };
           reader.readAsDataURL(file);
         });
@@ -15425,6 +15579,7 @@ var Sevenn = (() => {
           mediaInput.value = "";
           mediaUpload.value = "";
           updatePreview();
+          markDirty();
         });
         mediaLabel.appendChild(clearMedia);
         card.appendChild(mediaLabel);
@@ -15444,6 +15599,7 @@ var Sevenn = (() => {
         tagsInput.value = question.tags.join(", ");
         tagsInput.addEventListener("input", () => {
           question.tags = tagsInput.value.split(",").map((t) => t.trim()).filter(Boolean);
+          markDirty();
         });
         tagsLabel.appendChild(tagsInput);
         card.appendChild(tagsLabel);
@@ -15454,6 +15610,7 @@ var Sevenn = (() => {
         explanationInput.value = question.explanation || "";
         explanationInput.addEventListener("input", () => {
           question.explanation = explanationInput.value;
+          markDirty();
         });
         explanationLabel.appendChild(explanationInput);
         card.appendChild(explanationLabel);
@@ -15470,6 +15627,7 @@ var Sevenn = (() => {
             radio.checked = question.answer === opt.id;
             radio.addEventListener("change", () => {
               question.answer = opt.id;
+              markDirty();
             });
             const text = document.createElement("input");
             text.className = "input";
@@ -15478,6 +15636,7 @@ var Sevenn = (() => {
             text.value = opt.text;
             text.addEventListener("input", () => {
               opt.text = text.value;
+              markDirty();
             });
             const removeBtn = document.createElement("button");
             removeBtn.type = "button";
@@ -15489,6 +15648,7 @@ var Sevenn = (() => {
               if (question.answer === opt.id) {
                 question.answer = question.options[0]?.id || "";
               }
+              markDirty();
               renderOptions();
             });
             row.appendChild(radio);
@@ -15505,6 +15665,7 @@ var Sevenn = (() => {
         addOption.addEventListener("click", () => {
           const opt = { id: uid(), text: "" };
           question.options.push(opt);
+          markDirty();
           renderOptions();
         });
         card.appendChild(optionsWrap);
@@ -15515,29 +15676,22 @@ var Sevenn = (() => {
     renderQuestions();
     const actions = document.createElement("div");
     actions.className = "modal-actions";
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.className = "btn secondary";
-    cancel.textContent = "Cancel";
-    cancel.addEventListener("click", () => document.body.removeChild(overlay));
-    actions.appendChild(cancel);
     const save = document.createElement("button");
     save.type = "submit";
     save.className = "btn";
     save.textContent = "Save Exam";
     actions.appendChild(save);
     form.appendChild(actions);
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
+    async function persistExam() {
       error.textContent = "";
       const title = titleInput.value.trim();
       if (!title) {
         error.textContent = "Exam title is required.";
-        return;
+        return false;
       }
       if (!exam.questions.length) {
         error.textContent = "Add at least one question.";
-        return;
+        return false;
       }
       for (let i = 0; i < exam.questions.length; i++) {
         const question = exam.questions[i];
@@ -15547,11 +15701,11 @@ var Sevenn = (() => {
         question.options = question.options.map((opt) => ({ id: opt.id, text: opt.text.trim() })).filter((opt) => opt.text);
         if (question.options.length < 2) {
           error.textContent = `Question ${i + 1} needs at least two answer options.`;
-          return;
+          return false;
         }
         if (!question.answer || !question.options.some((opt) => opt.id === question.answer)) {
           error.textContent = `Select a correct answer for question ${i + 1}.`;
-          return;
+          return false;
         }
         question.tags = question.tags.map((t) => t.trim()).filter(Boolean);
       }
@@ -15561,13 +15715,91 @@ var Sevenn = (() => {
         updatedAt: Date.now()
       };
       await upsertExam(payload);
-      document.body.removeChild(overlay);
+      return true;
+    }
+    async function saveAndClose() {
+      const ok = await persistExam();
+      if (!ok) return false;
+      dirty = false;
+      removeOverlay();
       render();
+      return true;
+    }
+    function promptSaveChoice() {
+      return new Promise((resolve) => {
+        const modal = document.createElement("div");
+        modal.className = "modal";
+        const card = document.createElement("div");
+        card.className = "card";
+        const message = document.createElement("p");
+        message.textContent = "Save changes before closing?";
+        card.appendChild(message);
+        const actionsRow = document.createElement("div");
+        actionsRow.className = "modal-actions";
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.className = "btn";
+        saveBtn.textContent = "Save";
+        saveBtn.addEventListener("click", () => {
+          cleanup();
+          resolve("save");
+        });
+        const discardBtn = document.createElement("button");
+        discardBtn.type = "button";
+        discardBtn.className = "btn secondary";
+        discardBtn.textContent = "Discard";
+        discardBtn.addEventListener("click", () => {
+          cleanup();
+          resolve("discard");
+        });
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "ghost-btn";
+        cancelBtn.textContent = "Keep Editing";
+        cancelBtn.addEventListener("click", () => {
+          cleanup();
+          resolve("cancel");
+        });
+        actionsRow.appendChild(saveBtn);
+        actionsRow.appendChild(discardBtn);
+        actionsRow.appendChild(cancelBtn);
+        card.appendChild(actionsRow);
+        modal.appendChild(card);
+        modal.addEventListener("click", (e) => {
+          if (e.target === modal) {
+            cleanup();
+            resolve("cancel");
+          }
+        });
+        document.body.appendChild(modal);
+        saveBtn.focus();
+        function cleanup() {
+          if (modal.parentNode) document.body.removeChild(modal);
+        }
+      });
+    }
+    async function attemptClose() {
+      if (!dirty) {
+        removeOverlay();
+        return;
+      }
+      const choice = await promptSaveChoice();
+      if (choice === "cancel") return;
+      if (choice === "discard") {
+        dirty = false;
+        removeOverlay();
+        return;
+      }
+      if (choice === "save") {
+        await saveAndClose();
+      }
+    }
+    closeBtn.addEventListener("click", attemptClose);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      await saveAndClose();
     });
     overlay.appendChild(form);
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) document.body.removeChild(overlay);
-    });
     document.body.appendChild(overlay);
     titleInput.focus();
   }
@@ -18437,5 +18669,4 @@ var Sevenn = (() => {
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
-  return __toCommonJS(main_exports);
 })();

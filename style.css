@@ -2236,6 +2236,7 @@ input[type="checkbox"]:checked::after {
   max-width: 600px;
   max-height: 80vh;
   overflow-y: auto;
+  position: relative;
 }
 
 .import-conflict-modal .card {
@@ -2282,6 +2283,26 @@ input[type="checkbox"]:checked::after {
 
 .modal-form .input {
   width: 100%;
+}
+
+.modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: none;
+  border: none;
+  color: rgba(148, 163, 184, 0.85);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius);
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.modal-close:hover {
+  color: #fff;
+  background: rgba(148, 163, 184, 0.15);
 }
 
 .modal-form textarea.input {
@@ -5858,12 +5879,13 @@ body.map-toolbox-dragging {
 }
 
 .palette-button {
-  background: var(--muted);
-  border: 2px solid var(--border);
+  position: relative;
+  background: linear-gradient(135deg, rgba(148, 163, 184, 0.35), rgba(148, 163, 184, 0.45));
+  border: 2px solid rgba(148, 163, 184, 0.45);
   border-radius: var(--radius);
   padding: 10px 0;
   cursor: pointer;
-  color: var(--text);
+  color: rgba(15, 23, 42, 0.75);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5883,6 +5905,12 @@ body.map-toolbox-dragging {
 .palette-button.active {
   border-color: #ffffff;
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8);
+}
+
+.palette-button.unanswered {
+  background: linear-gradient(135deg, rgba(100, 116, 139, 0.25), rgba(148, 163, 184, 0.3));
+  border-color: rgba(100, 116, 139, 0.35);
+  color: rgba(15, 23, 42, 0.55);
 }
 
 .palette-button.answered {
@@ -5909,6 +5937,17 @@ body.map-toolbox-dragging {
   color: #854d0e;
 }
 
+.palette-button.flagged::after {
+  content: '🚩';
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  font-size: 0.8rem;
+  line-height: 1;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 0 rgba(15, 23, 42, 0.2));
+}
+
 .palette-button.flagged.answered {
   background: linear-gradient(135deg, #fef3c7 0%, #fde68a 45%, #bae6fd 100%);
   border-color: rgba(251, 191, 36, 0.65);
@@ -5926,6 +5965,23 @@ body.map-toolbox-dragging {
   background: linear-gradient(135deg, #fef3c7 0%, #fde68a 35%, rgba(252, 165, 165, 0.82) 100%);
   border-color: rgba(251, 191, 36, 0.65);
   color: #78350f;
+}
+
+.exam-review-insights {
+  margin-top: 12px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.95rem;
+  color: var(--gray);
+}
+
+.exam-review-insights strong {
+  color: var(--text);
 }
 
 
