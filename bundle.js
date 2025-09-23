@@ -9802,15 +9802,18 @@ var Sevenn = (() => {
     const badge = document.createElement("span");
     badge.className = "lecture-pass-chip-order";
     badge.textContent = `P${info?.order ?? ""}`;
-    const labelEl = document.createElement("span");
-    labelEl.className = "lecture-pass-chip-label";
-    labelEl.textContent = passTitle;
-    header.append(badge, labelEl);
+    header.appendChild(badge);
+    const defaultLabel = `Pass ${info?.order ?? ""}`.trim();
+    const primaryText = (info?.action || "").trim();
+    const fallbackText = (info?.label || "").trim();
+    const functionText = primaryText || (fallbackText && fallbackText !== defaultLabel ? fallbackText : "");
+    if (functionText) {
+      const functionEl = document.createElement("span");
+      functionEl.className = "lecture-pass-chip-function";
+      functionEl.textContent = functionText;
+      header.appendChild(functionEl);
+    }
     body.appendChild(header);
-    const functionLine = document.createElement("div");
-    functionLine.className = "lecture-pass-chip-function";
-    functionLine.textContent = info?.action || info?.label || "";
-    body.appendChild(functionLine);
     const timing = document.createElement("div");
     timing.className = "lecture-pass-chip-due";
     timing.textContent = Number.isFinite(info?.due) ? formatPassDueTimestamp(info.due) : "No scheduled date";
