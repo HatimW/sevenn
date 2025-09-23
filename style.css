@@ -613,13 +613,14 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(
   color: #020a16;
 }
 
+
 .search-field {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 220px;
-  flex: 1 1 280px;
-  padding: 0 16px;
+  gap: 8px;
+  min-width: 200px;
+  flex: 1 1 260px;
+  padding: 2px 12px;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.28);
   background: linear-gradient(135deg, rgba(15, 23, 42, 0.7), rgba(8, 13, 23, 0.82));
@@ -652,7 +653,7 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(
 .search-input {
   flex: 1;
   min-width: 0;
-  padding: 10px 0;
+  padding: 6px 0;
   border: none;
   background: transparent;
   color: var(--text);
