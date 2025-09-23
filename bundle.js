@@ -14360,6 +14360,26 @@ var Sevenn = (() => {
       initialAnswerAt: stat?.initialAnswerAt ?? null
     }));
   }
+  function extractAnswerSequence(stat, finalAnswer) {
+    const sequence = [];
+    const push = (value) => {
+      if (value == null) return;
+      if (sequence[sequence.length - 1] === value) return;
+      sequence.push(value);
+    };
+    if (stat && stat.initialAnswer != null) {
+      push(stat.initialAnswer);
+    }
+    const changes = Array.isArray(stat?.changes) ? stat.changes : [];
+    changes.forEach((change) => {
+      if (!change) return;
+      if (change.to != null) push(change.to);
+    });
+    if (finalAnswer != null) {
+      push(finalAnswer);
+    }
+    return sequence;
+  }
   function analyzeAnswerChange(stat, question, finalAnswer) {
     if (!question) {
       return {
@@ -14368,26 +14388,19 @@ var Sevenn = (() => {
         initialCorrect: null,
         finalCorrect: null,
         changed: false,
-        direction: null
+        direction: null,
+        switched: false,
+        sequence: []
       };
     }
     const answerId = question.answer;
-    const changes = Array.isArray(stat?.changes) ? stat.changes : [];
-    const firstRecorded = changes.find((change) => change && change.to != null) || null;
-    let lastRecorded = null;
-    for (let i = changes.length - 1; i >= 0; i -= 1) {
-      const change = changes[i];
-      if (change && change.to != null) {
-        lastRecorded = change;
-        break;
-      }
-    }
-    const storedInitialAnswer = stat?.initialAnswer ?? null;
-    const initialAnswer = storedInitialAnswer != null ? storedInitialAnswer : firstRecorded?.to ?? null;
-    const resolvedFinalAnswer = finalAnswer != null ? finalAnswer : lastRecorded?.to ?? initialAnswer;
+    const sequence = extractAnswerSequence(stat, finalAnswer);
+    const initialAnswer = sequence.length ? sequence[0] : stat?.initialAnswer ?? null;
+    const resolvedFinalAnswer = sequence.length ? sequence[sequence.length - 1] : finalAnswer ?? null;
     const initialCorrect = initialAnswer != null ? initialAnswer === answerId : null;
     const finalCorrect = resolvedFinalAnswer != null ? resolvedFinalAnswer === answerId : null;
-    const changed = initialAnswer != null && resolvedFinalAnswer != null && initialAnswer !== resolvedFinalAnswer;
+    const switched = sequence.length > 1;
+    const changed = switched && initialAnswer != null && resolvedFinalAnswer != null && initialAnswer !== resolvedFinalAnswer;
     let direction = null;
     if (changed) {
       if (initialCorrect === true && finalCorrect === false) {
@@ -14404,21 +14417,10 @@ var Sevenn = (() => {
       initialCorrect,
       finalCorrect,
       changed,
-      direction
+      direction,
+      switched,
+      sequence
     };
-  }
-  function countMeaningfulAnswerChanges(stat) {
-    if (!stat || !Array.isArray(stat.changes)) return 0;
-    let count = 0;
-    stat.changes.forEach((change) => {
-      if (!change) return;
-      const from = change.from ?? null;
-      const to = change.to ?? null;
-      if (from == null) return;
-      if (from === to) return;
-      count += 1;
-    });
-    return count;
   }
   function summarizeAnswerChanges(questionStats, exam, answers = {}) {
     let rightToWrong = 0;
@@ -14430,8 +14432,7 @@ var Sevenn = (() => {
       if (!question) return;
       const finalAnswer = answers[idx];
       const details = analyzeAnswerChange(stat, question, finalAnswer);
-      const meaningfulChanges = countMeaningfulAnswerChanges(stat);
-      if (meaningfulChanges > 0) {
+      if (details.switched) {
         switched += 1;
       }
       if (details.changed) {
@@ -14702,7 +14703,13 @@ var Sevenn = (() => {
       startedAt: Date.now(),
       elapsedMs: 0,
       remainingMs: totalMs,
-      questionStats: snapshot.questions.map(() => ({ timeMs: 0, changes: [], enteredAt: null }))
+      questionStats: snapshot.questions.map(() => ({
+        timeMs: 0,
+        changes: [],
+        enteredAt: null,
+        initialAnswer: null,
+        initialAnswerAt: null
+      }))
     };
   }
   function hydrateSavedSession(saved, fallbackExam) {
@@ -14727,7 +14734,9 @@ var Sevenn = (() => {
         return {
           timeMs: Number.isFinite(stat.timeMs) ? stat.timeMs : 0,
           changes: Array.isArray(stat.changes) ? stat.changes.map((change) => ({ ...change })) : [],
-          enteredAt: null
+          enteredAt: null,
+          initialAnswer: stat.initialAnswer ?? null,
+          initialAnswerAt: Number.isFinite(stat.initialAnswerAt) ? stat.initialAnswerAt : null
         };
       })
     };
@@ -15114,7 +15123,7 @@ var Sevenn = (() => {
         }
         const stat = statsList[idx];
         const changeDetails = analyzeAnswerChange(stat, question, answer);
-        const meaningfulChanges = countMeaningfulAnswerChanges(stat);
+        delete btn.dataset.changeDirection;
         if (changeDetails.changed) {
           let changeTitle = "Changed answer";
           if (changeDetails.direction === "right-to-wrong") {
@@ -15127,7 +15136,8 @@ var Sevenn = (() => {
             btn.dataset.changeDirection = "changed";
           }
           tooltipParts.push(changeTitle);
-        } else if (meaningfulChanges > 0) {
+        } else if (changeDetails.switched) {
+          btn.dataset.changeDirection = "returned";
           tooltipParts.push("Changed answers but returned to start");
         }
       } else {
@@ -15192,7 +15202,6 @@ var Sevenn = (() => {
     const hasWindow = typeof window !== "undefined";
     const prevIdx = sess.__lastRenderedIdx;
     const prevMode = sess.__lastRenderedMode;
-    const prevScrollX = hasWindow ? window.scrollX : 0;
     const prevScrollY = hasWindow ? window.scrollY : 0;
     if (hasWindow) {
       if (typeof prevIdx === "number") {
@@ -15380,24 +15389,54 @@ var Sevenn = (() => {
           const timeSpent = document.createElement("div");
           timeSpent.innerHTML = `<strong>Time spent:</strong> ${formatDuration(stats.timeMs)}`;
           insights.appendChild(timeSpent);
-          const meaningfulChanges = countMeaningfulAnswerChanges(stats);
           const finalAnswer = sess.result?.answers?.[sess.idx];
           const changeDetails = analyzeAnswerChange(stats, question, finalAnswer);
-          if (meaningfulChanges > 0) {
+          if (changeDetails.switched) {
             const changeInfo = document.createElement("div");
+            const label = document.createElement("strong");
+            label.textContent = "Answer change:";
+            changeInfo.appendChild(label);
+            changeInfo.append(" ");
+            const joinChoices = (list) => {
+              if (!list.length) return "";
+              if (list.length === 1) return list[0];
+              return `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+            };
+            const formatChoice = (answerId, fallback) => {
+              if (answerId == null) return fallback;
+              const label2 = optionText(question, answerId);
+              if (label2) return `"${label2}"`;
+              return fallback;
+            };
+            const initialDisplay = formatChoice(changeDetails.initialAnswer, "your original choice");
+            const finalDisplay = formatChoice(changeDetails.finalAnswer, "no answer");
+            let message = "";
             if (changeDetails.changed) {
-              let message = "You changed your answer.";
               if (changeDetails.direction === "right-to-wrong") {
-                message = "You changed your answer from correct to incorrect.";
+                message = `You changed from ${initialDisplay} (correct) to ${finalDisplay} (incorrect).`;
               } else if (changeDetails.direction === "wrong-to-right") {
-                message = "You changed your answer from incorrect to correct.";
+                message = `You changed from ${initialDisplay} (incorrect) to ${finalDisplay} (correct).`;
               } else if (changeDetails.initialCorrect === false && changeDetails.finalCorrect === false) {
-                message = "You changed your answer but it remained incorrect.";
+                message = `You changed from ${initialDisplay} to ${finalDisplay}, but both choices were incorrect.`;
+              } else {
+                message = `You changed from ${initialDisplay} to ${finalDisplay}.`;
               }
-              changeInfo.innerHTML = `<strong>Answer change:</strong> ${message}`;
             } else {
-              changeInfo.innerHTML = "<strong>Answer change:</strong> You changed answers but ended on your original choice.";
+              const intermediateIds = [];
+              changeDetails.sequence.slice(1, -1).forEach((id) => {
+                if (id == null) return;
+                if (id === changeDetails.initialAnswer) return;
+                if (!intermediateIds.includes(id)) intermediateIds.push(id);
+              });
+              const intermediateLabels = intermediateIds.map((id) => optionText(question, id)).filter((label2) => label2 && label2.trim().length).map((label2) => `"${label2}"`);
+              if (intermediateLabels.length) {
+                const joined = joinChoices(intermediateLabels);
+                message = `You tried ${joined} but returned to ${initialDisplay}.`;
+              } else {
+                message = `You briefly changed your answer but returned to ${initialDisplay}.`;
+              }
             }
+            changeInfo.append(message);
             insights.appendChild(changeInfo);
           }
           main.appendChild(insights);
@@ -15504,19 +15543,24 @@ var Sevenn = (() => {
     sess.__lastRenderedIdx = sess.idx;
     sess.__lastRenderedMode = sess.mode;
     if (hasWindow && typeof window.scrollTo === "function") {
-      const storedScroll = getStoredScroll(sess, sess.idx);
-      const targetY = sameQuestion ? prevScrollY : storedScroll ?? 0;
-      const targetX = sameQuestion ? prevScrollX : 0;
-      if (typeof sess.idx === "number") {
-        storeScrollPosition(sess, sess.idx, targetY);
-      }
-      const restore = () => {
-        window.scrollTo({ left: targetX, top: targetY, behavior: "auto" });
-      };
-      if (typeof window.requestAnimationFrame === "function") {
-        window.requestAnimationFrame(restore);
+      if (sameQuestion) {
+        if (typeof sess.idx === "number") {
+          storeScrollPosition(sess, sess.idx, prevScrollY);
+        }
       } else {
-        setTimeout(restore, 0);
+        const storedScroll = getStoredScroll(sess, sess.idx);
+        const targetY = storedScroll ?? 0;
+        if (typeof sess.idx === "number" && storedScroll == null) {
+          storeScrollPosition(sess, sess.idx, targetY);
+        }
+        const restore = () => {
+          window.scrollTo({ left: 0, top: targetY, behavior: "auto" });
+        };
+        if (typeof window.requestAnimationFrame === "function") {
+          window.requestAnimationFrame(restore);
+        } else {
+          setTimeout(restore, 0);
+        }
       }
     }
   }
@@ -15535,10 +15579,7 @@ var Sevenn = (() => {
       const summary = changeSummary || (sess.result ? summarizeAnswerChanges(sess.result.questionStats || [], sess.exam, sess.result.answers || {}) : null);
       if (summary) {
         const changeMeta = document.createElement("div");
-        changeMeta.innerHTML = `
-        <strong>Answer switches:</strong> ${summary.switched || 0}
-        (Returned: ${summary.returnedToOriginal || 0}, Right \u2192 Wrong: ${summary.rightToWrong || 0}, Wrong \u2192 Right: ${summary.wrongToRight || 0})
-      `;
+        changeMeta.innerHTML = `<strong>Answer switches:</strong> ${summary.switched || 0} (Returned: ${summary.returnedToOriginal || 0}, Right \u2192 Wrong: ${summary.rightToWrong || 0}, Wrong \u2192 Right: ${summary.wrongToRight || 0})`;
         info.appendChild(changeMeta);
       }
     } else if (sess.mode === "taking") {
