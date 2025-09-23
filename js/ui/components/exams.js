@@ -870,14 +870,15 @@ function renderPalette(sidebar, sess, render) {
     const answered = answer != null && question.options.some(opt => opt.id === answer);
 
     const tooltipParts = [];
+    let status = 'unanswered';
 
     if (isReview) {
       if (answered) {
         const isCorrect = answer === question.answer;
-        btn.classList.add(isCorrect ? 'correct' : 'incorrect');
+        status = isCorrect ? 'correct' : 'incorrect';
         tooltipParts.push(isCorrect ? 'Answered correctly' : 'Answered incorrectly');
       } else {
-        btn.classList.add('unanswered', 'review-unanswered');
+        status = 'review-unanswered';
         tooltipParts.push('Not answered');
       }
 
@@ -896,14 +897,31 @@ function renderPalette(sidebar, sess, render) {
         }
         tooltipParts.push(changeTitle);
       }
-    } else if (answered) {
+    } else {
+      status = answered ? 'answered' : 'unanswered';
+      tooltipParts.push(answered ? 'Answered' : 'Not answered');
+    }
+
+    if (status === 'correct') {
+      btn.classList.add('correct');
+    } else if (status === 'incorrect') {
+      btn.classList.add('incorrect');
+    } else if (status === 'answered') {
       btn.classList.add('answered');
-      tooltipParts.push('Answered');
+    } else if (status === 'review-unanswered') {
+      btn.classList.add('unanswered', 'review-unanswered');
     } else {
       btn.classList.add('unanswered');
-      tooltipParts.push('Not answered');
     }
-    if (flaggedSet.has(idx)) btn.classList.add('flagged');
+
+    btn.dataset.status = status;
+
+    if (flaggedSet.has(idx)) {
+      btn.classList.add('flagged');
+      btn.dataset.flagged = 'true';
+    } else {
+      btn.dataset.flagged = 'false';
+    }
     if (tooltipParts.length) {
       btn.title = tooltipParts.join(' · ');
     }
@@ -944,6 +962,11 @@ export function renderExamRunner(root, render) {
     teardownKeyboardNavigation();
     return;
   }
+  const hasWindow = typeof window !== 'undefined';
+  const prevIdx = sess.__lastRenderedIdx;
+  const prevMode = sess.__lastRenderedMode;
+  const prevScrollX = hasWindow ? window.scrollX : 0;
+  const prevScrollY = hasWindow ? window.scrollY : 0;
   root.innerHTML = '';
   root.className = 'exam-session';
 
@@ -1273,6 +1296,24 @@ export function renderExamRunner(root, render) {
   }
 
   root.appendChild(nav);
+
+  const sameQuestion = prevIdx === sess.idx && prevMode === sess.mode;
+  sess.__lastRenderedIdx = sess.idx;
+  sess.__lastRenderedMode = sess.mode;
+  if (hasWindow && typeof window.scrollTo === 'function') {
+    const restore = () => {
+      if (sameQuestion) {
+        window.scrollTo(prevScrollX, prevScrollY);
+      } else {
+        window.scrollTo({ left: 0, top: 0, behavior: 'auto' });
+      }
+    };
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(restore);
+    } else {
+      setTimeout(restore, 0);
+    }
+  }
 }
 function renderSidebarMeta(sidebar, sess, changeSummary) {
   const info = document.createElement('div');
