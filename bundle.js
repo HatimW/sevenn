@@ -9757,6 +9757,8 @@
       chip.classList.add("is-overdue");
     }
     const passTitle = info?.action || info?.label || `Pass ${info?.order ?? ""}`;
+    const statusWrap = document.createElement("div");
+    statusWrap.className = "lecture-pass-chip-status";
     const check = document.createElement("label");
     check.className = "lecture-pass-chip-check";
     const checkbox = document.createElement("input");
@@ -9768,7 +9770,8 @@
     faux.className = "lecture-pass-chip-checkmark";
     faux.setAttribute("aria-hidden", "true");
     check.append(checkbox, faux);
-    chip.appendChild(check);
+    statusWrap.appendChild(check);
+    chip.appendChild(statusWrap);
     const body = document.createElement("div");
     body.className = "lecture-pass-chip-body";
     chip.appendChild(body);
