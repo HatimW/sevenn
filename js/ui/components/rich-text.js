@@ -46,6 +46,17 @@ function escapeHtml(str = ''){
     .replace(/'/g, '&#39;');
 }
 
+const htmlEntityDecoder = typeof document !== 'undefined'
+  ? document.createElement('textarea')
+  : null;
+
+function decodeHtmlEntities(str = ''){
+  if (!str) return '';
+  if (!htmlEntityDecoder) return String(str);
+  htmlEntityDecoder.innerHTML = str;
+  return htmlEntityDecoder.value;
+}
+
 function isSafeUrl(value = '', { allowData = false, requireHttps = false } = {}){
   const trimmed = value.trim();
   if (!trimmed) return false;
@@ -139,10 +150,13 @@ export function sanitizeHtml(html = ''){
 }
 
 function normalizeInput(value = ''){
-  if (!value) return '';
-  const looksHtml = /<([a-z][^>]*>)/i.test(value);
-  if (looksHtml) return sanitizeHtml(value);
-  return sanitizeHtml(escapeHtml(value).replace(/\n/g, '<br>'));
+  if (value == null) return '';
+  const str = String(value);
+  if (!str) return '';
+  const looksHtml = /<([a-z][^>]*>)/i.test(str);
+  if (looksHtml) return sanitizeHtml(str);
+  const decoded = decodeHtmlEntities(str);
+  return sanitizeHtml(escapeHtml(decoded).replace(/\r?\n/g, '<br>'));
 }
 
 function isEmptyHtml(html = ''){

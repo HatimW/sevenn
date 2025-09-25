@@ -2932,10 +2932,14 @@ button.builder-pill.builder-pill-outline {
 /* Flashcards */
 .flashcard {
   --flash-accent: var(--accent);
-  --flash-accent-soft: color-mix(in srgb, var(--flash-accent) 18%, rgba(15, 23, 42, 0.06));
-  --flash-accent-strong: color-mix(in srgb, var(--flash-accent) 32%, rgba(15, 23, 42, 0.12));
-  --flash-accent-border: color-mix(in srgb, var(--flash-accent) 42%, rgba(15, 23, 42, 0.2));
-  --flash-accent-subtle: color-mix(in srgb, var(--flash-accent) 10%, rgba(148, 163, 184, 0.16));
+  --flash-neutral-inactive: color-mix(in srgb, var(--surface-2) 92%, rgba(148, 163, 184, 0.16));
+  --flash-neutral-start: color-mix(in srgb, var(--surface-2) 84%, rgba(148, 163, 184, 0.26));
+  --flash-neutral-end: color-mix(in srgb, var(--surface-3) 70%, rgba(148, 163, 184, 0.3));
+  --flash-neutral-border: color-mix(in srgb, var(--surface-3) 92%, transparent);
+  --flash-accent-soft: var(--flash-neutral-start);
+  --flash-accent-strong: var(--flash-neutral-end);
+  --flash-accent-border: var(--flash-neutral-border);
+  --flash-accent-subtle: color-mix(in srgb, var(--flash-neutral-border) 60%, transparent);
   display: flex;
   flex-direction: column;
   gap: var(--pad);
@@ -2947,7 +2951,7 @@ button.builder-pill.builder-pill-outline {
   border-radius: var(--radius);
   padding: var(--pad-sm);
   border: 1px solid var(--flash-accent-subtle);
-  background: color-mix(in srgb, var(--flash-accent) 8%, rgba(15, 23, 42, 0.04));
+  background: var(--flash-neutral-inactive);
   transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
 }
 
@@ -2964,7 +2968,7 @@ button.builder-pill.builder-pill-outline {
 }
 
 .flash-section[data-active="true"] .flash-heading {
-  color: color-mix(in srgb, var(--flash-accent) 82%, #041021);
+  color: color-mix(in srgb, var(--text) 92%, rgba(148, 163, 184, 0.08));
 }
 
 .flash-heading {
