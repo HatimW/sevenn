@@ -4622,8 +4622,12 @@ button.builder-pill.builder-pill-outline {
 
 .map-edge-decoration {
   pointer-events: none;
-  stroke: var(--panel);
   vector-effect: non-scaling-stroke;
+  stroke: currentColor;
+}
+
+.map-edge-decoration[data-decoration='blocked'] {
+  stroke: #f43f5e !important;
 }
 
 .map-label {

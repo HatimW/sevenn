@@ -1,31 +1,4 @@
-var Sevenn = (() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-    }
-    return to;
-  };
-  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
-  // js/main.js
-  var main_exports = {};
-  __export(main_exports, {
-    render: () => renderApp,
-    renderApp: () => renderApp,
-    resolveListKind: () => resolveListKind,
-    tabs: () => tabs
-  });
-
+(() => {
   // js/state.js
   var state = {
     tab: "Block Board",
@@ -16905,6 +16878,7 @@ var Sevenn = (() => {
     nodeDrag: null,
     areaDrag: null,
     menuDrag: null,
+    edgeDrag: null,
     selectionRect: null,
     nodeWasDragged: false,
     viewBox: null,
@@ -16936,6 +16910,8 @@ var Sevenn = (() => {
     hoveredEdgePointer: { x: 0, y: 0 },
     currentScales: { nodeScale: 1, labelScale: 1, lineScale: 1 },
     suppressNextClick: false,
+    edgeDragJustCompleted: false,
+    viewPointerId: null,
     mapConfig: null,
     mapConfigLoaded: false,
     blocks: [],
@@ -17005,6 +16981,35 @@ var Sevenn = (() => {
       groups.push(`kind:${item?.kind || "concept"}`);
     }
     return groups;
+  }
+  function parseGroupKey(key = "") {
+    const info = { block: "__", week: "__", lecture: key || "__" };
+    if (!key) {
+      return info;
+    }
+    const parts = String(key).split("|");
+    parts.forEach((part) => {
+      if (part.startsWith("block:")) {
+        const value = part.slice(6);
+        info.block = value || "__";
+      } else if (part.startsWith("block-only:")) {
+        const value = part.slice(11);
+        info.block = value || "__";
+      } else if (part.startsWith("week:")) {
+        const value = part.slice(5);
+        info.week = value || "__";
+      } else if (part.startsWith("lec:")) {
+        const value = part.slice(4);
+        info.lecture = value || info.lecture;
+      } else if (part.startsWith("name:") && (info.lecture === key || info.lecture === "__")) {
+        const value = part.slice(5);
+        info.lecture = value || info.lecture;
+      }
+    });
+    if (!info.lecture || info.lecture === "__") {
+      info.lecture = key || "__";
+    }
+    return info;
   }
   function getPrimaryGroupKey(item, keys = deriveItemGroupKeys(item)) {
     if (Array.isArray(keys) && keys.length) {
@@ -17824,10 +17829,13 @@ var Sevenn = (() => {
     mapState.areaDrag = null;
     mapState.draggingView = false;
     mapState.menuDrag = null;
+    mapState.edgeDrag = null;
     mapState.selectionRect = null;
     mapState.previewSelection = null;
     mapState.nodeWasDragged = false;
     mapState.justCompletedSelection = false;
+    mapState.edgeDragJustCompleted = false;
+    mapState.viewPointerId = null;
     mapState.searchInput = null;
     mapState.searchFieldEl = null;
     mapState.searchFeedbackEl = null;
@@ -18117,21 +18125,96 @@ var Sevenn = (() => {
       seenGroups.add(key);
       newGroupOrder.push(key);
     });
-    if (newGroupOrder.length) {
-      const clusterCols = Math.ceil(Math.sqrt(newGroupOrder.length));
-      const clusterRows = Math.ceil(newGroupOrder.length / clusterCols);
-      const clusterSpacing = 320;
-      newGroupOrder.forEach((key, index) => {
-        const col = index % clusterCols;
-        const row = Math.floor(index / clusterCols);
-        const offsetX = (col - (clusterCols - 1) / 2) * clusterSpacing;
-        const offsetY = (row - (clusterRows - 1) / 2) * clusterSpacing;
-        clusterOrigins.set(key, {
-          x: center + offsetX,
-          y: center + offsetY
-        });
-      });
+    const blockAggregates = /* @__PURE__ */ new Map();
+    const weekAggregates = /* @__PURE__ */ new Map();
+    const lecturesByWeek = /* @__PURE__ */ new Map();
+    const lectureCenters = /* @__PURE__ */ new Map();
+    existingGroupInfo.forEach((info, key) => {
+      const parsed = parseGroupKey(key);
+      const blockKey = parsed.block || "__";
+      const weekId = parsed.week || "__";
+      const weekKey = `${blockKey}::${weekId}`;
+      const centerX = (info.minX + info.maxX) / 2;
+      const centerY = (info.minY + info.maxY) / 2;
+      const blockAgg = blockAggregates.get(blockKey) || { x: 0, y: 0, count: 0 };
+      blockAgg.x += centerX;
+      blockAgg.y += centerY;
+      blockAgg.count += 1;
+      blockAggregates.set(blockKey, blockAgg);
+      const weekAgg = weekAggregates.get(weekKey) || { x: 0, y: 0, count: 0 };
+      weekAgg.x += centerX;
+      weekAgg.y += centerY;
+      weekAgg.count += 1;
+      weekAggregates.set(weekKey, weekAgg);
+      const lectureList = lecturesByWeek.get(weekKey) || [];
+      lectureList.push({ x: centerX, y: centerY });
+      lecturesByWeek.set(weekKey, lectureList);
+      const lectureKey2 = `${weekKey}::${parsed.lecture || key}`;
+      if (!lectureCenters.has(lectureKey2)) {
+        lectureCenters.set(lectureKey2, { x: centerX, y: centerY });
+      }
+    });
+    const blockCenters = /* @__PURE__ */ new Map();
+    const blockPositionList = [];
+    blockAggregates.forEach((agg, blockKey) => {
+      if (!agg.count) return;
+      const point = { x: agg.x / agg.count, y: agg.y / agg.count };
+      blockCenters.set(blockKey, point);
+      blockPositionList.push(point);
+    });
+    const weekCenters = /* @__PURE__ */ new Map();
+    const weekPositionsByBlock = /* @__PURE__ */ new Map();
+    weekAggregates.forEach((agg, weekKey) => {
+      if (!agg.count) return;
+      const point = { x: agg.x / agg.count, y: agg.y / agg.count };
+      weekCenters.set(weekKey, point);
+      const [blockKey] = weekKey.split("::");
+      const list = weekPositionsByBlock.get(blockKey) || [];
+      list.push(point);
+      weekPositionsByBlock.set(blockKey, list);
+    });
+    const BLOCK_SPACING = 920;
+    const WEEK_SPACING = 440;
+    const LECTURE_SPACING = 240;
+    function ensureBlockCenter(blockKey) {
+      if (blockCenters.has(blockKey)) return blockCenters.get(blockKey);
+      const base2 = { x: center, y: center };
+      const candidate = pickClusterPosition(blockPositionList, BLOCK_SPACING, base2);
+      blockCenters.set(blockKey, candidate);
+      blockPositionList.push(candidate);
+      return candidate;
     }
+    function ensureWeekCenter(blockKey, weekId, blockCenter) {
+      const weekKey = `${blockKey}::${weekId}`;
+      if (weekCenters.has(weekKey)) return weekCenters.get(weekKey);
+      const existing = weekPositionsByBlock.get(blockKey) || [];
+      const candidate = pickClusterPosition(existing, WEEK_SPACING, blockCenter);
+      weekCenters.set(weekKey, candidate);
+      existing.push(candidate);
+      weekPositionsByBlock.set(blockKey, existing);
+      return candidate;
+    }
+    function ensureLectureCenter(blockKey, weekId, lectureId, weekCenter) {
+      const weekKey = `${blockKey}::${weekId}`;
+      const lectureKey2 = `${weekKey}::${lectureId}`;
+      if (lectureCenters.has(lectureKey2)) return lectureCenters.get(lectureKey2);
+      const existing = lecturesByWeek.get(weekKey) || [];
+      const candidate = pickClusterPosition(existing, LECTURE_SPACING, weekCenter);
+      lectureCenters.set(lectureKey2, candidate);
+      existing.push(candidate);
+      lecturesByWeek.set(weekKey, existing);
+      return candidate;
+    }
+    newGroupOrder.forEach((key) => {
+      const parsed = parseGroupKey(key);
+      const blockKey = parsed.block || "__";
+      const weekId = parsed.week || "__";
+      const lectureId = parsed.lecture || key;
+      const blockCenter = ensureBlockCenter(blockKey);
+      const weekCenter = ensureWeekCenter(blockKey, weekId, blockCenter);
+      const lectureCenter = ensureLectureCenter(blockKey, weekId, lectureId, weekCenter);
+      clusterOrigins.set(key, lectureCenter);
+    });
     const groupPlacement = /* @__PURE__ */ new Map();
     function ensureGroupPlacement(key) {
       if (groupPlacement.has(key)) {
@@ -18146,14 +18229,14 @@ var Sevenn = (() => {
         x: (existing.minX + existing.maxX) / 2,
         y: (existing.minY + existing.maxY) / 2
       } : clusterOrigins.get(key) || { x: center, y: center };
-      let spacing = 200;
+      let spacing = 150;
       if (existing?.count > 1) {
         const spread = Math.max(existing.maxX - existing.minX, existing.maxY - existing.minY);
-        spacing = Math.max(160, spread / Math.max(1, existing.count - 1) + 100);
+        spacing = Math.max(130, spread / Math.max(1, existing.count - 1) + 70);
       } else if (existing?.count === 1) {
-        spacing = 180;
+        spacing = 140;
       } else if (clusterOrigins.has(key)) {
-        spacing = 220;
+        spacing = 160;
       }
       const info = { origin, columns, rows, spacing, index: existing?.count || 0 };
       groupPlacement.set(key, info);
@@ -18231,6 +18314,31 @@ var Sevenn = (() => {
         path.dataset.a = it.id;
         path.dataset.b = l.id;
         path.dataset.label = l.name || "";
+        path.addEventListener("pointerdown", (evt) => {
+          if (evt.button !== 0) return;
+          if (mapState.tool !== TOOL.NAVIGATE) return;
+          mapState.suppressNextClick = false;
+          evt.stopPropagation();
+          const pointerId = evt.pointerId;
+          const existingCurve = Number(path.dataset.curve);
+          const initialCurve = Number.isFinite(existingCurve) ? existingCurve : Number.isFinite(Number(l.curve)) ? Number(l.curve) : 0;
+          mapState.edgeDrag = {
+            pointerId,
+            line: path,
+            aId: it.id,
+            bId: l.id,
+            startCurve: initialCurve,
+            currentCurve: initialCurve,
+            moved: false,
+            captureTarget: evt.currentTarget || path
+          };
+          if (mapState.edgeDrag.captureTarget?.setPointerCapture) {
+            try {
+              mapState.edgeDrag.captureTarget.setPointerCapture(pointerId);
+            } catch {
+            }
+          }
+        });
         path.addEventListener("click", (e) => {
           e.stopPropagation();
           handleEdgeClick(path, it.id, l.id, e);
@@ -18286,8 +18394,16 @@ var Sevenn = (() => {
         if (isNavigateTool) {
           mapState.nodeDrag = {
             id: it.id,
-            offset: { x: x - current.x, y: y - current.y }
+            offset: { x: x - current.x, y: y - current.y },
+            pointerId: e.pointerId,
+            captureTarget: e.currentTarget || circle
           };
+          if (mapState.nodeDrag.captureTarget?.setPointerCapture) {
+            try {
+              mapState.nodeDrag.captureTarget.setPointerCapture(e.pointerId);
+            } catch {
+            }
+          }
           mapState.nodeWasDragged = false;
           setAreaInteracting(true);
         } else {
@@ -18298,14 +18414,22 @@ var Sevenn = (() => {
               const source = mapState.positions[id] || positions[id] || { x: 0, y: 0 };
               return { id, pos: { ...source } };
             }),
-            moved: false
+            moved: false,
+            pointerId: e.pointerId,
+            captureTarget: e.currentTarget || circle
           };
+          if (mapState.areaDrag.captureTarget?.setPointerCapture) {
+            try {
+              mapState.areaDrag.captureTarget.setPointerCapture(e.pointerId);
+            } catch {
+            }
+          }
           mapState.nodeWasDragged = false;
           setAreaInteracting(true);
         }
         refreshCursor({ keepOverride: false });
       };
-      circle.addEventListener("mousedown", handleNodePointerDown);
+      circle.addEventListener("pointerdown", handleNodePointerDown);
       circle.addEventListener("click", async (e) => {
         e.stopPropagation();
         if (mapState.suppressNextClick) {
@@ -18373,8 +18497,9 @@ var Sevenn = (() => {
   }
   function ensureListeners() {
     if (mapState.listenersAttached || typeof window === "undefined") return;
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
     mapState.listenersAttached = true;
     if (!window._mapResizeAttached) {
       window.addEventListener("resize", adjustScale);
@@ -18471,23 +18596,39 @@ var Sevenn = (() => {
     });
   }
   function attachSvgEvents(svg) {
-    svg.addEventListener("mousedown", (e) => {
+    svg.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       if (e.target !== svg) return;
       mapState.justCompletedSelection = false;
       if (mapState.tool !== TOOL.AREA) {
         e.preventDefault();
         mapState.draggingView = true;
+        mapState.viewPointerId = e.pointerId;
         mapState.lastPointer = { x: e.clientX, y: e.clientY };
+        if (svg.setPointerCapture) {
+          try {
+            svg.setPointerCapture(e.pointerId);
+          } catch {
+          }
+        }
         setAreaInteracting(true);
         refreshCursor({ keepOverride: false });
-      } else if (mapState.tool === TOOL.AREA) {
+      } else {
         e.preventDefault();
         mapState.selectionRect = {
-          start: { x: e.clientX, y: e.clientY },
-          current: { x: e.clientX, y: e.clientY }
+          pointerId: e.pointerId,
+          startClient: { x: e.clientX, y: e.clientY },
+          currentClient: { x: e.clientX, y: e.clientY },
+          startMap: clientToMap(e.clientX, e.clientY),
+          currentMap: clientToMap(e.clientX, e.clientY)
         };
         mapState.selectionBox.classList.remove("hidden");
+        if (svg.setPointerCapture) {
+          try {
+            svg.setPointerCapture(e.pointerId);
+          } catch {
+          }
+        }
         setAreaInteracting(true);
       }
     });
@@ -18521,7 +18662,7 @@ var Sevenn = (() => {
       mapState.updateViewBox();
     }, { passive: false });
   }
-  function handleMouseMove(e) {
+  function handlePointerMove(e) {
     if (!mapState.svg) return;
     if (mapState.toolboxDrag) {
       moveToolboxDrag(e.clientX, e.clientY);
@@ -18531,7 +18672,27 @@ var Sevenn = (() => {
       updateMenuDragPosition(e.clientX, e.clientY);
       return;
     }
-    if (mapState.nodeDrag) {
+    if (mapState.edgeDrag && mapState.edgeDrag.pointerId === e.pointerId) {
+      const drag = mapState.edgeDrag;
+      if (!drag.line) return;
+      const geometry = getLineGeometry(drag.aId, drag.bId, { line: drag.line });
+      if (!geometry) return;
+      const midX = (geometry.startX + geometry.endX) / 2;
+      const midY = (geometry.startY + geometry.endY) / 2;
+      const normal = { x: -geometry.uy, y: geometry.ux };
+      const point = clientToMap(e.clientX, e.clientY);
+      const offset = (point.x - midX) * normal.x + (point.y - midY) * normal.y;
+      const length = Math.max(geometry.trimmedLength || 1, 1);
+      const normalized2 = clamp2(offset / length, -3.5, 3.5);
+      drag.currentCurve = normalized2;
+      const delta = Math.abs((drag.startCurve ?? 0) - normalized2);
+      if (delta > 2e-3) {
+        drag.moved = true;
+        applyLineStyle(drag.line, { curve: normalized2 });
+      }
+      return;
+    }
+    if (mapState.nodeDrag && mapState.nodeDrag.pointerId === e.pointerId) {
       const entry = mapState.elements.get(mapState.nodeDrag.id);
       if (!entry || !entry.circle) return;
       const { x, y } = clientToMap(e.clientX, e.clientY);
@@ -18543,7 +18704,7 @@ var Sevenn = (() => {
       mapState.nodeWasDragged = true;
       return;
     }
-    if (mapState.areaDrag) {
+    if (mapState.areaDrag && mapState.areaDrag.pointerId === e.pointerId) {
       updateAutoPanFromPointer(e.clientX, e.clientY);
       const { x, y } = clientToMap(e.clientX, e.clientY);
       const dx = x - mapState.areaDrag.start.x;
@@ -18559,21 +18720,26 @@ var Sevenn = (() => {
       mapState.nodeWasDragged = true;
       return;
     }
-    if (mapState.draggingView) {
-      const scale = mapState.viewBox.w / mapState.svg.clientWidth;
-      mapState.viewBox.x -= (e.clientX - mapState.lastPointer.x) * scale;
-      mapState.viewBox.y -= (e.clientY - mapState.lastPointer.y) * scale;
+    if (mapState.draggingView && mapState.viewPointerId === e.pointerId) {
+      const prev = clientToMap(mapState.lastPointer.x, mapState.lastPointer.y);
+      const current = clientToMap(e.clientX, e.clientY);
+      mapState.viewBox.x += prev.x - current.x;
+      mapState.viewBox.y += prev.y - current.y;
       mapState.lastPointer = { x: e.clientX, y: e.clientY };
       mapState.updateViewBox();
+      if (mapState.selectionRect) {
+        refreshSelectionRectFromClients();
+      }
       return;
     }
-    if (mapState.selectionRect) {
+    if (mapState.selectionRect && mapState.selectionRect.pointerId === e.pointerId) {
       updateAutoPanFromPointer(e.clientX, e.clientY);
-      mapState.selectionRect.current = { x: e.clientX, y: e.clientY };
+      mapState.selectionRect.currentClient = { x: e.clientX, y: e.clientY };
+      mapState.selectionRect.currentMap = clientToMap(e.clientX, e.clientY);
       updateSelectionBox();
     }
   }
-  async function handleMouseUp(e) {
+  async function handlePointerUp(e) {
     if (!mapState.svg) return;
     if (mapState.toolboxDrag) {
       stopToolboxDrag();
@@ -18583,8 +18749,33 @@ var Sevenn = (() => {
       return;
     }
     let cursorNeedsRefresh = false;
-    if (mapState.nodeDrag) {
+    if (mapState.edgeDrag && mapState.edgeDrag.pointerId === e.pointerId) {
+      const drag = mapState.edgeDrag;
+      mapState.edgeDrag = null;
+      if (drag.captureTarget?.releasePointerCapture) {
+        try {
+          drag.captureTarget.releasePointerCapture(e.pointerId);
+        } catch {
+        }
+      }
+      if (drag.moved && Number.isFinite(drag.currentCurve)) {
+        await updateLink(drag.aId, drag.bId, { curve: drag.currentCurve });
+        applyLineStyle(drag.line, { curve: drag.currentCurve });
+        mapState.edgeDragJustCompleted = true;
+        setTimeout(() => {
+          mapState.edgeDragJustCompleted = false;
+        }, 0);
+      }
+      cursorNeedsRefresh = true;
+    }
+    if (mapState.nodeDrag && mapState.nodeDrag.pointerId === e.pointerId) {
       const id = mapState.nodeDrag.id;
+      if (mapState.nodeDrag.captureTarget?.releasePointerCapture) {
+        try {
+          mapState.nodeDrag.captureTarget.releasePointerCapture(e.pointerId);
+        } catch {
+        }
+      }
       mapState.nodeDrag = null;
       cursorNeedsRefresh = true;
       if (mapState.nodeWasDragged) {
@@ -18596,9 +18787,15 @@ var Sevenn = (() => {
       mapState.nodeWasDragged = false;
       setAreaInteracting(false);
     }
-    if (mapState.areaDrag) {
+    if (mapState.areaDrag && mapState.areaDrag.pointerId === e.pointerId) {
       const moved = mapState.areaDrag.moved;
       const ids = mapState.areaDrag.ids;
+      if (mapState.areaDrag.captureTarget?.releasePointerCapture) {
+        try {
+          mapState.areaDrag.captureTarget.releasePointerCapture(e.pointerId);
+        } catch {
+        }
+      }
       mapState.areaDrag = null;
       cursorNeedsRefresh = true;
       if (moved) {
@@ -18614,12 +18811,19 @@ var Sevenn = (() => {
       stopAutoPan();
       setAreaInteracting(false);
     }
-    if (mapState.draggingView) {
+    if (mapState.draggingView && mapState.viewPointerId === e.pointerId) {
       mapState.draggingView = false;
+      mapState.viewPointerId = null;
+      if (mapState.svg?.releasePointerCapture) {
+        try {
+          mapState.svg.releasePointerCapture(e.pointerId);
+        } catch {
+        }
+      }
       cursorNeedsRefresh = true;
       setAreaInteracting(false);
     }
-    if (mapState.selectionRect) {
+    if (mapState.selectionRect && mapState.selectionRect.pointerId === e.pointerId) {
       const selected = computeSelectionFromRect();
       mapState.selectionIds = selected;
       mapState.previewSelection = null;
@@ -18629,36 +18833,56 @@ var Sevenn = (() => {
       stopAutoPan();
       setAreaInteracting(false);
       mapState.justCompletedSelection = true;
+      if (mapState.svg?.releasePointerCapture) {
+        try {
+          mapState.svg.releasePointerCapture(e.pointerId);
+        } catch {
+        }
+      }
     }
     if (cursorNeedsRefresh) {
       refreshCursor({ keepOverride: true });
     }
   }
   function clientToMap(clientX, clientY) {
-    if (!mapState.svg) return { x: 0, y: 0 };
-    const rect = mapState.svg.getBoundingClientRect();
+    const svg = mapState.svg;
+    if (!svg) return { x: 0, y: 0 };
+    if (typeof svg.createSVGPoint === "function") {
+      const point = svg.createSVGPoint();
+      point.x = clientX;
+      point.y = clientY;
+      const ctm = typeof svg.getScreenCTM === "function" ? svg.getScreenCTM() : null;
+      if (ctm && typeof ctm.inverse === "function") {
+        try {
+          const transformed = point.matrixTransform(ctm.inverse());
+          return { x: transformed.x, y: transformed.y };
+        } catch {
+        }
+      }
+    }
+    const rect = svg.getBoundingClientRect();
     const x = mapState.viewBox.x + (clientX - rect.left) / rect.width * mapState.viewBox.w;
     const y = mapState.viewBox.y + (clientY - rect.top) / rect.height * mapState.viewBox.h;
     return { x, y };
   }
   function updateSelectionBox() {
     if (!mapState.selectionRect || !mapState.selectionBox || !mapState.svg) return;
-    const { start, current } = mapState.selectionRect;
+    const { startClient, currentClient, startMap, currentMap } = mapState.selectionRect;
+    if (!startClient || !currentClient) return;
     const rect = mapState.svg.getBoundingClientRect();
-    const left = Math.min(start.x, current.x) - rect.left;
-    const top = Math.min(start.y, current.y) - rect.top;
-    const width = Math.abs(start.x - current.x);
-    const height = Math.abs(start.y - current.y);
+    const left = Math.min(startClient.x, currentClient.x) - rect.left;
+    const top = Math.min(startClient.y, currentClient.y) - rect.top;
+    const width = Math.abs(startClient.x - currentClient.x);
+    const height = Math.abs(startClient.y - currentClient.y);
     mapState.selectionBox.style.left = `${left}px`;
     mapState.selectionBox.style.top = `${top}px`;
     mapState.selectionBox.style.width = `${width}px`;
     mapState.selectionBox.style.height = `${height}px`;
-    const from = clientToMap(start.x, start.y);
-    const to = clientToMap(current.x, current.y);
-    const minX = Math.min(from.x, to.x);
-    const maxX = Math.max(from.x, to.x);
-    const minY = Math.min(from.y, to.y);
-    const maxY = Math.max(from.y, to.y);
+    if (!startMap || !currentMap) return;
+    const minX = Math.min(startMap.x, currentMap.x);
+    const maxX = Math.max(startMap.x, currentMap.x);
+    const minY = Math.min(startMap.y, currentMap.y);
+    const maxY = Math.max(startMap.y, currentMap.y);
     const preview = [];
     Object.entries(mapState.positions).forEach(([id, pos]) => {
       if (pos.x >= minX && pos.x <= maxX && pos.y >= minY && pos.y <= maxY) {
@@ -18667,6 +18891,49 @@ var Sevenn = (() => {
     });
     mapState.previewSelection = preview;
     updateSelectionHighlight();
+  }
+  function refreshSelectionRectFromClients({ updateStart = false } = {}) {
+    if (!mapState.selectionRect) return;
+    const rect = mapState.selectionRect;
+    if (updateStart && rect.startClient) {
+      rect.startMap = clientToMap(rect.startClient.x, rect.startClient.y);
+    }
+    if (rect.currentClient) {
+      rect.currentMap = clientToMap(rect.currentClient.x, rect.currentClient.y);
+    }
+    updateSelectionBox();
+  }
+  function pickClusterPosition(existing = [], spacing = 200, base = { x: 0, y: 0 }) {
+    const baseX = Number.isFinite(base?.x) ? base.x : 0;
+    const baseY = Number.isFinite(base?.y) ? base.y : 0;
+    const minDistance = Math.max(spacing * 0.72, spacing - 140);
+    for (let radius = 0; radius <= 6; radius += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        for (let dy = -radius; dy <= radius; dy += 1) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+          const candidate = {
+            x: baseX + dx * spacing,
+            y: baseY + dy * spacing
+          };
+          let collision = false;
+          for (const pos of existing) {
+            if (!pos) continue;
+            const dist = Math.hypot((pos.x ?? 0) - candidate.x, (pos.y ?? 0) - candidate.y);
+            if (dist < minDistance) {
+              collision = true;
+              break;
+            }
+          }
+          if (!collision) {
+            return candidate;
+          }
+        }
+      }
+    }
+    return {
+      x: baseX + (Math.random() - 0.5) * spacing,
+      y: baseY + (Math.random() - 0.5) * spacing
+    };
   }
   function updateAutoPanFromPointer(clientX, clientY) {
     if (!mapState.svg || mapState.tool !== TOOL.AREA) return;
@@ -18730,6 +18997,9 @@ var Sevenn = (() => {
     mapState.viewBox.x += vector.dx * scaleX;
     mapState.viewBox.y += vector.dy * scaleY;
     mapState.updateViewBox();
+    if (mapState.selectionRect) {
+      refreshSelectionRectFromClients();
+    }
   }
   function stopAutoPan() {
     mapState.autoPan = null;
@@ -19234,6 +19504,10 @@ var Sevenn = (() => {
   }
   function handleEdgeClick(path, aId, bId, evt) {
     hideEdgeTooltip(path);
+    if (mapState.edgeDragJustCompleted) {
+      mapState.edgeDragJustCompleted = false;
+      return;
+    }
     if (mapState.tool === TOOL.NAVIGATE) {
       openLineMenu(evt, path, aId, bId);
     } else if (mapState.tool === TOOL.BREAK) {
@@ -19380,8 +19654,12 @@ var Sevenn = (() => {
     const len = Math.hypot(dx, dy) || 1;
     return ((px - x1) * dy - (py - y1) * dx) / len;
   }
-  function computeCurveOffset(aId, bId, segment) {
+  function computeCurveOffset(aId, bId, segment, manualCurve) {
     const trimmedLength = segment.trimmedLength || Math.hypot(segment.endX - segment.startX, segment.endY - segment.startY) || 1;
+    if (Number.isFinite(manualCurve)) {
+      const normalized2 = clamp2(manualCurve, -3.5, 3.5);
+      return normalized2 * trimmedLength;
+    }
     const seed = getPairCurveSeed(aId, bId);
     const baseMagnitude = Math.min(160, Math.max(48, trimmedLength * 0.24));
     const magnitude = baseMagnitude * (0.6 + Math.min(1, Math.abs(seed)) * 0.8);
@@ -19428,13 +19706,13 @@ var Sevenn = (() => {
     }
     return { trimA, trimB };
   }
-  function computeCurveControlPoint(aId, bId, segment) {
+  function computeCurveControlPoint(aId, bId, segment, manualCurve) {
     const { startX, startY, endX, endY, ux, uy } = segment;
     const nx = -uy;
     const ny = ux;
     const midX = (startX + endX) / 2;
     const midY = (startY + endY) / 2;
-    const offset = computeCurveOffset(aId, bId, segment);
+    const offset = computeCurveOffset(aId, bId, segment, manualCurve);
     const cx = midX + nx * offset;
     const cy = midY + ny * offset;
     return { cx, cy };
@@ -19447,7 +19725,15 @@ var Sevenn = (() => {
     const trims = computeStyleTrim(style, baseWidth);
     const segment = computeTrimmedSegment(aId, bId, trims);
     if (!segment) return null;
-    const { cx, cy } = computeCurveControlPoint(aId, bId, segment);
+    let curveOverride;
+    if (Object.prototype.hasOwnProperty.call(options, "curve")) {
+      const manual = Number(options.curve);
+      curveOverride = Number.isFinite(manual) ? clamp2(manual, -3.5, 3.5) : void 0;
+    } else if (line && Object.prototype.hasOwnProperty.call(line.dataset || {}, "curve")) {
+      const manual = Number(line.dataset.curve);
+      curveOverride = Number.isFinite(manual) ? clamp2(manual, -3.5, 3.5) : void 0;
+    }
+    const { cx, cy } = computeCurveControlPoint(aId, bId, segment, curveOverride);
     return { ...segment, cx, cy, style, baseWidth };
   }
   function getQuadraticPoint(start, control, end, t) {
@@ -19474,6 +19760,20 @@ var Sevenn = (() => {
     const previousStyle = line.dataset.style;
     const previousThickness = line.dataset.thickness;
     const previousLabel = line.dataset.label;
+    const hadCurveAttr = Object.prototype.hasOwnProperty.call(line.dataset || {}, "curve");
+    const previousCurve = hadCurveAttr ? Number(line.dataset.curve) : void 0;
+    const hasCurveOverride = Object.prototype.hasOwnProperty.call(info, "curve");
+    let curve = hasCurveOverride ? Number(info.curve) : previousCurve;
+    if (!Number.isFinite(curve)) {
+      curve = void 0;
+    }
+    if (hasCurveOverride) {
+      if (Number.isFinite(curve)) {
+        line.dataset.curve = String(curve);
+      } else {
+        delete line.dataset.curve;
+      }
+    }
     const color = info.color ?? previousColor ?? DEFAULT_LINK_COLOR;
     const style = normalizeLineStyle(info.style ?? previousStyle);
     const thickness = info.thickness ?? previousThickness ?? DEFAULT_LINE_THICKNESS;
@@ -19497,8 +19797,9 @@ var Sevenn = (() => {
     line.removeAttribute("marker-mid");
     line.removeAttribute("stroke-dasharray");
     line.classList.remove("edge-glow");
+    const geometryInfo = hasCurveOverride ? { ...info, curve } : info;
     if (line.dataset.a && line.dataset.b) {
-      line.setAttribute("d", calcPath(line.dataset.a, line.dataset.b, line, info));
+      line.setAttribute("d", calcPath(line.dataset.a, line.dataset.b, line, geometryInfo));
     }
     updateLineStrokeWidth(line);
     if (style === "dashed") {
@@ -19621,6 +19922,7 @@ var Sevenn = (() => {
     overlay.dataset.baseWidth = String(overlayBase);
     overlay.dataset.decoration = "blocked";
     overlay.setAttribute("stroke", "#f43f5e");
+    overlay.style.stroke = "#f43f5e";
     overlay.setAttribute("stroke-width", overlayBase * lineScale);
   }
   function updateInhibitOverlay(line, overlay) {
@@ -19652,6 +19954,7 @@ var Sevenn = (() => {
     overlay.dataset.decoration = "inhibit";
     const color = line.dataset.color || line.getAttribute("stroke") || DEFAULT_LINK_COLOR;
     overlay.setAttribute("stroke", color);
+    overlay.style.stroke = color;
     overlay.setAttribute("stroke-width", overlayBase * lineScale);
   }
   async function setNodeHidden(id, hidden) {
@@ -20114,5 +20417,4 @@ var Sevenn = (() => {
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
-  return __toCommonJS(main_exports);
 })();
