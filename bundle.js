@@ -1,4 +1,31 @@
-(() => {
+var Sevenn = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // js/main.js
+  var main_exports = {};
+  __export(main_exports, {
+    render: () => renderApp,
+    renderApp: () => renderApp,
+    resolveListKind: () => resolveListKind,
+    tabs: () => tabs
+  });
+
   // js/storage/preferences.js
   var STORAGE_KEY = "sevenn-ui-preferences";
   var cache = null;
@@ -17070,17 +17097,94 @@
     }
     return [];
   }
+  var FALLBACK_ACCENTS = {
+    disease: "#c084fc",
+    drug: "#60a5fa",
+    concept: "#4ade80"
+  };
+  var DEFAULT_ACCENT = "#38bdf8";
+  var HEX_COLOR = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+  function resolveAccentColor(item) {
+    if (item && typeof item.color === "string" && HEX_COLOR.test(item.color.trim())) {
+      return normalizeHex(item.color.trim());
+    }
+    const fallback = FALLBACK_ACCENTS[item?.kind];
+    if (typeof fallback === "string") {
+      return normalizeHex(fallback);
+    }
+    return DEFAULT_ACCENT;
+  }
+  function normalizeHex(value) {
+    if (typeof value !== "string") return DEFAULT_ACCENT;
+    const trimmed = value.trim();
+    if (!HEX_COLOR.test(trimmed)) return DEFAULT_ACCENT;
+    if (trimmed.length === 4) {
+      const [, r, g, b] = trimmed;
+      return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+    }
+    return trimmed.toUpperCase();
+  }
   function showPopup(item, options = {}) {
-    const { onEdit } = options;
-    const modal = document.createElement("div");
-    modal.className = "modal";
+    const { onEdit, onColorChange } = options;
+    const titleText = item?.name || item?.concept || "Item";
+    const accent = resolveAccentColor(item);
+    const win = createFloatingWindow({ title: titleText, width: 560 });
     const card = document.createElement("div");
-    card.className = "card";
-    const kindColors2 = { disease: "var(--purple)", drug: "var(--blue)", concept: "var(--green)" };
-    card.style.borderTop = `3px solid ${item.color || kindColors2[item.kind] || "var(--gray)"}`;
+    card.className = "card popup-card";
+    card.style.borderTop = `4px solid ${accent}`;
+    const header = document.createElement("div");
+    header.className = "popup-card-header";
     const title = document.createElement("h2");
-    title.textContent = item.name || item.concept || "Item";
-    card.appendChild(title);
+    title.textContent = titleText;
+    header.appendChild(title);
+    card.appendChild(header);
+    if (typeof onColorChange === "function") {
+      const meta = document.createElement("div");
+      meta.className = "popup-meta";
+      const colorLabel = document.createElement("label");
+      colorLabel.className = "popup-color-control";
+      const labelText = document.createElement("span");
+      labelText.textContent = "Accent";
+      colorLabel.appendChild(labelText);
+      const colorInput = document.createElement("input");
+      colorInput.type = "color";
+      colorInput.value = accent;
+      colorLabel.appendChild(colorInput);
+      const colorValue = document.createElement("span");
+      colorValue.className = "popup-color-value";
+      colorValue.textContent = accent;
+      colorLabel.appendChild(colorValue);
+      meta.appendChild(colorLabel);
+      card.appendChild(meta);
+      let currentAccent = accent;
+      const updateAccentPreview = (value, commit = false) => {
+        const normalized2 = normalizeHex(value);
+        card.style.borderTop = `4px solid ${normalized2}`;
+        colorValue.textContent = normalized2;
+        if (commit) {
+          currentAccent = normalized2;
+        }
+      };
+      colorInput.addEventListener("input", () => {
+        updateAccentPreview(colorInput.value);
+      });
+      colorInput.addEventListener("change", async () => {
+        if (typeof onColorChange === "function") {
+          const next = normalizeHex(colorInput.value);
+          updateAccentPreview(next);
+          try {
+            await onColorChange(next);
+            updateAccentPreview(next, true);
+          } catch (err) {
+            console.error(err);
+            updateAccentPreview(currentAccent, true);
+            colorInput.value = currentAccent;
+          }
+        } else {
+          updateAccentPreview(colorInput.value, true);
+        }
+      });
+    }
     const defs = fieldDefs2[item.kind] || [];
     defs.forEach(([field, label]) => {
       const val = item[field];
@@ -17111,30 +17215,30 @@
       card.appendChild(sec);
     });
     const actions = document.createElement("div");
-    actions.className = "modal-actions";
+    actions.className = "popup-actions";
     if (typeof onEdit === "function") {
       const editBtn = document.createElement("button");
       editBtn.type = "button";
       editBtn.className = "btn secondary";
       editBtn.textContent = "Edit";
       editBtn.addEventListener("click", () => {
-        modal.remove();
+        void win.close("edit");
         onEdit();
       });
       actions.appendChild(editBtn);
     }
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "btn";
-    close.textContent = "Close";
-    close.addEventListener("click", () => modal.remove());
-    actions.appendChild(close);
-    card.appendChild(actions);
-    modal.appendChild(card);
-    modal.addEventListener("click", (e) => {
-      if (e.target === modal) modal.remove();
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "btn";
+    closeBtn.textContent = "Close";
+    closeBtn.addEventListener("click", () => {
+      void win.close("close");
     });
-    document.body.appendChild(modal);
+    actions.appendChild(closeBtn);
+    card.appendChild(actions);
+    win.setContent(card);
+    win.setTitle(titleText);
+    return win;
   }
 
   // js/ui/components/map.js
@@ -17178,6 +17282,7 @@
   var DEFAULT_LINK_COLOR = "#888888";
   var DEFAULT_LINE_STYLE = "solid";
   var DEFAULT_LINE_THICKNESS = "regular";
+  var DEFAULT_CURVE_ANCHOR = 0.5;
   var LINE_STYLE_OPTIONS = [
     { value: "solid", label: "Smooth" },
     { value: "dashed", label: "Dashed" },
@@ -17211,6 +17316,11 @@
     { value: "regular", label: "Regular" },
     { value: "bold", label: "Bold" }
   ];
+  var KIND_FALLBACK_COLORS = {
+    disease: "var(--purple)",
+    drug: "var(--blue)",
+    concept: "var(--green)"
+  };
   var mapState = {
     tool: TOOL.NAVIGATE,
     selectionIds: [],
@@ -17273,6 +17383,8 @@
     searchSuggestionTimer: null,
     paletteSearch: "",
     nodeRadii: null,
+    edgeLayer: null,
+    nodeLayer: null,
     lineMarkers: /* @__PURE__ */ new Map()
   };
   function normalizeMapTab(tab = {}) {
@@ -18151,7 +18263,8 @@
     const item = mapState.itemMap?.[itemId];
     if (!item) return;
     showPopup(item, {
-      onEdit: () => openItemEditor(itemId)
+      onEdit: () => openItemEditor(itemId),
+      onColorChange: (color) => updateItemColor(itemId, color)
     });
   }
   function openItemEditor(itemId) {
@@ -18160,6 +18273,39 @@
     openEditor(item.kind, async () => {
       await renderMap(mapState.root);
     }, item);
+  }
+  async function updateItemColor(itemId, color) {
+    const item = await getItem(itemId);
+    if (!item) return;
+    const normalized2 = typeof color === "string" && color ? color : "";
+    if (normalized2) {
+      item.color = normalized2;
+    } else if (item.color) {
+      delete item.color;
+    }
+    await upsertItem(item);
+    if (!mapState.itemMap) {
+      mapState.itemMap = {};
+    }
+    const cached = mapState.itemMap[itemId];
+    if (cached) {
+      if (normalized2) {
+        cached.color = normalized2;
+      } else {
+        delete cached.color;
+      }
+    }
+    if (Array.isArray(mapState.visibleItems)) {
+      const visible = mapState.visibleItems.find((it) => it.id === itemId);
+      if (visible) {
+        if (normalized2) {
+          visible.color = normalized2;
+        } else {
+          delete visible.color;
+        }
+      }
+    }
+    refreshNodeColor(itemId);
   }
   function setAreaInteracting(active) {
     if (!mapState.root) return;
@@ -18205,6 +18351,8 @@
     }
     stopAutoPan();
     setAreaInteracting(false);
+    mapState.edgeLayer = null;
+    mapState.nodeLayer = null;
     ensureListeners();
     await ensureMapConfig();
     const catalog = await loadBlockCatalog();
@@ -18381,11 +18529,19 @@
     };
     mapState.updateViewBox = updateViewBox;
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    const edgeLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    edgeLayer.classList.add("map-layer", "map-layer--edges");
+    const nodeLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    nodeLayer.classList.add("map-layer", "map-layer--nodes");
     const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
     buildLineMarkers(defs);
+    g.appendChild(edgeLayer);
+    g.appendChild(nodeLayer);
     svg.appendChild(defs);
     svg.appendChild(g);
     mapState.g = g;
+    mapState.edgeLayer = edgeLayer;
+    mapState.nodeLayer = nodeLayer;
     container.appendChild(svg);
     const tooltip = document.createElement("div");
     tooltip.className = "map-edge-tooltip hidden";
@@ -18644,6 +18800,8 @@
     buildToolbox(container, hiddenNodes.length, hiddenLinks.length);
     buildHiddenPanel(container, hiddenNodes, hiddenLinks);
     const drawn = /* @__PURE__ */ new Set();
+    const edgeLayerRef = mapState.edgeLayer || g;
+    const nodeLayerRef = mapState.nodeLayer || g;
     visibleItems.forEach((it) => {
       (it.links || []).forEach((l) => {
         if (l.hidden) return;
@@ -18668,6 +18826,31 @@
           const pointerId = evt.pointerId;
           const existingCurve = Number(path.dataset.curve);
           const initialCurve = Number.isFinite(existingCurve) ? existingCurve : Number.isFinite(Number(l.curve)) ? Number(l.curve) : 0;
+          const existingAnchor = normalizeAnchorValue(
+            Object.prototype.hasOwnProperty.call(path.dataset || {}, "anchor") ? path.dataset.anchor : Object.prototype.hasOwnProperty.call(l || {}, "curveAnchor") ? l.curveAnchor : DEFAULT_CURVE_ANCHOR
+          ) ?? DEFAULT_CURVE_ANCHOR;
+          const pointerMap = clientToMap(evt.clientX, evt.clientY);
+          const geometryForHandle = getLineGeometry(it.id, l.id, {
+            line: path,
+            curve: initialCurve,
+            anchor: existingAnchor
+          });
+          let handle = "mid";
+          let anchorValue = existingAnchor;
+          if (geometryForHandle && pointerMap) {
+            const startPoint = { x: geometryForHandle.startX, y: geometryForHandle.startY };
+            const endPoint = { x: geometryForHandle.endX, y: geometryForHandle.endY };
+            const startDist = Math.hypot(pointerMap.x - startPoint.x, pointerMap.y - startPoint.y);
+            const endDist = Math.hypot(pointerMap.x - endPoint.x, pointerMap.y - endPoint.y);
+            const threshold = Math.max(36, (geometryForHandle.trimmedLength || 0) * 0.12);
+            if (startDist <= threshold) {
+              handle = "start";
+              anchorValue = normalizeAnchorValue(existingAnchor < 0.45 ? existingAnchor : 0.22) ?? 0.22;
+            } else if (endDist <= threshold) {
+              handle = "end";
+              anchorValue = normalizeAnchorValue(existingAnchor > 0.55 ? existingAnchor : 0.78) ?? 0.78;
+            }
+          }
           mapState.edgeDrag = {
             pointerId,
             line: path,
@@ -18676,7 +18859,10 @@
             startCurve: initialCurve,
             currentCurve: initialCurve,
             moved: false,
-            captureTarget: evt.currentTarget || path
+            captureTarget: evt.currentTarget || path,
+            handle,
+            anchor: anchorValue,
+            startAnchor: anchorValue
           };
           if (mapState.edgeDrag.captureTarget?.setPointerCapture) {
             try {
@@ -18709,7 +18895,7 @@
           }
           hideEdgeTooltip(path);
         });
-        g.appendChild(path);
+        edgeLayerRef.appendChild(path);
       });
     });
     visibleItems.forEach((it) => {
@@ -18724,9 +18910,7 @@
       circle.dataset.radius = baseR;
       circle.setAttribute("class", "map-node");
       circle.dataset.id = it.id;
-      const kindColors2 = { disease: "var(--purple)", drug: "var(--blue)" };
-      const fill = kindColors2[it.kind] || it.color || "var(--gray)";
-      circle.setAttribute("fill", fill);
+      circle.setAttribute("fill", getNodeFill(it));
       const handleNodePointerDown = (e) => {
         if (e.button !== 0) return;
         const isNavigateTool = mapState.tool === TOOL.NAVIGATE;
@@ -18812,7 +18996,7 @@
           clearCursorOverride("link");
         }
       });
-      g.appendChild(circle);
+      nodeLayerRef.appendChild(circle);
       const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
       text.setAttribute("x", pos.x);
       text.setAttribute("y", pos.y - (baseR + 12));
@@ -18833,7 +19017,7 @@
         }
         mapState.nodeWasDragged = false;
       });
-      g.appendChild(text);
+      nodeLayerRef.appendChild(text);
       mapState.elements.set(it.id, { circle, label: text });
     });
     updateSelectionHighlight();
@@ -18994,7 +19178,7 @@
     });
     svg.addEventListener("wheel", (e) => {
       e.preventDefault();
-      const factor = e.deltaY < 0 ? 0.9 : 1.1;
+      const factor = e.deltaY < 0 ? 0.96 : 1.04;
       const rect = svg.getBoundingClientRect();
       const mx = mapState.viewBox.x + (e.clientX - rect.left) / rect.width * mapState.viewBox.w;
       const my = mapState.viewBox.y + (e.clientY - rect.top) / rect.height * mapState.viewBox.h;
@@ -19021,20 +19205,29 @@
     if (mapState.edgeDrag && mapState.edgeDrag.pointerId === e.pointerId) {
       const drag = mapState.edgeDrag;
       if (!drag.line) return;
-      const geometry = getLineGeometry(drag.aId, drag.bId, { line: drag.line });
+      const geometry = getLineGeometry(drag.aId, drag.bId, { line: drag.line, curve: drag.currentCurve, anchor: drag.anchor });
       if (!geometry) return;
-      const midX = (geometry.startX + geometry.endX) / 2;
-      const midY = (geometry.startY + geometry.endY) / 2;
+      const pointer = clientToMap(e.clientX, e.clientY);
+      const dx = geometry.endX - geometry.startX;
+      const dy = geometry.endY - geometry.startY;
+      const lenSq = Math.max(dx * dx + dy * dy, 1);
+      const projection = ((pointer.x - geometry.startX) * dx + (pointer.y - geometry.startY) * dy) / lenSq;
+      const range = getAnchorRange(drag.handle);
+      drag.anchor = clamp2(projection, range.min, range.max);
+      const anchorPoint = {
+        x: geometry.startX + dx * drag.anchor,
+        y: geometry.startY + dy * drag.anchor
+      };
       const normal = { x: -geometry.uy, y: geometry.ux };
-      const point = clientToMap(e.clientX, e.clientY);
-      const offset = (point.x - midX) * normal.x + (point.y - midY) * normal.y;
-      const length = Math.max(geometry.trimmedLength || 1, 1);
+      const offset = (pointer.x - anchorPoint.x) * normal.x + (pointer.y - anchorPoint.y) * normal.y;
+      const length = Math.max(geometry.trimmedLength || Math.hypot(dx, dy) || 1, 1);
       const normalized2 = clamp2(offset / length, -3.5, 3.5);
       drag.currentCurve = normalized2;
-      const delta = Math.abs((drag.startCurve ?? 0) - normalized2);
-      if (delta > 2e-3) {
+      const curveDelta = Math.abs((drag.startCurve ?? 0) - normalized2);
+      const anchorDelta = Math.abs((drag.startAnchor ?? DEFAULT_CURVE_ANCHOR) - drag.anchor);
+      if (curveDelta > 2e-3 || anchorDelta > 0.01) {
         drag.moved = true;
-        applyLineStyle(drag.line, { curve: normalized2 });
+        applyLineStyle(drag.line, { curve: normalized2, anchor: drag.anchor });
       }
       return;
     }
@@ -19105,8 +19298,14 @@
         }
       }
       if (drag.moved && Number.isFinite(drag.currentCurve)) {
-        await updateLink(drag.aId, drag.bId, { curve: drag.currentCurve });
-        applyLineStyle(drag.line, { curve: drag.currentCurve });
+        const anchorValue = Number.isFinite(drag.anchor) ? clamp2(drag.anchor, 0.1, 0.9) : void 0;
+        const patch = {
+          curve: drag.currentCurve,
+          ...Number.isFinite(anchorValue) ? { curveAnchor: anchorValue } : {}
+        };
+        await updateLink(drag.aId, drag.bId, patch);
+        applyLineStyle(drag.line, { curve: drag.currentCurve, anchor: anchorValue });
+        applyLinkPatchToState(drag.aId, drag.bId, patch);
         mapState.edgeDragJustCompleted = true;
         setTimeout(() => {
           mapState.edgeDragJustCompleted = false;
@@ -19383,9 +19582,10 @@
     circle.setAttribute("r", baseR * nodeScale);
     if (label) {
       label.setAttribute("x", pos.x);
-      const offset = (baseR + 12) * nodeScale;
+      const offset = (baseR + 16) * nodeScale;
       label.setAttribute("y", pos.y - offset);
-      label.setAttribute("font-size", 16 * labelScale);
+      const fontSize = Math.max(14, 16 * labelScale);
+      label.setAttribute("font-size", fontSize);
     }
   }
   function updateSelectionHighlight() {
@@ -19413,8 +19613,9 @@
     });
   }
   function updateEdgesFor(id) {
-    if (!mapState.g) return;
-    mapState.g.querySelectorAll(`path[data-a='${id}'], path[data-b='${id}']`).forEach((edge) => {
+    const layer = mapState.edgeLayer || mapState.g;
+    if (!layer) return;
+    layer.querySelectorAll(`path[data-a='${id}'], path[data-b='${id}']`).forEach((edge) => {
       edge.setAttribute("d", calcPath(edge.dataset.a, edge.dataset.b, edge));
       syncLineDecoration(edge);
     });
@@ -19923,15 +20124,16 @@
     if (!Number.isFinite(w) || w <= 0) return;
     const defaultSize = Number.isFinite(mapState.defaultViewSize) ? mapState.defaultViewSize : w;
     const zoomRatio = w / defaultSize;
-    const nodeScale = clamp2(Math.pow(zoomRatio, 0.08), 0.88, 1.3);
-    const labelScale = clamp2(Math.pow(zoomRatio, 0.25), 1, 2.6);
-    const lineScale = clamp2(Math.pow(zoomRatio, 0.06), 0.9, 1.2);
+    const nodeScale = clamp2(Math.pow(zoomRatio, 0.04), 0.92, 1.6);
+    const labelScale = clamp2(Math.pow(zoomRatio, 0.28), 1.1, 3.2);
+    const lineScale = clamp2(Math.pow(zoomRatio, 0.05), 0.95, 1.35);
     mapState.currentScales = { nodeScale, labelScale, lineScale, zoomRatio };
     updateMarkerSizes();
     mapState.elements.forEach((entry, id) => {
       updateNodeGeometry(id, entry);
     });
-    svg.querySelectorAll(".map-edge").forEach((line) => {
+    const edgeContainer = mapState.edgeLayer || svg;
+    edgeContainer.querySelectorAll(".map-edge").forEach((line) => {
       if (line.dataset.a && line.dataset.b) {
         line.setAttribute("d", calcPath(line.dataset.a, line.dataset.b, line));
       }
@@ -19953,6 +20155,22 @@
     const base = getNodeBaseRadius(id);
     const scales = getCurrentScales();
     return base * (scales.nodeScale || 1);
+  }
+  function getNodeFill(item) {
+    if (!item || typeof item !== "object") {
+      return "var(--gray)";
+    }
+    if (item.color && typeof item.color === "string") {
+      return item.color;
+    }
+    return KIND_FALLBACK_COLORS[item.kind] || "var(--gray)";
+  }
+  function refreshNodeColor(id) {
+    const entry = mapState.elements?.get(id);
+    const item = mapState.itemMap?.[id];
+    if (entry?.circle && item) {
+      entry.circle.setAttribute("fill", getNodeFill(item));
+    }
   }
   function computeTrimmedSegment(aId, bId, options = {}) {
     const positions = mapState.positions || {};
@@ -19984,57 +20202,13 @@
       trimmedLength: trimmedLength || 0
     };
   }
-  function getPairCurveSeed(aId, bId) {
-    const key = [String(aId ?? ""), String(bId ?? "")].sort().join("|");
-    let hash = 2166136261;
-    for (let i = 0; i < key.length; i += 1) {
-      hash ^= key.charCodeAt(i);
-      hash = Math.imul(hash, 16777619);
-    }
-    const normalized2 = (hash >>> 0) / 4294967295;
-    return normalized2 * 2 - 1;
-  }
-  function signedDistanceToLine(px, py, x1, y1, x2, y2) {
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const len = Math.hypot(dx, dy) || 1;
-    return ((px - x1) * dy - (py - y1) * dx) / len;
-  }
   function computeCurveOffset(aId, bId, segment, manualCurve) {
     const trimmedLength = segment.trimmedLength || Math.hypot(segment.endX - segment.startX, segment.endY - segment.startY) || 1;
     if (Number.isFinite(manualCurve)) {
       const normalized2 = clamp2(manualCurve, -3.5, 3.5);
       return normalized2 * trimmedLength;
     }
-    const seed = getPairCurveSeed(aId, bId);
-    const baseMagnitude = Math.min(160, Math.max(48, trimmedLength * 0.24));
-    const magnitude = baseMagnitude * (0.6 + Math.min(1, Math.abs(seed)) * 0.8);
-    let offset = magnitude * (seed === 0 ? 1 : Math.sign(seed));
-    const positions = mapState.positions || {};
-    const clearance = Math.max(36, trimmedLength * 0.18);
-    let bias = 0;
-    for (const id in positions) {
-      if (id === aId || id === bId) continue;
-      const p = positions[id];
-      if (!p) continue;
-      const radius = getNodeRadius(id);
-      const distance = signedDistanceToLine(p.x, p.y, segment.startX, segment.startY, segment.endX, segment.endY);
-      const absDistance = Math.abs(distance);
-      if (absDistance >= clearance + radius) continue;
-      const weight = 1 - Math.min(1, absDistance / (clearance + radius));
-      bias += weight * (distance >= 0 ? 1 : -1);
-    }
-    if (bias) {
-      const direction = bias > 0 ? 1 : -1;
-      offset = Math.abs(offset) * direction;
-      const amplification = Math.min(1.5, Math.abs(bias));
-      offset *= 1 + amplification * 0.45;
-    }
-    const minOffset = baseMagnitude * 0.35;
-    if (Math.abs(offset) < minOffset) {
-      offset = minOffset * (offset < 0 ? -1 : 1);
-    }
-    return offset;
+    return 0;
   }
   function computeStyleTrim(style, baseWidth) {
     const arrowAllowance = Math.max(12, baseWidth * 2.7);
@@ -20052,16 +20226,17 @@
     }
     return { trimA, trimB };
   }
-  function computeCurveControlPoint(aId, bId, segment, manualCurve) {
+  function computeCurveControlPoint(aId, bId, segment, manualCurve, manualAnchor) {
     const { startX, startY, endX, endY, ux, uy } = segment;
     const nx = -uy;
     const ny = ux;
-    const midX = (startX + endX) / 2;
-    const midY = (startY + endY) / 2;
+    const anchor = clamp2(Number.isFinite(Number(manualAnchor)) ? Number(manualAnchor) : DEFAULT_CURVE_ANCHOR, 0.1, 0.9);
+    const baseX = startX + (endX - startX) * anchor;
+    const baseY = startY + (endY - startY) * anchor;
     const offset = computeCurveOffset(aId, bId, segment, manualCurve);
-    const cx = midX + nx * offset;
-    const cy = midY + ny * offset;
-    return { cx, cy };
+    const cx = baseX + nx * offset;
+    const cy = baseY + ny * offset;
+    return { cx, cy, anchor };
   }
   function getLineGeometry(aId, bId, options = {}) {
     const line = options.line || null;
@@ -20075,12 +20250,21 @@
     if (Object.prototype.hasOwnProperty.call(options, "curve")) {
       const manual = Number(options.curve);
       curveOverride = Number.isFinite(manual) ? clamp2(manual, -3.5, 3.5) : void 0;
+    } else if (Object.prototype.hasOwnProperty.call(options, "curveAnchor") && !Object.prototype.hasOwnProperty.call(options, "curve")) {
     } else if (line && Object.prototype.hasOwnProperty.call(line.dataset || {}, "curve")) {
       const manual = Number(line.dataset.curve);
       curveOverride = Number.isFinite(manual) ? clamp2(manual, -3.5, 3.5) : void 0;
     }
-    const { cx, cy } = computeCurveControlPoint(aId, bId, segment, curveOverride);
-    return { ...segment, cx, cy, style, baseWidth };
+    let anchorOverride;
+    if (Object.prototype.hasOwnProperty.call(options, "anchor")) {
+      anchorOverride = normalizeAnchorValue(options.anchor);
+    } else if (Object.prototype.hasOwnProperty.call(options, "curveAnchor")) {
+      anchorOverride = normalizeAnchorValue(options.curveAnchor);
+    } else if (line && Object.prototype.hasOwnProperty.call(line.dataset || {}, "anchor")) {
+      anchorOverride = normalizeAnchorValue(line.dataset.anchor);
+    }
+    const { cx, cy, anchor } = computeCurveControlPoint(aId, bId, segment, curveOverride, anchorOverride);
+    return { ...segment, cx, cy, style, baseWidth, anchor: anchor ?? DEFAULT_CURVE_ANCHOR };
   }
   function getQuadraticPoint(start, control, end, t) {
     const mt = 1 - t;
@@ -20109,6 +20293,9 @@
     const hadCurveAttr = Object.prototype.hasOwnProperty.call(line.dataset || {}, "curve");
     const previousCurve = hadCurveAttr ? Number(line.dataset.curve) : void 0;
     const hasCurveOverride = Object.prototype.hasOwnProperty.call(info, "curve");
+    const hadAnchorAttr = Object.prototype.hasOwnProperty.call(line.dataset || {}, "anchor");
+    const previousAnchor = hadAnchorAttr ? Number(line.dataset.anchor) : void 0;
+    const hasAnchorOverride = Object.prototype.hasOwnProperty.call(info, "anchor") || Object.prototype.hasOwnProperty.call(info, "curveAnchor");
     let curve = hasCurveOverride ? Number(info.curve) : previousCurve;
     if (!Number.isFinite(curve)) {
       curve = void 0;
@@ -20118,6 +20305,17 @@
         line.dataset.curve = String(curve);
       } else {
         delete line.dataset.curve;
+      }
+    }
+    let anchor = hasAnchorOverride ? normalizeAnchorValue(Object.prototype.hasOwnProperty.call(info, "anchor") ? info.anchor : info.curveAnchor) : normalizeAnchorValue(previousAnchor);
+    if (!Number.isFinite(anchor)) {
+      anchor = void 0;
+    }
+    if (hasAnchorOverride) {
+      if (Number.isFinite(anchor)) {
+        line.dataset.anchor = String(anchor);
+      } else {
+        delete line.dataset.anchor;
       }
     }
     const color = info.color ?? previousColor ?? DEFAULT_LINK_COLOR;
@@ -20143,7 +20341,13 @@
     line.removeAttribute("marker-mid");
     line.removeAttribute("stroke-dasharray");
     line.classList.remove("edge-glow");
-    const geometryInfo = hasCurveOverride ? { ...info, curve } : info;
+    const effectiveAnchor = Number.isFinite(anchor) ? anchor : normalizeAnchorValue(line.dataset.anchor) ?? DEFAULT_CURVE_ANCHOR;
+    const geometryInfo = {
+      ...info,
+      curve,
+      anchor: effectiveAnchor,
+      curveAnchor: effectiveAnchor
+    };
     if (line.dataset.a && line.dataset.b) {
       line.setAttribute("d", calcPath(line.dataset.a, line.dataset.b, line, geometryInfo));
     }
@@ -20189,6 +20393,20 @@
   }
   function clamp2(value, min, max) {
     return Math.min(Math.max(value, min), max);
+  }
+  function normalizeAnchorValue(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return void 0;
+    return clamp2(num, 0.1, 0.9);
+  }
+  function getAnchorRange(handle) {
+    if (handle === "start") {
+      return { min: 0.1, max: 0.45 };
+    }
+    if (handle === "end") {
+      return { min: 0.55, max: 0.9 };
+    }
+    return { min: 0.3, max: 0.7 };
   }
   function updateLineStrokeWidth(line) {
     if (!line) return;
@@ -20427,6 +20645,15 @@
     apply(b, aId);
     await upsertItem(a);
     await upsertItem(b);
+  }
+  function applyLinkPatchToState(aId, bId, patch = {}) {
+    const apply = (item, otherId) => {
+      if (!item || !Array.isArray(item.links)) return;
+      const link = item.links.find((x) => x.id === otherId);
+      if (link) Object.assign(link, patch);
+    };
+    apply(mapState.itemMap?.[aId], bId);
+    apply(mapState.itemMap?.[bId], aId);
   }
 
   // js/ui/components/entry-controls.js
@@ -20763,4 +20990,5 @@
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
+  return __toCommonJS(main_exports);
 })();
