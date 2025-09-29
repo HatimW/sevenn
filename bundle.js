@@ -1,5 +1,181 @@
 (() => {
+  // js/storage/preferences.js
+  var STORAGE_KEY = "sevenn-ui-preferences";
+  var cache = null;
+  function canUseStorage() {
+    try {
+      return typeof localStorage !== "undefined";
+    } catch (err) {
+      return false;
+    }
+  }
+  function readPreferences() {
+    if (cache) {
+      return cache;
+    }
+    if (!canUseStorage()) {
+      cache = {};
+      return cache;
+    }
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        cache = {};
+        return cache;
+      }
+      const parsed = JSON.parse(raw);
+      cache = parsed && typeof parsed === "object" ? parsed : {};
+    } catch (err) {
+      console.warn("Failed to read UI preferences", err);
+      cache = {};
+    }
+    return cache;
+  }
+  function loadUIPreferences() {
+    const stored = readPreferences();
+    return stored ? { ...stored } : {};
+  }
+  function updateUIPreferences(patch) {
+    if (!patch || typeof patch !== "object") {
+      return loadUIPreferences();
+    }
+    const current = { ...readPreferences() };
+    let changed = false;
+    for (const [key, value] of Object.entries(patch)) {
+      if (typeof value === "undefined") continue;
+      if (current[key] !== value) {
+        current[key] = value;
+        changed = true;
+      }
+    }
+    if (!changed) {
+      return current;
+    }
+    cache = current;
+    if (canUseStorage()) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+      } catch (err) {
+        console.warn("Failed to persist UI preferences", err);
+      }
+    }
+    return current;
+  }
+
   // js/state.js
+  var DEFAULT_ENTRY_FILTERS = {
+    types: ["disease", "drug", "concept"],
+    block: "",
+    week: "",
+    onlyFav: false,
+    sort: "updated-desc"
+  };
+  var DEFAULT_LECTURE_STATE = {
+    query: "",
+    blockId: "",
+    week: "",
+    status: "",
+    tag: "",
+    sort: "position-asc",
+    openBlocks: [],
+    openWeeks: [],
+    openSnapshot: 0,
+    scrollTop: 0
+  };
+  var DEFAULT_ENTRY_LAYOUT = {
+    mode: "list",
+    columns: 3,
+    scale: 1,
+    controlsVisible: false
+  };
+  var preferences = loadUIPreferences();
+  function sanitizeEntryFilters(value) {
+    if (!value || typeof value !== "object") return {};
+    const next = {};
+    if (Array.isArray(value.types)) {
+      const unique = Array.from(
+        new Set(
+          value.types.map((entry) => typeof entry === "string" ? entry.trim() : "").filter(Boolean)
+        )
+      );
+      if (unique.length) next.types = unique;
+    }
+    if (Object.prototype.hasOwnProperty.call(value, "block")) {
+      next.block = String(value.block ?? "");
+    }
+    if (Object.prototype.hasOwnProperty.call(value, "week")) {
+      const raw = value.week;
+      if (raw === "" || raw === null || typeof raw === "undefined") {
+        next.week = "";
+      } else if (Number.isFinite(Number(raw))) {
+        next.week = String(Number(raw));
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(value, "onlyFav")) {
+      next.onlyFav = Boolean(value.onlyFav);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, "sort")) {
+      next.sort = String(value.sort ?? "");
+    }
+    return next;
+  }
+  function sanitizeLectureState(value, { forPersist = false } = {}) {
+    if (!value || typeof value !== "object") return {};
+    const next = {};
+    const stringKeys = ["query", "blockId", "week", "status", "tag", "sort"];
+    stringKeys.forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        next[key] = String(value[key] ?? "");
+      }
+    });
+    if (Array.isArray(value.openBlocks)) {
+      const uniqueBlocks = Array.from(
+        new Set(value.openBlocks.map((block) => String(block ?? "")))
+      );
+      next.openBlocks = uniqueBlocks;
+    }
+    if (Array.isArray(value.openWeeks)) {
+      const uniqueWeeks2 = Array.from(
+        new Set(value.openWeeks.map((week) => String(week ?? "")))
+      );
+      next.openWeeks = uniqueWeeks2;
+    }
+    if (Object.prototype.hasOwnProperty.call(value, "openSnapshot")) {
+      const stamp = Number(value.openSnapshot);
+      next.openSnapshot = Number.isFinite(stamp) ? stamp : 0;
+    }
+    if (!forPersist && Object.prototype.hasOwnProperty.call(value, "scrollTop")) {
+      const top = Number(value.scrollTop);
+      next.scrollTop = Number.isFinite(top) && top > 0 ? Math.max(0, Math.round(top)) : 0;
+    }
+    return next;
+  }
+  function sanitizeEntryLayout(value) {
+    if (!value || typeof value !== "object") return {};
+    const next = {};
+    if (Object.prototype.hasOwnProperty.call(value, "mode")) {
+      next.mode = value.mode === "grid" ? "grid" : "list";
+    }
+    if (Object.prototype.hasOwnProperty.call(value, "columns")) {
+      const cols = Number(value.columns);
+      if (!Number.isNaN(cols)) {
+        next.columns = Math.max(1, Math.min(6, Math.round(cols)));
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(value, "scale")) {
+      const scl = Number(value.scale);
+      if (!Number.isNaN(scl)) {
+        next.scale = Math.max(0.6, Math.min(1.4, scl));
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(value, "controlsVisible")) {
+      next.controlsVisible = Boolean(value.controlsVisible);
+    }
+    return next;
+  }
+  var initialFilters = { ...DEFAULT_ENTRY_FILTERS, ...sanitizeEntryFilters(preferences.filters) };
+  var initialLectures = { ...DEFAULT_LECTURE_STATE, ...sanitizeLectureState(preferences.lectures || {}) };
+  var initialEntryLayout = { ...DEFAULT_ENTRY_LAYOUT, ...sanitizeEntryLayout(preferences.entryLayout) };
   var state = {
     tab: "Block Board",
     subtab: {
@@ -14,9 +190,9 @@
       Settings: ""
     },
     query: "",
-    filters: { types: ["disease", "drug", "concept"], block: "", week: "", onlyFav: false, sort: "updated-desc" },
-    lectures: { query: "", blockId: "", week: "", status: "", tag: "", sort: "position-asc" },
-    entryLayout: { mode: "list", columns: 3, scale: 1, controlsVisible: false },
+    filters: initialFilters,
+    lectures: initialLectures,
+    entryLayout: initialEntryLayout,
     blockBoard: { collapsedBlocks: [], hiddenTimelines: [] },
     builder: {
       blocks: [],
@@ -58,7 +234,37 @@
     state.query = q;
   }
   function setFilters(patch) {
-    Object.assign(state.filters, patch);
+    if (!patch) return;
+    const next = { ...state.filters };
+    if (Array.isArray(patch.types)) {
+      const unique = Array.from(
+        new Set(
+          patch.types.map((entry) => typeof entry === "string" ? entry.trim() : "").filter(Boolean)
+        )
+      );
+      if (unique.length) {
+        next.types = unique;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "block")) {
+      next.block = String(patch.block ?? "");
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "week")) {
+      const raw = patch.week;
+      if (raw === "" || raw === null || typeof raw === "undefined") {
+        next.week = "";
+      } else if (Number.isFinite(Number(raw))) {
+        next.week = String(Number(raw));
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "onlyFav")) {
+      next.onlyFav = Boolean(patch.onlyFav);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "sort")) {
+      next.sort = String(patch.sort ?? "");
+    }
+    state.filters = next;
+    updateUIPreferences({ filters: sanitizeEntryFilters(next) });
   }
   function setBuilder(patch) {
     Object.assign(state.builder, patch);
@@ -106,24 +312,15 @@
   function setLecturesState(patch) {
     if (!patch) return;
     if (!state.lectures) {
-      state.lectures = { query: "", blockId: "", week: "", status: "", tag: "", sort: "position-asc" };
+      state.lectures = { ...DEFAULT_LECTURE_STATE };
     }
     const next = { ...state.lectures };
-    if (Object.prototype.hasOwnProperty.call(patch, "query")) {
-      next.query = String(patch.query ?? "");
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, "blockId")) {
-      next.blockId = String(patch.blockId ?? "");
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, "week")) {
-      next.week = String(patch.week ?? "");
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, "status")) {
-      next.status = String(patch.status ?? "");
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, "tag")) {
-      next.tag = String(patch.tag ?? "");
-    }
+    const stringKeys = ["query", "blockId", "week", "status", "tag"];
+    stringKeys.forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(patch, key)) {
+        next[key] = String(patch[key] ?? "");
+      }
+    });
     if (Object.prototype.hasOwnProperty.call(patch, "sort")) {
       const value = patch.sort;
       if (typeof value === "string") {
@@ -134,7 +331,26 @@
         next.sort = `${field}-${direction}`;
       }
     }
+    if (Array.isArray(patch.openBlocks)) {
+      next.openBlocks = Array.from(
+        new Set(patch.openBlocks.map((block) => String(block ?? "")))
+      );
+    }
+    if (Array.isArray(patch.openWeeks)) {
+      next.openWeeks = Array.from(
+        new Set(patch.openWeeks.map((week) => String(week ?? "")))
+      );
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "openSnapshot")) {
+      const stamp = Number(patch.openSnapshot);
+      next.openSnapshot = Number.isFinite(stamp) ? stamp : 0;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "scrollTop")) {
+      const top = Number(patch.scrollTop);
+      next.scrollTop = Number.isFinite(top) && top > 0 ? Math.max(0, Math.round(top)) : 0;
+    }
     state.lectures = next;
+    updateUIPreferences({ lectures: sanitizeLectureState(next, { forPersist: true }) });
   }
   function setCardsState(patch) {
     if (!patch) return;
@@ -194,6 +410,7 @@
     if (Object.prototype.hasOwnProperty.call(patch, "controlsVisible")) {
       layout.controlsVisible = Boolean(patch.controlsVisible);
     }
+    updateUIPreferences({ entryLayout: sanitizeEntryLayout(layout) });
   }
   function setStudySelectedMode(mode) {
     if (!state.study) state.study = { selectedMode: "Flashcards" };
@@ -1628,11 +1845,11 @@
     const db = await dbPromise;
     return db.transaction(name, mode).objectStore(name);
   }
-  function canUseStorage() {
+  function canUseStorage2() {
     return typeof localStorage !== "undefined";
   }
   function readMapConfigBackup() {
-    if (!canUseStorage()) return null;
+    if (!canUseStorage2()) return null;
     try {
       const raw = localStorage.getItem(MAP_CONFIG_BACKUP_KEY);
       if (!raw) return null;
@@ -1646,7 +1863,7 @@
     return null;
   }
   function writeMapConfigBackup(config) {
-    if (!canUseStorage()) return;
+    if (!canUseStorage2()) return;
     try {
       localStorage.setItem(MAP_CONFIG_BACKUP_KEY, JSON.stringify(config));
     } catch (err) {
@@ -1654,7 +1871,7 @@
     }
   }
   async function writeDataBackup() {
-    if (!canUseStorage()) return;
+    if (!canUseStorage2()) return;
     try {
       const db = await dbPromise;
       if (!db || typeof db.transaction !== "function") return;
@@ -1677,7 +1894,7 @@
     }
   }
   function scheduleBackup() {
-    if (!canUseStorage()) return;
+    if (!canUseStorage2()) return;
     if (backupTimer) clearTimeout(backupTimer);
     backupTimer = setTimeout(() => {
       backupTimer = null;
@@ -1685,7 +1902,7 @@
     }, 1e3);
   }
   async function maybeRestoreFromBackup() {
-    if (!canUseStorage()) return;
+    if (!canUseStorage2()) return;
     let parsed;
     try {
       const raw = localStorage.getItem(DATA_BACKUP_KEY);
@@ -2348,7 +2565,7 @@
   }
 
   // js/storage/block-catalog.js
-  var cache = null;
+  var cache2 = null;
   var pending = null;
   function cloneBlock(block) {
     if (!block || typeof block !== "object") return block;
@@ -2408,14 +2625,14 @@
         const normalizedBlocks = (blocks || []).map(cloneBlock);
         const normalizedIndex = cloneLectureIndex(lectureIndex || {});
         const lectureLists = buildLectureLists(normalizedIndex);
-        cache = { blocks: normalizedBlocks, lectureIndex: normalizedIndex, lectureLists };
-        return snapshotCatalog(cache);
+        cache2 = { blocks: normalizedBlocks, lectureIndex: normalizedIndex, lectureLists };
+        return snapshotCatalog(cache2);
       })();
     }
     return pending;
   }
   function invalidateBlockCatalog() {
-    cache = null;
+    cache2 = null;
     pending = null;
   }
 
@@ -9648,6 +9865,35 @@
     }
     return state.lectures;
   }
+  function captureLectureViewState() {
+    const container = document.querySelector(".lectures-view");
+    if (!container) {
+      return;
+    }
+    const openBlocks = Array.from(
+      container.querySelectorAll(".lectures-block-group")
+    ).filter((details) => {
+      if (!details) return false;
+      if (typeof details.open === "boolean") return details.open;
+      return details.hasAttribute("open");
+    }).map((details) => String(details.dataset.blockKey ?? ""));
+    const openWeeks = Array.from(container.querySelectorAll(".lectures-week-group")).filter((details) => {
+      if (!details) return false;
+      if (typeof details.open === "boolean") return details.open;
+      return details.hasAttribute("open");
+    }).map((details) => {
+      const blockEl = details.closest(".lectures-block-group");
+      const blockKey = blockEl?.dataset?.blockKey ?? "";
+      const weekValue = details.dataset?.weekValue ?? "";
+      return `${String(blockKey)}::${String(weekValue)}`;
+    });
+    setLecturesState({
+      openBlocks,
+      openWeeks,
+      openSnapshot: Date.now(),
+      scrollTop: window.scrollY
+    });
+  }
   function collectLectures(catalog) {
     const lists = catalog?.lectureLists || {};
     const result = [];
@@ -10541,6 +10787,58 @@
     const weekFilter = String(filters?.week || "").trim();
     const now = Date.now();
     const sortConfig = normalizeLectureSort(filters?.sort);
+    const openSnapshot = Number(filters?.openSnapshot) || 0;
+    const storedBlockKeys = new Set(
+      Array.isArray(filters?.openBlocks) ? filters.openBlocks.map((value) => String(value ?? "")) : []
+    );
+    const storedWeekKeys = new Set(
+      Array.isArray(filters?.openWeeks) ? filters.openWeeks.map((value) => String(value ?? "")) : []
+    );
+    const useStoredExpansion = openSnapshot > 0;
+    function composeWeekKey(blockKey, weekValue) {
+      return `${String(blockKey)}::${String(weekValue)}`;
+    }
+    function recordBlockOpen(blockKey, isOpen) {
+      const key = String(blockKey ?? "");
+      const lectureState = ensureLectureState();
+      const openBlocks = new Set(
+        Array.isArray(lectureState.openBlocks) ? lectureState.openBlocks.map((value) => String(value ?? "")) : []
+      );
+      const openWeeks = new Set(
+        Array.isArray(lectureState.openWeeks) ? lectureState.openWeeks.map((value) => String(value ?? "")) : []
+      );
+      if (isOpen) {
+        openBlocks.add(key);
+      } else {
+        openBlocks.delete(key);
+        Array.from(openWeeks).forEach((entry) => {
+          if (entry.startsWith(`${key}::`)) {
+            openWeeks.delete(entry);
+          }
+        });
+      }
+      setLecturesState({
+        openBlocks: Array.from(openBlocks),
+        openWeeks: Array.from(openWeeks),
+        openSnapshot: Date.now()
+      });
+    }
+    function recordWeekOpen(blockKey, weekValue, isOpen) {
+      const composite = composeWeekKey(blockKey, weekValue);
+      const lectureState = ensureLectureState();
+      const openWeeks = new Set(
+        Array.isArray(lectureState.openWeeks) ? lectureState.openWeeks.map((value) => String(value ?? "")) : []
+      );
+      if (isOpen) {
+        openWeeks.add(composite);
+      } else {
+        openWeeks.delete(composite);
+      }
+      setLecturesState({
+        openWeeks: Array.from(openWeeks),
+        openSnapshot: Date.now()
+      });
+    }
     const blockGroups = /* @__PURE__ */ new Map();
     lectures.forEach((lecture) => {
       if (!lecture) return;
@@ -10589,7 +10887,10 @@
     sortedGroups.forEach((group) => {
       const blockDetails = document.createElement("details");
       blockDetails.className = "lectures-block-group";
-      blockDetails.dataset.blockId = String(group.blockId ?? "");
+      const normalizedGroupId = String(group.blockId ?? "");
+      const blockKey = String(group.key ?? normalizedGroupId);
+      blockDetails.dataset.blockId = normalizedGroupId;
+      blockDetails.dataset.blockKey = blockKey;
       const blockInfo = group.block || {};
       if (blockInfo.color) {
         blockDetails.style.setProperty("--block-accent", blockInfo.color);
@@ -10635,16 +10936,44 @@
         if (!Number.isFinite(aNum) && Number.isFinite(bNum)) return 1;
         return String(bKey).localeCompare(String(aKey));
       });
-      const normalizedGroupId = String(group.blockId ?? "");
-      const shouldOpenBlock = blockFilter ? blockFilter === normalizedGroupId : defaultBlockId === normalizedGroupId;
+      const matchesWeekFilter = weekFilter ? sortedWeeks.some(([weekKey]) => {
+        const normalized2 = weekKey === "__no-week" ? "" : String(weekKey);
+        return normalized2 === weekFilter;
+      }) : false;
+      let shouldOpenBlock;
+      if (blockFilter) {
+        shouldOpenBlock = blockFilter === normalizedGroupId;
+      } else if (matchesWeekFilter) {
+        shouldOpenBlock = true;
+      } else if (useStoredExpansion) {
+        shouldOpenBlock = storedBlockKeys.has(blockKey);
+      } else {
+        shouldOpenBlock = defaultBlockId === normalizedGroupId;
+      }
       blockDetails.open = shouldOpenBlock;
+      blockDetails.addEventListener("toggle", () => {
+        recordBlockOpen(blockKey, blockDetails.open);
+      });
       sortedWeeks.forEach(([weekKey, weekLectures], index) => {
         const weekDetails = document.createElement("details");
         weekDetails.className = "lectures-week-group";
-        const normalizedWeek = weekKey === "__no-week" ? "" : weekKey;
+        const normalizedWeek = weekKey === "__no-week" ? "" : String(weekKey);
         weekDetails.dataset.week = normalizedWeek;
-        const shouldOpenWeek = weekFilter ? weekFilter === normalizedWeek : blockDetails.open && index === 0;
-        weekDetails.open = shouldOpenWeek;
+        weekDetails.dataset.weekValue = normalizedWeek;
+        weekDetails.dataset.weekKey = String(weekKey ?? "");
+        const compositeKey = composeWeekKey(blockKey, normalizedWeek);
+        let shouldOpenWeek;
+        if (weekFilter) {
+          shouldOpenWeek = weekFilter === normalizedWeek;
+        } else if (useStoredExpansion) {
+          shouldOpenWeek = storedWeekKeys.has(compositeKey);
+        } else {
+          shouldOpenWeek = blockDetails.open && index === 0;
+        }
+        weekDetails.open = blockDetails.open && shouldOpenWeek;
+        weekDetails.addEventListener("toggle", () => {
+          recordWeekOpen(blockKey, normalizedWeek, weekDetails.open);
+        });
         const weekSummary = document.createElement("summary");
         weekSummary.className = "lectures-week-summary";
         const weekTitle = document.createElement("span");
@@ -11773,6 +12102,10 @@
     const lectureLists = catalog.lectureLists || {};
     const filtered = applyFilters(allLectures, filters);
     const defaultPassPlan = plannerDefaultsToPassPlan(settings?.plannerDefaults);
+    const requestRedraw = () => {
+      captureLectureViewState();
+      return redraw();
+    };
     const resolveBlockLabel = (blockInfo) => {
       if (!blockInfo) return "block";
       return blockInfo.title || blockInfo.name || blockInfo.blockId || "block";
@@ -11843,7 +12176,7 @@
         }
         await importLectureTransfer(payload, { strategy });
         await invalidateBlockCatalog();
-        await redraw();
+        await requestRedraw();
         alert("Import complete.");
       } catch (err) {
         console.error("Failed to import lecture bundle", err);
@@ -11854,21 +12187,34 @@
     const layout = document.createElement("div");
     layout.className = "lectures-view";
     root.appendChild(layout);
-    const toolbar = buildToolbar(blocks, allLectures, lectureLists, redraw, defaultPassPlan, handleImportBundle);
+    const toolbar = buildToolbar(
+      blocks,
+      allLectures,
+      lectureLists,
+      requestRedraw,
+      defaultPassPlan,
+      handleImportBundle
+    );
     layout.appendChild(toolbar);
     const table = renderLectureTable(
       blocks,
       filtered,
       filters,
-      (lecture) => handleEdit(lecture, blocks, lectureLists, redraw),
-      (lecture) => handleDelete(lecture, redraw),
-      (lecture, pass) => handlePassEdit(lecture, pass, redraw),
-      (lecture, pass, checked) => handlePassToggle(lecture, pass, checked, redraw),
+      (lecture) => handleEdit(lecture, blocks, lectureLists, requestRedraw),
+      (lecture) => handleDelete(lecture, requestRedraw),
+      (lecture, pass) => handlePassEdit(lecture, pass, requestRedraw),
+      (lecture, pass, checked) => handlePassToggle(lecture, pass, checked, requestRedraw),
       (lecture, blockInfo) => handleExportLectureBundle(lecture, blockInfo || blocks.find((block) => block.blockId === lecture.blockId)),
       (blockInfo, weekValue) => handleExportWeekBundle(blockInfo, weekValue),
       (blockInfo) => handleExportBlockBundle(blockInfo)
     );
     layout.appendChild(table);
+    requestAnimationFrame(() => {
+      const target = Number(filters?.scrollTop);
+      if (Number.isFinite(target) && target > 0) {
+        window.scrollTo({ top: target, left: 0, behavior: "auto" });
+      }
+    });
   }
 
   // js/ui/components/section-utils.js

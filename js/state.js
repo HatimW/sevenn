@@ -1,3 +1,128 @@
+import { loadUIPreferences, updateUIPreferences } from './storage/preferences.js';
+
+const DEFAULT_ENTRY_FILTERS = {
+  types: ['disease', 'drug', 'concept'],
+  block: '',
+  week: '',
+  onlyFav: false,
+  sort: 'updated-desc'
+};
+
+const DEFAULT_LECTURE_STATE = {
+  query: '',
+  blockId: '',
+  week: '',
+  status: '',
+  tag: '',
+  sort: 'position-asc',
+  openBlocks: [],
+  openWeeks: [],
+  openSnapshot: 0,
+  scrollTop: 0
+};
+
+const DEFAULT_ENTRY_LAYOUT = {
+  mode: 'list',
+  columns: 3,
+  scale: 1,
+  controlsVisible: false
+};
+
+const preferences = loadUIPreferences();
+
+function sanitizeEntryFilters(value) {
+  if (!value || typeof value !== 'object') return {};
+  const next = {};
+  if (Array.isArray(value.types)) {
+    const unique = Array.from(
+      new Set(
+        value.types
+          .map(entry => (typeof entry === 'string' ? entry.trim() : ''))
+          .filter(Boolean)
+      )
+    );
+    if (unique.length) next.types = unique;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'block')) {
+    next.block = String(value.block ?? '');
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'week')) {
+    const raw = value.week;
+    if (raw === '' || raw === null || typeof raw === 'undefined') {
+      next.week = '';
+    } else if (Number.isFinite(Number(raw))) {
+      next.week = String(Number(raw));
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'onlyFav')) {
+    next.onlyFav = Boolean(value.onlyFav);
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'sort')) {
+    next.sort = String(value.sort ?? '');
+  }
+  return next;
+}
+
+function sanitizeLectureState(value, { forPersist = false } = {}) {
+  if (!value || typeof value !== 'object') return {};
+  const next = {};
+  const stringKeys = ['query', 'blockId', 'week', 'status', 'tag', 'sort'];
+  stringKeys.forEach(key => {
+    if (Object.prototype.hasOwnProperty.call(value, key)) {
+      next[key] = String(value[key] ?? '');
+    }
+  });
+  if (Array.isArray(value.openBlocks)) {
+    const uniqueBlocks = Array.from(
+      new Set(value.openBlocks.map(block => String(block ?? '')))
+    );
+    next.openBlocks = uniqueBlocks;
+  }
+  if (Array.isArray(value.openWeeks)) {
+    const uniqueWeeks = Array.from(
+      new Set(value.openWeeks.map(week => String(week ?? '')))
+    );
+    next.openWeeks = uniqueWeeks;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'openSnapshot')) {
+    const stamp = Number(value.openSnapshot);
+    next.openSnapshot = Number.isFinite(stamp) ? stamp : 0;
+  }
+  if (!forPersist && Object.prototype.hasOwnProperty.call(value, 'scrollTop')) {
+    const top = Number(value.scrollTop);
+    next.scrollTop = Number.isFinite(top) && top > 0 ? Math.max(0, Math.round(top)) : 0;
+  }
+  return next;
+}
+
+function sanitizeEntryLayout(value) {
+  if (!value || typeof value !== 'object') return {};
+  const next = {};
+  if (Object.prototype.hasOwnProperty.call(value, 'mode')) {
+    next.mode = value.mode === 'grid' ? 'grid' : 'list';
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'columns')) {
+    const cols = Number(value.columns);
+    if (!Number.isNaN(cols)) {
+      next.columns = Math.max(1, Math.min(6, Math.round(cols)));
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'scale')) {
+    const scl = Number(value.scale);
+    if (!Number.isNaN(scl)) {
+      next.scale = Math.max(0.6, Math.min(1.4, scl));
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'controlsVisible')) {
+    next.controlsVisible = Boolean(value.controlsVisible);
+  }
+  return next;
+}
+
+const initialFilters = { ...DEFAULT_ENTRY_FILTERS, ...sanitizeEntryFilters(preferences.filters) };
+const initialLectures = { ...DEFAULT_LECTURE_STATE, ...sanitizeLectureState(preferences.lectures || {}) };
+const initialEntryLayout = { ...DEFAULT_ENTRY_LAYOUT, ...sanitizeEntryLayout(preferences.entryLayout) };
+
 export const state = {
   tab: "Block Board",
   subtab: {
@@ -11,9 +136,9 @@ export const state = {
     Settings: ""
   },
   query: "",
-  filters: { types:["disease","drug","concept"], block:"", week:"", onlyFav:false, sort:"updated-desc" },
-  lectures: { query: '', blockId: '', week: '', status: '', tag: '', sort: 'position-asc' },
-  entryLayout: { mode: 'list', columns: 3, scale: 1, controlsVisible: false },
+  filters: initialFilters,
+  lectures: initialLectures,
+  entryLayout: initialEntryLayout,
   blockBoard: { collapsedBlocks: [], hiddenTimelines: [] },
   builder: {
     blocks:[],
@@ -49,7 +174,41 @@ export const state = {
 export function setTab(t){ state.tab = t; }
 export function setSubtab(tab, sub){ state.subtab[tab] = sub; }
 export function setQuery(q){ state.query = q; }
-export function setFilters(patch){ Object.assign(state.filters, patch); }
+export function setFilters(patch) {
+  if (!patch) return;
+  const next = { ...state.filters };
+  if (Array.isArray(patch.types)) {
+    const unique = Array.from(
+      new Set(
+        patch.types
+          .map(entry => (typeof entry === 'string' ? entry.trim() : ''))
+          .filter(Boolean)
+      )
+    );
+    if (unique.length) {
+      next.types = unique;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'block')) {
+    next.block = String(patch.block ?? '');
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'week')) {
+    const raw = patch.week;
+    if (raw === '' || raw === null || typeof raw === 'undefined') {
+      next.week = '';
+    } else if (Number.isFinite(Number(raw))) {
+      next.week = String(Number(raw));
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'onlyFav')) {
+    next.onlyFav = Boolean(patch.onlyFav);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'sort')) {
+    next.sort = String(patch.sort ?? '');
+  }
+  state.filters = next;
+  updateUIPreferences({ filters: sanitizeEntryFilters(next) });
+}
 export function setBuilder(patch){ Object.assign(state.builder, patch); }
 export function setBlockBoardState(patch) {
   if (!patch) return;
@@ -94,39 +253,51 @@ export function setBlockBoardState(patch) {
 export function setLecturesState(patch) {
   if (!patch) return;
   if (!state.lectures) {
-    state.lectures = { query: '', blockId: '', week: '', status: '', tag: '', sort: 'position-asc' };
+    state.lectures = { ...DEFAULT_LECTURE_STATE };
   }
   const next = { ...state.lectures };
-  if (Object.prototype.hasOwnProperty.call(patch, 'query')) {
-    next.query = String(patch.query ?? '');
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, 'blockId')) {
-    next.blockId = String(patch.blockId ?? '');
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, 'week')) {
-    next.week = String(patch.week ?? '');
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, 'status')) {
-    next.status = String(patch.status ?? '');
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, 'tag')) {
-    next.tag = String(patch.tag ?? '');
-  }
+  const stringKeys = ['query', 'blockId', 'week', 'status', 'tag'];
+  stringKeys.forEach(key => {
+    if (Object.prototype.hasOwnProperty.call(patch, key)) {
+      next[key] = String(patch[key] ?? '');
+    }
+  });
   if (Object.prototype.hasOwnProperty.call(patch, 'sort')) {
     const value = patch.sort;
     if (typeof value === 'string') {
       next.sort = value;
     } else if (value && typeof value === 'object') {
-      const field = typeof value.field === 'string' && value.field.trim() ? value.field.trim() : 'position';
+      const field =
+        typeof value.field === 'string' && value.field.trim() ? value.field.trim() : 'position';
       const direction = value.direction === 'desc' ? 'desc' : 'asc';
       next.sort = `${field}-${direction}`;
     }
   }
+  if (Array.isArray(patch.openBlocks)) {
+    next.openBlocks = Array.from(
+      new Set(patch.openBlocks.map(block => String(block ?? '')))
+    );
+  }
+  if (Array.isArray(patch.openWeeks)) {
+    next.openWeeks = Array.from(
+      new Set(patch.openWeeks.map(week => String(week ?? '')))
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'openSnapshot')) {
+    const stamp = Number(patch.openSnapshot);
+    next.openSnapshot = Number.isFinite(stamp) ? stamp : 0;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'scrollTop')) {
+    const top = Number(patch.scrollTop);
+    next.scrollTop = Number.isFinite(top) && top > 0 ? Math.max(0, Math.round(top)) : 0;
+  }
   state.lectures = next;
+  updateUIPreferences({ lectures: sanitizeLectureState(next, { forPersist: true }) });
 }
 
 export function resetLecturesState() {
-  state.lectures = { query: '', blockId: '', week: '', status: '', tag: '', sort: 'position-asc' };
+  state.lectures = { ...DEFAULT_LECTURE_STATE };
+  updateUIPreferences({ lectures: sanitizeLectureState(state.lectures, { forPersist: true }) });
 }
 export function setCardsState(patch){
   if (!patch) return;
@@ -155,7 +326,7 @@ export function setExamAttemptExpanded(examId, expanded){
 }
 export function setBlockMode(patch){ Object.assign(state.blockMode, patch); }
 export function resetBlockMode(){ state.blockMode = { section:"", assignments:{}, reveal:{}, order:{} }; }
-export function setEntryLayout(patch){
+export function setEntryLayout(patch) {
   if (!patch) return;
   const layout = state.entryLayout;
   if (Object.prototype.hasOwnProperty.call(patch, 'columns')) {
@@ -176,6 +347,7 @@ export function setEntryLayout(patch){
   if (Object.prototype.hasOwnProperty.call(patch, 'controlsVisible')) {
     layout.controlsVisible = Boolean(patch.controlsVisible);
   }
+  updateUIPreferences({ entryLayout: sanitizeEntryLayout(layout) });
 }
 
 export function setStudySelectedMode(mode) {
