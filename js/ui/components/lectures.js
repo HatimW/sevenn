@@ -26,6 +26,40 @@ function ensureLectureState() {
   return state.lectures;
 }
 
+function captureLectureViewState() {
+  const container = document.querySelector('.lectures-view');
+  if (!container) {
+    return;
+  }
+  const openBlocks = Array.from(
+    container.querySelectorAll('.lectures-block-group')
+  )
+    .filter(details => {
+      if (!details) return false;
+      if (typeof details.open === 'boolean') return details.open;
+      return details.hasAttribute('open');
+    })
+    .map(details => String(details.dataset.blockKey ?? ''));
+  const openWeeks = Array.from(container.querySelectorAll('.lectures-week-group'))
+    .filter(details => {
+      if (!details) return false;
+      if (typeof details.open === 'boolean') return details.open;
+      return details.hasAttribute('open');
+    })
+    .map(details => {
+      const blockEl = details.closest('.lectures-block-group');
+      const blockKey = blockEl?.dataset?.blockKey ?? '';
+      const weekValue = details.dataset?.weekValue ?? '';
+      return `${String(blockKey)}::${String(weekValue)}`;
+    });
+  setLecturesState({
+    openBlocks,
+    openWeeks,
+    openSnapshot: Date.now(),
+    scrollTop: window.scrollY
+  });
+}
+
 function collectLectures(catalog) {
   const lists = catalog?.lectureLists || {};
   const result = [];
@@ -1116,6 +1150,71 @@ function renderLectureTable(
   const weekFilter = String(filters?.week || '').trim();
   const now = Date.now();
   const sortConfig = normalizeLectureSort(filters?.sort);
+  const openSnapshot = Number(filters?.openSnapshot) || 0;
+  const storedBlockKeys = new Set(
+    Array.isArray(filters?.openBlocks)
+      ? filters.openBlocks.map(value => String(value ?? ''))
+      : []
+  );
+  const storedWeekKeys = new Set(
+    Array.isArray(filters?.openWeeks)
+      ? filters.openWeeks.map(value => String(value ?? ''))
+      : []
+  );
+  const useStoredExpansion = openSnapshot > 0;
+
+  function composeWeekKey(blockKey, weekValue) {
+    return `${String(blockKey)}::${String(weekValue)}`;
+  }
+
+  function recordBlockOpen(blockKey, isOpen) {
+    const key = String(blockKey ?? '');
+    const lectureState = ensureLectureState();
+    const openBlocks = new Set(
+      Array.isArray(lectureState.openBlocks)
+        ? lectureState.openBlocks.map(value => String(value ?? ''))
+        : []
+    );
+    const openWeeks = new Set(
+      Array.isArray(lectureState.openWeeks)
+        ? lectureState.openWeeks.map(value => String(value ?? ''))
+        : []
+    );
+    if (isOpen) {
+      openBlocks.add(key);
+    } else {
+      openBlocks.delete(key);
+      Array.from(openWeeks).forEach(entry => {
+        if (entry.startsWith(`${key}::`)) {
+          openWeeks.delete(entry);
+        }
+      });
+    }
+    setLecturesState({
+      openBlocks: Array.from(openBlocks),
+      openWeeks: Array.from(openWeeks),
+      openSnapshot: Date.now()
+    });
+  }
+
+  function recordWeekOpen(blockKey, weekValue, isOpen) {
+    const composite = composeWeekKey(blockKey, weekValue);
+    const lectureState = ensureLectureState();
+    const openWeeks = new Set(
+      Array.isArray(lectureState.openWeeks)
+        ? lectureState.openWeeks.map(value => String(value ?? ''))
+        : []
+    );
+    if (isOpen) {
+      openWeeks.add(composite);
+    } else {
+      openWeeks.delete(composite);
+    }
+    setLecturesState({
+      openWeeks: Array.from(openWeeks),
+      openSnapshot: Date.now()
+    });
+  }
 
   const blockGroups = new Map();
 
@@ -1170,7 +1269,10 @@ function renderLectureTable(
   sortedGroups.forEach(group => {
     const blockDetails = document.createElement('details');
     blockDetails.className = 'lectures-block-group';
-    blockDetails.dataset.blockId = String(group.blockId ?? '');
+    const normalizedGroupId = String(group.blockId ?? '');
+    const blockKey = String(group.key ?? normalizedGroupId);
+    blockDetails.dataset.blockId = normalizedGroupId;
+    blockDetails.dataset.blockKey = blockKey;
     const blockInfo = group.block || {};
     if (blockInfo.color) {
       blockDetails.style.setProperty('--block-accent', blockInfo.color);
@@ -1224,21 +1326,48 @@ function renderLectureTable(
       return String(bKey).localeCompare(String(aKey));
     });
 
-    const normalizedGroupId = String(group.blockId ?? '');
-    const shouldOpenBlock = blockFilter
-      ? blockFilter === normalizedGroupId
-      : defaultBlockId === normalizedGroupId;
+    const matchesWeekFilter = weekFilter
+      ? sortedWeeks.some(([weekKey]) => {
+          const normalized = weekKey === '__no-week' ? '' : String(weekKey);
+          return normalized === weekFilter;
+        })
+      : false;
+
+    let shouldOpenBlock;
+    if (blockFilter) {
+      shouldOpenBlock = blockFilter === normalizedGroupId;
+    } else if (matchesWeekFilter) {
+      shouldOpenBlock = true;
+    } else if (useStoredExpansion) {
+      shouldOpenBlock = storedBlockKeys.has(blockKey);
+    } else {
+      shouldOpenBlock = defaultBlockId === normalizedGroupId;
+    }
     blockDetails.open = shouldOpenBlock;
+    blockDetails.addEventListener('toggle', () => {
+      recordBlockOpen(blockKey, blockDetails.open);
+    });
 
     sortedWeeks.forEach(([weekKey, weekLectures], index) => {
       const weekDetails = document.createElement('details');
       weekDetails.className = 'lectures-week-group';
-      const normalizedWeek = weekKey === '__no-week' ? '' : weekKey;
+      const normalizedWeek = weekKey === '__no-week' ? '' : String(weekKey);
       weekDetails.dataset.week = normalizedWeek;
-      const shouldOpenWeek = weekFilter
-        ? weekFilter === normalizedWeek
-        : blockDetails.open && index === 0;
-      weekDetails.open = shouldOpenWeek;
+      weekDetails.dataset.weekValue = normalizedWeek;
+      weekDetails.dataset.weekKey = String(weekKey ?? '');
+      const compositeKey = composeWeekKey(blockKey, normalizedWeek);
+      let shouldOpenWeek;
+      if (weekFilter) {
+        shouldOpenWeek = weekFilter === normalizedWeek;
+      } else if (useStoredExpansion) {
+        shouldOpenWeek = storedWeekKeys.has(compositeKey);
+      } else {
+        shouldOpenWeek = blockDetails.open && index === 0;
+      }
+      weekDetails.open = blockDetails.open && shouldOpenWeek;
+      weekDetails.addEventListener('toggle', () => {
+        recordWeekOpen(blockKey, normalizedWeek, weekDetails.open);
+      });
 
       const weekSummary = document.createElement('summary');
       weekSummary.className = 'lectures-week-summary';
@@ -2545,6 +2674,10 @@ export async function renderLectures(root, redraw) {
   const lectureLists = catalog.lectureLists || {};
   const filtered = applyFilters(allLectures, filters);
   const defaultPassPlan = plannerDefaultsToPassPlan(settings?.plannerDefaults);
+  const requestRedraw = () => {
+    captureLectureViewState();
+    return redraw();
+  };
 
   const resolveBlockLabel = blockInfo => {
     if (!blockInfo) return 'block';
@@ -2615,17 +2748,17 @@ export async function renderLectures(root, redraw) {
         const choice = await promptImportStrategy(conflicts);
         if (!choice) {
           return;
-        }
-        strategy = choice;
       }
-      await importLectureTransfer(payload, { strategy });
-      await invalidateBlockCatalog();
-      await redraw();
-      alert('Import complete.');
-    } catch (err) {
-      console.error('Failed to import lecture bundle', err);
-      alert('Import failed.');
+      strategy = choice;
     }
+    await importLectureTransfer(payload, { strategy });
+    await invalidateBlockCatalog();
+    await requestRedraw();
+    alert('Import complete.');
+  } catch (err) {
+    console.error('Failed to import lecture bundle', err);
+    alert('Import failed.');
+  }
   }
 
   root.innerHTML = '';
@@ -2633,20 +2766,34 @@ export async function renderLectures(root, redraw) {
   layout.className = 'lectures-view';
   root.appendChild(layout);
 
-  const toolbar = buildToolbar(blocks, allLectures, lectureLists, redraw, defaultPassPlan, handleImportBundle);
+  const toolbar = buildToolbar(
+    blocks,
+    allLectures,
+    lectureLists,
+    requestRedraw,
+    defaultPassPlan,
+    handleImportBundle
+  );
   layout.appendChild(toolbar);
 
   const table = renderLectureTable(
     blocks,
     filtered,
     filters,
-    lecture => handleEdit(lecture, blocks, lectureLists, redraw),
-    lecture => handleDelete(lecture, redraw),
-    (lecture, pass) => handlePassEdit(lecture, pass, redraw),
-    (lecture, pass, checked) => handlePassToggle(lecture, pass, checked, redraw),
+    lecture => handleEdit(lecture, blocks, lectureLists, requestRedraw),
+    lecture => handleDelete(lecture, requestRedraw),
+    (lecture, pass) => handlePassEdit(lecture, pass, requestRedraw),
+    (lecture, pass, checked) => handlePassToggle(lecture, pass, checked, requestRedraw),
     (lecture, blockInfo) => handleExportLectureBundle(lecture, blockInfo || blocks.find(block => block.blockId === lecture.blockId)),
     (blockInfo, weekValue) => handleExportWeekBundle(blockInfo, weekValue),
     blockInfo => handleExportBlockBundle(blockInfo)
   );
   layout.appendChild(table);
+
+  requestAnimationFrame(() => {
+    const target = Number(filters?.scrollTop);
+    if (Number.isFinite(target) && target > 0) {
+      window.scrollTo({ top: target, left: 0, behavior: 'auto' });
+    }
+  });
 }
