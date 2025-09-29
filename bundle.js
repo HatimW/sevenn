@@ -1,31 +1,4 @@
-var Sevenn = (() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-    }
-    return to;
-  };
-  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
-  // js/main.js
-  var main_exports = {};
-  __export(main_exports, {
-    render: () => renderApp,
-    renderApp: () => renderApp,
-    resolveListKind: () => resolveListKind,
-    tabs: () => tabs
-  });
-
+(() => {
   // js/storage/preferences.js
   var STORAGE_KEY = "sevenn-ui-preferences";
   var cache = null;
@@ -17386,7 +17359,9 @@ var Sevenn = (() => {
     nodeRadii: null,
     edgeLayer: null,
     nodeLayer: null,
-    lineMarkers: /* @__PURE__ */ new Map()
+    lineMarkers: /* @__PURE__ */ new Map(),
+    edgeRefs: /* @__PURE__ */ new Map(),
+    allEdges: /* @__PURE__ */ new Set()
   };
   function normalizeMapTab(tab = {}) {
     const filter = tab.filter && typeof tab.filter === "object" ? tab.filter : {};
@@ -18350,6 +18325,16 @@ var Sevenn = (() => {
     } else {
       mapState.lineMarkers = /* @__PURE__ */ new Map();
     }
+    if (mapState.edgeRefs) {
+      mapState.edgeRefs.clear();
+    } else {
+      mapState.edgeRefs = /* @__PURE__ */ new Map();
+    }
+    if (mapState.allEdges) {
+      mapState.allEdges.clear();
+    } else {
+      mapState.allEdges = /* @__PURE__ */ new Set();
+    }
     stopAutoPan();
     setAreaInteracting(false);
     mapState.edgeLayer = null;
@@ -18830,6 +18815,7 @@ var Sevenn = (() => {
         path.dataset.a = it.id;
         path.dataset.b = l.id;
         path.dataset.label = l.name || "";
+        registerEdgeElement(path, it.id, l.id);
         path.addEventListener("pointerdown", (evt) => {
           if (evt.button !== 0) return;
           if (mapState.tool !== TOOL.NAVIGATE) return;
@@ -19613,6 +19599,48 @@ var Sevenn = (() => {
       }
     });
   }
+  var EDGE_NODE_KEY = Symbol("edgeNodes");
+  function ensureEdgeRegistry() {
+    if (!mapState.edgeRefs) {
+      mapState.edgeRefs = /* @__PURE__ */ new Map();
+    }
+    if (!mapState.allEdges) {
+      mapState.allEdges = /* @__PURE__ */ new Set();
+    }
+  }
+  function registerEdgeElement(edge, aId, bId) {
+    if (!edge) return;
+    ensureEdgeRegistry();
+    mapState.allEdges.add(edge);
+    edge[EDGE_NODE_KEY] = { aId, bId };
+    [aId, bId].forEach((id) => {
+      if (!id) return;
+      let set = mapState.edgeRefs.get(id);
+      if (!set) {
+        set = /* @__PURE__ */ new Set();
+        mapState.edgeRefs.set(id, set);
+      }
+      set.add(edge);
+    });
+  }
+  function unregisterEdgeElement(edge) {
+    if (!edge) return;
+    const info = edge[EDGE_NODE_KEY];
+    if (info) {
+      [info.aId, info.bId].forEach((id) => {
+        const set = mapState.edgeRefs?.get(id);
+        if (!set) return;
+        set.delete(edge);
+        if (!set.size) {
+          mapState.edgeRefs.delete(id);
+        }
+      });
+      delete edge[EDGE_NODE_KEY];
+    }
+    if (mapState.allEdges) {
+      mapState.allEdges.delete(edge);
+    }
+  }
   function updatePendingHighlight() {
     mapState.elements.forEach(({ circle, label }, id) => {
       if (mapState.pendingLink === id) {
@@ -19625,12 +19653,21 @@ var Sevenn = (() => {
     });
   }
   function updateEdgesFor(id) {
-    const layer = mapState.edgeLayer || mapState.g;
-    if (!layer) return;
-    layer.querySelectorAll(`path[data-a='${id}'], path[data-b='${id}']`).forEach((edge) => {
+    if (!mapState.edgeRefs) return;
+    const edges = mapState.edgeRefs.get(id);
+    if (!edges || !edges.size) return;
+    const stale = [];
+    edges.forEach((edge) => {
+      if (!edge || !edge.isConnected || !edge.ownerSVGElement) {
+        stale.push(edge);
+        return;
+      }
       edge.setAttribute("d", calcPath(edge.dataset.a, edge.dataset.b, edge));
       syncLineDecoration(edge);
     });
+    if (stale.length) {
+      stale.forEach(unregisterEdgeElement);
+    }
   }
   function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
     const tools = [
@@ -20147,14 +20184,33 @@ var Sevenn = (() => {
     mapState.elements.forEach((entry, id) => {
       updateNodeGeometry(id, entry);
     });
-    const edgeContainer = mapState.edgeLayer || svg;
-    edgeContainer.querySelectorAll(".map-edge").forEach((line) => {
-      if (line.dataset.a && line.dataset.b) {
-        line.setAttribute("d", calcPath(line.dataset.a, line.dataset.b, line));
+    const allEdges = mapState.allEdges;
+    if (allEdges && allEdges.size) {
+      const stale = [];
+      allEdges.forEach((line) => {
+        if (!line || !line.isConnected || !line.ownerSVGElement) {
+          stale.push(line);
+          return;
+        }
+        if (line.dataset.a && line.dataset.b) {
+          line.setAttribute("d", calcPath(line.dataset.a, line.dataset.b, line));
+        }
+        updateLineStrokeWidth(line);
+        syncLineDecoration(line);
+      });
+      if (stale.length) {
+        stale.forEach(unregisterEdgeElement);
       }
-      updateLineStrokeWidth(line);
-      syncLineDecoration(line);
-    });
+    } else {
+      const edgeContainer = mapState.edgeLayer || svg;
+      edgeContainer.querySelectorAll(".map-edge").forEach((line) => {
+        if (line.dataset.a && line.dataset.b) {
+          line.setAttribute("d", calcPath(line.dataset.a, line.dataset.b, line));
+        }
+        updateLineStrokeWidth(line);
+        syncLineDecoration(line);
+      });
+    }
   }
   function getNodeBaseRadius(id) {
     if (mapState.nodeRadii && mapState.nodeRadii.has(id)) {
@@ -21005,5 +21061,4 @@ var Sevenn = (() => {
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
-  return __toCommonJS(main_exports);
 })();
