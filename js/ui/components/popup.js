@@ -1,4 +1,5 @@
 import { renderRichText } from './rich-text.js';
+import { createFloatingWindow } from './window-manager.js';
 
 const fieldDefs = {
   disease: [
@@ -50,21 +51,108 @@ function collectExtras(item) {
   return [];
 }
 
-export function showPopup(item, options = {}){
-  const { onEdit } = options;
-  const modal = document.createElement('div');
-  modal.className = 'modal';
-  const card = document.createElement('div');
-  card.className = 'card';
-  const kindColors = { disease: 'var(--purple)', drug: 'var(--blue)', concept: 'var(--green)' };
-  card.style.borderTop = `3px solid ${item.color || kindColors[item.kind] || 'var(--gray)'}`;
+const FALLBACK_ACCENTS = {
+  disease: '#c084fc',
+  drug: '#60a5fa',
+  concept: '#4ade80'
+};
 
+const DEFAULT_ACCENT = '#38bdf8';
+const HEX_COLOR = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+function resolveAccentColor(item) {
+  if (item && typeof item.color === 'string' && HEX_COLOR.test(item.color.trim())) {
+    return normalizeHex(item.color.trim());
+  }
+  const fallback = FALLBACK_ACCENTS[item?.kind];
+  if (typeof fallback === 'string') {
+    return normalizeHex(fallback);
+  }
+  return DEFAULT_ACCENT;
+}
+
+function normalizeHex(value) {
+  if (typeof value !== 'string') return DEFAULT_ACCENT;
+  const trimmed = value.trim();
+  if (!HEX_COLOR.test(trimmed)) return DEFAULT_ACCENT;
+  if (trimmed.length === 4) {
+    const [, r, g, b] = trimmed;
+    return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
+  return trimmed.toUpperCase();
+}
+
+export function showPopup(item, options = {}) {
+  const { onEdit, onColorChange } = options;
+  const titleText = item?.name || item?.concept || 'Item';
+  const accent = resolveAccentColor(item);
+  const win = createFloatingWindow({ title: titleText, width: 560 });
+
+  const card = document.createElement('div');
+  card.className = 'card popup-card';
+  card.style.borderTop = `4px solid ${accent}`;
+
+  const header = document.createElement('div');
+  header.className = 'popup-card-header';
   const title = document.createElement('h2');
-  title.textContent = item.name || item.concept || 'Item';
-  card.appendChild(title);
+  title.textContent = titleText;
+  header.appendChild(title);
+  card.appendChild(header);
+
+  if (typeof onColorChange === 'function') {
+    const meta = document.createElement('div');
+    meta.className = 'popup-meta';
+    const colorLabel = document.createElement('label');
+    colorLabel.className = 'popup-color-control';
+    const labelText = document.createElement('span');
+    labelText.textContent = 'Accent';
+    colorLabel.appendChild(labelText);
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.value = accent;
+    colorLabel.appendChild(colorInput);
+    const colorValue = document.createElement('span');
+    colorValue.className = 'popup-color-value';
+    colorValue.textContent = accent;
+    colorLabel.appendChild(colorValue);
+    meta.appendChild(colorLabel);
+    card.appendChild(meta);
+
+    let currentAccent = accent;
+
+    const updateAccentPreview = (value, commit = false) => {
+      const normalized = normalizeHex(value);
+      card.style.borderTop = `4px solid ${normalized}`;
+      colorValue.textContent = normalized;
+      if (commit) {
+        currentAccent = normalized;
+      }
+    };
+
+    colorInput.addEventListener('input', () => {
+      updateAccentPreview(colorInput.value);
+    });
+
+    colorInput.addEventListener('change', async () => {
+      if (typeof onColorChange === 'function') {
+        const next = normalizeHex(colorInput.value);
+        updateAccentPreview(next);
+        try {
+          await onColorChange(next);
+          updateAccentPreview(next, true);
+        } catch (err) {
+          console.error(err);
+          updateAccentPreview(currentAccent, true);
+          colorInput.value = currentAccent;
+        }
+      } else {
+        updateAccentPreview(colorInput.value, true);
+      }
+    });
+  }
 
   const defs = fieldDefs[item.kind] || [];
-  defs.forEach(([field,label]) => {
+  defs.forEach(([field, label]) => {
     const val = item[field];
     if (!val) return;
     const sec = document.createElement('div');
@@ -95,7 +183,7 @@ export function showPopup(item, options = {}){
   });
 
   const actions = document.createElement('div');
-  actions.className = 'modal-actions';
+  actions.className = 'popup-actions';
 
   if (typeof onEdit === 'function') {
     const editBtn = document.createElement('button');
@@ -103,22 +191,24 @@ export function showPopup(item, options = {}){
     editBtn.className = 'btn secondary';
     editBtn.textContent = 'Edit';
     editBtn.addEventListener('click', () => {
-      modal.remove();
+      void win.close('edit');
       onEdit();
     });
     actions.appendChild(editBtn);
   }
 
-  const close = document.createElement('button');
-  close.type = 'button';
-  close.className = 'btn';
-  close.textContent = 'Close';
-  close.addEventListener('click', () => modal.remove());
-  actions.appendChild(close);
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'btn';
+  closeBtn.textContent = 'Close';
+  closeBtn.addEventListener('click', () => {
+    void win.close('close');
+  });
+  actions.appendChild(closeBtn);
 
   card.appendChild(actions);
 
-  modal.appendChild(card);
-  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
-  document.body.appendChild(modal);
+  win.setContent(card);
+  win.setTitle(titleText);
+  return win;
 }

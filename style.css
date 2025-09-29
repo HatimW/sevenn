@@ -748,6 +748,57 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(
   box-shadow: 0 16px 36px rgba(2, 6, 23, 0.45);
 }
 
+.floating-body .popup-card {
+  margin: 0;
+  padding: var(--pad);
+}
+
+.popup-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pad-sm);
+  margin-bottom: var(--pad-sm);
+}
+
+.popup-meta {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--pad-sm);
+}
+
+.popup-color-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+  color: var(--text-muted);
+}
+
+.popup-color-control input[type="color"] {
+  width: 42px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.4);
+  cursor: pointer;
+}
+
+.popup-color-value {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.82rem;
+  color: var(--text);
+  opacity: 0.8;
+}
+
+.popup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: var(--pad);
+}
+
 .card-grid {
   display: flex;
   flex-wrap: wrap;
@@ -4584,8 +4635,8 @@ button.builder-pill.builder-pill-outline {
 }
 .map-node {
   cursor: inherit;
-  stroke: rgba(15, 23, 42, 0.75);
-  stroke-width: 1.6;
+  stroke: rgba(15, 23, 42, 0.82);
+  stroke-width: 2.2;
   vector-effect: non-scaling-stroke;
 }
 .map-edge {
@@ -4645,7 +4696,12 @@ button.builder-pill.builder-pill-outline {
   font-weight: 600;
   text-anchor: middle;
   pointer-events: none;
-  text-shadow: 0 0 6px rgba(0, 0, 0, 0.45);
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0.55);
+  paint-order: stroke fill;
+  stroke: rgba(6, 11, 23, 0.72);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  letter-spacing: 0.02em;
 }
 
 .map-edge-tooltip {

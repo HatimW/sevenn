@@ -98,6 +98,7 @@ const ICONS = {
 const DEFAULT_LINK_COLOR = '#888888';
 const DEFAULT_LINE_STYLE = 'solid';
 const DEFAULT_LINE_THICKNESS = 'regular';
+const DEFAULT_CURVE_ANCHOR = 0.5;
 
 const LINE_STYLE_OPTIONS = [
   { value: 'solid', label: 'Smooth' },
@@ -136,6 +137,12 @@ const LINE_THICKNESS_OPTIONS = [
   { value: 'regular', label: 'Regular' },
   { value: 'bold', label: 'Bold' }
 ];
+
+const KIND_FALLBACK_COLORS = {
+  disease: 'var(--purple)',
+  drug: 'var(--blue)',
+  concept: 'var(--green)'
+};
 
 const mapState = {
   tool: TOOL.NAVIGATE,
@@ -198,6 +205,8 @@ const mapState = {
   searchSuggestionTimer: null,
   paletteSearch: '',
   nodeRadii: null,
+  edgeLayer: null,
+  nodeLayer: null,
   lineMarkers: new Map()
 };
 
@@ -1159,7 +1168,8 @@ function openItemPopup(itemId) {
   const item = mapState.itemMap?.[itemId];
   if (!item) return;
   showPopup(item, {
-    onEdit: () => openItemEditor(itemId)
+    onEdit: () => openItemEditor(itemId),
+    onColorChange: color => updateItemColor(itemId, color)
   });
 }
 
@@ -1169,6 +1179,40 @@ function openItemEditor(itemId) {
   openEditor(item.kind, async () => {
     await renderMap(mapState.root);
   }, item);
+}
+
+async function updateItemColor(itemId, color) {
+  const item = await getItem(itemId);
+  if (!item) return;
+  const normalized = typeof color === 'string' && color ? color : '';
+  if (normalized) {
+    item.color = normalized;
+  } else if (item.color) {
+    delete item.color;
+  }
+  await upsertItem(item);
+  if (!mapState.itemMap) {
+    mapState.itemMap = {};
+  }
+  const cached = mapState.itemMap[itemId];
+  if (cached) {
+    if (normalized) {
+      cached.color = normalized;
+    } else {
+      delete cached.color;
+    }
+  }
+  if (Array.isArray(mapState.visibleItems)) {
+    const visible = mapState.visibleItems.find(it => it.id === itemId);
+    if (visible) {
+      if (normalized) {
+        visible.color = normalized;
+      } else {
+        delete visible.color;
+      }
+    }
+  }
+  refreshNodeColor(itemId);
 }
 
 function setAreaInteracting(active) {
@@ -1216,6 +1260,8 @@ export async function renderMap(root) {
   }
   stopAutoPan();
   setAreaInteracting(false);
+  mapState.edgeLayer = null;
+  mapState.nodeLayer = null;
 
   ensureListeners();
 
@@ -1432,11 +1478,19 @@ export async function renderMap(root) {
   mapState.updateViewBox = updateViewBox;
 
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  const edgeLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  edgeLayer.classList.add('map-layer', 'map-layer--edges');
+  const nodeLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  nodeLayer.classList.add('map-layer', 'map-layer--nodes');
   const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
   buildLineMarkers(defs);
+  g.appendChild(edgeLayer);
+  g.appendChild(nodeLayer);
   svg.appendChild(defs);
   svg.appendChild(g);
   mapState.g = g;
+  mapState.edgeLayer = edgeLayer;
+  mapState.nodeLayer = nodeLayer;
 
   container.appendChild(svg);
 
@@ -1733,6 +1787,8 @@ export async function renderMap(root) {
   buildHiddenPanel(container, hiddenNodes, hiddenLinks);
 
   const drawn = new Set();
+  const edgeLayerRef = mapState.edgeLayer || g;
+  const nodeLayerRef = mapState.nodeLayer || g;
   visibleItems.forEach(it => {
     (it.links || []).forEach(l => {
       if (l.hidden) return;
@@ -1762,6 +1818,35 @@ export async function renderMap(root) {
           : Number.isFinite(Number(l.curve))
             ? Number(l.curve)
             : 0;
+        const existingAnchor = normalizeAnchorValue(
+          Object.prototype.hasOwnProperty.call(path.dataset || {}, 'anchor')
+            ? path.dataset.anchor
+            : Object.prototype.hasOwnProperty.call(l || {}, 'curveAnchor')
+              ? l.curveAnchor
+              : DEFAULT_CURVE_ANCHOR
+        ) ?? DEFAULT_CURVE_ANCHOR;
+        const pointerMap = clientToMap(evt.clientX, evt.clientY);
+        const geometryForHandle = getLineGeometry(it.id, l.id, {
+          line: path,
+          curve: initialCurve,
+          anchor: existingAnchor
+        });
+        let handle = 'mid';
+        let anchorValue = existingAnchor;
+        if (geometryForHandle && pointerMap) {
+          const startPoint = { x: geometryForHandle.startX, y: geometryForHandle.startY };
+          const endPoint = { x: geometryForHandle.endX, y: geometryForHandle.endY };
+          const startDist = Math.hypot(pointerMap.x - startPoint.x, pointerMap.y - startPoint.y);
+          const endDist = Math.hypot(pointerMap.x - endPoint.x, pointerMap.y - endPoint.y);
+          const threshold = Math.max(36, (geometryForHandle.trimmedLength || 0) * 0.12);
+          if (startDist <= threshold) {
+            handle = 'start';
+            anchorValue = normalizeAnchorValue(existingAnchor < 0.45 ? existingAnchor : 0.22) ?? 0.22;
+          } else if (endDist <= threshold) {
+            handle = 'end';
+            anchorValue = normalizeAnchorValue(existingAnchor > 0.55 ? existingAnchor : 0.78) ?? 0.78;
+          }
+        }
         mapState.edgeDrag = {
           pointerId,
           line: path,
@@ -1770,7 +1855,10 @@ export async function renderMap(root) {
           startCurve: initialCurve,
           currentCurve: initialCurve,
           moved: false,
-          captureTarget: evt.currentTarget || path
+          captureTarget: evt.currentTarget || path,
+          handle,
+          anchor: anchorValue,
+          startAnchor: anchorValue
         };
         if (mapState.edgeDrag.captureTarget?.setPointerCapture) {
           try {
@@ -1802,7 +1890,7 @@ export async function renderMap(root) {
         }
         hideEdgeTooltip(path);
       });
-      g.appendChild(path);
+      edgeLayerRef.appendChild(path);
     });
   });
 
@@ -1821,9 +1909,7 @@ export async function renderMap(root) {
     circle.dataset.radius = baseR;
     circle.setAttribute('class', 'map-node');
     circle.dataset.id = it.id;
-    const kindColors = { disease: 'var(--purple)', drug: 'var(--blue)' };
-    const fill = kindColors[it.kind] || it.color || 'var(--gray)';
-    circle.setAttribute('fill', fill);
+    circle.setAttribute('fill', getNodeFill(it));
 
     const handleNodePointerDown = e => {
       if (e.button !== 0) return;
@@ -1913,7 +1999,7 @@ export async function renderMap(root) {
       }
     });
 
-    g.appendChild(circle);
+    nodeLayerRef.appendChild(circle);
 
     const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     text.setAttribute('x', pos.x);
@@ -1935,7 +2021,7 @@ export async function renderMap(root) {
       }
       mapState.nodeWasDragged = false;
     });
-    g.appendChild(text);
+    nodeLayerRef.appendChild(text);
 
     mapState.elements.set(it.id, { circle, label: text });
   });
@@ -2103,7 +2189,7 @@ function attachSvgEvents(svg) {
 
   svg.addEventListener('wheel', e => {
     e.preventDefault();
-    const factor = e.deltaY < 0 ? 0.9 : 1.1;
+    const factor = e.deltaY < 0 ? 0.96 : 1.04;
     const rect = svg.getBoundingClientRect();
     const mx = mapState.viewBox.x + ((e.clientX - rect.left) / rect.width) * mapState.viewBox.w;
     const my = mapState.viewBox.y + ((e.clientY - rect.top) / rect.height) * mapState.viewBox.h;
@@ -2134,20 +2220,29 @@ function handlePointerMove(e) {
   if (mapState.edgeDrag && mapState.edgeDrag.pointerId === e.pointerId) {
     const drag = mapState.edgeDrag;
     if (!drag.line) return;
-    const geometry = getLineGeometry(drag.aId, drag.bId, { line: drag.line });
+    const geometry = getLineGeometry(drag.aId, drag.bId, { line: drag.line, curve: drag.currentCurve, anchor: drag.anchor });
     if (!geometry) return;
-    const midX = (geometry.startX + geometry.endX) / 2;
-    const midY = (geometry.startY + geometry.endY) / 2;
+    const pointer = clientToMap(e.clientX, e.clientY);
+    const dx = geometry.endX - geometry.startX;
+    const dy = geometry.endY - geometry.startY;
+    const lenSq = Math.max(dx * dx + dy * dy, 1);
+    const projection = ((pointer.x - geometry.startX) * dx + (pointer.y - geometry.startY) * dy) / lenSq;
+    const range = getAnchorRange(drag.handle);
+    drag.anchor = clamp(projection, range.min, range.max);
+    const anchorPoint = {
+      x: geometry.startX + dx * drag.anchor,
+      y: geometry.startY + dy * drag.anchor
+    };
     const normal = { x: -geometry.uy, y: geometry.ux };
-    const point = clientToMap(e.clientX, e.clientY);
-    const offset = (point.x - midX) * normal.x + (point.y - midY) * normal.y;
-    const length = Math.max(geometry.trimmedLength || 1, 1);
+    const offset = (pointer.x - anchorPoint.x) * normal.x + (pointer.y - anchorPoint.y) * normal.y;
+    const length = Math.max(geometry.trimmedLength || Math.hypot(dx, dy) || 1, 1);
     const normalized = clamp(offset / length, -3.5, 3.5);
     drag.currentCurve = normalized;
-    const delta = Math.abs((drag.startCurve ?? 0) - normalized);
-    if (delta > 0.002) {
+    const curveDelta = Math.abs((drag.startCurve ?? 0) - normalized);
+    const anchorDelta = Math.abs((drag.startAnchor ?? DEFAULT_CURVE_ANCHOR) - drag.anchor);
+    if (curveDelta > 0.002 || anchorDelta > 0.01) {
       drag.moved = true;
-      applyLineStyle(drag.line, { curve: normalized });
+      applyLineStyle(drag.line, { curve: normalized, anchor: drag.anchor });
     }
     return;
   }
@@ -2226,8 +2321,14 @@ async function handlePointerUp(e) {
       } catch {}
     }
     if (drag.moved && Number.isFinite(drag.currentCurve)) {
-      await updateLink(drag.aId, drag.bId, { curve: drag.currentCurve });
-      applyLineStyle(drag.line, { curve: drag.currentCurve });
+      const anchorValue = Number.isFinite(drag.anchor) ? clamp(drag.anchor, 0.1, 0.9) : undefined;
+      const patch = {
+        curve: drag.currentCurve,
+        ...(Number.isFinite(anchorValue) ? { curveAnchor: anchorValue } : {})
+      };
+      await updateLink(drag.aId, drag.bId, patch);
+      applyLineStyle(drag.line, { curve: drag.currentCurve, anchor: anchorValue });
+      applyLinkPatchToState(drag.aId, drag.bId, patch);
       mapState.edgeDragJustCompleted = true;
       setTimeout(() => {
         mapState.edgeDragJustCompleted = false;
@@ -2523,9 +2624,10 @@ function updateNodeGeometry(id, entry = mapState.elements.get(id)) {
   circle.setAttribute('r', baseR * nodeScale);
   if (label) {
     label.setAttribute('x', pos.x);
-    const offset = (baseR + 12) * nodeScale;
+    const offset = (baseR + 16) * nodeScale;
     label.setAttribute('y', pos.y - offset);
-    label.setAttribute('font-size', 16 * labelScale);
+    const fontSize = Math.max(14, 16 * labelScale);
+    label.setAttribute('font-size', fontSize);
   }
 }
 
@@ -2556,8 +2658,9 @@ function updatePendingHighlight() {
 }
 
 function updateEdgesFor(id) {
-  if (!mapState.g) return;
-  mapState.g.querySelectorAll(`path[data-a='${id}'], path[data-b='${id}']`).forEach(edge => {
+  const layer = mapState.edgeLayer || mapState.g;
+  if (!layer) return;
+  layer.querySelectorAll(`path[data-a='${id}'], path[data-b='${id}']`).forEach(edge => {
     edge.setAttribute('d', calcPath(edge.dataset.a, edge.dataset.b, edge));
     syncLineDecoration(edge);
   });
@@ -3113,9 +3216,9 @@ function adjustScale() {
   if (!Number.isFinite(w) || w <= 0) return;
   const defaultSize = Number.isFinite(mapState.defaultViewSize) ? mapState.defaultViewSize : w;
   const zoomRatio = w / defaultSize;
-  const nodeScale = clamp(Math.pow(zoomRatio, 0.08), 0.88, 1.3);
-  const labelScale = clamp(Math.pow(zoomRatio, 0.25), 1, 2.6);
-  const lineScale = clamp(Math.pow(zoomRatio, 0.06), 0.9, 1.2);
+  const nodeScale = clamp(Math.pow(zoomRatio, 0.04), 0.92, 1.6);
+  const labelScale = clamp(Math.pow(zoomRatio, 0.28), 1.1, 3.2);
+  const lineScale = clamp(Math.pow(zoomRatio, 0.05), 0.95, 1.35);
 
   mapState.currentScales = { nodeScale, labelScale, lineScale, zoomRatio };
   updateMarkerSizes();
@@ -3124,7 +3227,8 @@ function adjustScale() {
     updateNodeGeometry(id, entry);
   });
 
-  svg.querySelectorAll('.map-edge').forEach(line => {
+  const edgeContainer = mapState.edgeLayer || svg;
+  edgeContainer.querySelectorAll('.map-edge').forEach(line => {
     if (line.dataset.a && line.dataset.b) {
       line.setAttribute('d', calcPath(line.dataset.a, line.dataset.b, line));
     }
@@ -3148,6 +3252,24 @@ function getNodeRadius(id) {
   const base = getNodeBaseRadius(id);
   const scales = getCurrentScales();
   return base * (scales.nodeScale || 1);
+}
+
+function getNodeFill(item) {
+  if (!item || typeof item !== 'object') {
+    return 'var(--gray)';
+  }
+  if (item.color && typeof item.color === 'string') {
+    return item.color;
+  }
+  return KIND_FALLBACK_COLORS[item.kind] || 'var(--gray)';
+}
+
+function refreshNodeColor(id) {
+  const entry = mapState.elements?.get(id);
+  const item = mapState.itemMap?.[id];
+  if (entry?.circle && item) {
+    entry.circle.setAttribute('fill', getNodeFill(item));
+  }
 }
 
 function computeTrimmedSegment(aId, bId, options = {}) {
@@ -3205,39 +3327,7 @@ function computeCurveOffset(aId, bId, segment, manualCurve) {
     const normalized = clamp(manualCurve, -3.5, 3.5);
     return normalized * trimmedLength;
   }
-  const seed = getPairCurveSeed(aId, bId);
-  const baseMagnitude = Math.min(160, Math.max(48, trimmedLength * 0.24));
-  const magnitude = baseMagnitude * (0.6 + Math.min(1, Math.abs(seed)) * 0.8);
-  let offset = magnitude * (seed === 0 ? 1 : Math.sign(seed));
-
-  const positions = mapState.positions || {};
-  const clearance = Math.max(36, trimmedLength * 0.18);
-  let bias = 0;
-  for (const id in positions) {
-    if (id === aId || id === bId) continue;
-    const p = positions[id];
-    if (!p) continue;
-    const radius = getNodeRadius(id);
-    const distance = signedDistanceToLine(p.x, p.y, segment.startX, segment.startY, segment.endX, segment.endY);
-    const absDistance = Math.abs(distance);
-    if (absDistance >= clearance + radius) continue;
-    const weight = 1 - Math.min(1, absDistance / (clearance + radius));
-    bias += weight * (distance >= 0 ? 1 : -1);
-  }
-
-  if (bias) {
-    const direction = bias > 0 ? 1 : -1;
-    offset = Math.abs(offset) * direction;
-    const amplification = Math.min(1.5, Math.abs(bias));
-    offset *= 1 + amplification * 0.45;
-  }
-
-  const minOffset = baseMagnitude * 0.35;
-  if (Math.abs(offset) < minOffset) {
-    offset = minOffset * (offset < 0 ? -1 : 1);
-  }
-
-  return offset;
+  return 0;
 }
 
 function computeStyleTrim(style, baseWidth) {
@@ -3257,16 +3347,17 @@ function computeStyleTrim(style, baseWidth) {
   return { trimA, trimB };
 }
 
-function computeCurveControlPoint(aId, bId, segment, manualCurve) {
+function computeCurveControlPoint(aId, bId, segment, manualCurve, manualAnchor) {
   const { startX, startY, endX, endY, ux, uy } = segment;
   const nx = -uy;
   const ny = ux;
-  const midX = (startX + endX) / 2;
-  const midY = (startY + endY) / 2;
+  const anchor = clamp(Number.isFinite(Number(manualAnchor)) ? Number(manualAnchor) : DEFAULT_CURVE_ANCHOR, 0.1, 0.9);
+  const baseX = startX + (endX - startX) * anchor;
+  const baseY = startY + (endY - startY) * anchor;
   const offset = computeCurveOffset(aId, bId, segment, manualCurve);
-  const cx = midX + nx * offset;
-  const cy = midY + ny * offset;
-  return { cx, cy };
+  const cx = baseX + nx * offset;
+  const cy = baseY + ny * offset;
+  return { cx, cy, anchor };
 }
 
 function getLineGeometry(aId, bId, options = {}) {
@@ -3281,12 +3372,24 @@ function getLineGeometry(aId, bId, options = {}) {
   if (Object.prototype.hasOwnProperty.call(options, 'curve')) {
     const manual = Number(options.curve);
     curveOverride = Number.isFinite(manual) ? clamp(manual, -3.5, 3.5) : undefined;
+  } else if (Object.prototype.hasOwnProperty.call(options, 'curveAnchor') && !Object.prototype.hasOwnProperty.call(options, 'curve')) {
+    // when only anchor is provided we still allow dataset curve to persist
   } else if (line && Object.prototype.hasOwnProperty.call(line.dataset || {}, 'curve')) {
     const manual = Number(line.dataset.curve);
     curveOverride = Number.isFinite(manual) ? clamp(manual, -3.5, 3.5) : undefined;
   }
-  const { cx, cy } = computeCurveControlPoint(aId, bId, segment, curveOverride);
-  return { ...segment, cx, cy, style, baseWidth };
+
+  let anchorOverride;
+  if (Object.prototype.hasOwnProperty.call(options, 'anchor')) {
+    anchorOverride = normalizeAnchorValue(options.anchor);
+  } else if (Object.prototype.hasOwnProperty.call(options, 'curveAnchor')) {
+    anchorOverride = normalizeAnchorValue(options.curveAnchor);
+  } else if (line && Object.prototype.hasOwnProperty.call(line.dataset || {}, 'anchor')) {
+    anchorOverride = normalizeAnchorValue(line.dataset.anchor);
+  }
+
+  const { cx, cy, anchor } = computeCurveControlPoint(aId, bId, segment, curveOverride, anchorOverride);
+  return { ...segment, cx, cy, style, baseWidth, anchor: anchor ?? DEFAULT_CURVE_ANCHOR };
 }
 
 function getQuadraticPoint(start, control, end, t) {
@@ -3319,6 +3422,10 @@ function applyLineStyle(line, info = {}) {
   const hadCurveAttr = Object.prototype.hasOwnProperty.call(line.dataset || {}, 'curve');
   const previousCurve = hadCurveAttr ? Number(line.dataset.curve) : undefined;
   const hasCurveOverride = Object.prototype.hasOwnProperty.call(info, 'curve');
+  const hadAnchorAttr = Object.prototype.hasOwnProperty.call(line.dataset || {}, 'anchor');
+  const previousAnchor = hadAnchorAttr ? Number(line.dataset.anchor) : undefined;
+  const hasAnchorOverride =
+    Object.prototype.hasOwnProperty.call(info, 'anchor') || Object.prototype.hasOwnProperty.call(info, 'curveAnchor');
   let curve = hasCurveOverride ? Number(info.curve) : previousCurve;
   if (!Number.isFinite(curve)) {
     curve = undefined;
@@ -3328,6 +3435,20 @@ function applyLineStyle(line, info = {}) {
       line.dataset.curve = String(curve);
     } else {
       delete line.dataset.curve;
+    }
+  }
+
+  let anchor = hasAnchorOverride
+    ? normalizeAnchorValue(Object.prototype.hasOwnProperty.call(info, 'anchor') ? info.anchor : info.curveAnchor)
+    : normalizeAnchorValue(previousAnchor);
+  if (!Number.isFinite(anchor)) {
+    anchor = undefined;
+  }
+  if (hasAnchorOverride) {
+    if (Number.isFinite(anchor)) {
+      line.dataset.anchor = String(anchor);
+    } else {
+      delete line.dataset.anchor;
     }
   }
 
@@ -3358,7 +3479,13 @@ function applyLineStyle(line, info = {}) {
   line.removeAttribute('stroke-dasharray');
   line.classList.remove('edge-glow');
 
-  const geometryInfo = hasCurveOverride ? { ...info, curve } : info;
+  const effectiveAnchor = Number.isFinite(anchor) ? anchor : normalizeAnchorValue(line.dataset.anchor) ?? DEFAULT_CURVE_ANCHOR;
+  const geometryInfo = {
+    ...info,
+    curve,
+    anchor: effectiveAnchor,
+    curveAnchor: effectiveAnchor
+  };
   if (line.dataset.a && line.dataset.b) {
     line.setAttribute('d', calcPath(line.dataset.a, line.dataset.b, line, geometryInfo));
   }
@@ -3412,6 +3539,22 @@ function applyLineStyle(line, info = {}) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+function normalizeAnchorValue(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return undefined;
+  return clamp(num, 0.1, 0.9);
+}
+
+function getAnchorRange(handle) {
+  if (handle === 'start') {
+    return { min: 0.1, max: 0.45 };
+  }
+  if (handle === 'end') {
+    return { min: 0.55, max: 0.9 };
+  }
+  return { min: 0.3, max: 0.7 };
 }
 
 function updateLineStrokeWidth(line) {
@@ -3674,4 +3817,14 @@ async function updateLink(aId, bId, patch) {
   apply(b, aId);
   await upsertItem(a);
   await upsertItem(b);
+}
+
+function applyLinkPatchToState(aId, bId, patch = {}) {
+  const apply = (item, otherId) => {
+    if (!item || !Array.isArray(item.links)) return;
+    const link = item.links.find(x => x.id === otherId);
+    if (link) Object.assign(link, patch);
+  };
+  apply(mapState.itemMap?.[aId], bId);
+  apply(mapState.itemMap?.[bId], aId);
 }
