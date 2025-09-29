@@ -208,7 +208,9 @@ const mapState = {
   nodeRadii: null,
   edgeLayer: null,
   nodeLayer: null,
-  lineMarkers: new Map()
+  lineMarkers: new Map(),
+  edgeRefs: new Map(),
+  allEdges: new Set()
 };
 
 function normalizeMapTab(tab = {}) {
@@ -1259,6 +1261,16 @@ export async function renderMap(root) {
   } else {
     mapState.lineMarkers = new Map();
   }
+  if (mapState.edgeRefs) {
+    mapState.edgeRefs.clear();
+  } else {
+    mapState.edgeRefs = new Map();
+  }
+  if (mapState.allEdges) {
+    mapState.allEdges.clear();
+  } else {
+    mapState.allEdges = new Set();
+  }
   stopAutoPan();
   setAreaInteracting(false);
   mapState.edgeLayer = null;
@@ -1819,6 +1831,7 @@ export async function renderMap(root) {
       path.dataset.a = it.id;
       path.dataset.b = l.id;
       path.dataset.label = l.name || '';
+      registerEdgeElement(path, it.id, l.id);
       path.addEventListener('pointerdown', evt => {
         if (evt.button !== 0) return;
         if (mapState.tool !== TOOL.NAVIGATE) return;
@@ -2658,6 +2671,52 @@ function updateSelectionHighlight() {
   });
 }
 
+const EDGE_NODE_KEY = Symbol('edgeNodes');
+
+function ensureEdgeRegistry() {
+  if (!mapState.edgeRefs) {
+    mapState.edgeRefs = new Map();
+  }
+  if (!mapState.allEdges) {
+    mapState.allEdges = new Set();
+  }
+}
+
+function registerEdgeElement(edge, aId, bId) {
+  if (!edge) return;
+  ensureEdgeRegistry();
+  mapState.allEdges.add(edge);
+  edge[EDGE_NODE_KEY] = { aId, bId };
+  [aId, bId].forEach(id => {
+    if (!id) return;
+    let set = mapState.edgeRefs.get(id);
+    if (!set) {
+      set = new Set();
+      mapState.edgeRefs.set(id, set);
+    }
+    set.add(edge);
+  });
+}
+
+function unregisterEdgeElement(edge) {
+  if (!edge) return;
+  const info = edge[EDGE_NODE_KEY];
+  if (info) {
+    [info.aId, info.bId].forEach(id => {
+      const set = mapState.edgeRefs?.get(id);
+      if (!set) return;
+      set.delete(edge);
+      if (!set.size) {
+        mapState.edgeRefs.delete(id);
+      }
+    });
+    delete edge[EDGE_NODE_KEY];
+  }
+  if (mapState.allEdges) {
+    mapState.allEdges.delete(edge);
+  }
+}
+
 function updatePendingHighlight() {
   mapState.elements.forEach(({ circle, label }, id) => {
     if (mapState.pendingLink === id) {
@@ -2671,12 +2730,21 @@ function updatePendingHighlight() {
 }
 
 function updateEdgesFor(id) {
-  const layer = mapState.edgeLayer || mapState.g;
-  if (!layer) return;
-  layer.querySelectorAll(`path[data-a='${id}'], path[data-b='${id}']`).forEach(edge => {
+  if (!mapState.edgeRefs) return;
+  const edges = mapState.edgeRefs.get(id);
+  if (!edges || !edges.size) return;
+  const stale = [];
+  edges.forEach(edge => {
+    if (!edge || !edge.isConnected || !edge.ownerSVGElement) {
+      stale.push(edge);
+      return;
+    }
     edge.setAttribute('d', calcPath(edge.dataset.a, edge.dataset.b, edge));
     syncLineDecoration(edge);
   });
+  if (stale.length) {
+    stale.forEach(unregisterEdgeElement);
+  }
 }
 
 function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
@@ -3243,14 +3311,33 @@ function adjustScale() {
     updateNodeGeometry(id, entry);
   });
 
-  const edgeContainer = mapState.edgeLayer || svg;
-  edgeContainer.querySelectorAll('.map-edge').forEach(line => {
-    if (line.dataset.a && line.dataset.b) {
-      line.setAttribute('d', calcPath(line.dataset.a, line.dataset.b, line));
+  const allEdges = mapState.allEdges;
+  if (allEdges && allEdges.size) {
+    const stale = [];
+    allEdges.forEach(line => {
+      if (!line || !line.isConnected || !line.ownerSVGElement) {
+        stale.push(line);
+        return;
+      }
+      if (line.dataset.a && line.dataset.b) {
+        line.setAttribute('d', calcPath(line.dataset.a, line.dataset.b, line));
+      }
+      updateLineStrokeWidth(line);
+      syncLineDecoration(line);
+    });
+    if (stale.length) {
+      stale.forEach(unregisterEdgeElement);
     }
-    updateLineStrokeWidth(line);
-    syncLineDecoration(line);
-  });
+  } else {
+    const edgeContainer = mapState.edgeLayer || svg;
+    edgeContainer.querySelectorAll('.map-edge').forEach(line => {
+      if (line.dataset.a && line.dataset.b) {
+        line.setAttribute('d', calcPath(line.dataset.a, line.dataset.b, line));
+      }
+      updateLineStrokeWidth(line);
+      syncLineDecoration(line);
+    });
+  }
 }
 
 function getNodeBaseRadius(id) {
