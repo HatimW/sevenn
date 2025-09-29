@@ -182,6 +182,7 @@ const mapState = {
   baseCursor: 'grab',
   cursorOverride: null,
   defaultViewSize: null,
+  lastScaleSize: null,
   justCompletedSelection: false,
   edgeTooltip: null,
   hoveredEdge: null,
@@ -1471,9 +1472,21 @@ export async function renderMap(root) {
     mapState.defaultViewSize = viewBox.w;
   }
 
-  const updateViewBox = () => {
+  const updateViewBox = (options = {}) => {
     svg.setAttribute('viewBox', `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
-    adjustScale();
+    const { forceScale = false } = options;
+    if (forceScale) {
+      mapState.lastScaleSize = { w: viewBox.w, h: viewBox.h };
+      adjustScale();
+      return;
+    }
+    const prev = mapState.lastScaleSize;
+    const sizeChanged =
+      !prev || Math.abs(prev.w - viewBox.w) > 0.5 || Math.abs(prev.h - viewBox.h) > 0.5;
+    if (sizeChanged) {
+      mapState.lastScaleSize = { w: viewBox.w, h: viewBox.h };
+      adjustScale();
+    }
   };
   mapState.updateViewBox = updateViewBox;
 
@@ -2005,7 +2018,7 @@ export async function renderMap(root) {
     text.setAttribute('x', pos.x);
     text.setAttribute('y', pos.y - (baseR + 12));
     text.setAttribute('class', 'map-label');
-    text.setAttribute('font-size', '16');
+    text.setAttribute('font-size', '14');
     text.dataset.id = it.id;
     text.textContent = it.name || it.concept || '?';
     text.addEventListener('mousedown', handleNodePointerDown);
@@ -2029,7 +2042,7 @@ export async function renderMap(root) {
   updateSelectionHighlight();
   updatePendingHighlight();
 
-  updateViewBox();
+  updateViewBox({ forceScale: true });
   refreshCursor();
 }
 
@@ -2189,7 +2202,7 @@ function attachSvgEvents(svg) {
 
   svg.addEventListener('wheel', e => {
     e.preventDefault();
-    const factor = e.deltaY < 0 ? 0.96 : 1.04;
+    const factor = e.deltaY < 0 ? 0.97 : 1.03;
     const rect = svg.getBoundingClientRect();
     const mx = mapState.viewBox.x + ((e.clientX - rect.left) / rect.width) * mapState.viewBox.w;
     const my = mapState.viewBox.y + ((e.clientY - rect.top) / rect.height) * mapState.viewBox.h;
@@ -2624,9 +2637,9 @@ function updateNodeGeometry(id, entry = mapState.elements.get(id)) {
   circle.setAttribute('r', baseR * nodeScale);
   if (label) {
     label.setAttribute('x', pos.x);
-    const offset = (baseR + 16) * nodeScale;
+    const offset = (baseR + 12) * nodeScale;
     label.setAttribute('y', pos.y - offset);
-    const fontSize = Math.max(14, 16 * labelScale);
+    const fontSize = Math.max(12, 14 * labelScale);
     label.setAttribute('font-size', fontSize);
   }
 }
@@ -3212,14 +3225,17 @@ function adjustScale() {
   if (!svg) return;
   const vb = svg.getAttribute('viewBox');
   if (!vb) return;
-  const [,, w] = vb.split(' ').map(Number);
+  const parts = vb.split(/\s+/).map(Number);
+  const [, , w, h] = parts;
   if (!Number.isFinite(w) || w <= 0) return;
+  const height = Number.isFinite(h) && h > 0 ? h : w;
   const defaultSize = Number.isFinite(mapState.defaultViewSize) ? mapState.defaultViewSize : w;
   const zoomRatio = w / defaultSize;
-  const nodeScale = clamp(Math.pow(zoomRatio, 0.04), 0.92, 1.6);
-  const labelScale = clamp(Math.pow(zoomRatio, 0.28), 1.1, 3.2);
-  const lineScale = clamp(Math.pow(zoomRatio, 0.05), 0.95, 1.35);
+  const nodeScale = clamp(Math.pow(zoomRatio, 0.02), 0.85, 1.35);
+  const labelScale = clamp(Math.pow(zoomRatio, 0.18), 0.95, 2.6);
+  const lineScale = clamp(Math.pow(zoomRatio, 0.04), 0.92, 1.28);
 
+  mapState.lastScaleSize = { w, h: height };
   mapState.currentScales = { nodeScale, labelScale, lineScale, zoomRatio };
   updateMarkerSizes();
 
