@@ -172,7 +172,7 @@ const mapState = {
   selectionBox: null,
   sizeLimit: 2000,
   minView: 100,
-  lastPointer: { x: 0, y: 0 },
+  lastPointer: { x: 0, y: 0, mapX: 0, mapY: 0 },
   autoPan: null,
   autoPanFrame: null,
   toolboxPos: { x: 16, y: 16 },
@@ -183,6 +183,10 @@ const mapState = {
   cursorOverride: null,
   defaultViewSize: null,
   lastScaleSize: null,
+  viewBoxFrame: null,
+  pendingViewBoxOptions: null,
+  svgRect: null,
+  svgRectTime: 0,
   justCompletedSelection: false,
   edgeTooltip: null,
   hoveredEdge: null,
@@ -1083,7 +1087,7 @@ function centerOnNode(id) {
   if (Number.isFinite(nextX)) mapState.viewBox.x = nextX;
   if (Number.isFinite(nextY)) mapState.viewBox.y = nextY;
   if (mapState.updateViewBox) {
-    mapState.updateViewBox();
+    mapState.updateViewBox({ immediate: true });
   }
   mapState.selectionIds = [id];
   updateSelectionHighlight();
@@ -1484,7 +1488,7 @@ export async function renderMap(root) {
     mapState.defaultViewSize = viewBox.w;
   }
 
-  const updateViewBox = (options = {}) => {
+  const commitViewBox = (options = {}) => {
     svg.setAttribute('viewBox', `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
     const { forceScale = false } = options;
     if (forceScale) {
@@ -1500,6 +1504,41 @@ export async function renderMap(root) {
       adjustScale();
     }
   };
+
+  const updateViewBox = (options = {}) => {
+    const pending = {
+      ...(mapState.pendingViewBoxOptions || {}),
+      forceScale: Boolean(options.forceScale) || Boolean(mapState.pendingViewBoxOptions?.forceScale)
+    };
+    mapState.pendingViewBoxOptions = pending;
+    const immediate = Boolean(options.immediate) || typeof window === 'undefined';
+    if (immediate) {
+      if (mapState.viewBoxFrame && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(mapState.viewBoxFrame);
+      }
+      mapState.viewBoxFrame = null;
+      const commitOptions = mapState.pendingViewBoxOptions;
+      mapState.pendingViewBoxOptions = null;
+      commitViewBox(commitOptions || {});
+      return;
+    }
+    if (mapState.viewBoxFrame) {
+      return;
+    }
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      const commitOptions = mapState.pendingViewBoxOptions;
+      mapState.pendingViewBoxOptions = null;
+      commitViewBox(commitOptions || {});
+      return;
+    }
+    mapState.viewBoxFrame = window.requestAnimationFrame(() => {
+      const commitOptions = mapState.pendingViewBoxOptions;
+      mapState.pendingViewBoxOptions = null;
+      mapState.viewBoxFrame = null;
+      commitViewBox(commitOptions || {});
+    });
+  };
+
   mapState.updateViewBox = updateViewBox;
 
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -2055,7 +2094,7 @@ export async function renderMap(root) {
   updateSelectionHighlight();
   updatePendingHighlight();
 
-  updateViewBox({ forceScale: true });
+  updateViewBox({ forceScale: true, immediate: true });
   refreshCursor();
 }
 
@@ -2066,7 +2105,10 @@ function ensureListeners() {
   window.addEventListener('pointercancel', handlePointerUp);
   mapState.listenersAttached = true;
   if (!window._mapResizeAttached) {
-    window.addEventListener('resize', adjustScale);
+    window.addEventListener('resize', () => {
+      invalidateSvgRect();
+      adjustScale();
+    });
     window._mapResizeAttached = true;
   }
   if (!window._mapToolboxResizeAttached) {
@@ -2167,11 +2209,18 @@ function attachSvgEvents(svg) {
     if (e.button !== 0) return;
     if (e.target !== svg) return;
     mapState.justCompletedSelection = false;
+    getSvgRect({ force: true });
     if (mapState.tool !== TOOL.AREA) {
       e.preventDefault();
+      const startMap = clientToMap(e.clientX, e.clientY);
       mapState.draggingView = true;
       mapState.viewPointerId = e.pointerId;
-      mapState.lastPointer = { x: e.clientX, y: e.clientY };
+      mapState.lastPointer = {
+        x: e.clientX,
+        y: e.clientY,
+        mapX: startMap.x,
+        mapY: startMap.y
+      };
       if (svg.setPointerCapture) {
         try {
           svg.setPointerCapture(e.pointerId);
@@ -2215,17 +2264,29 @@ function attachSvgEvents(svg) {
 
   svg.addEventListener('wheel', e => {
     e.preventDefault();
-    const factor = e.deltaY < 0 ? 0.97 : 1.03;
-    const rect = svg.getBoundingClientRect();
-    const mx = mapState.viewBox.x + ((e.clientX - rect.left) / rect.width) * mapState.viewBox.w;
-    const my = mapState.viewBox.y + ((e.clientY - rect.top) / rect.height) * mapState.viewBox.h;
+    if (!mapState.viewBox) return;
+    const rect = getSvgRect({ force: true });
+    if (!rect || !rect.width || !rect.height) return;
+    const ratioX = (e.clientX - rect.left) / rect.width;
+    const ratioY = (e.clientY - rect.top) / rect.height;
+    const mx = mapState.viewBox.x + ratioX * mapState.viewBox.w;
+    const my = mapState.viewBox.y + ratioY * mapState.viewBox.h;
+    const intensity = 0.0018;
+    const rawFactor = Math.exp(e.deltaY * intensity);
+    const factor = Number.isFinite(rawFactor) && rawFactor > 0 ? rawFactor : 1;
     const maxSize = mapState.sizeLimit || 2000;
     const minSize = mapState.minView || 100;
-    const nextW = Math.max(minSize, Math.min(maxSize, mapState.viewBox.w * factor));
+    const nextW = clamp(mapState.viewBox.w * factor, minSize, maxSize);
     mapState.viewBox.w = nextW;
     mapState.viewBox.h = nextW;
-    mapState.viewBox.x = mx - ((e.clientX - rect.left) / rect.width) * mapState.viewBox.w;
-    mapState.viewBox.y = my - ((e.clientY - rect.top) / rect.height) * mapState.viewBox.h;
+    mapState.viewBox.x = mx - ratioX * nextW;
+    mapState.viewBox.y = my - ratioY * nextW;
+    if (maxSize > 0) {
+      const maxX = Math.max(0, maxSize - mapState.viewBox.w);
+      const maxY = Math.max(0, maxSize - mapState.viewBox.h);
+      mapState.viewBox.x = clamp(mapState.viewBox.x, 0, maxX);
+      mapState.viewBox.y = clamp(mapState.viewBox.y, 0, maxY);
+    }
     mapState.updateViewBox();
   }, { passive: false });
 }
@@ -2304,12 +2365,14 @@ function handlePointerMove(e) {
   }
 
   if (mapState.draggingView && mapState.viewPointerId === e.pointerId) {
-    const prev = clientToMap(mapState.lastPointer.x, mapState.lastPointer.y);
+    const prev = Number.isFinite(mapState.lastPointer.mapX)
+      ? { x: mapState.lastPointer.mapX, y: mapState.lastPointer.mapY }
+      : clientToMap(mapState.lastPointer.x, mapState.lastPointer.y);
     const current = clientToMap(e.clientX, e.clientY);
     mapState.viewBox.x += prev.x - current.x;
     mapState.viewBox.y += prev.y - current.y;
-    mapState.lastPointer = { x: e.clientX, y: e.clientY };
-    mapState.updateViewBox();
+    mapState.lastPointer = { x: e.clientX, y: e.clientY, mapX: current.x, mapY: current.y };
+    mapState.updateViewBox({ immediate: true });
     if (mapState.selectionRect) {
       refreshSelectionRectFromClients();
     }
@@ -2440,32 +2503,56 @@ async function handlePointerUp(e) {
   }
 }
 
-function clientToMap(clientX, clientY) {
-  const svg = mapState.svg;
-  if (!svg) return { x: 0, y: 0 };
-  if (typeof svg.createSVGPoint === 'function') {
-    const point = svg.createSVGPoint();
-    point.x = clientX;
-    point.y = clientY;
-    const ctm = typeof svg.getScreenCTM === 'function' ? svg.getScreenCTM() : null;
-    if (ctm && typeof ctm.inverse === 'function') {
-      try {
-        const transformed = point.matrixTransform(ctm.inverse());
-        return { x: transformed.x, y: transformed.y };
-      } catch {}
-    }
+function getNow() {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return performance.now();
   }
-  const rect = svg.getBoundingClientRect();
-  const x = mapState.viewBox.x + ((clientX - rect.left) / rect.width) * mapState.viewBox.w;
-  const y = mapState.viewBox.y + ((clientY - rect.top) / rect.height) * mapState.viewBox.h;
-  return { x, y };
+  return Date.now();
+}
+
+function invalidateSvgRect() {
+  mapState.svgRect = null;
+  mapState.svgRectTime = 0;
+}
+
+function getSvgRect(options = {}) {
+  const svg = mapState.svg;
+  if (!svg) return null;
+  const { force = false } = options;
+  if (force) {
+    mapState.svgRect = svg.getBoundingClientRect();
+    mapState.svgRectTime = getNow();
+    return mapState.svgRect;
+  }
+  const now = getNow();
+  if (!mapState.svgRect || !mapState.svgRectTime || now - mapState.svgRectTime > 100) {
+    mapState.svgRect = svg.getBoundingClientRect();
+    mapState.svgRectTime = now;
+  }
+  return mapState.svgRect;
+}
+
+function clientToMap(clientX, clientY) {
+  const viewBox = mapState.viewBox;
+  if (!mapState.svg || !viewBox) return { x: 0, y: 0 };
+  const rect = getSvgRect();
+  if (!rect || !rect.width || !rect.height) {
+    return { x: viewBox.x, y: viewBox.y };
+  }
+  const ratioX = (clientX - rect.left) / rect.width;
+  const ratioY = (clientY - rect.top) / rect.height;
+  return {
+    x: viewBox.x + ratioX * viewBox.w,
+    y: viewBox.y + ratioY * viewBox.h
+  };
 }
 
 function updateSelectionBox() {
   if (!mapState.selectionRect || !mapState.selectionBox || !mapState.svg) return;
   const { startClient, currentClient, startMap, currentMap } = mapState.selectionRect;
   if (!startClient || !currentClient) return;
-  const rect = mapState.svg.getBoundingClientRect();
+  const rect = getSvgRect();
+  if (!rect) return;
   const left = Math.min(startClient.x, currentClient.x) - rect.left;
   const top = Math.min(startClient.y, currentClient.y) - rect.top;
   const width = Math.abs(startClient.x - currentClient.x);
@@ -2546,7 +2633,8 @@ function updateAutoPanFromPointer(clientX, clientY) {
 }
 
 function computeAutoPanVector(clientX, clientY) {
-  const rect = mapState.svg.getBoundingClientRect();
+  const rect = getSvgRect();
+  if (!rect) return null;
   const threshold = 40;
   const baseSpeed = 25;
   let dx = 0;
@@ -2597,13 +2685,13 @@ function startAutoPan(vector) {
 
 function applyAutoPan(vector) {
   if (!mapState.svg || !mapState.viewBox || !mapState.updateViewBox) return;
-  const rect = mapState.svg.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
+  const rect = getSvgRect();
+  if (!rect || !rect.width || !rect.height) return;
   const scaleX = mapState.viewBox.w / rect.width;
   const scaleY = mapState.viewBox.h / rect.height;
   mapState.viewBox.x += vector.dx * scaleX;
   mapState.viewBox.y += vector.dy * scaleY;
-  mapState.updateViewBox();
+  mapState.updateViewBox({ immediate: true });
   if (mapState.selectionRect) {
     refreshSelectionRectFromClients();
   }
@@ -2969,7 +3057,8 @@ async function finishMenuDrag(clientX, clientY) {
   mapState.menuDrag = null;
   if (drag?.ghost) drag.ghost.remove();
   if (!drag || !mapState.svg) return;
-  const rect = mapState.svg.getBoundingClientRect();
+  const rect = getSvgRect({ force: true });
+  if (!rect) return;
   if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
     return;
   }
