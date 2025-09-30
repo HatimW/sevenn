@@ -52,6 +52,9 @@ const CURSOR_STYLE = {
   )
 };
 
+const PAN_ACCELERATION = 1.12;
+const ZOOM_INTENSITY = 0.0032;
+
 const ICONS = {
   sliders:
     '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
@@ -241,14 +244,89 @@ function normalizeMapTab(tab = {}) {
     layoutSeeded: tab.layoutSeeded === true,
     filter: {
       blockId: filter.blockId || '',
-      week: Number.isFinite(filter.week) ? filter.week : (typeof filter.week === 'string' && filter.week.trim() ? Number(filter.week) : ''),
-      lectureKey: filter.lectureKey || ''
+      weeks: getFilterWeeks(filter),
+      lectureKeys: getFilterLectureKeys(filter)
     }
   };
-  if (!Number.isFinite(normalized.filter.week)) {
-    normalized.filter.week = '';
-  }
   return normalized;
+}
+
+function parseWeekValue(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function normalizeWeekArray(values = []) {
+  const seen = new Set();
+  const result = [];
+  values.forEach(value => {
+    const week = parseWeekValue(value);
+    if (!Number.isFinite(week) || seen.has(week)) return;
+    seen.add(week);
+    result.push(week);
+  });
+  result.sort((a, b) => a - b);
+  return result;
+}
+
+function normalizeLectureKeyArray(values = []) {
+  const seen = new Set();
+  const result = [];
+  values.forEach(value => {
+    const key = typeof value === 'string' ? value.trim() : '';
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    result.push(key);
+  });
+  return result;
+}
+
+function getFilterWeeks(filter = {}) {
+  if (!filter || typeof filter !== 'object') {
+    return [];
+  }
+  const weeks = normalizeWeekArray(filter.weeks);
+  if (weeks.length) {
+    return weeks;
+  }
+  const legacy = parseWeekValue(filter.week);
+  return Number.isFinite(legacy) ? [legacy] : [];
+}
+
+function getFilterLectureKeys(filter = {}) {
+  if (!filter || typeof filter !== 'object') {
+    return [];
+  }
+  const keys = normalizeLectureKeyArray(filter.lectureKeys);
+  if (keys.length) {
+    return keys;
+  }
+  const legacy = typeof filter.lectureKey === 'string' ? filter.lectureKey.trim() : '';
+  return legacy ? [legacy] : [];
+}
+
+function setFilterWeeks(targetFilter, weeks = []) {
+  if (!targetFilter || typeof targetFilter !== 'object') return;
+  targetFilter.weeks = normalizeWeekArray(weeks);
+  if ('week' in targetFilter) {
+    targetFilter.week = '';
+  }
+}
+
+function setFilterLectureKeys(targetFilter, keys = []) {
+  if (!targetFilter || typeof targetFilter !== 'object') return;
+  targetFilter.lectureKeys = normalizeLectureKeyArray(keys);
+  if ('lectureKey' in targetFilter) {
+    targetFilter.lectureKey = '';
+  }
 }
 
 function deriveItemGroupKeys(item) {
@@ -395,7 +473,7 @@ async function createMapTab() {
     manualMode: false,
     manualIds: [],
     layoutSeeded: true,
-    filter: { blockId: '', week: '', lectureKey: '' }
+    filter: { blockId: '', weeks: [], lectureKeys: [] }
   });
   config.tabs.push(tab);
   config.activeTabId = tab.id;
@@ -570,10 +648,36 @@ function createMapTabsPanel(activeTab) {
   const tabsWrap = document.createElement('div');
   tabsWrap.className = 'map-tabs';
 
+  const header = document.createElement('div');
+  header.className = 'map-tabs-header';
+
   const heading = document.createElement('div');
   heading.className = 'map-tabs-heading';
-  heading.textContent = 'Concept maps';
-  tabsWrap.appendChild(heading);
+  const title = document.createElement('h2');
+  title.className = 'map-tabs-title';
+  title.textContent = 'Concept maps';
+  heading.appendChild(title);
+  const subtitle = document.createElement('p');
+  subtitle.className = 'map-tabs-subtitle';
+  subtitle.textContent = 'Jump between saved layouts or spin up a fresh canvas.';
+  heading.appendChild(subtitle);
+  header.appendChild(heading);
+
+  const actions = document.createElement('div');
+  actions.className = 'map-tab-actions';
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'map-pill-btn map-tab-add';
+  addBtn.setAttribute('aria-label', 'Create new map tab');
+  addBtn.innerHTML = `${ICONS.plus}<span>New map</span>`;
+  addBtn.addEventListener('click', () => {
+    createMapTab();
+  });
+  actions.appendChild(addBtn);
+
+  header.appendChild(actions);
+  tabsWrap.appendChild(header);
 
   const tabList = document.createElement('div');
   tabList.className = 'map-tab-list';
@@ -590,34 +694,6 @@ function createMapTabsPanel(activeTab) {
     tabList.appendChild(btn);
   });
   tabsWrap.appendChild(tabList);
-
-  const actions = document.createElement('div');
-  actions.className = 'map-tab-actions';
-
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'map-icon-btn map-tab-add';
-  addBtn.setAttribute('aria-label', 'Create new map tab');
-  addBtn.innerHTML = `${ICONS.plus}`;
-  addBtn.addEventListener('click', () => {
-    createMapTab();
-  });
-  actions.appendChild(addBtn);
-
-  const settingsBtn = document.createElement('button');
-  settingsBtn.type = 'button';
-  settingsBtn.className = 'map-icon-btn map-tab-settings';
-  settingsBtn.setAttribute('aria-label', 'Open settings');
-  settingsBtn.innerHTML = `${ICONS.gear}`;
-  settingsBtn.addEventListener('click', () => {
-    const headerSettings = document.querySelector('.header-settings-btn');
-    if (headerSettings) {
-      headerSettings.click();
-    }
-  });
-  actions.appendChild(settingsBtn);
-
-  tabsWrap.appendChild(actions);
 
   return tabsWrap;
 }
@@ -774,8 +850,8 @@ function createMapControlsPanel(activeTab) {
     activeTab.manualMode = manualInput.checked;
     if (manualInput.checked) {
       activeTab.filter.blockId = '';
-      activeTab.filter.week = '';
-      activeTab.filter.lectureKey = '';
+      setFilterWeeks(activeTab.filter, []);
+      setFilterLectureKeys(activeTab.filter, []);
       activeTab.includeLinked = false;
     } else {
       activeTab.includeLinked = true;
@@ -811,8 +887,11 @@ function createMapControlsPanel(activeTab) {
   filterRow.className = 'map-controls-row';
 
   const blockWrap = document.createElement('label');
-  blockWrap.className = 'map-control';
-  blockWrap.textContent = 'Block';
+  blockWrap.className = 'map-control map-control-group';
+  const blockLabel = document.createElement('span');
+  blockLabel.className = 'map-control-label';
+  blockLabel.textContent = 'Block';
+  blockWrap.appendChild(blockLabel);
   const blockSelect = document.createElement('select');
   blockSelect.className = 'map-select';
   const blocks = mapState.blocks || [];
@@ -830,91 +909,182 @@ function createMapControlsPanel(activeTab) {
   blockSelect.disabled = Boolean(activeTab.manualMode);
   blockSelect.addEventListener('change', async () => {
     activeTab.filter.blockId = blockSelect.value;
-    activeTab.filter.week = '';
-    activeTab.filter.lectureKey = '';
+    setFilterWeeks(activeTab.filter, []);
+    setFilterLectureKeys(activeTab.filter, []);
     await persistMapConfig();
     await renderMap(mapState.root);
   });
   blockWrap.appendChild(blockSelect);
   filterRow.appendChild(blockWrap);
 
-  const weekWrap = document.createElement('label');
-  weekWrap.className = 'map-control';
-  weekWrap.textContent = 'Week';
-  const weekSelect = document.createElement('select');
-  weekSelect.className = 'map-select';
-  const weekBlock = blocks.find(b => b.blockId === blockSelect.value);
-  const weekDefault = document.createElement('option');
-  weekDefault.value = '';
-  weekDefault.textContent = blockSelect.value ? 'All weeks' : 'Select a block';
-  weekSelect.appendChild(weekDefault);
-  if (weekBlock && blockSelect.value) {
-    const weekNumbers = new Set();
-    if (Number(weekBlock.weeks)) {
-      for (let i = 1; i <= Number(weekBlock.weeks); i++) {
-        weekNumbers.add(i);
-      }
+  const makeChip = ({ label, active = false, onToggle, disabled = false, title }) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'map-chip' + (active ? ' active' : '');
+    chip.textContent = label;
+    chip.setAttribute('aria-pressed', active ? 'true' : 'false');
+    if (title) {
+      chip.title = title;
     }
-    (weekBlock.lectures || []).forEach(lec => {
-      if (Number.isFinite(lec?.week)) {
-        weekNumbers.add(lec.week);
-      }
-    });
-    Array.from(weekNumbers)
-      .sort((a, b) => a - b)
-      .forEach(num => {
-        const opt = document.createElement('option');
-        opt.value = String(num);
-        opt.textContent = `Week ${num}`;
-        weekSelect.appendChild(opt);
-      });
-  }
-  if (blockSelect.value && activeTab.filter.week) {
-    weekSelect.value = String(activeTab.filter.week);
-  } else {
-    weekSelect.value = '';
-  }
-  weekSelect.disabled = !blockSelect.value || Boolean(activeTab.manualMode);
-  weekSelect.addEventListener('change', async () => {
-    const val = weekSelect.value;
-    activeTab.filter.week = val ? Number(val) : '';
-    activeTab.filter.lectureKey = '';
+    if (disabled) {
+      chip.disabled = true;
+      chip.classList.add('disabled');
+    } else if (typeof onToggle === 'function') {
+      chip.addEventListener('click', onToggle);
+    }
+    return chip;
+  };
+
+  const selectedWeeks = new Set(getFilterWeeks(activeTab.filter));
+  const selectedLectures = new Set(getFilterLectureKeys(activeTab.filter));
+  const weekBlock = blocks.find(b => b.blockId === blockSelect.value);
+  const filtersDisabled = Boolean(activeTab.manualMode);
+  const hasBlock = Boolean(blockSelect.value);
+
+  const weekWrap = document.createElement('div');
+  weekWrap.className = 'map-control map-control-group';
+  const weekLabel = document.createElement('div');
+  weekLabel.className = 'map-control-label';
+  weekLabel.textContent = 'Weeks';
+  weekWrap.appendChild(weekLabel);
+  const weekList = document.createElement('div');
+  weekList.className = 'map-chip-list';
+  weekWrap.appendChild(weekList);
+
+  const applyWeeks = async nextWeeks => {
+    setFilterWeeks(activeTab.filter, nextWeeks);
+    setFilterLectureKeys(activeTab.filter, []);
     await persistMapConfig();
     await renderMap(mapState.root);
-  });
-  weekWrap.appendChild(weekSelect);
+  };
+
+  if (!hasBlock || filtersDisabled) {
+    const message = document.createElement('div');
+    message.className = 'map-chip-empty';
+    message.textContent = filtersDisabled ? 'Disabled in manual mode.' : 'Choose a block to filter weeks.';
+    weekList.appendChild(message);
+  } else {
+    const weekNumbers = new Set();
+    if (weekBlock) {
+      if (Number(weekBlock.weeks)) {
+        for (let i = 1; i <= Number(weekBlock.weeks); i++) {
+          weekNumbers.add(i);
+        }
+      }
+      (weekBlock.lectures || []).forEach(lec => {
+        if (Number.isFinite(lec?.week)) {
+          weekNumbers.add(lec.week);
+        }
+      });
+    }
+    const sortedWeeks = Array.from(weekNumbers).sort((a, b) => a - b);
+    weekList.appendChild(
+      makeChip({
+        label: 'All weeks',
+        active: selectedWeeks.size === 0,
+        onToggle: () => applyWeeks([])
+      })
+    );
+    if (!sortedWeeks.length) {
+      const empty = document.createElement('div');
+      empty.className = 'map-chip-empty';
+      empty.textContent = 'No weeks found for this block.';
+      weekList.appendChild(empty);
+    } else {
+      sortedWeeks.forEach(num => {
+        weekList.appendChild(
+          makeChip({
+            label: `Week ${num}`,
+            active: selectedWeeks.has(num),
+            onToggle: () => {
+              const next = new Set(selectedWeeks);
+              if (next.has(num)) {
+                next.delete(num);
+              } else {
+                next.add(num);
+              }
+              applyWeeks(Array.from(next).sort((a, b) => a - b));
+            }
+          })
+        );
+      });
+    }
+  }
   filterRow.appendChild(weekWrap);
 
-  const lectureWrap = document.createElement('label');
-  lectureWrap.className = 'map-control';
-  lectureWrap.textContent = 'Lecture';
-  const lectureSelect = document.createElement('select');
-  lectureSelect.className = 'map-select';
-  const lectureDefault = document.createElement('option');
-  lectureDefault.value = '';
-  lectureDefault.textContent = blockSelect.value ? 'All lectures' : 'Select a block';
-  lectureSelect.appendChild(lectureDefault);
-  if (weekBlock && blockSelect.value) {
-    const lectures = Array.isArray(weekBlock.lectures) ? weekBlock.lectures : [];
-    const weekFilter = activeTab.filter.week;
-    lectures
-      .filter(lec => !weekFilter || lec.week === weekFilter)
-      .forEach(lec => {
-        const opt = document.createElement('option');
-        opt.value = `${weekBlock.blockId}|${lec.id}`;
-        const label = lec.name ? `${lec.name} (Week ${lec.week})` : `Lecture ${lec.id}`;
-        opt.textContent = label;
-        lectureSelect.appendChild(opt);
-      });
-  }
-  lectureSelect.value = activeTab.filter.lectureKey || '';
-  lectureSelect.disabled = !blockSelect.value || Boolean(activeTab.manualMode);
-  lectureSelect.addEventListener('change', async () => {
-    activeTab.filter.lectureKey = lectureSelect.value || '';
+  const lectureWrap = document.createElement('div');
+  lectureWrap.className = 'map-control map-control-group';
+  const lectureLabel = document.createElement('div');
+  lectureLabel.className = 'map-control-label';
+  lectureLabel.textContent = 'Lectures';
+  lectureWrap.appendChild(lectureLabel);
+  const lectureList = document.createElement('div');
+  lectureList.className = 'map-chip-list';
+  lectureWrap.appendChild(lectureList);
+
+  const applyLectures = async nextKeys => {
+    setFilterLectureKeys(activeTab.filter, nextKeys);
     await persistMapConfig();
     await renderMap(mapState.root);
-  });
-  lectureWrap.appendChild(lectureSelect);
+  };
+
+  if (!hasBlock || filtersDisabled) {
+    const message = document.createElement('div');
+    message.className = 'map-chip-empty';
+    message.textContent = filtersDisabled ? 'Disabled in manual mode.' : 'Choose a block first.';
+    lectureList.appendChild(message);
+  } else {
+    const lectures = Array.isArray(weekBlock?.lectures) ? weekBlock.lectures : [];
+    const filteredLectures = lectures
+      .filter(lec => !selectedWeeks.size || selectedWeeks.has(Number(lec.week)))
+      .sort((a, b) => {
+        const weekA = Number(a.week) || 0;
+        const weekB = Number(b.week) || 0;
+        if (weekA !== weekB) return weekA - weekB;
+        const idA = Number(a.id) || 0;
+        const idB = Number(b.id) || 0;
+        return idA - idB;
+      });
+
+    lectureList.appendChild(
+      makeChip({
+        label: 'All lectures',
+        active: selectedLectures.size === 0,
+        onToggle: () => applyLectures([])
+      })
+    );
+
+    if (!filteredLectures.length) {
+      const empty = document.createElement('div');
+      empty.className = 'map-chip-empty';
+      empty.textContent = selectedWeeks.size
+        ? 'No lectures match the selected weeks.'
+        : 'No lectures found for this block.';
+      lectureList.appendChild(empty);
+    } else {
+      filteredLectures.forEach(lec => {
+        const key = `${weekBlock.blockId}|${lec.id}`;
+        const label = lec.name ? lec.name : `Lecture ${lec.id}`;
+        const weekLabel = Number.isFinite(lec.week) ? `Week ${lec.week}` : '';
+        lectureList.appendChild(
+          makeChip({
+            label: weekLabel ? `${label} · ${weekLabel}` : label,
+            title: weekLabel ? `${label} (${weekLabel})` : label,
+            active: selectedLectures.has(key),
+            onToggle: () => {
+              const next = new Set(selectedLectures);
+              if (next.has(key)) {
+                next.delete(key);
+              } else {
+                next.add(key);
+              }
+              applyLectures(Array.from(next));
+            }
+          })
+        );
+      });
+    }
+  }
   filterRow.appendChild(lectureWrap);
 
   const resetBtn = document.createElement('button');
@@ -924,8 +1094,8 @@ function createMapControlsPanel(activeTab) {
   resetBtn.disabled = Boolean(activeTab.manualMode);
   resetBtn.addEventListener('click', async () => {
     activeTab.filter.blockId = '';
-    activeTab.filter.week = '';
-    activeTab.filter.lectureKey = '';
+    setFilterWeeks(activeTab.filter, []);
+    setFilterLectureKeys(activeTab.filter, []);
     await persistMapConfig();
     await renderMap(mapState.root);
   });
@@ -1099,37 +1269,42 @@ function centerOnNode(id) {
 function matchesFilter(item, filter = {}) {
   if (!filter) return true;
   const blockId = filter.blockId || '';
-  const week = filter.week;
-  const lectureKey = filter.lectureKey || '';
+  const weeks = getFilterWeeks(filter);
+  const lectureKeys = getFilterLectureKeys(filter);
   if (blockId) {
     const inBlock = (item.blocks || []).includes(blockId) || (item.lectures || []).some(lec => lec.blockId === blockId);
     if (!inBlock) return false;
   }
-  if (week !== '' && week !== null && week !== undefined) {
-    const weekNum = Number(week);
-    if (Number.isFinite(weekNum)) {
+  if (weeks.length) {
+    const satisfiesWeek = weeks.some(weekNum => {
+      if (!Number.isFinite(weekNum)) return false;
       if (blockId) {
-        const matchesWeek = (item.lectures || []).some(lec => lec.blockId === blockId && lec.week === weekNum) || (item.weeks || []).includes(weekNum);
-        if (!matchesWeek) return false;
-      } else if (!(item.weeks || []).includes(weekNum)) {
-        return false;
+        const inLectures = (item.lectures || []).some(lec => lec.blockId === blockId && Number(lec.week) === weekNum);
+        const inWeeks = Array.isArray(item.weeks) && item.weeks.includes(weekNum);
+        return inLectures || inWeeks;
       }
-    }
+      const directWeek = Array.isArray(item.weeks) && item.weeks.includes(weekNum);
+      if (directWeek) return true;
+      return (item.lectures || []).some(lec => Number(lec.week) === weekNum);
+    });
+    if (!satisfiesWeek) return false;
   }
-  if (lectureKey) {
-    const [blk, lecStr] = lectureKey.split('|');
-    const lecId = Number(lecStr);
-    if (Number.isFinite(lecId)) {
-      const blockMatch = blk || blockId;
-      const hasLecture = (item.lectures || []).some(lec => {
-        if (!Number.isFinite(lec.id)) return false;
+  if (lectureKeys.length) {
+    const satisfiesLecture = lectureKeys.some(rawKey => {
+      if (!rawKey) return false;
+      const [blk, lecStr] = String(rawKey).split('|');
+      const lecId = Number(lecStr);
+      if (!Number.isFinite(lecId)) return false;
+      const blockMatch = blk || blockId || '';
+      return (item.lectures || []).some(lec => {
+        if (!Number.isFinite(lec?.id)) return false;
         if (blockMatch) {
           return lec.blockId === blockMatch && lec.id === lecId;
         }
         return lec.id === lecId;
       });
-      if (!hasLecture) return false;
-    }
+    });
+    if (!satisfiesLecture) return false;
   }
   return true;
 }
@@ -1333,6 +1508,14 @@ export async function renderMap(root) {
   container.className = 'map-container';
   stage.appendChild(container);
   mapState.container = container;
+  container.addEventListener('pointerdown', e => {
+    if (mapState.tool === TOOL.AREA) return;
+    if (e.button !== 0) return;
+    if (e.target !== container) return;
+    if (beginViewDrag(e)) {
+      e.preventDefault();
+    }
+  });
 
   const overlay = document.createElement('div');
   overlay.className = 'map-overlay';
@@ -1361,7 +1544,14 @@ export async function renderMap(root) {
   closeBtn.className = 'map-menu-close';
   closeBtn.setAttribute('aria-label', 'Hide map controls');
   closeBtn.innerHTML = `<span class="sr-only">Hide map controls</span>${ICONS.close}`;
-  panel.appendChild(closeBtn);
+  const panelHeader = document.createElement('div');
+  panelHeader.className = 'map-menu-header';
+  const panelTitle = document.createElement('div');
+  panelTitle.className = 'map-menu-title';
+  panelTitle.textContent = 'Map controls';
+  panelHeader.appendChild(panelTitle);
+  panelHeader.appendChild(closeBtn);
+  panel.appendChild(panelHeader);
 
   const tabsPanel = createMapTabsPanel(activeTab);
   panel.appendChild(tabsPanel);
@@ -2217,6 +2407,30 @@ function updateMarkerSizes() {
   });
 }
 
+function beginViewDrag(e) {
+  if (!mapState.svg || !mapState.viewBox) return false;
+  if (e.button !== 0) return false;
+  mapState.justCompletedSelection = false;
+  getSvgRect({ force: true });
+  const startMap = clientToMap(e.clientX, e.clientY);
+  mapState.draggingView = true;
+  mapState.viewPointerId = e.pointerId;
+  mapState.lastPointer = {
+    x: e.clientX,
+    y: e.clientY,
+    mapX: startMap.x,
+    mapY: startMap.y
+  };
+  if (e.currentTarget?.setPointerCapture) {
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+  }
+  setAreaInteracting(true);
+  refreshCursor({ keepOverride: false });
+  return true;
+}
+
 function attachSvgEvents(svg) {
   svg.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
@@ -2225,22 +2439,7 @@ function attachSvgEvents(svg) {
     getSvgRect({ force: true });
     if (mapState.tool !== TOOL.AREA) {
       e.preventDefault();
-      const startMap = clientToMap(e.clientX, e.clientY);
-      mapState.draggingView = true;
-      mapState.viewPointerId = e.pointerId;
-      mapState.lastPointer = {
-        x: e.clientX,
-        y: e.clientY,
-        mapX: startMap.x,
-        mapY: startMap.y
-      };
-      if (svg.setPointerCapture) {
-        try {
-          svg.setPointerCapture(e.pointerId);
-        } catch {}
-      }
-      setAreaInteracting(true);
-      refreshCursor({ keepOverride: false });
+      beginViewDrag(e);
     } else {
       e.preventDefault();
       mapState.selectionRect = {
@@ -2280,12 +2479,28 @@ function attachSvgEvents(svg) {
     if (!mapState.viewBox) return;
     const rect = getSvgRect({ force: true });
     if (!rect || !rect.width || !rect.height) return;
+    const pixelMode = e.deltaMode === 0;
+    const wantsZoom = e.ctrlKey || e.metaKey || e.altKey || !pixelMode;
+    if (!wantsZoom) {
+      const scaleX = rect.width ? (mapState.viewBox.w / rect.width) : 0;
+      const scaleY = rect.height ? (mapState.viewBox.h / rect.height) : 0;
+      mapState.viewBox.x += e.deltaX * scaleX * PAN_ACCELERATION;
+      mapState.viewBox.y += e.deltaY * scaleY * PAN_ACCELERATION;
+      constrainViewBox();
+      mapState.updateViewBox({ immediate: true });
+      return;
+    }
     const ratioX = (e.clientX - rect.left) / rect.width;
     const ratioY = (e.clientY - rect.top) / rect.height;
     const mx = mapState.viewBox.x + ratioX * mapState.viewBox.w;
     const my = mapState.viewBox.y + ratioY * mapState.viewBox.h;
-    const intensity = 0.0018;
-    const rawFactor = Math.exp(e.deltaY * intensity);
+    let deltaY = e.deltaY;
+    if (e.deltaMode === 1) {
+      deltaY *= 16;
+    } else if (e.deltaMode === 2) {
+      deltaY *= rect.height;
+    }
+    const rawFactor = Math.exp(deltaY * ZOOM_INTENSITY);
     const factor = Number.isFinite(rawFactor) && rawFactor > 0 ? rawFactor : 1;
     const maxSize = mapState.sizeLimit || 2000;
     const minSize = mapState.minView || 100;
@@ -2294,12 +2509,7 @@ function attachSvgEvents(svg) {
     mapState.viewBox.h = nextW;
     mapState.viewBox.x = mx - ratioX * nextW;
     mapState.viewBox.y = my - ratioY * nextW;
-    if (maxSize > 0) {
-      const maxX = Math.max(0, maxSize - mapState.viewBox.w);
-      const maxY = Math.max(0, maxSize - mapState.viewBox.h);
-      mapState.viewBox.x = clamp(mapState.viewBox.x, 0, maxX);
-      mapState.viewBox.y = clamp(mapState.viewBox.y, 0, maxY);
-    }
+    constrainViewBox();
     mapState.updateViewBox();
   }, { passive: false });
 }
@@ -2378,8 +2588,12 @@ function handlePointerMove(e) {
       ? { x: mapState.lastPointer.mapX, y: mapState.lastPointer.mapY }
       : clientToMap(mapState.lastPointer.x, mapState.lastPointer.y);
     const current = clientToMap(e.clientX, e.clientY);
-    mapState.viewBox.x += prev.x - current.x;
-    mapState.viewBox.y += prev.y - current.y;
+    if (typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
+    mapState.viewBox.x += (prev.x - current.x) * PAN_ACCELERATION;
+    mapState.viewBox.y += (prev.y - current.y) * PAN_ACCELERATION;
+    constrainViewBox();
     mapState.lastPointer = { x: e.clientX, y: e.clientY, mapX: current.x, mapY: current.y };
     mapState.updateViewBox({ immediate: true });
     if (mapState.selectionRect) {
@@ -2577,6 +2791,18 @@ function getSvgRect(options = {}) {
     mapState.svgRectTime = now;
   }
   return mapState.svgRect;
+}
+
+function constrainViewBox() {
+  const viewBox = mapState.viewBox;
+  if (!viewBox) return;
+  const maxSize = mapState.sizeLimit || 0;
+  if (maxSize > 0) {
+    const maxX = Math.max(0, maxSize - viewBox.w);
+    const maxY = Math.max(0, maxSize - viewBox.h);
+    viewBox.x = clamp(viewBox.x, 0, maxX);
+    viewBox.y = clamp(viewBox.y, 0, maxY);
+  }
 }
 
 function clientToMap(clientX, clientY) {
