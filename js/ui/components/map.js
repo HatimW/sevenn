@@ -214,7 +214,9 @@ const mapState = {
   nodeLayer: null,
   lineMarkers: new Map(),
   edgeRefs: new Map(),
-  allEdges: new Set()
+  allEdges: new Set(),
+  pendingNodeUpdates: new Map(),
+  nodeUpdateFrame: null
 };
 
 function normalizeMapTab(tab = {}) {
@@ -1279,6 +1281,10 @@ export async function renderMap(root) {
   setAreaInteracting(false);
   mapState.edgeLayer = null;
   mapState.nodeLayer = null;
+  flushNodePositionUpdates({ cancelFrame: true });
+  if (mapState.pendingNodeUpdates) {
+    mapState.pendingNodeUpdates.clear();
+  }
 
   ensureListeners();
 
@@ -2070,11 +2076,11 @@ export async function renderMap(root) {
     text.setAttribute('x', pos.x);
     text.setAttribute('y', pos.y - (baseR + 12));
     text.setAttribute('class', 'map-label');
-    text.setAttribute('font-size', '14');
+    text.setAttribute('font-size', '16');
     text.dataset.id = it.id;
     text.textContent = it.name || it.concept || '?';
-    text.addEventListener('mousedown', handleNodePointerDown);
-    text.addEventListener('click', e => {
+    text.addEventListener('pointerdown', handleNodePointerDown);
+    text.addEventListener('click', async e => {
       e.stopPropagation();
       if (mapState.suppressNextClick) {
         mapState.suppressNextClick = false;
@@ -2083,6 +2089,13 @@ export async function renderMap(root) {
       }
       if (mapState.tool === TOOL.NAVIGATE && !mapState.nodeWasDragged) {
         openItemPopup(it.id);
+      } else if (mapState.tool === TOOL.HIDE) {
+        if (confirm(`Remove ${titleOf(it)} from the map?`)) {
+          await setNodeHidden(it.id, true);
+          await renderMap(root);
+        }
+      } else if (mapState.tool === TOOL.ADD_LINK) {
+        await handleAddLinkClick(it.id);
       }
       mapState.nodeWasDragged = false;
     });
@@ -2340,9 +2353,7 @@ function handlePointerMove(e) {
     const { x, y } = clientToMap(e.clientX, e.clientY);
     const nx = x - mapState.nodeDrag.offset.x;
     const ny = y - mapState.nodeDrag.offset.y;
-    mapState.positions[mapState.nodeDrag.id] = { x: nx, y: ny };
-    updateNodeGeometry(mapState.nodeDrag.id, entry);
-    updateEdgesFor(mapState.nodeDrag.id);
+    scheduleNodePositionUpdate(mapState.nodeDrag.id, { x: nx, y: ny });
     mapState.nodeWasDragged = true;
     return;
   }
@@ -2356,9 +2367,7 @@ function handlePointerMove(e) {
     mapState.areaDrag.origin.forEach(({ id, pos }) => {
       const nx = pos.x + dx;
       const ny = pos.y + dy;
-      mapState.positions[id] = { x: nx, y: ny };
-      updateNodeGeometry(id);
-      updateEdgesFor(id);
+      scheduleNodePositionUpdate(id, { x: nx, y: ny });
     });
     mapState.nodeWasDragged = true;
     return;
@@ -2389,6 +2398,8 @@ function handlePointerMove(e) {
 
 async function handlePointerUp(e) {
   if (!mapState.svg) return;
+
+  flushNodePositionUpdates({ cancelFrame: true });
 
   if (mapState.toolboxDrag) {
     stopToolboxDrag();
@@ -2501,6 +2512,42 @@ async function handlePointerUp(e) {
   if (cursorNeedsRefresh) {
     refreshCursor({ keepOverride: true });
   }
+}
+
+function scheduleNodePositionUpdate(id, pos) {
+  if (!id || !pos) return;
+  if (!mapState.pendingNodeUpdates) {
+    mapState.pendingNodeUpdates = new Map();
+  }
+  mapState.positions[id] = pos;
+  mapState.pendingNodeUpdates.set(id, pos);
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+    flushNodePositionUpdates();
+    return;
+  }
+  if (mapState.nodeUpdateFrame) {
+    return;
+  }
+  mapState.nodeUpdateFrame = window.requestAnimationFrame(() => {
+    mapState.nodeUpdateFrame = null;
+    flushNodePositionUpdates();
+  });
+}
+
+function flushNodePositionUpdates({ cancelFrame = false } = {}) {
+  if (cancelFrame && mapState.nodeUpdateFrame && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+    window.cancelAnimationFrame(mapState.nodeUpdateFrame);
+    mapState.nodeUpdateFrame = null;
+  }
+  const updates = mapState.pendingNodeUpdates;
+  if (!updates || !updates.size) return;
+  updates.forEach((_, id) => {
+    const entry = mapState.elements.get(id);
+    if (!entry) return;
+    updateNodeGeometry(id, entry);
+    updateEdgesFor(id);
+  });
+  updates.clear();
 }
 
 function getNow() {
@@ -2740,7 +2787,7 @@ function updateNodeGeometry(id, entry = mapState.elements.get(id)) {
     label.setAttribute('x', pos.x);
     const offset = (baseR + 12) * nodeScale;
     label.setAttribute('y', pos.y - offset);
-    const fontSize = Math.max(12, 14 * labelScale);
+    const fontSize = Math.max(14, 16 * labelScale);
     label.setAttribute('font-size', fontSize);
   }
 }
