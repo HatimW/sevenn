@@ -9886,6 +9886,16 @@ var Sevenn = (() => {
   }
 
   // js/ui/components/lectures.js
+  function findLectureScrollContainer(element) {
+    if (element && typeof element.closest === "function") {
+      const main = element.closest("main");
+      if (main && typeof main.scrollTop === "number") {
+        return main;
+      }
+    }
+    const doc = document.scrollingElement || document.documentElement || document.body;
+    return doc;
+  }
   function ensureLectureState() {
     if (!state.lectures) {
       setLecturesState({});
@@ -9918,7 +9928,7 @@ var Sevenn = (() => {
       openBlocks,
       openWeeks,
       openSnapshot: Date.now(),
-      scrollTop: window.scrollY
+      scrollTop: (findLectureScrollContainer(container)?.scrollTop ?? window.scrollY)
     });
   }
   function collectLectures(catalog) {
@@ -12236,10 +12246,17 @@ var Sevenn = (() => {
       (blockInfo) => handleExportBlockBundle(blockInfo)
     );
     layout.appendChild(table);
+    const scroller = findLectureScrollContainer(root);
     requestAnimationFrame(() => {
       const target = Number(filters?.scrollTop);
       if (Number.isFinite(target) && target > 0) {
-        window.scrollTo({ top: target, left: 0, behavior: "auto" });
+        if (scroller && typeof scroller.scrollTo === "function") {
+          scroller.scrollTo({ top: target, left: 0, behavior: "auto" });
+        } else if (scroller && "scrollTop" in scroller) {
+          scroller.scrollTop = target;
+        } else {
+          window.scrollTo({ top: target, left: 0, behavior: "auto" });
+        }
       }
     });
   }
@@ -17375,6 +17392,7 @@ var Sevenn = (() => {
     suppressNextClick: false,
     edgeDragJustCompleted: false,
     viewPointerId: null,
+    viewDragStart: null,
     mapConfig: null,
     mapConfigLoaded: false,
     blocks: [],
@@ -19391,6 +19409,12 @@ var Sevenn = (() => {
       mapX: startMap.x,
       mapY: startMap.y
     };
+    mapState.viewDragStart = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      viewX: mapState.viewBox.x,
+      viewY: mapState.viewBox.y
+    };
     if (e.currentTarget?.setPointerCapture) {
       try {
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -19546,15 +19570,21 @@ var Sevenn = (() => {
       return;
     }
     if (mapState.draggingView && mapState.viewPointerId === e.pointerId) {
-      const prev = Number.isFinite(mapState.lastPointer.mapX) ? { x: mapState.lastPointer.mapX, y: mapState.lastPointer.mapY } : clientToMap(mapState.lastPointer.x, mapState.lastPointer.y);
-      const current = clientToMap(e.clientX, e.clientY);
+      const start = mapState.viewDragStart;
+      if (!start) return;
+      const rect = getSvgRect();
+      if (!rect || !rect.width || !rect.height) return;
       if (typeof e.preventDefault === "function") {
         e.preventDefault();
       }
-      mapState.viewBox.x += (prev.x - current.x) * PAN_ACCELERATION;
-      mapState.viewBox.y += (prev.y - current.y) * PAN_ACCELERATION;
+      const scaleX = mapState.viewBox.w / rect.width;
+      const scaleY = mapState.viewBox.h / rect.height;
+      const deltaX = (e.clientX - start.clientX) * PAN_ACCELERATION;
+      const deltaY = (e.clientY - start.clientY) * PAN_ACCELERATION;
+      mapState.viewBox.x = start.viewX - deltaX * scaleX;
+      mapState.viewBox.y = start.viewY - deltaY * scaleY;
       constrainViewBox();
-      mapState.lastPointer = { x: e.clientX, y: e.clientY, mapX: current.x, mapY: current.y };
+      mapState.lastPointer = { x: e.clientX, y: e.clientY };
       mapState.updateViewBox({ immediate: true });
       if (mapState.selectionRect) {
         refreshSelectionRectFromClients();
@@ -19650,6 +19680,7 @@ var Sevenn = (() => {
     if (mapState.draggingView && mapState.viewPointerId === e.pointerId) {
       mapState.draggingView = false;
       mapState.viewPointerId = null;
+      mapState.viewDragStart = null;
       if (mapState.svg?.releasePointerCapture) {
         try {
           mapState.svg.releasePointerCapture(e.pointerId);
