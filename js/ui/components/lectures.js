@@ -19,6 +19,17 @@ import {
 import { LECTURE_PASS_ACTIONS } from '../../lectures/actions.js';
 import { passColorForOrder, setPassColorPalette } from './pass-colors.js';
 
+function findLectureScrollContainer(element) {
+  if (element && typeof element.closest === 'function') {
+    const main = element.closest('main');
+    if (main && typeof main.scrollTop === 'number') {
+      return main;
+    }
+  }
+  const doc = document.scrollingElement || document.documentElement || document.body;
+  return doc;
+}
+
 function ensureLectureState() {
   if (!state.lectures) {
     setLecturesState({});
@@ -56,7 +67,7 @@ function captureLectureViewState() {
     openBlocks,
     openWeeks,
     openSnapshot: Date.now(),
-    scrollTop: window.scrollY
+    scrollTop: findLectureScrollContainer(container)?.scrollTop ?? window.scrollY
   });
 }
 
@@ -2790,10 +2801,17 @@ export async function renderLectures(root, redraw) {
   );
   layout.appendChild(table);
 
+  const scroller = findLectureScrollContainer(root);
   requestAnimationFrame(() => {
     const target = Number(filters?.scrollTop);
     if (Number.isFinite(target) && target > 0) {
-      window.scrollTo({ top: target, left: 0, behavior: 'auto' });
+      if (scroller && typeof scroller.scrollTo === 'function') {
+        scroller.scrollTo({ top: target, left: 0, behavior: 'auto' });
+      } else if (scroller && 'scrollTop' in scroller) {
+        scroller.scrollTop = target;
+      } else {
+        window.scrollTo({ top: target, left: 0, behavior: 'auto' });
+      }
     }
   });
 }
