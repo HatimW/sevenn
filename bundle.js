@@ -5075,6 +5075,65 @@ var Sevenn = (() => {
       }
       return state2;
     }
+    function selectionContextElement() {
+      const selection = window.getSelection();
+      if (!selection?.anchorNode) return editable;
+      let node = selection.anchorNode;
+      if (node.nodeType === Node.TEXT_NODE) {
+        node = node.parentNode;
+      }
+      while (node && node !== editable) {
+        if (node instanceof Element && editable.contains(node)) {
+          return node;
+        }
+        node = node.parentNode;
+      }
+      return editable;
+    }
+    function normalizeFontLabel(value2 = "") {
+      if (!value2) return "Default";
+      const primary = value2.split(",")[0] || "";
+      return primary.replace(/^['"]+|['"]+$/g, "").trim() || "Default";
+    }
+    function parseFontSize(value2 = "") {
+      const parsed = Number.parseFloat(value2);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    let suppressSizeSync = false;
+    function updateFontIndicators() {
+      if (!fontDisplay || !sizeInput || typeof window === "undefined") return;
+      const selection = window.getSelection();
+      const inEditor = selectionWithinEditor({ allowCollapsed: true });
+      const context = inEditor ? selectionContextElement() : editable;
+      let fontLabel = "Default";
+      let fontTitle = "";
+      let sizeValue = null;
+      try {
+        if (context instanceof Element) {
+          const styles = window.getComputedStyle(context);
+          if (styles) {
+            fontTitle = styles.fontFamily || "";
+            fontLabel = normalizeFontLabel(fontTitle);
+            sizeValue = parseFontSize(styles.fontSize || "");
+          }
+        }
+      } catch (err) {
+        fontLabel = "Default";
+        fontTitle = "";
+        sizeValue = null;
+      }
+      fontDisplay.textContent = `Font: ${fontLabel}`;
+      fontDisplay.title = fontTitle || fontLabel;
+      if (document.activeElement !== sizeInput) {
+        suppressSizeSync = true;
+        if (Number.isFinite(sizeValue)) {
+          sizeInput.value = String(Math.round(sizeValue));
+        } else {
+          sizeInput.value = "";
+        }
+        suppressSizeSync = false;
+      }
+    }
     function updateInlineState() {
       const inEditor = selectionWithinEditor();
       const selection = window.getSelection();
@@ -5098,6 +5157,7 @@ var Sevenn = (() => {
         btn.dataset.active = isActive ? "true" : "false";
         btn.setAttribute("aria-pressed", isActive ? "true" : "false");
       });
+      updateFontIndicators();
     }
     function createGroup(extraClass) {
       const group = document.createElement("div");
@@ -5205,55 +5265,107 @@ var Sevenn = (() => {
       const btn = createToolbarButton(label, title, handler);
       listGroup.appendChild(btn);
     });
-    const sizeSelect = document.createElement("select");
-    sizeSelect.className = "rich-editor-size";
-    const sizes = [
-      ["Default", ""],
-      ["Small", "0.85rem"],
-      ["Normal", "1rem"],
-      ["Large", "1.25rem"],
-      ["Huge", "1.5rem"]
-    ];
-    sizes.forEach(([label, value2]) => {
-      const opt = document.createElement("option");
-      opt.value = value2;
-      opt.textContent = label;
-      sizeSelect.appendChild(opt);
-    });
-    sizeSelect.addEventListener("change", () => {
-      if (!hasActiveSelection()) {
-        sizeSelect.value = "";
+    const sizeInput = document.createElement("input");
+    sizeInput.type = "number";
+    sizeInput.inputMode = "numeric";
+    sizeInput.min = "8";
+    sizeInput.max = "96";
+    sizeInput.step = "1";
+    sizeInput.placeholder = "Size";
+    sizeInput.setAttribute("aria-label", "Font size");
+    sizeInput.className = "rich-editor-size-input";
+    function cleanEmptySpan(node) {
+      if (!(node instanceof HTMLElement)) return;
+      if (node.tagName?.toLowerCase() !== "span") return;
+      if (node.getAttribute("style")) return;
+      if (node.attributes.length > 0) return;
+      const parent = node.parentNode;
+      if (!parent) return;
+      while (node.firstChild) parent.insertBefore(node.firstChild, node);
+      parent.removeChild(node);
+    }
+    function setFontSize(pxValue) {
+      const hasValue = Number.isFinite(pxValue) && pxValue > 0;
+      if (!hasValue) {
+        runCommand(() => {
+          const selection = window.getSelection();
+          if (!selection?.rangeCount) return;
+          for (let i = 0; i < selection.rangeCount; i += 1) {
+            const range = selection.getRangeAt(i);
+            const tree = document.createTreeWalker(range.commonAncestorContainer, NodeFilter.SHOW_ELEMENT, null);
+            const seen = /* @__PURE__ */ new Set();
+            while (tree.nextNode()) {
+              const el = tree.currentNode;
+              if (!(el instanceof HTMLElement)) continue;
+              if (!editable.contains(el)) continue;
+              if (seen.has(el)) continue;
+              seen.add(el);
+              if (!range.intersectsNode(el)) continue;
+              if (el.style && el.style.fontSize) {
+                el.style.removeProperty("font-size");
+                if (!el.getAttribute("style")) el.removeAttribute("style");
+                cleanEmptySpan(el);
+              }
+            }
+          }
+          editable.querySelectorAll("font[size]").forEach((node) => {
+            const parent = node.parentNode;
+            if (!parent) return;
+            while (node.firstChild) parent.insertBefore(node.firstChild, node);
+            parent.removeChild(node);
+          });
+        });
         return;
       }
+      const sizePx = Math.max(8, Math.min(96, Math.round(pxValue)));
       runCommand(() => {
         document.execCommand("styleWithCSS", false, true);
         document.execCommand("fontSize", false, 4);
-        const selection = window.getSelection();
-        if (selection?.rangeCount) {
-          const walker = document.createTreeWalker(editable, NodeFilter.SHOW_ELEMENT, {
-            acceptNode: (node) => node.tagName?.toLowerCase() === "font" ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
-          });
-          const toAdjust = [];
-          while (walker.nextNode()) {
-            toAdjust.push(walker.currentNode);
-          }
-          toAdjust.forEach((node) => {
-            if (sizeSelect.value) {
-              const span = document.createElement("span");
-              span.style.fontSize = sizeSelect.value;
-              while (node.firstChild) span.appendChild(node.firstChild);
-              node.parentNode.replaceChild(span, node);
-            } else {
-              const parent = node.parentNode;
-              while (node.firstChild) parent.insertBefore(node.firstChild, node);
-              parent.removeChild(node);
-            }
-          });
-        }
-      }, { requireSelection: true });
-      sizeSelect.value = "";
+        editable.querySelectorAll("font[size]").forEach((node) => {
+          const parent = node.parentNode;
+          if (!parent) return;
+          const span = document.createElement("span");
+          span.style.fontSize = `${sizePx}px`;
+          while (node.firstChild) span.appendChild(node.firstChild);
+          parent.replaceChild(span, node);
+        });
+      });
+    }
+    function commitSizeInput() {
+      if (suppressSizeSync) return;
+      const raw = sizeInput.value.trim();
+      if (!raw) {
+        setFontSize(null);
+        updateFontIndicators();
+        return;
+      }
+      const parsed = Number.parseFloat(raw);
+      if (!Number.isFinite(parsed)) {
+        updateFontIndicators();
+        return;
+      }
+      const clamped = Math.max(8, Math.min(96, Math.round(parsed)));
+      setFontSize(clamped);
+      if (String(clamped) !== sizeInput.value) {
+        suppressSizeSync = true;
+        sizeInput.value = String(clamped);
+        suppressSizeSync = false;
+      }
+      updateFontIndicators();
+    }
+    sizeInput.addEventListener("change", commitSizeInput);
+    sizeInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commitSizeInput();
+      }
     });
-    listGroup.appendChild(sizeSelect);
+    listGroup.appendChild(sizeInput);
+    const fontDisplay = document.createElement("span");
+    fontDisplay.className = "rich-editor-font-display";
+    fontDisplay.textContent = "Font: Default";
+    fontDisplay.title = "Default";
+    listGroup.appendChild(fontDisplay);
     const mediaGroup = createGroup("rich-editor-media-group");
     const linkBtn = createToolbarButton("\u{1F517}", "Insert link", () => {
       if (!hasActiveSelection()) return;
@@ -5308,6 +5420,26 @@ var Sevenn = (() => {
         event.preventDefault();
         beginImageEditing(target);
       }
+    });
+    editable.addEventListener("paste", (event) => {
+      if (!selectionWithinEditor({ allowCollapsed: true })) return;
+      const data = event.clipboardData || window.clipboardData;
+      const text = data?.getData("text/plain");
+      if (text == null) return;
+      event.preventDefault();
+      const normalized2 = text.replace(/\r\n?/g, "\n");
+      captureSelectionRange();
+      runCommand(() => {
+        try {
+          if (typeof document.queryCommandSupported === "function" && document.queryCommandSupported("insertText")) {
+            document.execCommand("insertText", false, normalized2);
+            return;
+          }
+        } catch (err) {
+        }
+        const html = escapeHtml2(normalized2).replace(/\n/g, "<br>");
+        document.execCommand("insertHTML", false, html);
+      });
     });
     ["keyup", "mouseup", "focus"].forEach((event) => {
       editable.addEventListener(event, () => updateInlineState());
@@ -9928,7 +10060,7 @@ var Sevenn = (() => {
       openBlocks,
       openWeeks,
       openSnapshot: Date.now(),
-      scrollTop: (findLectureScrollContainer(container)?.scrollTop ?? window.scrollY)
+      scrollTop: findLectureScrollContainer(container)?.scrollTop ?? window.scrollY
     });
   }
   function collectLectures(catalog) {
@@ -12265,13 +12397,25 @@ var Sevenn = (() => {
   function stripHtml2(value) {
     return String(value || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
   }
+  function hasRichNodes(html = "") {
+    if (!html) return false;
+    if (typeof document === "undefined") {
+      return /<(img|video|audio|iframe|canvas|svg|source)\b/i.test(html) || stripHtml2(html).length > 0;
+    }
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const media = template.content.querySelector("img,video,audio,iframe,canvas,svg,source");
+    if (media) return true;
+    const text = template.content.textContent?.replace(/\u00a0/g, " ").trim();
+    return Boolean(text);
+  }
   function hasSectionContent(item, key) {
     if (!item || !key) return false;
     const defs = sectionDefsForKind(item.kind);
     if (!defs.some((def) => def.key === key)) return false;
     const raw = item[key];
     if (raw === null || raw === void 0) return false;
-    return stripHtml2(raw).length > 0;
+    return hasRichNodes(raw);
   }
   function sectionsForItem(item, allowedKeys = null) {
     const defs = sectionDefsForKind(item.kind);

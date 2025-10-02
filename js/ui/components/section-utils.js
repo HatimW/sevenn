@@ -8,13 +8,26 @@ function stripHtml(value) {
     .trim();
 }
 
+function hasRichNodes(html = '') {
+  if (!html) return false;
+  if (typeof document === 'undefined') {
+    return /<(img|video|audio|iframe|canvas|svg|source)\b/i.test(html) || stripHtml(html).length > 0;
+  }
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  const media = template.content.querySelector('img,video,audio,iframe,canvas,svg,source');
+  if (media) return true;
+  const text = template.content.textContent?.replace(/\u00a0/g, ' ').trim();
+  return Boolean(text);
+}
+
 export function hasSectionContent(item, key) {
   if (!item || !key) return false;
   const defs = sectionDefsForKind(item.kind);
   if (!defs.some(def => def.key === key)) return false;
   const raw = item[key];
   if (raw === null || raw === undefined) return false;
-  return stripHtml(raw).length > 0;
+  return hasRichNodes(raw);
 }
 
 export function sectionsForItem(item, allowedKeys = null) {
