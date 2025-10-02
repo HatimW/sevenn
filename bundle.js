@@ -6482,17 +6482,6 @@ var Sevenn = (() => {
       mainBtn.setAttribute("aria-expanded", expanded.has(item.id));
     });
     header.appendChild(mainBtn);
-    const quickEdit = document.createElement("button");
-    quickEdit.type = "button";
-    quickEdit.className = "icon-btn card-quick-edit";
-    quickEdit.title = "Edit entry";
-    quickEdit.setAttribute("aria-label", "Edit entry");
-    quickEdit.innerHTML = "✏️";
-    quickEdit.addEventListener("click", (e) => {
-      e.stopPropagation();
-      openEditor(item.kind, onChange, item);
-    });
-    header.appendChild(quickEdit);
     const settings = document.createElement("div");
     settings.className = "card-settings";
     const menu = document.createElement("div");
@@ -7553,6 +7542,7 @@ var Sevenn = (() => {
     container.appendChild(overlay);
     let activeKeyHandler = null;
     let persistRelatedVisibility = false;
+    let deckDirty = false;
     function closeDeck() {
       overlay.dataset.active = "false";
       viewer.innerHTML = "";
@@ -7562,6 +7552,14 @@ var Sevenn = (() => {
         activeKeyHandler = null;
       }
       persistRelatedVisibility = false;
+      if (deckDirty && typeof onChange === "function") {
+        const result = onChange();
+        if (result && typeof result.catch === "function") {
+          result.catch(() => {
+          });
+        }
+      }
+      deckDirty = false;
     }
     overlay.addEventListener("click", (evt) => {
       if (evt.target === overlay) closeDeck();
@@ -7576,12 +7574,30 @@ var Sevenn = (() => {
       }
       const baseContext = { block, week, lecture };
       const slideCache = /* @__PURE__ */ new WeakMap();
+      const handleCardEdited = (item) => {
+        deckDirty = true;
+        slideCache.delete(item);
+        if (lecture.cards[idx] === item) {
+          renderCard();
+        }
+      };
+      function prepareSlideActions(slide, item) {
+        if (!slide) return;
+        const editBtn = slide.querySelector('[data-role="deck-edit"]');
+        if (editBtn) {
+          editBtn.addEventListener("click", () => {
+            openEditor(item.kind, () => handleCardEdited(item), item);
+          });
+        }
+      }
       function acquireSlide(item) {
         if (!slideCache.has(item)) {
-          slideCache.set(item, createDeckSlide(item, baseContext));
+          slideCache.set(item, createDeckSlide(item, baseContext, { allowEdit: true }));
         }
-        const slide = slideCache.get(item).cloneNode(true);
+        const template = slideCache.get(item);
+        const slide = template.cloneNode(true);
         slide.classList.add("deck-slide-full");
+        prepareSlideActions(slide, item);
         return slide;
       }
       viewer.className = "deck-viewer deck-viewer-card";
@@ -7808,7 +7824,7 @@ var Sevenn = (() => {
       chip.appendChild(label);
       return chip;
     }
-    function createDeckSlide(item, context) {
+    function createDeckSlide(item, context, options = {}) {
       const slide = document.createElement("article");
       slide.className = "deck-slide";
       const accent = getItemAccent(item);
@@ -7822,6 +7838,14 @@ var Sevenn = (() => {
       if (context.week?.label) crumbPieces.push(context.week.label);
       crumb.textContent = crumbPieces.join(" \u2022 ");
       heading.appendChild(crumb);
+      if (options.allowEdit) {
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "deck-slide-edit";
+        editBtn.dataset.role = "deck-edit";
+        editBtn.innerHTML = '<span class="deck-slide-edit-icon">\u270F\uFE0F</span><span>Edit card</span>';
+        heading.appendChild(editBtn);
+      }
       const title = document.createElement("h3");
       title.className = "deck-slide-title";
       title.textContent = titleFromItem(item);
@@ -12606,7 +12630,7 @@ var Sevenn = (() => {
     const editBtn = document.createElement("button");
     editBtn.type = "button";
     editBtn.className = "icon-btn flashcard-edit-btn";
-    editBtn.innerHTML = "✏️";
+    editBtn.innerHTML = "\u270F\uFE0F";
     editBtn.title = "Edit card";
     editBtn.setAttribute("aria-label", "Edit card");
     editBtn.addEventListener("click", (event) => {
@@ -13329,7 +13353,7 @@ var Sevenn = (() => {
     const editBtn = document.createElement("button");
     editBtn.type = "button";
     editBtn.className = "icon-btn quiz-edit-btn";
-    editBtn.innerHTML = "✏️";
+    editBtn.innerHTML = "\u270F\uFE0F";
     editBtn.title = "Edit card";
     editBtn.setAttribute("aria-label", "Edit card");
     editBtn.addEventListener("click", (event) => {
@@ -17589,6 +17613,7 @@ var Sevenn = (() => {
     lastPointer: { x: 0, y: 0, mapX: 0, mapY: 0 },
     autoPan: null,
     autoPanFrame: null,
+    autoPanPointer: null,
     toolboxPos: { x: 16, y: 16 },
     toolboxDrag: null,
     toolboxEl: null,
@@ -19403,7 +19428,8 @@ var Sevenn = (() => {
             id: it.id,
             offset: { x: x - current.x, y: y - current.y },
             pointerId: e.pointerId,
-            captureTarget: e.currentTarget || circle
+            captureTarget: e.currentTarget || circle,
+            client: { x: e.clientX, y: e.clientY }
           };
           if (mapState.nodeDrag.captureTarget?.setPointerCapture) {
             try {
@@ -19423,7 +19449,8 @@ var Sevenn = (() => {
             }),
             moved: false,
             pointerId: e.pointerId,
-            captureTarget: e.currentTarget || circle
+            captureTarget: e.currentTarget || circle,
+            client: { x: e.clientX, y: e.clientY }
           };
           if (mapState.areaDrag.captureTarget?.setPointerCapture) {
             try {
@@ -19765,6 +19792,8 @@ var Sevenn = (() => {
     if (mapState.nodeDrag && mapState.nodeDrag.pointerId === e.pointerId) {
       const entry = mapState.elements.get(mapState.nodeDrag.id);
       if (!entry || !entry.circle) return;
+      mapState.nodeDrag.client = { x: e.clientX, y: e.clientY };
+      updateAutoPanFromPointer(e.clientX, e.clientY, { allowDuringDrag: true });
       const { x, y } = clientToMap(e.clientX, e.clientY);
       const nx = x - mapState.nodeDrag.offset.x;
       const ny = y - mapState.nodeDrag.offset.y;
@@ -19773,7 +19802,8 @@ var Sevenn = (() => {
       return;
     }
     if (mapState.areaDrag && mapState.areaDrag.pointerId === e.pointerId) {
-      updateAutoPanFromPointer(e.clientX, e.clientY);
+      mapState.areaDrag.client = { x: e.clientX, y: e.clientY };
+      updateAutoPanFromPointer(e.clientX, e.clientY, { allowDuringDrag: true });
       const { x, y } = clientToMap(e.clientX, e.clientY);
       const dx = x - mapState.areaDrag.start.x;
       const dy = y - mapState.areaDrag.start.y;
@@ -19818,6 +19848,7 @@ var Sevenn = (() => {
   async function handlePointerUp(e) {
     if (!mapState.svg) return;
     flushNodePositionUpdates({ cancelFrame: true });
+    stopAutoPan();
     if (mapState.toolboxDrag) {
       stopToolboxDrag();
     }
@@ -20096,8 +20127,16 @@ var Sevenn = (() => {
       y: baseY + (Math.random() - 0.5) * spacing
     };
   }
-  function updateAutoPanFromPointer(clientX, clientY) {
-    if (!mapState.svg || mapState.tool !== TOOL.AREA) return;
+  function updateAutoPanFromPointer(clientX, clientY, options = {}) {
+    if (!mapState.svg) return;
+    const { allowDuringDrag = false, force = false } = options;
+    const dragging = allowDuringDrag && (mapState.nodeDrag || mapState.areaDrag);
+    const shouldAutoPan = force || mapState.tool === TOOL.AREA || dragging;
+    if (!shouldAutoPan) {
+      stopAutoPan();
+      return;
+    }
+    mapState.autoPanPointer = { x: clientX, y: clientY };
     const vector = computeAutoPanVector(clientX, clientY);
     if (vector) {
       startAutoPan(vector);
@@ -20136,14 +20175,24 @@ var Sevenn = (() => {
     return null;
   }
   function startAutoPan(vector) {
-    mapState.autoPan = vector;
-    applyAutoPan(vector);
+    if (!vector) return;
+    mapState.autoPan = { dx: vector.dx, dy: vector.dy };
+    applyAutoPan(mapState.autoPan);
     if (typeof window === "undefined") return;
     if (mapState.autoPanFrame) return;
     const step = () => {
       if (!mapState.autoPan) {
         mapState.autoPanFrame = null;
         return;
+      }
+      if (mapState.autoPanPointer) {
+        const nextVector = computeAutoPanVector(mapState.autoPanPointer.x, mapState.autoPanPointer.y);
+        if (!nextVector) {
+          stopAutoPan();
+          return;
+        }
+        mapState.autoPan.dx = nextVector.dx;
+        mapState.autoPan.dy = nextVector.dy;
       }
       applyAutoPan(mapState.autoPan);
       mapState.autoPanFrame = window.requestAnimationFrame(step);
@@ -20158,13 +20207,34 @@ var Sevenn = (() => {
     const scaleY = mapState.viewBox.h / rect.height;
     mapState.viewBox.x += vector.dx * scaleX;
     mapState.viewBox.y += vector.dy * scaleY;
+    constrainViewBox();
     mapState.updateViewBox({ immediate: true });
     if (mapState.selectionRect) {
-      refreshSelectionRectFromClients();
+      refreshSelectionRectFromClients({ updateStart: true });
+    }
+    if (mapState.nodeDrag?.client) {
+      const pointer = clientToMap(mapState.nodeDrag.client.x, mapState.nodeDrag.client.y);
+      const nx = pointer.x - mapState.nodeDrag.offset.x;
+      const ny = pointer.y - mapState.nodeDrag.offset.y;
+      scheduleNodePositionUpdate(mapState.nodeDrag.id, { x: nx, y: ny }, { immediate: true });
+      mapState.nodeWasDragged = true;
+    }
+    if (mapState.areaDrag?.client) {
+      const pointer = clientToMap(mapState.areaDrag.client.x, mapState.areaDrag.client.y);
+      const dx = pointer.x - mapState.areaDrag.start.x;
+      const dy = pointer.y - mapState.areaDrag.start.y;
+      mapState.areaDrag.moved = mapState.areaDrag.moved || Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
+      mapState.areaDrag.origin.forEach(({ id, pos }) => {
+        const nx = pos.x + dx;
+        const ny = pos.y + dy;
+        scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+      });
+      mapState.nodeWasDragged = true;
     }
   }
   function stopAutoPan() {
     mapState.autoPan = null;
+    mapState.autoPanPointer = null;
     if (mapState.autoPanFrame && typeof window !== "undefined") {
       window.cancelAnimationFrame(mapState.autoPanFrame);
     }

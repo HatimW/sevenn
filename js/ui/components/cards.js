@@ -1,5 +1,6 @@
 import { state, setCardsState } from '../../state.js';
 import { renderRichText } from './rich-text.js';
+import { openEditor } from './editor.js';
 import { loadBlockCatalog } from '../../storage/block-catalog.js';
 
 const UNASSIGNED_BLOCK_KEY = '__unassigned__';
@@ -492,6 +493,7 @@ export async function renderCards(container, items, onChange) {
 
   let activeKeyHandler = null;
   let persistRelatedVisibility = false;
+  let deckDirty = false;
 
   function closeDeck() {
     overlay.dataset.active = 'false';
@@ -502,6 +504,13 @@ export async function renderCards(container, items, onChange) {
       activeKeyHandler = null;
     }
     persistRelatedVisibility = false;
+    if (deckDirty && typeof onChange === 'function') {
+      const result = onChange();
+      if (result && typeof result.catch === 'function') {
+        result.catch(() => {});
+      }
+    }
+    deckDirty = false;
   }
 
   overlay.addEventListener('click', evt => {
@@ -520,12 +529,32 @@ export async function renderCards(container, items, onChange) {
     const baseContext = { block, week, lecture };
     const slideCache = new WeakMap();
 
+    const handleCardEdited = item => {
+      deckDirty = true;
+      slideCache.delete(item);
+      if (lecture.cards[idx] === item) {
+        renderCard();
+      }
+    };
+
+    function prepareSlideActions(slide, item) {
+      if (!slide) return;
+      const editBtn = slide.querySelector('[data-role="deck-edit"]');
+      if (editBtn) {
+        editBtn.addEventListener('click', () => {
+          openEditor(item.kind, () => handleCardEdited(item), item);
+        });
+      }
+    }
+
     function acquireSlide(item) {
       if (!slideCache.has(item)) {
-        slideCache.set(item, createDeckSlide(item, baseContext));
+        slideCache.set(item, createDeckSlide(item, baseContext, { allowEdit: true }));
       }
-      const slide = slideCache.get(item).cloneNode(true);
+      const template = slideCache.get(item);
+      const slide = template.cloneNode(true);
       slide.classList.add('deck-slide-full');
+      prepareSlideActions(slide, item);
       return slide;
     }
 
@@ -802,7 +831,7 @@ export async function renderCards(container, items, onChange) {
     return chip;
   }
 
-  function createDeckSlide(item, context) {
+  function createDeckSlide(item, context, options = {}) {
     const slide = document.createElement('article');
     slide.className = 'deck-slide';
     const accent = getItemAccent(item);
@@ -818,6 +847,15 @@ export async function renderCards(container, items, onChange) {
     if (context.week?.label) crumbPieces.push(context.week.label);
     crumb.textContent = crumbPieces.join(' • ');
     heading.appendChild(crumb);
+
+    if (options.allowEdit) {
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'deck-slide-edit';
+      editBtn.dataset.role = 'deck-edit';
+      editBtn.innerHTML = '<span class="deck-slide-edit-icon">✏️</span><span>Edit card</span>';
+      heading.appendChild(editBtn);
+    }
 
     const title = document.createElement('h3');
     title.className = 'deck-slide-title';

@@ -3555,12 +3555,6 @@ button.builder-pill.builder-pill-outline {
   position: relative;
 }
 
-.card-quick-edit {
-  flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-}
-
 .card-title-btn {
   background: none;
   border: none;
@@ -4429,6 +4423,39 @@ button.builder-pill.builder-pill-outline {
   gap: 8px;
   position: relative;
   z-index: 1;
+}
+
+.deck-slide-edit {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.6);
+  color: rgba(248, 250, 252, 0.85);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.deck-slide-edit:hover,
+.deck-slide-edit:focus-visible {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 65%, rgba(148, 163, 184, 0.35));
+  background: rgba(8, 47, 73, 0.55);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+}
+
+.deck-slide-edit:focus-visible {
+  outline: none;
+}
+
+.deck-slide-edit-icon {
+  font-size: 1rem;
+  line-height: 1;
 }
 
 .deck-slide-crumb {
