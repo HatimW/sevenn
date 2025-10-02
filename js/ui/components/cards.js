@@ -62,6 +62,15 @@ function titleFromItem(item) {
   return item?.name || item?.concept || 'Untitled Card';
 }
 
+function compareByCreation(a, b) {
+  const av = typeof a?.createdAt === 'number' ? a.createdAt : 0;
+  const bv = typeof b?.createdAt === 'number' ? b.createdAt : 0;
+  if (av !== bv) return av - bv;
+  const at = titleFromItem(a);
+  const bt = titleFromItem(b);
+  return at.localeCompare(bt);
+}
+
 function escapeHtml(str = '') {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -147,11 +156,15 @@ export async function renderCards(container, items, onChange) {
   container.innerHTML = '';
   container.classList.add('cards-tab');
 
+  const sortedItems = Array.isArray(items)
+    ? items.slice().sort(compareByCreation)
+    : [];
+
   const { blocks: blockDefs } = await loadBlockCatalog();
   const blockLookup = new Map(blockDefs.map(def => [def.blockId, def]));
   const blockOrder = new Map(blockDefs.map((def, idx) => [def.blockId, idx]));
 
-  const itemLookup = new Map(items.map(item => [item.id, item]));
+  const itemLookup = new Map(sortedItems.map(item => [item.id, item]));
   /** @type {Map<string, Array<{ block: any, week: any, lecture: any }>>} */
   const deckContextLookup = new Map();
 
@@ -247,7 +260,7 @@ export async function renderCards(container, items, onChange) {
     return weekBucket.lectures.get(lectureKey);
   }
 
-  items.forEach(item => {
+  sortedItems.forEach(item => {
     const lectureRefs = Array.isArray(item.lectures) ? item.lectures : [];
     if (lectureRefs.length) {
       lectureRefs.forEach(ref => {
@@ -286,7 +299,7 @@ export async function renderCards(container, items, onChange) {
         .map(week => {
           const lectures = Array.from(week.lectures.values())
             .map(lec => {
-              const cards = lec.cards.slice().sort((a, b) => titleFromItem(a).localeCompare(titleFromItem(b)));
+              const cards = lec.cards.slice().sort(compareByCreation);
               return {
                 ...lec,
                 cards,
@@ -889,48 +902,66 @@ export async function renderCards(container, items, onChange) {
 
     const sections = document.createElement('div');
     sections.className = 'deck-slide-sections';
+    const buildContentSection = ({ labelText, iconText = '', bodyHtml = '', extra = false }) => {
+      const section = document.createElement('section');
+      section.className = 'deck-section';
+      if (extra) section.classList.add('deck-section-extra');
+      section.style.setProperty('--section-accent', accent);
+      section.classList.add('is-collapsed');
+
+      const headerBtn = document.createElement('button');
+      headerBtn.type = 'button';
+      headerBtn.className = 'deck-section-header';
+      headerBtn.setAttribute('aria-expanded', 'false');
+
+      const titleWrap = document.createElement('div');
+      titleWrap.className = 'deck-section-title';
+      if (iconText) {
+        const iconEl = document.createElement('span');
+        iconEl.className = 'deck-section-icon';
+        iconEl.textContent = iconText;
+        titleWrap.appendChild(iconEl);
+      }
+      const labelNode = document.createElement('span');
+      labelNode.textContent = labelText;
+      titleWrap.appendChild(labelNode);
+      headerBtn.appendChild(titleWrap);
+      headerBtn.appendChild(createCollapseIcon());
+
+      const bodyWrap = document.createElement('div');
+      bodyWrap.className = 'deck-section-body';
+      const content = document.createElement('div');
+      content.className = 'deck-section-content';
+      renderRichText(content, bodyHtml, { clozeMode: 'interactive' });
+      bodyWrap.appendChild(content);
+
+      section.appendChild(headerBtn);
+      section.appendChild(bodyWrap);
+
+      headerBtn.addEventListener('click', () => {
+        const collapsed = section.classList.toggle('is-collapsed');
+        headerBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      });
+
+      return section;
+    };
+
     const defs = KIND_FIELDS[item.kind] || [];
     defs.forEach(([field, label, icon]) => {
       const value = item[field];
       if (!value) return;
-      const section = document.createElement('section');
-      section.className = 'deck-section';
-      section.style.setProperty('--section-accent', accent);
-      const sectionTitle = document.createElement('h4');
-      sectionTitle.className = 'deck-section-title';
-      if (icon) {
-        const iconEl = document.createElement('span');
-        iconEl.className = 'deck-section-icon';
-        iconEl.textContent = icon;
-        sectionTitle.appendChild(iconEl);
-      }
-      const labelNode = document.createElement('span');
-      labelNode.textContent = label;
-      sectionTitle.appendChild(labelNode);
-      section.appendChild(sectionTitle);
-      const content = document.createElement('div');
-      content.className = 'deck-section-content';
-      renderRichText(content, value);
-      section.appendChild(content);
-      sections.appendChild(section);
+      sections.appendChild(buildContentSection({ labelText: label, iconText: icon, bodyHtml: value }));
     });
 
     ensureExtras(item).forEach(extra => {
       if (!extra?.body) return;
-      const section = document.createElement('section');
-      section.className = 'deck-section deck-section-extra';
-      section.style.setProperty('--section-accent', accent);
-      const sectionTitle = document.createElement('h4');
-      sectionTitle.className = 'deck-section-title';
-      const labelNode = document.createElement('span');
-      labelNode.textContent = extra.title || 'Additional Notes';
-      sectionTitle.appendChild(labelNode);
-      section.appendChild(sectionTitle);
-      const content = document.createElement('div');
-      content.className = 'deck-section-content';
-      renderRichText(content, extra.body);
-      section.appendChild(content);
-      sections.appendChild(section);
+      sections.appendChild(
+        buildContentSection({
+          labelText: extra.title || 'Additional Notes',
+          bodyHtml: extra.body,
+          extra: true
+        })
+      );
     });
 
     if (!sections.children.length) {
