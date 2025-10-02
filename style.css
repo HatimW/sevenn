@@ -2053,9 +2053,39 @@ input[type="checkbox"]:checked::after {
   border-radius: var(--radius-sm);
   color: var(--text);
   padding: 4px 8px;
-  cursor: pointer;
   font-size: 0.85rem;
   min-width: 0;
+}
+
+.rich-editor-size-input {
+  width: 84px;
+  -moz-appearance: textfield;
+}
+
+.rich-editor-size-input::-webkit-outer-spin-button,
+.rich-editor-size-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.rich-editor-font-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 130px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.rich-editor-font-info span {
+  display: block;
+  white-space: nowrap;
+}
+
+.rich-editor-typography-group {
+  align-items: stretch;
+  gap: 8px;
 }
 
 .rich-editor-area {

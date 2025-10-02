@@ -274,6 +274,26 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   if (ariaLabelledBy) editable.setAttribute('aria-labelledby', ariaLabelledBy);
   wrapper.appendChild(editable);
 
+  editable.addEventListener('paste', (event) => {
+    if (!event.clipboardData) return;
+    const files = Array.from(event.clipboardData.files || []);
+    const imageFile = files.find(file => file && file.type && file.type.startsWith('image/')) || null;
+    if (imageFile) {
+      event.preventDefault();
+      void insertCroppedImageFile(imageFile);
+      return;
+    }
+    const mediaFile = files.find(file => file && file.type && (file.type.startsWith('video/') || file.type.startsWith('audio/')));
+    if (mediaFile) {
+      event.preventDefault();
+      void insertMediaFile(mediaFile);
+      return;
+    }
+    const text = event.clipboardData.getData('text/plain');
+    event.preventDefault();
+    insertPlainText(text || '');
+  });
+
   function triggerEditorChange(){
     editable.dispatchEvent(new Event('input', { bubbles: true }));
   }
@@ -536,6 +556,9 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   }
 
   const commandButtons = [];
+  let sizeInput = null;
+  let fontNameLabel = null;
+  let fontSizeLabel = null;
 
   function focusEditor(){
     editable.focus({ preventScroll: false });
@@ -632,6 +655,18 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
     }, { requireSelection });
   }
 
+  function insertPlainText(text) {
+    if (text == null) return;
+    const normalized = String(text).replace(/\r\n/g, '\n');
+    runCommand(() => {
+      const ok = document.execCommand('insertText', false, normalized);
+      if (ok === false) {
+        const html = escapeHtml(normalized).replace(/\n/g, '<br>');
+        document.execCommand('insertHTML', false, html);
+      }
+    });
+  }
+
   function insertHtml(html) {
     if (!html) return;
     runCommand(() => document.execCommand('insertHTML', false, html));
@@ -722,6 +757,130 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
       btn.dataset.active = isActive ? 'true' : 'false';
       btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
     });
+
+    const style = inEditor ? computeSelectionStyle() : null;
+    updateTypographyState(style);
+  }
+
+  function styleForNode(node) {
+    let current = node;
+    while (current && current !== editable) {
+      if (current instanceof Element) {
+        return window.getComputedStyle(current);
+      }
+      current = current.parentNode;
+    }
+    if (editable instanceof Element) {
+      return window.getComputedStyle(editable);
+    }
+    return null;
+  }
+
+  function computeSelectionStyle() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+    if (selection.isCollapsed) {
+      return styleForNode(selection.anchorNode);
+    }
+    const range = selection.getRangeAt(0);
+    const startStyle = styleForNode(range.startContainer);
+    if (startStyle) return startStyle;
+    const endStyle = styleForNode(range.endContainer);
+    if (endStyle) return endStyle;
+    return styleForNode(range.commonAncestorContainer);
+  }
+
+  function formatFontFamily(value = '') {
+    if (!value) return 'Default';
+    const primary = value.split(',')[0] || value;
+    return primary.replace(/^['"]+|['"]+$/g, '').trim() || 'Default';
+  }
+
+  function updateTypographyState(style) {
+    if (!fontNameLabel || !fontSizeLabel || !sizeInput) return;
+    const editingSize = document.activeElement === sizeInput;
+    if (!style) {
+      fontNameLabel.textContent = 'Font: Default';
+      fontSizeLabel.textContent = 'Size: —';
+      if (!editingSize) {
+        sizeInput.value = '';
+        sizeInput.placeholder = 'Size (px)';
+      }
+      return;
+    }
+    const family = formatFontFamily(style.fontFamily || '');
+    const sizeText = style.fontSize || '';
+    fontNameLabel.textContent = `Font: ${family}`;
+    fontSizeLabel.textContent = `Size: ${sizeText || '—'}`;
+    if (!editingSize) {
+      const numeric = Number.parseFloat(sizeText);
+      sizeInput.value = Number.isFinite(numeric) ? String(Math.round(numeric)) : '';
+    }
+    sizeInput.placeholder = sizeText || 'Size (px)';
+  }
+
+  function collectElementsInRange(range) {
+    const elements = [];
+    if (!range) return elements;
+    const walker = document.createTreeWalker(
+      editable,
+      NodeFilter.SHOW_ELEMENT,
+      {
+        acceptNode: (node) => {
+          try {
+            return range.intersectsNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+          } catch (err) {
+            return NodeFilter.FILTER_SKIP;
+          }
+        }
+      }
+    );
+    while (walker.nextNode()) {
+      elements.push(walker.currentNode);
+    }
+    return elements;
+  }
+
+  function removeFontSizeFromRange(range) {
+    const elements = collectElementsInRange(range);
+    elements.forEach(node => {
+      if (!(node instanceof HTMLElement)) return;
+      if (node.style && node.style.fontSize) {
+        node.style.removeProperty('font-size');
+        if (!node.style.length) node.removeAttribute('style');
+      }
+      if (node.tagName?.toLowerCase() === 'font') {
+        const parent = node.parentNode;
+        if (!parent) return;
+        while (node.firstChild) parent.insertBefore(node.firstChild, node);
+        parent.removeChild(node);
+      }
+    });
+  }
+
+  function applyFontSizeValue(value) {
+    runCommand(() => {
+      const selection = window.getSelection();
+      if (!selection?.rangeCount) return;
+      const range = selection.getRangeAt(0);
+      removeFontSizeFromRange(range);
+      const numeric = Number.parseFloat(value);
+      const hasSize = Number.isFinite(numeric) && numeric > 0;
+      if (!hasSize) {
+        return;
+      }
+      document.execCommand('styleWithCSS', false, true);
+      document.execCommand('fontSize', false, 4);
+      const fonts = editable.querySelectorAll('font');
+      fonts.forEach(node => {
+        const parent = node.parentNode;
+        if (!parent) return;
+        const span = document.createElement('span');
+        span.style.fontSize = `${numeric}px`;
+        while (node.firstChild) span.appendChild(node.firstChild);
+        parent.replaceChild(span, node);
+      });
+    }, { requireSelection: true });
   }
 
   function createGroup(extraClass){
@@ -841,55 +1000,58 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
     listGroup.appendChild(btn);
   });
 
-  const sizeSelect = document.createElement('select');
-  sizeSelect.className = 'rich-editor-size';
-  const sizes = [
-    ['Default', ''],
-    ['Small', '0.85rem'],
-    ['Normal', '1rem'],
-    ['Large', '1.25rem'],
-    ['Huge', '1.5rem']
-  ];
-  sizes.forEach(([label, value]) => {
-    const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = label;
-    sizeSelect.appendChild(opt);
-  });
-  sizeSelect.addEventListener('change', () => {
+  const typographyGroup = createGroup('rich-editor-typography-group');
+
+  const fontInfo = document.createElement('div');
+  fontInfo.className = 'rich-editor-font-info';
+  fontNameLabel = document.createElement('span');
+  fontNameLabel.className = 'rich-editor-font-name';
+  fontNameLabel.textContent = 'Font: Default';
+  fontInfo.appendChild(fontNameLabel);
+  fontSizeLabel = document.createElement('span');
+  fontSizeLabel.className = 'rich-editor-font-size';
+  fontSizeLabel.textContent = 'Size: —';
+  fontInfo.appendChild(fontSizeLabel);
+  typographyGroup.appendChild(fontInfo);
+
+  sizeInput = document.createElement('input');
+  sizeInput.type = 'number';
+  sizeInput.className = 'rich-editor-size rich-editor-size-input';
+  sizeInput.placeholder = 'Size (px)';
+  sizeInput.min = '8';
+  sizeInput.max = '96';
+  sizeInput.step = '1';
+  sizeInput.setAttribute('aria-label', 'Font size in pixels');
+
+  const commitFontSize = () => {
     if (!hasActiveSelection()) {
-      sizeSelect.value = '';
+      sizeInput.value = '';
       return;
     }
-    runCommand(() => {
-      document.execCommand('styleWithCSS', false, true);
-      document.execCommand('fontSize', false, 4);
-      const selection = window.getSelection();
-      if (selection?.rangeCount) {
-        const walker = document.createTreeWalker(editable, NodeFilter.SHOW_ELEMENT, {
-          acceptNode: (node) => node.tagName?.toLowerCase() === 'font' ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
-        });
-        const toAdjust = [];
-        while (walker.nextNode()) {
-          toAdjust.push(walker.currentNode);
-        }
-        toAdjust.forEach(node => {
-          if (sizeSelect.value) {
-            const span = document.createElement('span');
-            span.style.fontSize = sizeSelect.value;
-            while (node.firstChild) span.appendChild(node.firstChild);
-            node.parentNode.replaceChild(span, node);
-          } else {
-            const parent = node.parentNode;
-            while (node.firstChild) parent.insertBefore(node.firstChild, node);
-            parent.removeChild(node);
-          }
-        });
-      }
-    }, { requireSelection: true });
-    sizeSelect.value = '';
+    const raw = sizeInput.value.trim();
+    if (!raw) {
+      applyFontSizeValue(null);
+    } else {
+      applyFontSizeValue(raw);
+    }
+  };
+
+  sizeInput.addEventListener('change', commitFontSize);
+  sizeInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commitFontSize();
+      sizeInput.blur();
+    }
   });
-  listGroup.appendChild(sizeSelect);
+  typographyGroup.appendChild(sizeInput);
+
+  const resetSizeBtn = createToolbarButton('↺', 'Reset font size', () => {
+    if (!hasActiveSelection()) return;
+    sizeInput.value = '';
+    applyFontSizeValue(null);
+  });
+  typographyGroup.appendChild(resetSizeBtn);
 
   const mediaGroup = createGroup('rich-editor-media-group');
 
@@ -1022,5 +1184,9 @@ export function renderRichText(target, value){
   }
   target.classList.add('rich-content');
   target.innerHTML = normalized;
+}
+
+export function hasRichTextContent(value){
+  return !isEmptyHtml(normalizeInput(value));
 }
 
