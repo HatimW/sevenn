@@ -85,6 +85,18 @@ export function createItemCard(item, onChange){
   });
   header.appendChild(mainBtn);
 
+  const quickEdit = document.createElement('button');
+  quickEdit.type = 'button';
+  quickEdit.className = 'icon-btn card-quick-edit';
+  quickEdit.title = 'Edit entry';
+  quickEdit.setAttribute('aria-label', 'Edit entry');
+  quickEdit.innerHTML = '✏️';
+  quickEdit.addEventListener('click', e => {
+    e.stopPropagation();
+    openEditor(item.kind, onChange, item);
+  });
+  header.appendChild(quickEdit);
+
   const settings = document.createElement('div');
   settings.className = 'card-settings';
   const menu = document.createElement('div');

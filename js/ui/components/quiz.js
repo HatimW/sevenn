@@ -5,6 +5,7 @@ import { sectionsForItem } from './section-utils.js';
 import { REVIEW_RATINGS, DEFAULT_REVIEW_STEPS } from '../../review/constants.js';
 import { getReviewDurations, rateSection } from '../../review/scheduler.js';
 import { upsertItem } from '../../storage/storage.js';
+import { openEditor } from './editor.js';
 
 
 const RATING_LABELS = {
@@ -139,15 +140,33 @@ export function renderQuiz(root, redraw) {
   const header = document.createElement('div');
   header.className = 'quiz-header';
 
+  const headerInfo = document.createElement('div');
+  headerInfo.className = 'quiz-header-info';
+
   const progress = document.createElement('div');
   progress.className = 'quiz-progress';
   progress.textContent = `Question ${session.idx + 1} of ${pool.length}`;
-  header.appendChild(progress);
+  headerInfo.appendChild(progress);
 
   const tally = document.createElement('div');
   tally.className = 'quiz-score';
   tally.textContent = `Score: ${session.score}`;
-  header.appendChild(tally);
+  headerInfo.appendChild(tally);
+
+  header.appendChild(headerInfo);
+
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'icon-btn quiz-edit-btn';
+  editBtn.innerHTML = '✏️';
+  editBtn.title = 'Edit card';
+  editBtn.setAttribute('aria-label', 'Edit card');
+  editBtn.addEventListener('click', event => {
+    event.stopPropagation();
+    const onSave = typeof redraw === 'function' ? () => redraw() : undefined;
+    openEditor(item.kind, onSave, item);
+  });
+  header.appendChild(editBtn);
 
   card.appendChild(header);
 

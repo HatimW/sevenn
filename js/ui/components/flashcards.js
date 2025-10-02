@@ -2,6 +2,7 @@ import { state, setFlashSession, setSubtab, setStudySelectedMode } from '../../s
 import { setToggleState } from '../../utils.js';
 import { renderRichText } from './rich-text.js';
 import { sectionsForItem } from './section-utils.js';
+import { openEditor } from './editor.js';
 import { REVIEW_RATINGS, DEFAULT_REVIEW_STEPS } from '../../review/constants.js';
 import { getReviewDurations, rateSection, getSectionStateSnapshot } from '../../review/scheduler.js';
 import { upsertItem } from '../../storage/storage.js';
@@ -156,9 +157,28 @@ export function renderFlashcards(root, redraw) {
   card.className = 'card flashcard';
   card.tabIndex = 0;
 
+  const header = document.createElement('div');
+  header.className = 'flashcard-header';
+
   const title = document.createElement('h2');
+  title.className = 'flashcard-title';
   title.textContent = item.name || item.concept || '';
-  card.appendChild(title);
+  header.appendChild(title);
+
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'icon-btn flashcard-edit-btn';
+  editBtn.innerHTML = '✏️';
+  editBtn.title = 'Edit card';
+  editBtn.setAttribute('aria-label', 'Edit card');
+  editBtn.addEventListener('click', event => {
+    event.stopPropagation();
+    const onSave = typeof redraw === 'function' ? () => redraw() : undefined;
+    openEditor(item.kind, onSave, item);
+  });
+  header.appendChild(editBtn);
+
+  card.appendChild(header);
 
   const durationsPromise = getReviewDurations().catch(() => ({ ...DEFAULT_REVIEW_STEPS }));
   const sectionBlocks = sections.length ? sections : [];

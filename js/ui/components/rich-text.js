@@ -289,6 +289,15 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
       void insertMediaFile(mediaFile);
       return;
     }
+    const html = event.clipboardData.getData('text/html');
+    if (html) {
+      const sanitized = sanitizeHtml(html);
+      if (sanitized.trim()) {
+        event.preventDefault();
+        insertHtml(sanitized);
+        return;
+      }
+    }
     const text = event.clipboardData.getData('text/plain');
     event.preventDefault();
     insertPlainText(text || '');
