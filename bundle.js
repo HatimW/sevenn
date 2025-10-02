@@ -4738,6 +4738,15 @@ var Sevenn = (() => {
         void insertMediaFile(mediaFile);
         return;
       }
+      const html = event.clipboardData.getData("text/html");
+      if (html) {
+        const sanitized = sanitizeHtml(html);
+        if (sanitized.trim()) {
+          event.preventDefault();
+          insertHtml(sanitized);
+          return;
+        }
+      }
       const text = event.clipboardData.getData("text/plain");
       event.preventDefault();
       insertPlainText(text || "");
@@ -6473,6 +6482,17 @@ var Sevenn = (() => {
       mainBtn.setAttribute("aria-expanded", expanded.has(item.id));
     });
     header.appendChild(mainBtn);
+    const quickEdit = document.createElement("button");
+    quickEdit.type = "button";
+    quickEdit.className = "icon-btn card-quick-edit";
+    quickEdit.title = "Edit entry";
+    quickEdit.setAttribute("aria-label", "Edit entry");
+    quickEdit.innerHTML = "✏️";
+    quickEdit.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openEditor(item.kind, onChange, item);
+    });
+    header.appendChild(quickEdit);
     const settings = document.createElement("div");
     settings.className = "card-settings";
     const menu = document.createElement("div");
@@ -12577,9 +12597,25 @@ var Sevenn = (() => {
     const card = document.createElement("section");
     card.className = "card flashcard";
     card.tabIndex = 0;
+    const header = document.createElement("div");
+    header.className = "flashcard-header";
     const title = document.createElement("h2");
+    title.className = "flashcard-title";
     title.textContent = item.name || item.concept || "";
-    card.appendChild(title);
+    header.appendChild(title);
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "icon-btn flashcard-edit-btn";
+    editBtn.innerHTML = "✏️";
+    editBtn.title = "Edit card";
+    editBtn.setAttribute("aria-label", "Edit card");
+    editBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const onSave = typeof redraw === "function" ? () => redraw() : void 0;
+      openEditor(item.kind, onSave, item);
+    });
+    header.appendChild(editBtn);
+    card.appendChild(header);
     const durationsPromise = getReviewDurations().catch(() => ({ ...DEFAULT_REVIEW_STEPS }));
     const sectionBlocks = sections.length ? sections : [];
     const sectionRequirements = /* @__PURE__ */ new Map();
@@ -13279,14 +13315,29 @@ var Sevenn = (() => {
     root.appendChild(card);
     const header = document.createElement("div");
     header.className = "quiz-header";
+    const headerInfo = document.createElement("div");
+    headerInfo.className = "quiz-header-info";
     const progress = document.createElement("div");
     progress.className = "quiz-progress";
     progress.textContent = `Question ${session.idx + 1} of ${pool.length}`;
-    header.appendChild(progress);
+    headerInfo.appendChild(progress);
     const tally = document.createElement("div");
     tally.className = "quiz-score";
     tally.textContent = `Score: ${session.score}`;
-    header.appendChild(tally);
+    headerInfo.appendChild(tally);
+    header.appendChild(headerInfo);
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "icon-btn quiz-edit-btn";
+    editBtn.innerHTML = "✏️";
+    editBtn.title = "Edit card";
+    editBtn.setAttribute("aria-label", "Edit card");
+    editBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const onSave = typeof redraw === "function" ? () => redraw() : void 0;
+      openEditor(item.kind, onSave, item);
+    });
+    header.appendChild(editBtn);
     card.appendChild(header);
     const prompt2 = document.createElement("p");
     prompt2.className = "quiz-prompt";
@@ -17453,7 +17504,7 @@ var Sevenn = (() => {
       23
     )
   };
-  var PAN_ACCELERATION = 1.12;
+  var PAN_ACCELERATION = 1.8;
   var ZOOM_INTENSITY = 32e-4;
   var ICONS = {
     sliders: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 7h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M6 12h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M6 17h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><circle cx="16" cy="7" r="2.5" stroke="currentColor" stroke-width="1.6" /><circle cx="11" cy="12" r="2.5" stroke="currentColor" stroke-width="1.6" /><circle cx="19" cy="17" r="2.5" stroke="currentColor" stroke-width="1.6" /></svg>',
@@ -19717,7 +19768,7 @@ var Sevenn = (() => {
       const { x, y } = clientToMap(e.clientX, e.clientY);
       const nx = x - mapState.nodeDrag.offset.x;
       const ny = y - mapState.nodeDrag.offset.y;
-      scheduleNodePositionUpdate(mapState.nodeDrag.id, { x: nx, y: ny });
+      scheduleNodePositionUpdate(mapState.nodeDrag.id, { x: nx, y: ny }, { immediate: true });
       mapState.nodeWasDragged = true;
       return;
     }
@@ -19730,7 +19781,7 @@ var Sevenn = (() => {
       mapState.areaDrag.origin.forEach(({ id, pos }) => {
         const nx = pos.x + dx;
         const ny = pos.y + dy;
-        scheduleNodePositionUpdate(id, { x: nx, y: ny });
+        scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
       });
       mapState.nodeWasDragged = true;
       return;
@@ -19877,12 +19928,24 @@ var Sevenn = (() => {
       refreshCursor({ keepOverride: true });
     }
   }
-  function scheduleNodePositionUpdate(id, pos) {
+  function scheduleNodePositionUpdate(id, pos, options = {}) {
     if (!id || !pos) return;
+    const { immediate = false } = options;
+    mapState.positions[id] = pos;
+    if (immediate) {
+      if (mapState.pendingNodeUpdates && typeof mapState.pendingNodeUpdates.delete === "function") {
+        mapState.pendingNodeUpdates.delete(id);
+      }
+      const entry = mapState.elements.get(id);
+      if (entry) {
+        updateNodeGeometry(id, entry);
+        updateEdgesFor(id);
+      }
+      return;
+    }
     if (!mapState.pendingNodeUpdates) {
       mapState.pendingNodeUpdates = /* @__PURE__ */ new Map();
     }
-    mapState.positions[id] = pos;
     mapState.pendingNodeUpdates.set(id, pos);
     if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
       flushNodePositionUpdates();

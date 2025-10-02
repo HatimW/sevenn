@@ -882,8 +882,19 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(
 .quiz-header {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: var(--pad);
+}
+
+.quiz-header-info {
+  display: flex;
+  gap: var(--pad-sm);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.quiz-edit-btn {
+  flex-shrink: 0;
 }
 
 .quiz-progress {
@@ -3035,6 +3046,22 @@ button.builder-pill.builder-pill-outline {
   gap: var(--pad);
 }
 
+.flashcard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pad-sm);
+}
+
+.flashcard-title {
+  margin: 0;
+  flex: 1;
+}
+
+.flashcard-edit-btn {
+  flex-shrink: 0;
+}
+
 .flash-section {
   margin-top: var(--pad);
   cursor: pointer;
@@ -3526,6 +3553,12 @@ button.builder-pill.builder-pill-outline {
   gap: 12px;
   padding: calc(var(--pad-sm) * var(--card-scale));
   position: relative;
+}
+
+.card-quick-edit {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
 }
 
 .card-title-btn {

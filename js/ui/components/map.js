@@ -52,7 +52,7 @@ const CURSOR_STYLE = {
   )
 };
 
-const PAN_ACCELERATION = 1.12;
+const PAN_ACCELERATION = 1.8;
 const ZOOM_INTENSITY = 0.0032;
 
 const ICONS = {
@@ -2570,7 +2570,7 @@ function handlePointerMove(e) {
     const { x, y } = clientToMap(e.clientX, e.clientY);
     const nx = x - mapState.nodeDrag.offset.x;
     const ny = y - mapState.nodeDrag.offset.y;
-    scheduleNodePositionUpdate(mapState.nodeDrag.id, { x: nx, y: ny });
+    scheduleNodePositionUpdate(mapState.nodeDrag.id, { x: nx, y: ny }, { immediate: true });
     mapState.nodeWasDragged = true;
     return;
   }
@@ -2584,7 +2584,7 @@ function handlePointerMove(e) {
     mapState.areaDrag.origin.forEach(({ id, pos }) => {
       const nx = pos.x + dx;
       const ny = pos.y + dy;
-      scheduleNodePositionUpdate(id, { x: nx, y: ny });
+      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
     });
     mapState.nodeWasDragged = true;
     return;
@@ -2740,12 +2740,24 @@ async function handlePointerUp(e) {
   }
 }
 
-function scheduleNodePositionUpdate(id, pos) {
+function scheduleNodePositionUpdate(id, pos, options = {}) {
   if (!id || !pos) return;
+  const { immediate = false } = options;
+  mapState.positions[id] = pos;
+  if (immediate) {
+    if (mapState.pendingNodeUpdates && typeof mapState.pendingNodeUpdates.delete === 'function') {
+      mapState.pendingNodeUpdates.delete(id);
+    }
+    const entry = mapState.elements.get(id);
+    if (entry) {
+      updateNodeGeometry(id, entry);
+      updateEdgesFor(id);
+    }
+    return;
+  }
   if (!mapState.pendingNodeUpdates) {
     mapState.pendingNodeUpdates = new Map();
   }
-  mapState.positions[id] = pos;
   mapState.pendingNodeUpdates.set(id, pos);
   if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
     flushNodePositionUpdates();
