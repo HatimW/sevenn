@@ -4719,15 +4719,6 @@ var Sevenn = (() => {
     toolbar.setAttribute("role", "toolbar");
     toolbar.setAttribute("aria-label", "Text formatting toolbar");
     wrapper.appendChild(toolbar);
-    const toolbarMain = document.createElement("div");
-    toolbarMain.className = "rich-editor-toolbar-row";
-    toolbar.appendChild(toolbarMain);
-    const advancedRow = document.createElement("div");
-    advancedRow.className = "rich-editor-toolbar-row rich-editor-toolbar-advanced";
-    advancedRow.hidden = true;
-    const advancedRowId = `rich-editor-advanced-${Math.random().toString(36).slice(2)}`;
-    advancedRow.id = advancedRowId;
-    toolbar.appendChild(advancedRow);
     const imageFileInput = document.createElement("input");
     imageFileInput.type = "file";
     imageFileInput.accept = "image/*";
@@ -5498,11 +5489,11 @@ var Sevenn = (() => {
         });
       }, { requireSelection: true });
     }
-    function createGroup(extraClass, target = toolbarMain) {
+    function createGroup(extraClass) {
       const group = document.createElement("div");
       group.className = "rich-editor-group";
       if (extraClass) group.classList.add(extraClass);
-      target.appendChild(group);
+      toolbar.appendChild(group);
       return group;
     }
     const inlineGroup = createGroup();
@@ -5534,7 +5525,7 @@ var Sevenn = (() => {
       colorInput.dataset.lastColor = colorInput.value;
     });
     colorWrap.appendChild(colorInput);
-    const colorGroup = createGroup("rich-editor-color-group", advancedRow);
+    const colorGroup = createGroup("rich-editor-color-group");
     colorGroup.appendChild(colorWrap);
     const highlightRow = document.createElement("div");
     highlightRow.className = "rich-editor-highlight-row";
@@ -5604,7 +5595,7 @@ var Sevenn = (() => {
       const btn = createToolbarButton(label, title, handler);
       listGroup.appendChild(btn);
     });
-    const typographyGroup = createGroup("rich-editor-typography-group", advancedRow);
+    const typographyGroup = createGroup("rich-editor-typography-group");
     const fontInfo = document.createElement("div");
     fontInfo.className = "rich-editor-font-info";
     fontNameLabel = document.createElement("span");
@@ -5754,31 +5745,6 @@ var Sevenn = (() => {
     const utilityGroup = createGroup("rich-editor-utility-group");
     utilityGroup.appendChild(clozeTool);
     utilityGroup.appendChild(clearBtn);
-    let advancedOpen = false;
-    const advancedToggle = createToolbarButton("\u22EF", "More formatting options", (event) => {
-      event.preventDefault();
-      setAdvancedOpen(!advancedOpen);
-    });
-    advancedToggle.classList.add("rich-editor-more-btn");
-    advancedToggle.dataset.toggle = "false";
-    advancedToggle.dataset.active = "false";
-    advancedToggle.setAttribute("aria-expanded", "false");
-    advancedToggle.setAttribute("aria-controls", advancedRowId);
-    utilityGroup.appendChild(advancedToggle);
-    function setAdvancedOpen(open) {
-      advancedOpen = Boolean(open);
-      advancedRow.hidden = !advancedOpen;
-      advancedToggle.dataset.active = advancedOpen ? "true" : "false";
-      advancedToggle.setAttribute("aria-pressed", advancedOpen ? "true" : "false");
-      advancedToggle.setAttribute("aria-expanded", advancedOpen ? "true" : "false");
-      advancedToggle.classList.toggle("is-active", advancedOpen);
-      if (!advancedOpen) {
-        advancedRow.setAttribute("aria-hidden", "true");
-      } else {
-        advancedRow.removeAttribute("aria-hidden");
-      }
-    }
-    setAdvancedOpen(false);
     let settingValue = false;
     editable.addEventListener("input", () => {
       if (settingValue) return;
@@ -8316,9 +8282,7 @@ var Sevenn = (() => {
         bodyWrap.appendChild(content);
         section.appendChild(headerBtn);
         section.appendChild(bodyWrap);
-        headerBtn.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
+        headerBtn.addEventListener("click", () => {
           const collapsed = section.classList.toggle("is-collapsed");
           headerBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
         });
@@ -12899,39 +12863,6 @@ var Sevenn = (() => {
   }
 
   // js/ui/components/section-utils.js
-  var EXTRA_PREFIX = "extra:";
-  function escapeHtml6(str = "") {
-    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-  }
-  function normalizeExtras(item) {
-    if (Array.isArray(item?.extras) && item.extras.length) {
-      return item.extras.map((extra, index) => {
-        if (!extra || typeof extra !== "object") return null;
-        const body = typeof extra.body === "string" ? extra.body : "";
-        if (!hasRichTextContent(body)) return null;
-        const id = extra.id != null ? String(extra.id) : String(index);
-        return {
-          id,
-          title: typeof extra.title === "string" && extra.title.trim() ? extra.title.trim() : "Additional Section",
-          body
-        };
-      }).filter(Boolean);
-    }
-    if (Array.isArray(item?.facts) && item.facts.length) {
-      return [
-        {
-          id: "legacy-facts",
-          title: "Highlights",
-          body: `<ul>${item.facts.map((fact) => `<li>${escapeHtml6(fact)}</li>`).join("")}</ul>`
-        }
-      ];
-    }
-    return [];
-  }
-  function extraKeyFor(extra, index) {
-    const rawId = extra?.id != null ? String(extra.id) : String(index);
-    return `${EXTRA_PREFIX}${rawId}`;
-  }
   function hasSectionContent(item, key) {
     if (!item || !key) return false;
     const defs = sectionDefsForKind(item.kind);
@@ -12943,35 +12874,12 @@ var Sevenn = (() => {
   function sectionsForItem(item, allowedKeys = null) {
     const defs = sectionDefsForKind(item.kind);
     const allowSet = allowedKeys ? new Set(allowedKeys) : null;
-    const sections = defs.filter((def) => (!allowSet || allowSet.has(def.key)) && hasSectionContent(item, def.key)).map((def) => ({
-      key: def.key,
-      label: def.label,
-      body: item?.[def.key] || "",
-      isExtra: false
-    }));
-    const extras = normalizeExtras(item);
-    extras.forEach((extra, index) => {
-      const key = extraKeyFor(extra, index);
-      sections.push({
-        key,
-        label: extra.title || "Additional Section",
-        body: extra.body,
-        isExtra: true
-      });
-    });
-    return sections;
+    return defs.filter((def) => (!allowSet || allowSet.has(def.key)) && hasSectionContent(item, def.key)).map((def) => ({ key: def.key, label: def.label }));
   }
   function getSectionLabel(item, key) {
     const defs = sectionDefsForKind(item.kind);
     const def = defs.find((entry) => entry.key === key);
-    if (def) return def.label;
-    if (typeof key === "string" && key.startsWith(EXTRA_PREFIX)) {
-      const extras = normalizeExtras(item);
-      const match = extras.find((extra, index) => extraKeyFor(extra, index) === key);
-      if (match) return match.title || "Custom Section";
-      return "Custom Section";
-    }
-    return key;
+    return def ? def.label : key;
   }
 
   // js/ui/components/flashcards.js
@@ -13129,14 +13037,13 @@ var Sevenn = (() => {
       empty.textContent = "No content available for this card.";
       card.appendChild(empty);
     }
-    sectionBlocks.forEach((section) => {
-      const { key, label, body: sectionBody = "", isExtra } = section;
+    sectionBlocks.forEach(({ key, label }) => {
       const ratingId = ratingKey(item, key);
       const previousRating = active.ratings[ratingId] || null;
-      const snapshot = isExtra ? null : getSectionStateSnapshot(item, key);
-      const lockedByQueue = !isExtra && !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
-      const alreadyQueued = !isExtra && !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
-      const requiresRating = !isExtra && (isReview || !alreadyQueued);
+      const snapshot = getSectionStateSnapshot(item, key);
+      const lockedByQueue = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
+      const alreadyQueued = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
+      const requiresRating = isReview || !alreadyQueued;
       sectionRequirements.set(key, requiresRating);
       const sec = document.createElement("div");
       sec.className = "flash-section";
@@ -13147,119 +13054,114 @@ var Sevenn = (() => {
       head.textContent = label;
       const body = document.createElement("div");
       body.className = "flash-body";
-      renderRichText(body, sectionBody, { clozeMode: "interactive" });
-      let ratingRow = null;
-      if (!isExtra) {
-        ratingRow = document.createElement("div");
-        ratingRow.className = "flash-rating";
-        const ratingButtons = document.createElement("div");
-        ratingButtons.className = "flash-rating-options";
-        const status = document.createElement("span");
-        status.className = "flash-rating-status";
-        let ratingLocked = lockedByQueue;
-        const selectRating = (value) => {
-          active.ratings[ratingId] = value;
-          Array.from(ratingButtons.querySelectorAll("button")).forEach((btn) => {
-            const btnValue = btn.dataset.value;
-            const isSelected = btnValue === value;
-            btn.classList.toggle("is-selected", isSelected);
-            if (isSelected) {
-              ratingButtons.dataset.selected = value;
-            } else if (ratingButtons.dataset.selected === btnValue) {
-              delete ratingButtons.dataset.selected;
-            }
-            btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
-          });
-          status.classList.remove("is-error");
-          commitSession({ ratings: { ...active.ratings } });
-        };
-        const handleRating = async (value) => {
-          if (ratingLocked) return;
-          const durations = await durationsPromise;
-          setToggleState(sec, true, "revealed");
-          ratingRow.classList.add("is-saving");
-          status.textContent = "Saving\u2026";
-          status.classList.remove("is-error");
-          try {
-            rateSection(item, key, value, durations, Date.now());
-            await upsertItem(item);
-            selectRating(value);
-            status.textContent = "Saved";
-            status.classList.remove("is-error");
-          } catch (err) {
-            console.error("Failed to record rating", err);
-            status.textContent = "Save failed";
-            status.classList.add("is-error");
-          } finally {
-            ratingRow.classList.remove("is-saving");
+      renderRichText(body, item[key] || "", { clozeMode: "interactive" });
+      const ratingRow = document.createElement("div");
+      ratingRow.className = "flash-rating";
+      const ratingButtons = document.createElement("div");
+      ratingButtons.className = "flash-rating-options";
+      const status = document.createElement("span");
+      status.className = "flash-rating-status";
+      let ratingLocked = lockedByQueue;
+      const selectRating = (value) => {
+        active.ratings[ratingId] = value;
+        Array.from(ratingButtons.querySelectorAll("button")).forEach((btn) => {
+          const btnValue = btn.dataset.value;
+          const isSelected = btnValue === value;
+          btn.classList.toggle("is-selected", isSelected);
+          if (isSelected) {
+            ratingButtons.dataset.selected = value;
+          } else if (ratingButtons.dataset.selected === btnValue) {
+            delete ratingButtons.dataset.selected;
           }
-        };
-        REVIEW_RATINGS.forEach((value) => {
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.dataset.value = value;
-          btn.dataset.rating = value;
-          btn.className = "flash-rating-btn";
-          const variant = RATING_CLASS[value];
-          if (variant) btn.classList.add(variant);
-          btn.textContent = RATING_LABELS[value];
-          btn.setAttribute("aria-pressed", "false");
-          btn.addEventListener("click", (event) => {
-            event.stopPropagation();
-            handleRating(value);
-          });
-          btn.addEventListener("keydown", (event) => {
-            event.stopPropagation();
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              handleRating(value);
-            }
-          });
-          ratingButtons.appendChild(btn);
+          btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
         });
-        const unlockRating = () => {
-          if (!ratingLocked) return;
-          ratingLocked = false;
-          ratingRow.classList.remove("is-locked");
-          ratingButtons.hidden = false;
-          status.classList.remove("flash-rating-status-action");
-          status.removeAttribute("role");
-          status.removeAttribute("tabindex");
-          status.textContent = previousRating ? "Update rating" : "Select a rating (optional)";
-        };
-        if (lockedByQueue) {
-          ratingLocked = true;
-          ratingRow.classList.add("is-locked");
-          ratingButtons.hidden = true;
-          const label2 = queueStatusLabel(snapshot);
-          status.textContent = `${label2} \u2014 click to adjust`;
-          status.classList.add("flash-rating-status-action");
-          status.setAttribute("role", "button");
-          status.setAttribute("tabindex", "0");
-          status.setAttribute("aria-label", "Update review rating");
-          status.addEventListener("click", (event) => {
-            event.stopPropagation();
-            unlockRating();
-          });
-          status.addEventListener("keydown", (event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              unlockRating();
-            }
-          });
-        } else if (previousRating) {
+        status.classList.remove("is-error");
+        commitSession({ ratings: { ...active.ratings } });
+      };
+      const handleRating = async (value) => {
+        if (ratingLocked) return;
+        const durations = await durationsPromise;
+        setToggleState(sec, true, "revealed");
+        ratingRow.classList.add("is-saving");
+        status.textContent = "Saving\u2026";
+        status.classList.remove("is-error");
+        try {
+          rateSection(item, key, value, durations, Date.now());
+          await upsertItem(item);
+          selectRating(value);
           status.textContent = "Saved";
-        } else {
-          status.textContent = "Select a rating (optional)";
+          status.classList.remove("is-error");
+        } catch (err) {
+          console.error("Failed to record rating", err);
+          status.textContent = "Save failed";
+          status.classList.add("is-error");
+        } finally {
+          ratingRow.classList.remove("is-saving");
         }
-        if (previousRating) {
-          selectRating(previousRating);
-        }
-        ratingRow.appendChild(ratingButtons);
-        ratingRow.appendChild(status);
+      };
+      REVIEW_RATINGS.forEach((value) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.dataset.value = value;
+        btn.dataset.rating = value;
+        btn.className = "flash-rating-btn";
+        const variant = RATING_CLASS[value];
+        if (variant) btn.classList.add(variant);
+        btn.textContent = RATING_LABELS[value];
+        btn.setAttribute("aria-pressed", "false");
+        btn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          handleRating(value);
+        });
+        btn.addEventListener("keydown", (event) => {
+          event.stopPropagation();
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            handleRating(value);
+          }
+        });
+        ratingButtons.appendChild(btn);
+      });
+      const unlockRating = () => {
+        if (!ratingLocked) return;
+        ratingLocked = false;
+        ratingRow.classList.remove("is-locked");
+        ratingButtons.hidden = false;
+        status.classList.remove("flash-rating-status-action");
+        status.removeAttribute("role");
+        status.removeAttribute("tabindex");
+        status.textContent = previousRating ? "Update rating" : "Select a rating (optional)";
+      };
+      if (lockedByQueue) {
+        ratingLocked = true;
+        ratingRow.classList.add("is-locked");
+        ratingButtons.hidden = true;
+        const label2 = queueStatusLabel(snapshot);
+        status.textContent = `${label2} \u2014 click to adjust`;
+        status.classList.add("flash-rating-status-action");
+        status.setAttribute("role", "button");
+        status.setAttribute("tabindex", "0");
+        status.setAttribute("aria-label", "Update review rating");
+        status.addEventListener("click", (event) => {
+          event.stopPropagation();
+          unlockRating();
+        });
+        status.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            unlockRating();
+          }
+        });
+      } else if (previousRating) {
+        status.textContent = "Saved";
       } else {
-        sec.classList.add("flash-section-extra");
+        status.textContent = "Select a rating (optional)";
       }
+      if (previousRating) {
+        selectRating(previousRating);
+      }
+      ratingRow.appendChild(ratingButtons);
+      ratingRow.appendChild(status);
       setToggleState(sec, false, "revealed");
       const toggleReveal = () => {
         if (sec.classList.contains("flash-section-disabled")) return;
@@ -13283,7 +13185,7 @@ var Sevenn = (() => {
       });
       sec.appendChild(head);
       sec.appendChild(body);
-      if (ratingRow) sec.appendChild(ratingRow);
+      sec.appendChild(ratingRow);
       card.appendChild(sec);
     });
     const controls = document.createElement("div");
@@ -13865,7 +13767,7 @@ var Sevenn = (() => {
       emptySection.textContent = "No card content available for this entry.";
       details.appendChild(emptySection);
     } else {
-      sections.forEach(({ key, label, body: sectionBody = "", isExtra }) => {
+      sections.forEach(({ key, label }) => {
         const block = document.createElement("div");
         block.className = "quiz-section";
         const head = document.createElement("div");
@@ -13874,10 +13776,7 @@ var Sevenn = (() => {
         block.appendChild(head);
         const body = document.createElement("div");
         body.className = "quiz-section-body";
-        renderRichText(body, sectionBody || "");
-        if (isExtra) {
-          block.classList.add("quiz-section-extra");
-        }
+        renderRichText(body, item[key] || "");
         block.appendChild(body);
         details.appendChild(block);
       });
@@ -17833,7 +17732,7 @@ var Sevenn = (() => {
       ["mnemonic", "Mnemonic"]
     ]
   };
-  function escapeHtml7(str = "") {
+  function escapeHtml6(str = "") {
     return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
   function collectExtras(item) {
@@ -17842,7 +17741,7 @@ var Sevenn = (() => {
       return [{
         id: "legacy-facts",
         title: "Highlights",
-        body: `<ul>${item.facts.map((f) => `<li>${escapeHtml7(f)}</li>`).join("")}</ul>`
+        body: `<ul>${item.facts.map((f) => `<li>${escapeHtml6(f)}</li>`).join("")}</ul>`
       }];
     }
     return [];
