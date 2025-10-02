@@ -1,12 +1,5 @@
 import { sectionDefsForKind } from './sections.js';
-
-function stripHtml(value) {
-  return String(value || '')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+import { hasRichTextContent } from './rich-text.js';
 
 export function hasSectionContent(item, key) {
   if (!item || !key) return false;
@@ -14,7 +7,7 @@ export function hasSectionContent(item, key) {
   if (!defs.some(def => def.key === key)) return false;
   const raw = item[key];
   if (raw === null || raw === undefined) return false;
-  return stripHtml(raw).length > 0;
+  return hasRichTextContent(raw);
 }
 
 export function sectionsForItem(item, allowedKeys = null) {
