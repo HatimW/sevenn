@@ -938,9 +938,7 @@ export async function renderCards(container, items, onChange) {
       section.appendChild(headerBtn);
       section.appendChild(bodyWrap);
 
-      headerBtn.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
+      headerBtn.addEventListener('click', () => {
         const collapsed = section.classList.toggle('is-collapsed');
         headerBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       });

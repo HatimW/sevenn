@@ -937,11 +937,6 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(
   gap: var(--pad-sm);
 }
 
-.quiz-section-extra {
-  border-style: dashed;
-  border-color: rgba(148, 163, 184, 0.35);
-}
-
 .quiz-section-title {
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -1927,34 +1922,19 @@ input[type="checkbox"]:checked::after {
 
 .rich-editor-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: stretch;
-}
-
-.rich-editor-toolbar-row {
-  display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
-}
-
-.rich-editor-toolbar-advanced {
-  padding: 6px;
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(8, 13, 23, 0.5);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
 .rich-editor-group {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 4px;
+  padding: 4px 6px;
   border-radius: var(--radius-sm);
-  border: 1px solid rgba(148, 163, 184, 0.12);
-  background: rgba(8, 13, 23, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(8, 13, 23, 0.5);
   backdrop-filter: blur(8px);
 }
 
@@ -1972,18 +1952,12 @@ input[type="checkbox"]:checked::after {
   flex-wrap: wrap;
 }
 
-.rich-editor-more-btn {
-  font-weight: 700;
-  min-width: 32px;
-  justify-content: center;
-}
-
 .rich-editor-btn {
-  background: rgba(15, 23, 42, 0.38);
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.25);
   color: var(--text-muted);
-  padding: 4px 6px;
-  font-size: 0.78rem;
+  padding: 6px 8px;
+  font-size: 0.85rem;
   cursor: pointer;
   border-radius: var(--radius-sm);
   font-weight: 600;
@@ -3192,15 +3166,6 @@ button.builder-pill.builder-pill-outline {
 
 .flash-section.revealed .flash-rating {
   display: flex;
-}
-
-.flash-section-extra {
-  border-style: dashed;
-  border-color: rgba(148, 163, 184, 0.35);
-}
-
-.flash-section-extra .flash-heading {
-  color: var(--text-muted);
 }
 
 .flash-rating-options {

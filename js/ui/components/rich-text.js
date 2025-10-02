@@ -267,17 +267,6 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   toolbar.setAttribute('aria-label', 'Text formatting toolbar');
   wrapper.appendChild(toolbar);
 
-  const toolbarMain = document.createElement('div');
-  toolbarMain.className = 'rich-editor-toolbar-row';
-  toolbar.appendChild(toolbarMain);
-
-  const advancedRow = document.createElement('div');
-  advancedRow.className = 'rich-editor-toolbar-row rich-editor-toolbar-advanced';
-  advancedRow.hidden = true;
-  const advancedRowId = `rich-editor-advanced-${Math.random().toString(36).slice(2)}`;
-  advancedRow.id = advancedRowId;
-  toolbar.appendChild(advancedRow);
-
   const imageFileInput = document.createElement('input');
   imageFileInput.type = 'file';
   imageFileInput.accept = 'image/*';
@@ -1127,11 +1116,11 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
     }, { requireSelection: true });
   }
 
-  function createGroup(extraClass, target = toolbarMain){
+  function createGroup(extraClass){
     const group = document.createElement('div');
     group.className = 'rich-editor-group';
     if (extraClass) group.classList.add(extraClass);
-    target.appendChild(group);
+    toolbar.appendChild(group);
     return group;
   }
   const inlineGroup = createGroup();
@@ -1164,7 +1153,7 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
     colorInput.dataset.lastColor = colorInput.value;
   });
   colorWrap.appendChild(colorInput);
-  const colorGroup = createGroup('rich-editor-color-group', advancedRow);
+  const colorGroup = createGroup('rich-editor-color-group');
   colorGroup.appendChild(colorWrap);
 
   const highlightRow = document.createElement('div');
@@ -1244,7 +1233,7 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
     listGroup.appendChild(btn);
   });
 
-  const typographyGroup = createGroup('rich-editor-typography-group', advancedRow);
+  const typographyGroup = createGroup('rich-editor-typography-group');
 
   const fontInfo = document.createElement('div');
   fontInfo.className = 'rich-editor-font-info';
@@ -1403,33 +1392,6 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   const utilityGroup = createGroup('rich-editor-utility-group');
   utilityGroup.appendChild(clozeTool);
   utilityGroup.appendChild(clearBtn);
-
-  let advancedOpen = false;
-  const advancedToggle = createToolbarButton('⋯', 'More formatting options', (event) => {
-    event.preventDefault();
-    setAdvancedOpen(!advancedOpen);
-  });
-  advancedToggle.classList.add('rich-editor-more-btn');
-  advancedToggle.dataset.toggle = 'false';
-  advancedToggle.dataset.active = 'false';
-  advancedToggle.setAttribute('aria-expanded', 'false');
-  advancedToggle.setAttribute('aria-controls', advancedRowId);
-  utilityGroup.appendChild(advancedToggle);
-
-  function setAdvancedOpen(open) {
-    advancedOpen = Boolean(open);
-    advancedRow.hidden = !advancedOpen;
-    advancedToggle.dataset.active = advancedOpen ? 'true' : 'false';
-    advancedToggle.setAttribute('aria-pressed', advancedOpen ? 'true' : 'false');
-    advancedToggle.setAttribute('aria-expanded', advancedOpen ? 'true' : 'false');
-    advancedToggle.classList.toggle('is-active', advancedOpen);
-    if (!advancedOpen) {
-      advancedRow.setAttribute('aria-hidden', 'true');
-    } else {
-      advancedRow.removeAttribute('aria-hidden');
-    }
-  }
-  setAdvancedOpen(false);
 
   let settingValue = false;
   editable.addEventListener('input', () => {

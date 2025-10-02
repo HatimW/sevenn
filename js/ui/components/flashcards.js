@@ -190,14 +190,13 @@ export function renderFlashcards(root, redraw) {
     card.appendChild(empty);
   }
 
-  sectionBlocks.forEach(section => {
-    const { key, label, body: sectionBody = '', isExtra } = section;
+  sectionBlocks.forEach(({ key, label }) => {
     const ratingId = ratingKey(item, key);
     const previousRating = active.ratings[ratingId] || null;
-    const snapshot = isExtra ? null : getSectionStateSnapshot(item, key);
-    const lockedByQueue = !isExtra && !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
-    const alreadyQueued = !isExtra && !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
-    const requiresRating = !isExtra && (isReview || !alreadyQueued);
+    const snapshot = getSectionStateSnapshot(item, key);
+    const lockedByQueue = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
+    const alreadyQueued = !isReview && Boolean(snapshot && snapshot.last && !snapshot.retired);
+    const requiresRating = isReview || !alreadyQueued;
     sectionRequirements.set(key, requiresRating);
     const sec = document.createElement('div');
     sec.className = 'flash-section';
@@ -210,133 +209,130 @@ export function renderFlashcards(root, redraw) {
 
     const body = document.createElement('div');
     body.className = 'flash-body';
-    renderRichText(body, sectionBody, { clozeMode: 'interactive' });
+    renderRichText(body, item[key] || '', { clozeMode: 'interactive' });
 
-    let ratingRow = null;
-    if (!isExtra) {
-      ratingRow = document.createElement('div');
-      ratingRow.className = 'flash-rating';
+    const ratingRow = document.createElement('div');
+    ratingRow.className = 'flash-rating';
 
-      const ratingButtons = document.createElement('div');
-      ratingButtons.className = 'flash-rating-options';
+    const ratingButtons = document.createElement('div');
+    ratingButtons.className = 'flash-rating-options';
 
-      const status = document.createElement('span');
-      status.className = 'flash-rating-status';
+    const status = document.createElement('span');
+    status.className = 'flash-rating-status';
 
-      let ratingLocked = lockedByQueue;
+    let ratingLocked = lockedByQueue;
 
-      const selectRating = (value) => {
-        active.ratings[ratingId] = value;
-        Array.from(ratingButtons.querySelectorAll('button')).forEach(btn => {
-          const btnValue = btn.dataset.value;
-          const isSelected = btnValue === value;
-          btn.classList.toggle('is-selected', isSelected);
+    const selectRating = (value) => {
+      active.ratings[ratingId] = value;
+      Array.from(ratingButtons.querySelectorAll('button')).forEach(btn => {
+        const btnValue = btn.dataset.value;
+        const isSelected = btnValue === value;
+        btn.classList.toggle('is-selected', isSelected);
 
-          if (isSelected) {
-            ratingButtons.dataset.selected = value;
-          } else if (ratingButtons.dataset.selected === btnValue) {
-            delete ratingButtons.dataset.selected;
-          }
-
-          btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
-        });
-        status.classList.remove('is-error');
-        commitSession({ ratings: { ...active.ratings } });
-      };
-
-      const handleRating = async (value) => {
-        if (ratingLocked) return;
-
-        const durations = await durationsPromise;
-        setToggleState(sec, true, 'revealed');
-        ratingRow.classList.add('is-saving');
-        status.textContent = 'Saving…';
-        status.classList.remove('is-error');
-        try {
-          rateSection(item, key, value, durations, Date.now());
-          await upsertItem(item);
-          selectRating(value);
-          status.textContent = 'Saved';
-          status.classList.remove('is-error');
-        } catch (err) {
-          console.error('Failed to record rating', err);
-          status.textContent = 'Save failed';
-          status.classList.add('is-error');
-        } finally {
-          ratingRow.classList.remove('is-saving');
+        if (isSelected) {
+          ratingButtons.dataset.selected = value;
+        } else if (ratingButtons.dataset.selected === btnValue) {
+          delete ratingButtons.dataset.selected;
         }
-      };
 
-      REVIEW_RATINGS.forEach(value => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.dataset.value = value;
-        btn.dataset.rating = value;
-        btn.className = 'flash-rating-btn';
-        const variant = RATING_CLASS[value];
-        if (variant) btn.classList.add(variant);
-        btn.textContent = RATING_LABELS[value];
-        btn.setAttribute('aria-pressed', 'false');
-        btn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          handleRating(value);
-        });
-        btn.addEventListener('keydown', (event) => {
-          event.stopPropagation();
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            handleRating(value);
-          }
-        });
-        ratingButtons.appendChild(btn);
+        btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
       });
+      status.classList.remove('is-error');
+      commitSession({ ratings: { ...active.ratings } });
 
-      const unlockRating = () => {
-        if (!ratingLocked) return;
-        ratingLocked = false;
-        ratingRow.classList.remove('is-locked');
-        ratingButtons.hidden = false;
-        status.classList.remove('flash-rating-status-action');
-        status.removeAttribute('role');
-        status.removeAttribute('tabindex');
-        status.textContent = previousRating ? 'Update rating' : 'Select a rating (optional)';
-      };
+    };
 
-      if (lockedByQueue) {
-        ratingLocked = true;
-        ratingRow.classList.add('is-locked');
-        ratingButtons.hidden = true;
-        const label = queueStatusLabel(snapshot);
-        status.textContent = `${label} — click to adjust`;
-        status.classList.add('flash-rating-status-action');
-        status.setAttribute('role', 'button');
-        status.setAttribute('tabindex', '0');
-        status.setAttribute('aria-label', 'Update review rating');
-        status.addEventListener('click', (event) => {
-          event.stopPropagation();
-          unlockRating();
-        });
-        status.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            unlockRating();
-          }
-        });
-      } else if (previousRating) {
+    const handleRating = async (value) => {
+      if (ratingLocked) return;
+
+      const durations = await durationsPromise;
+      setToggleState(sec, true, 'revealed');
+      ratingRow.classList.add('is-saving');
+      status.textContent = 'Saving…';
+      status.classList.remove('is-error');
+      try {
+        rateSection(item, key, value, durations, Date.now());
+        await upsertItem(item);
+        selectRating(value);
         status.textContent = 'Saved';
-      } else {
-        status.textContent = 'Select a rating (optional)';
+        status.classList.remove('is-error');
+      } catch (err) {
+        console.error('Failed to record rating', err);
+        status.textContent = 'Save failed';
+        status.classList.add('is-error');
+      } finally {
+        ratingRow.classList.remove('is-saving');
       }
+    };
 
-      if (previousRating) {
-        selectRating(previousRating);
-      }
+    REVIEW_RATINGS.forEach(value => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.dataset.value = value;
+      btn.dataset.rating = value;
+      btn.className = 'flash-rating-btn';
+      const variant = RATING_CLASS[value];
+      if (variant) btn.classList.add(variant);
+      btn.textContent = RATING_LABELS[value];
+      btn.setAttribute('aria-pressed', 'false');
+      btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        handleRating(value);
+      });
+      btn.addEventListener('keydown', (event) => {
+        event.stopPropagation();
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          handleRating(value);
+        }
+      });
+      ratingButtons.appendChild(btn);
+    });
 
-      ratingRow.appendChild(ratingButtons);
-      ratingRow.appendChild(status);
+    const unlockRating = () => {
+      if (!ratingLocked) return;
+      ratingLocked = false;
+      ratingRow.classList.remove('is-locked');
+      ratingButtons.hidden = false;
+      status.classList.remove('flash-rating-status-action');
+      status.removeAttribute('role');
+      status.removeAttribute('tabindex');
+      status.textContent = previousRating ? 'Update rating' : 'Select a rating (optional)';
+    };
+
+    if (lockedByQueue) {
+      ratingLocked = true;
+      ratingRow.classList.add('is-locked');
+      ratingButtons.hidden = true;
+      const label = queueStatusLabel(snapshot);
+      status.textContent = `${label} — click to adjust`;
+      status.classList.add('flash-rating-status-action');
+      status.setAttribute('role', 'button');
+      status.setAttribute('tabindex', '0');
+      status.setAttribute('aria-label', 'Update review rating');
+      status.addEventListener('click', (event) => {
+        event.stopPropagation();
+        unlockRating();
+      });
+      status.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          unlockRating();
+        }
+      });
+    } else if (previousRating) {
+      status.textContent = 'Saved';
     } else {
-      sec.classList.add('flash-section-extra');
+      status.textContent = 'Select a rating (optional)';
     }
+
+    if (previousRating) {
+      selectRating(previousRating);
+
+    }
+
+    ratingRow.appendChild(ratingButtons);
+    ratingRow.appendChild(status);
 
     setToggleState(sec, false, 'revealed');
     const toggleReveal = () => {
@@ -362,7 +358,7 @@ export function renderFlashcards(root, redraw) {
 
     sec.appendChild(head);
     sec.appendChild(body);
-    if (ratingRow) sec.appendChild(ratingRow);
+    sec.appendChild(ratingRow);
     card.appendChild(sec);
   });
 

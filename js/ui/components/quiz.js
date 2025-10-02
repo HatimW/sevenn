@@ -185,7 +185,7 @@ export function renderQuiz(root, redraw) {
     emptySection.textContent = 'No card content available for this entry.';
     details.appendChild(emptySection);
   } else {
-    sections.forEach(({ key, label, body: sectionBody = '', isExtra }) => {
+    sections.forEach(({ key, label }) => {
       const block = document.createElement('div');
       block.className = 'quiz-section';
 
@@ -196,10 +196,7 @@ export function renderQuiz(root, redraw) {
 
       const body = document.createElement('div');
       body.className = 'quiz-section-body';
-      renderRichText(body, sectionBody || '');
-      if (isExtra) {
-        block.classList.add('quiz-section-extra');
-      }
+      renderRichText(body, item[key] || '');
       block.appendChild(body);
 
       details.appendChild(block);
