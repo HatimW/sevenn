@@ -2327,6 +2327,7 @@ var Sevenn = (() => {
     }
     const onlyFav = Boolean(filter.onlyFav);
     const query = typeof filter.query === "string" ? filter.query.trim() : "";
+    const normalizedQuery = query.toLowerCase();
     const tokens = query ? tokenize(query) : [];
     return {
       types,
@@ -2334,6 +2335,7 @@ var Sevenn = (() => {
       week,
       onlyFav,
       tokens: tokens.length ? tokens : null,
+      query: normalizedQuery,
       sort: normalizeSort(filter.sort)
     };
   }
@@ -2428,7 +2430,24 @@ var Sevenn = (() => {
       if (cacheKey != null) lectureSortCache.set(cacheKey, latest);
       return latest;
     }
+    const queryString = typeof normalized2.query === "string" ? normalized2.query : "";
+    const hasQueryString = queryString.length > 0;
+    function nameMatchScore(item) {
+      if (!hasQueryString) return 0;
+      const title = titleOf(item).toLowerCase();
+      if (!title) return 0;
+      if (title.startsWith(queryString)) return 2;
+      if (title.includes(queryString)) return 1;
+      return 0;
+    }
     results.sort((a, b) => {
+      if (hasQueryString) {
+        const aScore = nameMatchScore(a);
+        const bScore = nameMatchScore(b);
+        if (aScore !== bScore) {
+          return bScore - aScore;
+        }
+      }
       let cmp = 0;
       switch (normalized2.sort.mode) {
         case "name":
