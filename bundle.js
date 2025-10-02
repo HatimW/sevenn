@@ -7969,10 +7969,10 @@ var Sevenn = (() => {
       }
       function acquireSlide(item) {
         if (!slideCache.has(item)) {
-          slideCache.set(item, createDeckSlide(item, baseContext, { allowEdit: true }));
+          slideCache.set(item, () => createDeckSlide(item, baseContext, { allowEdit: true }));
         }
-        const template = slideCache.get(item);
-        const slide = template.cloneNode(true);
+        const factory = slideCache.get(item);
+        const slide = factory();
         slide.classList.add("deck-slide-full");
         prepareSlideActions(slide, item);
         return slide;
@@ -8672,8 +8672,105 @@ var Sevenn = (() => {
   function sectionDefsForKind(kind) {
     return SECTION_DEFS[kind] || [];
   }
-  function allSectionDefs() {
-    return SECTION_DEFS;
+
+  // js/ui/components/section-utils.js
+  var EXTRA_SECTION_PREFIX = "extra:";
+  function escapeHtml6(str = "") {
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function rawExtras(item) {
+    if (Array.isArray(item?.extras) && item.extras.length) {
+      return item.extras;
+    }
+    if (Array.isArray(item?.facts) && item.facts.length) {
+      return [{
+        id: "legacy-facts",
+        title: "Highlights",
+        body: `<ul>${item.facts.map((f) => `<li>${escapeHtml6(f)}</li>`).join("")}</ul>`
+      }];
+    }
+    return [];
+  }
+  function normalizeExtras(item) {
+    const extras = rawExtras(item);
+    const seenKeys = /* @__PURE__ */ new Set();
+    return extras.map((extra, index) => {
+      const source = extra && typeof extra === "object" ? extra : {};
+      const title = typeof source.title === "string" ? source.title.trim() : "";
+      const body = typeof source.body === "string" ? source.body : "";
+      let keyId = source.id != null && `${source.id}`.trim() ? `${source.id}`.trim() : `idx-${index}`;
+      let key = `${EXTRA_SECTION_PREFIX}${keyId}`;
+      let attempt = 0;
+      while (seenKeys.has(key)) {
+        attempt += 1;
+        key = `${EXTRA_SECTION_PREFIX}${keyId}-${attempt}`;
+      }
+      seenKeys.add(key);
+      return {
+        key,
+        id: source.id ?? null,
+        title,
+        body,
+        index,
+        source
+      };
+    });
+  }
+  function findExtraByKey(item, key) {
+    if (!key || !key.startsWith(EXTRA_SECTION_PREFIX)) return null;
+    return normalizeExtras(item).find((entry) => entry.key === key) || null;
+  }
+  function hasRichContent(value) {
+    if (typeof document === "undefined") {
+      if (value == null) return false;
+      const text = String(value).replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").trim();
+      return text.length > 0;
+    }
+    return hasRichTextContent(value);
+  }
+  function hasSectionContent(item, key) {
+    if (!item || !key) return false;
+    if (key.startsWith(EXTRA_SECTION_PREFIX)) {
+      const extra = findExtraByKey(item, key);
+      return extra ? hasRichContent(extra.body) : false;
+    }
+    const defs = sectionDefsForKind(item.kind);
+    if (!defs.some((def) => def.key === key)) return false;
+    const raw = item[key];
+    if (raw === null || raw === void 0) return false;
+    return hasRichContent(raw);
+  }
+  function sectionsForItem(item, allowedKeys = null) {
+    const defs = sectionDefsForKind(item.kind);
+    const allowSet = allowedKeys ? new Set(allowedKeys) : null;
+    const sections = defs.filter((def) => (!allowSet || allowSet.has(def.key)) && hasSectionContent(item, def.key)).map((def) => ({ key: def.key, label: def.label, content: item?.[def.key] || "" }));
+    normalizeExtras(item).forEach((extra) => {
+      if (!hasRichContent(extra.body)) return;
+      sections.push({
+        key: extra.key,
+        label: extra.title || "Additional Notes",
+        content: extra.body,
+        extra: true,
+        extraId: extra.id
+      });
+    });
+    return sections;
+  }
+  function getSectionLabel(item, key) {
+    if (key && key.startsWith(EXTRA_SECTION_PREFIX)) {
+      const extra = findExtraByKey(item, key);
+      return extra ? extra.title || "Additional Notes" : key;
+    }
+    const defs = sectionDefsForKind(item.kind);
+    const def = defs.find((entry) => entry.key === key);
+    return def ? def.label : key;
+  }
+  function getSectionContent(item, key) {
+    if (key && key.startsWith(EXTRA_SECTION_PREFIX)) {
+      const extra = findExtraByKey(item, key);
+      return extra ? extra.body || "" : "";
+    }
+    return item?.[key] || "";
   }
 
   // js/review/scheduler.js
@@ -8707,7 +8804,7 @@ var Sevenn = (() => {
   }
   function computeSectionDigest(item, key) {
     if (!item || !key) return null;
-    const raw = item[key];
+    const raw = getSectionContent(item, key);
     return digestContent(raw);
   }
   var cachedDurations = null;
@@ -8812,31 +8909,20 @@ var Sevenn = (() => {
     section.due = now + Math.round(intervalMinutes * 60 * 1e3);
     return section;
   }
-  function hasContentForSection(item, key) {
-    if (!item || !key) return false;
-    const defs = sectionDefsForKind(item.kind);
-    if (!defs.find((def) => def.key === key)) return false;
-    const raw = item[key];
-    if (raw === null || raw === void 0) return false;
-    const text = String(raw).replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").trim();
-    return text.length > 0;
-  }
   function collectReviewEntries(items, { now = Date.now(), predicate } = {}) {
     const results = [];
     if (!Array.isArray(items) || !items.length) return results;
-    const defsMap = allSectionDefs();
     for (const item of items) {
-      const defs = defsMap[item?.kind] || [];
-      for (const def of defs) {
-        if (!hasContentForSection(item, def.key)) continue;
-        const snapshot = getSectionStateSnapshot(item, def.key);
+      const sections = sectionsForItem(item);
+      for (const section of sections) {
+        const snapshot = getSectionStateSnapshot(item, section.key);
         if (!snapshot || snapshot.retired) continue;
-        if (typeof predicate === "function" && !predicate(snapshot, now, item, def)) continue;
+        if (typeof predicate === "function" && !predicate(snapshot, now, item, section)) continue;
         results.push({
           item,
           itemId: item.id,
-          sectionKey: def.key,
-          sectionLabel: def.label,
+          sectionKey: section.key,
+          sectionLabel: section.label,
           due: snapshot.due
         });
       }
@@ -12862,26 +12948,6 @@ var Sevenn = (() => {
     });
   }
 
-  // js/ui/components/section-utils.js
-  function hasSectionContent(item, key) {
-    if (!item || !key) return false;
-    const defs = sectionDefsForKind(item.kind);
-    if (!defs.some((def) => def.key === key)) return false;
-    const raw = item[key];
-    if (raw === null || raw === void 0) return false;
-    return hasRichTextContent(raw);
-  }
-  function sectionsForItem(item, allowedKeys = null) {
-    const defs = sectionDefsForKind(item.kind);
-    const allowSet = allowedKeys ? new Set(allowedKeys) : null;
-    return defs.filter((def) => (!allowSet || allowSet.has(def.key)) && hasSectionContent(item, def.key)).map((def) => ({ key: def.key, label: def.label }));
-  }
-  function getSectionLabel(item, key) {
-    const defs = sectionDefsForKind(item.kind);
-    const def = defs.find((entry) => entry.key === key);
-    return def ? def.label : key;
-  }
-
   // js/ui/components/flashcards.js
   var KIND_ACCENTS = {
     disease: "var(--pink)",
@@ -13037,7 +13103,7 @@ var Sevenn = (() => {
       empty.textContent = "No content available for this card.";
       card.appendChild(empty);
     }
-    sectionBlocks.forEach(({ key, label }) => {
+    sectionBlocks.forEach(({ key, label, content, extra }) => {
       const ratingId = ratingKey(item, key);
       const previousRating = active.ratings[ratingId] || null;
       const snapshot = getSectionStateSnapshot(item, key);
@@ -13047,6 +13113,7 @@ var Sevenn = (() => {
       sectionRequirements.set(key, requiresRating);
       const sec = document.createElement("div");
       sec.className = "flash-section";
+      if (extra) sec.classList.add("flash-section-extra");
       sec.setAttribute("role", "button");
       sec.tabIndex = 0;
       const head = document.createElement("div");
@@ -13054,7 +13121,7 @@ var Sevenn = (() => {
       head.textContent = label;
       const body = document.createElement("div");
       body.className = "flash-body";
-      renderRichText(body, item[key] || "", { clozeMode: "interactive" });
+      renderRichText(body, content || "", { clozeMode: "interactive" });
       const ratingRow = document.createElement("div");
       ratingRow.className = "flash-rating";
       const ratingButtons = document.createElement("div");
@@ -13767,16 +13834,17 @@ var Sevenn = (() => {
       emptySection.textContent = "No card content available for this entry.";
       details.appendChild(emptySection);
     } else {
-      sections.forEach(({ key, label }) => {
+      sections.forEach(({ key, label, content, extra }) => {
         const block = document.createElement("div");
         block.className = "quiz-section";
+        if (extra) block.classList.add("quiz-section-extra");
         const head = document.createElement("div");
         head.className = "quiz-section-title";
         head.textContent = label;
         block.appendChild(head);
         const body = document.createElement("div");
         body.className = "quiz-section-body";
-        renderRichText(body, item[key] || "");
+        renderRichText(body, content || "", { clozeMode: "interactive" });
         block.appendChild(body);
         details.appendChild(block);
       });
@@ -17732,7 +17800,7 @@ var Sevenn = (() => {
       ["mnemonic", "Mnemonic"]
     ]
   };
-  function escapeHtml6(str = "") {
+  function escapeHtml7(str = "") {
     return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
   function collectExtras(item) {
@@ -17741,7 +17809,7 @@ var Sevenn = (() => {
       return [{
         id: "legacy-facts",
         title: "Highlights",
-        body: `<ul>${item.facts.map((f) => `<li>${escapeHtml6(f)}</li>`).join("")}</ul>`
+        body: `<ul>${item.facts.map((f) => `<li>${escapeHtml7(f)}</li>`).join("")}</ul>`
       }];
     }
     return [];

@@ -185,9 +185,10 @@ export function renderQuiz(root, redraw) {
     emptySection.textContent = 'No card content available for this entry.';
     details.appendChild(emptySection);
   } else {
-    sections.forEach(({ key, label }) => {
+    sections.forEach(({ key, label, content, extra }) => {
       const block = document.createElement('div');
       block.className = 'quiz-section';
+      if (extra) block.classList.add('quiz-section-extra');
 
       const head = document.createElement('div');
       head.className = 'quiz-section-title';
@@ -196,7 +197,7 @@ export function renderQuiz(root, redraw) {
 
       const body = document.createElement('div');
       body.className = 'quiz-section-body';
-      renderRichText(body, item[key] || '');
+      renderRichText(body, content || '', { clozeMode: 'interactive' });
       block.appendChild(body);
 
       details.appendChild(block);
