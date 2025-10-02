@@ -178,6 +178,7 @@ const mapState = {
   lastPointer: { x: 0, y: 0, mapX: 0, mapY: 0 },
   autoPan: null,
   autoPanFrame: null,
+  autoPanPointer: null,
   toolboxPos: { x: 16, y: 16 },
   toolboxDrag: null,
   toolboxEl: null,
@@ -2188,7 +2189,8 @@ export async function renderMap(root) {
           id: it.id,
           offset: { x: x - current.x, y: y - current.y },
           pointerId: e.pointerId,
-          captureTarget: e.currentTarget || circle
+          captureTarget: e.currentTarget || circle,
+          client: { x: e.clientX, y: e.clientY }
         };
         if (mapState.nodeDrag.captureTarget?.setPointerCapture) {
           try {
@@ -2207,7 +2209,8 @@ export async function renderMap(root) {
           }),
           moved: false,
           pointerId: e.pointerId,
-          captureTarget: e.currentTarget || circle
+          captureTarget: e.currentTarget || circle,
+          client: { x: e.clientX, y: e.clientY }
         };
         if (mapState.areaDrag.captureTarget?.setPointerCapture) {
           try {
@@ -2567,6 +2570,8 @@ function handlePointerMove(e) {
   if (mapState.nodeDrag && mapState.nodeDrag.pointerId === e.pointerId) {
     const entry = mapState.elements.get(mapState.nodeDrag.id);
     if (!entry || !entry.circle) return;
+    mapState.nodeDrag.client = { x: e.clientX, y: e.clientY };
+    updateAutoPanFromPointer(e.clientX, e.clientY, { allowDuringDrag: true });
     const { x, y } = clientToMap(e.clientX, e.clientY);
     const nx = x - mapState.nodeDrag.offset.x;
     const ny = y - mapState.nodeDrag.offset.y;
@@ -2576,7 +2581,8 @@ function handlePointerMove(e) {
   }
 
   if (mapState.areaDrag && mapState.areaDrag.pointerId === e.pointerId) {
-    updateAutoPanFromPointer(e.clientX, e.clientY);
+    mapState.areaDrag.client = { x: e.clientX, y: e.clientY };
+    updateAutoPanFromPointer(e.clientX, e.clientY, { allowDuringDrag: true });
     const { x, y } = clientToMap(e.clientX, e.clientY);
     const dx = x - mapState.areaDrag.start.x;
     const dy = y - mapState.areaDrag.start.y;
@@ -2625,6 +2631,8 @@ async function handlePointerUp(e) {
   if (!mapState.svg) return;
 
   flushNodePositionUpdates({ cancelFrame: true });
+
+  stopAutoPan();
 
   if (mapState.toolboxDrag) {
     stopToolboxDrag();
@@ -2919,8 +2927,16 @@ function pickClusterPosition(existing = [], spacing = 200, base = { x: 0, y: 0 }
   };
 }
 
-function updateAutoPanFromPointer(clientX, clientY) {
-  if (!mapState.svg || mapState.tool !== TOOL.AREA) return;
+function updateAutoPanFromPointer(clientX, clientY, options = {}) {
+  if (!mapState.svg) return;
+  const { allowDuringDrag = false, force = false } = options;
+  const dragging = allowDuringDrag && (mapState.nodeDrag || mapState.areaDrag);
+  const shouldAutoPan = force || mapState.tool === TOOL.AREA || dragging;
+  if (!shouldAutoPan) {
+    stopAutoPan();
+    return;
+  }
+  mapState.autoPanPointer = { x: clientX, y: clientY };
   const vector = computeAutoPanVector(clientX, clientY);
   if (vector) {
     startAutoPan(vector);
@@ -2965,14 +2981,24 @@ function computeAutoPanVector(clientX, clientY) {
 }
 
 function startAutoPan(vector) {
-  mapState.autoPan = vector;
-  applyAutoPan(vector);
+  if (!vector) return;
+  mapState.autoPan = { dx: vector.dx, dy: vector.dy };
+  applyAutoPan(mapState.autoPan);
   if (typeof window === 'undefined') return;
   if (mapState.autoPanFrame) return;
   const step = () => {
     if (!mapState.autoPan) {
       mapState.autoPanFrame = null;
       return;
+    }
+    if (mapState.autoPanPointer) {
+      const nextVector = computeAutoPanVector(mapState.autoPanPointer.x, mapState.autoPanPointer.y);
+      if (!nextVector) {
+        stopAutoPan();
+        return;
+      }
+      mapState.autoPan.dx = nextVector.dx;
+      mapState.autoPan.dy = nextVector.dy;
     }
     applyAutoPan(mapState.autoPan);
     mapState.autoPanFrame = window.requestAnimationFrame(step);
@@ -2988,14 +3014,35 @@ function applyAutoPan(vector) {
   const scaleY = mapState.viewBox.h / rect.height;
   mapState.viewBox.x += vector.dx * scaleX;
   mapState.viewBox.y += vector.dy * scaleY;
+  constrainViewBox();
   mapState.updateViewBox({ immediate: true });
   if (mapState.selectionRect) {
-    refreshSelectionRectFromClients();
+    refreshSelectionRectFromClients({ updateStart: true });
+  }
+  if (mapState.nodeDrag?.client) {
+    const pointer = clientToMap(mapState.nodeDrag.client.x, mapState.nodeDrag.client.y);
+    const nx = pointer.x - mapState.nodeDrag.offset.x;
+    const ny = pointer.y - mapState.nodeDrag.offset.y;
+    scheduleNodePositionUpdate(mapState.nodeDrag.id, { x: nx, y: ny }, { immediate: true });
+    mapState.nodeWasDragged = true;
+  }
+  if (mapState.areaDrag?.client) {
+    const pointer = clientToMap(mapState.areaDrag.client.x, mapState.areaDrag.client.y);
+    const dx = pointer.x - mapState.areaDrag.start.x;
+    const dy = pointer.y - mapState.areaDrag.start.y;
+    mapState.areaDrag.moved = mapState.areaDrag.moved || Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
+    mapState.areaDrag.origin.forEach(({ id, pos }) => {
+      const nx = pos.x + dx;
+      const ny = pos.y + dy;
+      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+    });
+    mapState.nodeWasDragged = true;
   }
 }
 
 function stopAutoPan() {
   mapState.autoPan = null;
+  mapState.autoPanPointer = null;
   if (mapState.autoPanFrame && typeof window !== 'undefined') {
     window.cancelAnimationFrame(mapState.autoPanFrame);
   }
