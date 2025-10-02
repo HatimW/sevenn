@@ -4492,7 +4492,7 @@ var Sevenn = (() => {
   var allowedAttributes = {
     "a": ["href", "title", "target", "rel"],
     "img": ["src", "alt", "title", "width", "height"],
-    "span": ["style"],
+    "span": ["style", "data-cloze"],
     "div": ["style"],
     "p": ["style"],
     "font": ["style", "color", "face", "size"],
@@ -4508,6 +4508,7 @@ var Sevenn = (() => {
     "color",
     "background-color",
     "font-size",
+    "font-family",
     "font-weight",
     "font-style",
     "text-decoration-line",
@@ -4605,10 +4606,69 @@ var Sevenn = (() => {
     });
     Array.from(node.childNodes).forEach(sanitizeNode);
   }
+  var CLOZE_ATTR = "data-cloze";
+  var CLOZE_VALUE = "true";
+  var CLOZE_SELECTOR = `[${CLOZE_ATTR}="${CLOZE_VALUE}"]`;
+  function createClozeSpan(content) {
+    const span = document.createElement("span");
+    span.setAttribute(CLOZE_ATTR, CLOZE_VALUE);
+    span.textContent = content;
+    return span;
+  }
+  function upgradeClozeSyntax(root) {
+    if (!root) return;
+    const braceRegex = /\{([^{}]+)\}/g;
+    const walker = document.createTreeWalker(
+      root,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: (node) => {
+          if (!node?.nodeValue || node.nodeValue.indexOf("{") === -1) {
+            return NodeFilter.FILTER_SKIP;
+          }
+          if (node.parentElement?.closest(CLOZE_SELECTOR)) {
+            return NodeFilter.FILTER_SKIP;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+    const targets = [];
+    while (walker.nextNode()) targets.push(walker.currentNode);
+    targets.forEach((node) => {
+      const text = node.nodeValue || "";
+      let match;
+      braceRegex.lastIndex = 0;
+      let lastIndex = 0;
+      let replaced = false;
+      const fragment = document.createDocumentFragment();
+      while (match = braceRegex.exec(text)) {
+        const before = text.slice(lastIndex, match.index);
+        if (before) fragment.appendChild(document.createTextNode(before));
+        const inner = match[1];
+        const trimmed = inner.trim();
+        if (trimmed) {
+          fragment.appendChild(createClozeSpan(trimmed));
+          replaced = true;
+        } else {
+          fragment.appendChild(document.createTextNode(match[0]));
+        }
+        lastIndex = match.index + match[0].length;
+      }
+      if (!replaced) return;
+      const after = text.slice(lastIndex);
+      if (after) fragment.appendChild(document.createTextNode(after));
+      const parent = node.parentNode;
+      if (!parent) return;
+      parent.insertBefore(fragment, node);
+      parent.removeChild(node);
+    });
+  }
   function sanitizeHtml(html = "") {
     const template = document.createElement("template");
     template.innerHTML = html;
     Array.from(template.content.childNodes).forEach(sanitizeNode);
+    upgradeClozeSyntax(template.content);
     return template.innerHTML;
   }
   function normalizeInput(value = "") {
@@ -4620,6 +4680,15 @@ var Sevenn = (() => {
     const decoded = decodeHtmlEntities(str);
     return sanitizeHtml(escapeHtml2(decoded).replace(/\r?\n/g, "<br>"));
   }
+  var FONT_SIZE_VALUES = [10, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 40, 48];
+  var FONT_OPTIONS = [
+    { value: "", label: "Default" },
+    { value: '"Inter", "Segoe UI", sans-serif', label: "Modern Sans" },
+    { value: '"Helvetica Neue", Arial, sans-serif', label: "Classic Sans" },
+    { value: '"Times New Roman", Times, serif', label: "Serif" },
+    { value: '"Source Code Pro", Menlo, monospace', label: "Monospace" },
+    { value: '"Comic Neue", "Comic Sans MS", cursive', label: "Handwriting" }
+  ];
   function isEmptyHtml(html = "") {
     if (!html) return true;
     const template = document.createElement("template");
@@ -4982,9 +5051,11 @@ var Sevenn = (() => {
       };
     }
     const commandButtons = [];
-    let sizeInput = null;
+    let sizeSelect = null;
+    let fontSelect = null;
     let fontNameLabel = null;
     let fontSizeLabel = null;
+    let clozeButton = null;
     function focusEditor() {
       editable.focus({ preventScroll: false });
     }
@@ -5161,6 +5232,17 @@ var Sevenn = (() => {
       });
       const style = inEditor ? computeSelectionStyle() : null;
       updateTypographyState(style);
+      if (clozeButton) {
+        const saved = getSavedRange({ requireSelection: false });
+        const startNode = saved?.startContainer || null;
+        const endNode = saved?.endContainer || null;
+        const startCloze = startNode ? findClozeAncestor(startNode) : null;
+        const endCloze = endNode ? findClozeAncestor(endNode) : null;
+        const active = Boolean(startCloze && startCloze === endCloze);
+        clozeButton.classList.toggle("is-active", active);
+        clozeButton.dataset.active = active ? "true" : "false";
+        clozeButton.setAttribute("aria-pressed", active ? "true" : "false");
+      }
     }
     function styleForNode(node) {
       let current = node;
@@ -5188,20 +5270,89 @@ var Sevenn = (() => {
       if (endStyle) return endStyle;
       return styleForNode(range.commonAncestorContainer);
     }
+    function findClozeAncestor(node) {
+      let current = node;
+      while (current && current !== editable) {
+        if (current instanceof HTMLElement && current.getAttribute?.(CLOZE_ATTR) === CLOZE_VALUE) {
+          return current;
+        }
+        current = current.parentNode;
+      }
+      return null;
+    }
+    function unwrapClozeElement(element) {
+      const parent = element.parentNode;
+      if (!parent) return;
+      const selection = window.getSelection();
+      const range = document.createRange();
+      let firstChild = null;
+      let lastChild = null;
+      while (element.firstChild) {
+        const child = element.firstChild;
+        parent.insertBefore(child, element);
+        if (!firstChild) firstChild = child;
+        lastChild = child;
+      }
+      const nextSibling = element.nextSibling;
+      parent.removeChild(element);
+      if (firstChild && lastChild) {
+        range.setStartBefore(firstChild);
+        range.setEndAfter(lastChild);
+      } else {
+        const index = Array.prototype.indexOf.call(parent.childNodes, nextSibling);
+        range.setStart(parent, index >= 0 ? index : parent.childNodes.length);
+        range.collapse(true);
+      }
+      if (selection) {
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+    function toggleClozeFormatting() {
+      const range = getSavedRange({ requireSelection: false });
+      if (!range) return;
+      const startCloze = findClozeAncestor(range.startContainer);
+      const endCloze = findClozeAncestor(range.endContainer);
+      if (startCloze && startCloze === endCloze) {
+        runCommand(() => {
+          unwrapClozeElement(startCloze);
+        });
+        return;
+      }
+      if (range.collapsed) return;
+      runCommand(() => {
+        const selection = window.getSelection();
+        if (!selection?.rangeCount) return;
+        const activeRange = selection.getRangeAt(0);
+        const fragment = activeRange.extractContents();
+        const span = document.createElement("span");
+        span.setAttribute(CLOZE_ATTR, CLOZE_VALUE);
+        span.appendChild(fragment);
+        activeRange.insertNode(span);
+        selection.removeAllRanges();
+        const newRange = document.createRange();
+        newRange.selectNode(span);
+        selection.addRange(newRange);
+      }, { requireSelection: true });
+    }
     function formatFontFamily(value2 = "") {
       if (!value2) return "Default";
       const primary = value2.split(",")[0] || value2;
       return primary.replace(/^['"]+|['"]+$/g, "").trim() || "Default";
     }
     function updateTypographyState(style) {
-      if (!fontNameLabel || !fontSizeLabel || !sizeInput) return;
-      const editingSize = document.activeElement === sizeInput;
+      if (!fontNameLabel || !fontSizeLabel || !sizeSelect) return;
+      const editingSize = document.activeElement === sizeSelect;
+      const editingFont = document.activeElement === fontSelect;
       if (!style) {
         fontNameLabel.textContent = "Font: Default";
         fontSizeLabel.textContent = "Size: \u2014";
+        if (!editingFont && fontSelect) {
+          fontSelect.value = "";
+        }
         if (!editingSize) {
-          sizeInput.value = "";
-          sizeInput.placeholder = "Size (px)";
+          sizeSelect.value = "";
+          if (sizeSelect) delete sizeSelect.dataset.customValue;
         }
         return;
       }
@@ -5209,11 +5360,34 @@ var Sevenn = (() => {
       const sizeText = style.fontSize || "";
       fontNameLabel.textContent = `Font: ${family}`;
       fontSizeLabel.textContent = `Size: ${sizeText || "\u2014"}`;
+      if (!editingFont && fontSelect) {
+        const normalized2 = (style.fontFamily || "").trim().toLowerCase();
+        const match = FONT_OPTIONS.find((option) => option.value.trim().toLowerCase() === normalized2);
+        if (match) {
+          fontSelect.value = match.value;
+        } else if (normalized2) {
+          fontSelect.value = "custom";
+          fontSelect.dataset.customValue = style.fontFamily || "";
+        } else {
+          fontSelect.value = "";
+        }
+      }
       if (!editingSize) {
         const numeric = Number.parseFloat(sizeText);
-        sizeInput.value = Number.isFinite(numeric) ? String(Math.round(numeric)) : "";
+        if (Number.isFinite(numeric)) {
+          const rounded = Math.round(numeric);
+          const optionMatch = FONT_SIZE_VALUES.find((val) => val === rounded);
+          if (optionMatch) {
+            sizeSelect.value = String(optionMatch);
+          } else {
+            sizeSelect.value = "custom";
+            sizeSelect.dataset.customValue = String(rounded);
+          }
+        } else {
+          sizeSelect.value = "";
+          delete sizeSelect.dataset.customValue;
+        }
       }
-      sizeInput.placeholder = sizeText || "Size (px)";
     }
     function collectElementsInRange(range) {
       const elements = [];
@@ -5252,6 +5426,22 @@ var Sevenn = (() => {
         }
       });
     }
+    function removeFontFamilyFromRange(range) {
+      const elements = collectElementsInRange(range);
+      elements.forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+        if (node.style && node.style.fontFamily) {
+          node.style.removeProperty("font-family");
+          if (!node.style.length) node.removeAttribute("style");
+        }
+        if (node.tagName?.toLowerCase() === "font") {
+          const parent = node.parentNode;
+          if (!parent) return;
+          while (node.firstChild) parent.insertBefore(node.firstChild, node);
+          parent.removeChild(node);
+        }
+      });
+    }
     function applyFontSizeValue(value2) {
       runCommand(() => {
         const selection = window.getSelection();
@@ -5271,6 +5461,29 @@ var Sevenn = (() => {
           if (!parent) return;
           const span = document.createElement("span");
           span.style.fontSize = `${numeric}px`;
+          while (node.firstChild) span.appendChild(node.firstChild);
+          parent.replaceChild(span, node);
+        });
+      }, { requireSelection: true });
+    }
+    function applyFontFamilyValue(value2) {
+      runCommand(() => {
+        const selection = window.getSelection();
+        if (!selection?.rangeCount) return;
+        const range = selection.getRangeAt(0);
+        removeFontFamilyFromRange(range);
+        const trimmed = typeof value2 === "string" ? value2.trim() : "";
+        if (!trimmed) {
+          return;
+        }
+        document.execCommand("styleWithCSS", false, true);
+        document.execCommand("fontName", false, trimmed);
+        const fonts = editable.querySelectorAll("font");
+        fonts.forEach((node) => {
+          const parent = node.parentNode;
+          if (!parent) return;
+          const span = document.createElement("span");
+          span.style.fontFamily = trimmed;
           while (node.firstChild) span.appendChild(node.firstChild);
           parent.replaceChild(span, node);
         });
@@ -5394,39 +5607,94 @@ var Sevenn = (() => {
     fontSizeLabel.textContent = "Size: \u2014";
     fontInfo.appendChild(fontSizeLabel);
     typographyGroup.appendChild(fontInfo);
-    sizeInput = document.createElement("input");
-    sizeInput.type = "number";
-    sizeInput.className = "rich-editor-size rich-editor-size-input";
-    sizeInput.placeholder = "Size (px)";
-    sizeInput.min = "8";
-    sizeInput.max = "96";
-    sizeInput.step = "1";
-    sizeInput.setAttribute("aria-label", "Font size in pixels");
-    const commitFontSize = () => {
+    fontSelect = document.createElement("select");
+    fontSelect.className = "rich-editor-select rich-editor-font-select";
+    fontSelect.setAttribute("aria-label", "Font family");
+    FONT_OPTIONS.forEach((option) => {
+      const opt = document.createElement("option");
+      opt.value = option.value;
+      opt.textContent = option.label;
+      fontSelect.appendChild(opt);
+    });
+    const customFontOption = document.createElement("option");
+    customFontOption.value = "custom";
+    customFontOption.textContent = "Custom\u2026";
+    fontSelect.appendChild(customFontOption);
+    ["mousedown", "focus", "keydown"].forEach((evt) => {
+      fontSelect.addEventListener(evt, () => captureSelectionRange());
+    });
+    fontSelect.addEventListener("change", () => {
       if (!hasActiveSelection()) {
-        sizeInput.value = "";
+        updateInlineState();
         return;
       }
-      const raw = sizeInput.value.trim();
-      if (!raw) {
-        applyFontSizeValue(null);
-      } else {
-        applyFontSizeValue(raw);
+      let selected = fontSelect.value;
+      if (selected === "custom") {
+        const current = fontSelect.dataset.customValue || "";
+        const custom = prompt("Enter font family (CSS value)", current || "");
+        if (!custom) {
+          updateInlineState();
+          return;
+        }
+        fontSelect.dataset.customValue = custom;
+        selected = custom;
+      } else if (!selected) {
+        delete fontSelect.dataset.customValue;
       }
-    };
-    sizeInput.addEventListener("change", commitFontSize);
-    sizeInput.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        commitFontSize();
-        sizeInput.blur();
-      }
+      applyFontFamilyValue(selected);
+      focusEditor();
     });
-    typographyGroup.appendChild(sizeInput);
+    typographyGroup.appendChild(fontSelect);
+    sizeSelect = document.createElement("select");
+    sizeSelect.className = "rich-editor-select rich-editor-size";
+    sizeSelect.setAttribute("aria-label", "Font size");
+    const defaultSizeOption = document.createElement("option");
+    defaultSizeOption.value = "";
+    defaultSizeOption.textContent = "Size";
+    sizeSelect.appendChild(defaultSizeOption);
+    FONT_SIZE_VALUES.forEach((val) => {
+      const opt = document.createElement("option");
+      opt.value = String(val);
+      opt.textContent = `${val}px`;
+      sizeSelect.appendChild(opt);
+    });
+    const customSizeOption = document.createElement("option");
+    customSizeOption.value = "custom";
+    customSizeOption.textContent = "Custom\u2026";
+    sizeSelect.appendChild(customSizeOption);
+    ["mousedown", "focus", "keydown"].forEach((evt) => {
+      sizeSelect.addEventListener(evt, () => captureSelectionRange());
+    });
+    sizeSelect.addEventListener("change", () => {
+      if (!hasActiveSelection()) {
+        updateInlineState();
+        return;
+      }
+      let selected = sizeSelect.value;
+      if (selected === "custom") {
+        const current = sizeSelect.dataset.customValue || "";
+        const custom = prompt("Enter font size in pixels", current || "16");
+        const numeric = Number.parseFloat(custom || "");
+        if (!custom || !Number.isFinite(numeric) || numeric <= 0) {
+          updateInlineState();
+          return;
+        }
+        const rounded = Math.round(numeric);
+        sizeSelect.dataset.customValue = String(rounded);
+        selected = String(rounded);
+      } else if (!selected) {
+        delete sizeSelect.dataset.customValue;
+      }
+      applyFontSizeValue(selected || null);
+      focusEditor();
+    });
+    typographyGroup.appendChild(sizeSelect);
     const resetSizeBtn = createToolbarButton("\u21BA", "Reset font size", () => {
       if (!hasActiveSelection()) return;
-      sizeInput.value = "";
+      sizeSelect.value = "";
+      delete sizeSelect.dataset.customValue;
       applyFontSizeValue(null);
+      focusEditor();
     });
     typographyGroup.appendChild(resetSizeBtn);
     const mediaGroup = createGroup("rich-editor-media-group");
@@ -5468,8 +5736,14 @@ var Sevenn = (() => {
       mediaFileInput.click();
     });
     mediaGroup.appendChild(mediaBtn);
+    const clozeTool = createToolbarButton("\u29C9", "Toggle cloze (hide selected text until clicked)", () => {
+      toggleClozeFormatting();
+      focusEditor();
+    });
+    clozeButton = clozeTool;
     const clearBtn = createToolbarButton("\u232B", "Clear formatting", () => exec("removeFormat", null, { requireSelection: true, styleWithCss: false }));
     const utilityGroup = createGroup("rich-editor-utility-group");
+    utilityGroup.appendChild(clozeTool);
     utilityGroup.appendChild(clearBtn);
     let settingValue = false;
     editable.addEventListener("input", () => {
@@ -5519,6 +5793,98 @@ var Sevenn = (() => {
       }
     };
   }
+  var CLOZE_STATE_HIDDEN = "hidden";
+  var CLOZE_STATE_REVEALED = "revealed";
+  function setClozeState(node, state2) {
+    if (!(node instanceof HTMLElement)) return;
+    const next = state2 === CLOZE_STATE_REVEALED ? CLOZE_STATE_REVEALED : CLOZE_STATE_HIDDEN;
+    node.setAttribute("data-cloze-state", next);
+    if (next === CLOZE_STATE_REVEALED) {
+      node.classList.add("is-cloze-revealed");
+      node.classList.remove("is-cloze-hidden");
+    } else {
+      node.classList.add("is-cloze-hidden");
+      node.classList.remove("is-cloze-revealed");
+    }
+    if (node.classList.contains("cloze-text-interactive")) {
+      node.setAttribute("aria-pressed", next === CLOZE_STATE_REVEALED ? "true" : "false");
+    } else if (node.hasAttribute("aria-pressed")) {
+      node.removeAttribute("aria-pressed");
+    }
+  }
+  function toggleCloze(node) {
+    if (!(node instanceof HTMLElement)) return;
+    const current = node.getAttribute("data-cloze-state");
+    const next = current === CLOZE_STATE_REVEALED ? CLOZE_STATE_HIDDEN : CLOZE_STATE_REVEALED;
+    setClozeState(node, next);
+  }
+  function handleClozeClick(event) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const cloze = target.closest(CLOZE_SELECTOR);
+    if (!cloze) return;
+    event.stopPropagation();
+    toggleCloze(cloze);
+  }
+  function handleClozeKey(event) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const cloze = target.closest(CLOZE_SELECTOR);
+    if (!cloze) return;
+    event.preventDefault();
+    event.stopPropagation();
+    toggleCloze(cloze);
+  }
+  function detachClozeHandlers(container) {
+    const handlers = container.__clozeHandlers;
+    if (!handlers) return;
+    container.removeEventListener("click", handlers.click);
+    container.removeEventListener("keydown", handlers.key);
+    delete container.__clozeHandlers;
+  }
+  function enhanceClozeContent(target, { clozeMode = "static" } = {}) {
+    const nodes = target.querySelectorAll(CLOZE_SELECTOR);
+    if (!nodes.length) {
+      target.classList.remove("rich-content-with-cloze");
+      detachClozeHandlers(target);
+      return;
+    }
+    target.classList.add("rich-content-with-cloze");
+    const interactive = clozeMode === "interactive";
+    nodes.forEach((node) => {
+      node.classList.add("cloze-text");
+      if (interactive) {
+        node.classList.add("cloze-text-interactive");
+        if (!node.hasAttribute("tabindex")) node.setAttribute("tabindex", "0");
+        node.setAttribute("role", "button");
+        const current = node.getAttribute("data-cloze-state");
+        if (current !== CLOZE_STATE_REVEALED && current !== CLOZE_STATE_HIDDEN) {
+          setClozeState(node, CLOZE_STATE_HIDDEN);
+        } else {
+          setClozeState(node, current);
+        }
+      } else {
+        node.classList.remove("cloze-text-interactive");
+        if (node.getAttribute("tabindex") === "0") node.removeAttribute("tabindex");
+        if (node.getAttribute("role") === "button") node.removeAttribute("role");
+        setClozeState(node, CLOZE_STATE_REVEALED);
+      }
+    });
+    if (interactive) {
+      if (!target.__clozeHandlers) {
+        const handlers = {
+          click: handleClozeClick,
+          key: handleClozeKey
+        };
+        target.addEventListener("click", handlers.click);
+        target.addEventListener("keydown", handlers.key);
+        target.__clozeHandlers = handlers;
+      }
+    } else {
+      detachClozeHandlers(target);
+    }
+  }
   function normalizedFromCache(value) {
     if (!value) return "";
     const key = typeof value === "string" ? value : null;
@@ -5538,15 +5904,17 @@ var Sevenn = (() => {
     }
     return normalized2;
   }
-  function renderRichText(target, value) {
+  function renderRichText(target, value, options = {}) {
     const normalized2 = normalizedFromCache(value);
     if (!normalized2) {
       target.textContent = "";
       target.classList.remove("rich-content");
+      detachClozeHandlers(target);
       return;
     }
     target.classList.add("rich-content");
     target.innerHTML = normalized2;
+    enhanceClozeContent(target, options);
   }
   function hasRichTextContent(value) {
     return !isEmptyHtml(normalizeInput(value));
@@ -7177,6 +7545,14 @@ var Sevenn = (() => {
     }
     return item?.name || item?.concept || "Untitled Card";
   }
+  function compareByCreation(a, b) {
+    const av = typeof a?.createdAt === "number" ? a.createdAt : 0;
+    const bv = typeof b?.createdAt === "number" ? b.createdAt : 0;
+    if (av !== bv) return av - bv;
+    const at = titleFromItem(a);
+    const bt = titleFromItem(b);
+    return at.localeCompare(bt);
+  }
   function escapeHtml5(str = "") {
     return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
@@ -7241,10 +7617,11 @@ var Sevenn = (() => {
   async function renderCards(container, items, onChange) {
     container.innerHTML = "";
     container.classList.add("cards-tab");
+    const sortedItems = Array.isArray(items) ? items.slice().sort(compareByCreation) : [];
     const { blocks: blockDefs } = await loadBlockCatalog();
     const blockLookup = new Map(blockDefs.map((def) => [def.blockId, def]));
     const blockOrder = new Map(blockDefs.map((def, idx) => [def.blockId, idx]));
-    const itemLookup = new Map(items.map((item) => [item.id, item]));
+    const itemLookup = new Map(sortedItems.map((item) => [item.id, item]));
     const deckContextLookup = /* @__PURE__ */ new Map();
     const cardsState = state.cards || {};
     const stateInitialized = cardsState?.initialized === true;
@@ -7326,7 +7703,7 @@ var Sevenn = (() => {
       }
       return weekBucket.lectures.get(lectureKey2);
     }
-    items.forEach((item) => {
+    sortedItems.forEach((item) => {
       const lectureRefs = Array.isArray(item.lectures) ? item.lectures : [];
       if (lectureRefs.length) {
         lectureRefs.forEach((ref) => {
@@ -7361,7 +7738,7 @@ var Sevenn = (() => {
     const blockSections = Array.from(blockBuckets.values()).map((block) => {
       const weeks = Array.from(block.weeks.values()).map((week) => {
         const lectures = Array.from(week.lectures.values()).map((lec) => {
-          const cards = lec.cards.slice().sort((a, b) => titleFromItem(a).localeCompare(titleFromItem(b)));
+          const cards = lec.cards.slice().sort(compareByCreation);
           return {
             ...lec,
             cards,
@@ -7874,47 +8251,58 @@ var Sevenn = (() => {
       if (meta.children.length) slide.appendChild(meta);
       const sections = document.createElement("div");
       sections.className = "deck-slide-sections";
+      const buildContentSection = ({ labelText, iconText = "", bodyHtml = "", extra = false }) => {
+        const section = document.createElement("section");
+        section.className = "deck-section";
+        if (extra) section.classList.add("deck-section-extra");
+        section.style.setProperty("--section-accent", accent);
+        section.classList.add("is-collapsed");
+        const headerBtn = document.createElement("button");
+        headerBtn.type = "button";
+        headerBtn.className = "deck-section-header";
+        headerBtn.setAttribute("aria-expanded", "false");
+        const titleWrap = document.createElement("div");
+        titleWrap.className = "deck-section-title";
+        if (iconText) {
+          const iconEl = document.createElement("span");
+          iconEl.className = "deck-section-icon";
+          iconEl.textContent = iconText;
+          titleWrap.appendChild(iconEl);
+        }
+        const labelNode = document.createElement("span");
+        labelNode.textContent = labelText;
+        titleWrap.appendChild(labelNode);
+        headerBtn.appendChild(titleWrap);
+        headerBtn.appendChild(createCollapseIcon());
+        const bodyWrap = document.createElement("div");
+        bodyWrap.className = "deck-section-body";
+        const content = document.createElement("div");
+        content.className = "deck-section-content";
+        renderRichText(content, bodyHtml, { clozeMode: "interactive" });
+        bodyWrap.appendChild(content);
+        section.appendChild(headerBtn);
+        section.appendChild(bodyWrap);
+        headerBtn.addEventListener("click", () => {
+          const collapsed = section.classList.toggle("is-collapsed");
+          headerBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        });
+        return section;
+      };
       const defs = KIND_FIELDS[item.kind] || [];
       defs.forEach(([field, label, icon]) => {
         const value = item[field];
         if (!value) return;
-        const section = document.createElement("section");
-        section.className = "deck-section";
-        section.style.setProperty("--section-accent", accent);
-        const sectionTitle = document.createElement("h4");
-        sectionTitle.className = "deck-section-title";
-        if (icon) {
-          const iconEl = document.createElement("span");
-          iconEl.className = "deck-section-icon";
-          iconEl.textContent = icon;
-          sectionTitle.appendChild(iconEl);
-        }
-        const labelNode = document.createElement("span");
-        labelNode.textContent = label;
-        sectionTitle.appendChild(labelNode);
-        section.appendChild(sectionTitle);
-        const content = document.createElement("div");
-        content.className = "deck-section-content";
-        renderRichText(content, value);
-        section.appendChild(content);
-        sections.appendChild(section);
+        sections.appendChild(buildContentSection({ labelText: label, iconText: icon, bodyHtml: value }));
       });
       ensureExtras2(item).forEach((extra) => {
         if (!extra?.body) return;
-        const section = document.createElement("section");
-        section.className = "deck-section deck-section-extra";
-        section.style.setProperty("--section-accent", accent);
-        const sectionTitle = document.createElement("h4");
-        sectionTitle.className = "deck-section-title";
-        const labelNode = document.createElement("span");
-        labelNode.textContent = extra.title || "Additional Notes";
-        sectionTitle.appendChild(labelNode);
-        section.appendChild(sectionTitle);
-        const content = document.createElement("div");
-        content.className = "deck-section-content";
-        renderRichText(content, extra.body);
-        section.appendChild(content);
-        sections.appendChild(section);
+        sections.appendChild(
+          buildContentSection({
+            labelText: extra.title || "Additional Notes",
+            bodyHtml: extra.body,
+            extra: true
+          })
+        );
       });
       if (!sections.children.length) {
         const empty = document.createElement("p");
@@ -12666,7 +13054,7 @@ var Sevenn = (() => {
       head.textContent = label;
       const body = document.createElement("div");
       body.className = "flash-body";
-      renderRichText(body, item[key] || "");
+      renderRichText(body, item[key] || "", { clozeMode: "interactive" });
       const ratingRow = document.createElement("div");
       ratingRow.className = "flash-rating";
       const ratingButtons = document.createElement("div");
@@ -12782,7 +13170,10 @@ var Sevenn = (() => {
         setToggleState(sec, next2, "revealed");
       };
       sec.addEventListener("click", (event) => {
-        if (event.target instanceof HTMLElement && event.target.closest(".flash-rating")) return;
+        if (event.target instanceof HTMLElement) {
+          if (event.target.closest(".flash-rating")) return;
+          if (event.target.closest("[data-cloze]")) return;
+        }
         toggleReveal();
       });
       sec.addEventListener("keydown", (e) => {

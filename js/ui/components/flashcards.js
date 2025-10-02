@@ -209,7 +209,7 @@ export function renderFlashcards(root, redraw) {
 
     const body = document.createElement('div');
     body.className = 'flash-body';
-    renderRichText(body, item[key] || '');
+    renderRichText(body, item[key] || '', { clozeMode: 'interactive' });
 
     const ratingRow = document.createElement('div');
     ratingRow.className = 'flash-rating';
@@ -342,7 +342,10 @@ export function renderFlashcards(root, redraw) {
       setToggleState(sec, next, 'revealed');
     };
     sec.addEventListener('click', (event) => {
-      if (event.target instanceof HTMLElement && event.target.closest('.flash-rating')) return;
+      if (event.target instanceof HTMLElement) {
+        if (event.target.closest('.flash-rating')) return;
+        if (event.target.closest('[data-cloze]')) return;
+      }
       toggleReveal();
     });
     sec.addEventListener('keydown', (e) => {
