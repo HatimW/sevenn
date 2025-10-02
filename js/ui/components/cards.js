@@ -562,10 +562,10 @@ export async function renderCards(container, items, onChange) {
 
     function acquireSlide(item) {
       if (!slideCache.has(item)) {
-        slideCache.set(item, createDeckSlide(item, baseContext, { allowEdit: true }));
+        slideCache.set(item, () => createDeckSlide(item, baseContext, { allowEdit: true }));
       }
-      const template = slideCache.get(item);
-      const slide = template.cloneNode(true);
+      const factory = slideCache.get(item);
+      const slide = factory();
       slide.classList.add('deck-slide-full');
       prepareSlideActions(slide, item);
       return slide;

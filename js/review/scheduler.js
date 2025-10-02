@@ -1,5 +1,5 @@
 import { getSettings } from '../storage/storage.js';
-import { sectionDefsForKind, allSectionDefs } from '../ui/components/sections.js';
+import { sectionsForItem, hasSectionContent, getSectionContent } from '../ui/components/section-utils.js';
 import { DEFAULT_REVIEW_STEPS, REVIEW_RATINGS, RETIRE_RATING } from './constants.js';
 import { normalizeReviewSteps } from './settings.js';
 import { SR_VERSION, defaultSectionState, normalizeSectionRecord, normalizeSrRecord } from './sr-data.js';
@@ -40,7 +40,7 @@ function computeLectureScope(item) {
 
 function computeSectionDigest(item, key) {
   if (!item || !key) return null;
-  const raw = item[key];
+  const raw = getSectionContent(item, key);
   return digestContent(raw);
 }
 
@@ -157,34 +157,23 @@ export function rateSection(item, key, rating, durations, now = Date.now()) {
 }
 
 export function hasContentForSection(item, key) {
-  if (!item || !key) return false;
-  const defs = sectionDefsForKind(item.kind);
-  if (!defs.find(def => def.key === key)) return false;
-  const raw = item[key];
-  if (raw === null || raw === undefined) return false;
-  const text = String(raw)
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .trim();
-  return text.length > 0;
+  return hasSectionContent(item, key);
 }
 
 function collectReviewEntries(items, { now = Date.now(), predicate } = {}) {
   const results = [];
   if (!Array.isArray(items) || !items.length) return results;
-  const defsMap = allSectionDefs();
   for (const item of items) {
-    const defs = defsMap[item?.kind] || [];
-    for (const def of defs) {
-      if (!hasContentForSection(item, def.key)) continue;
-      const snapshot = getSectionStateSnapshot(item, def.key);
+    const sections = sectionsForItem(item);
+    for (const section of sections) {
+      const snapshot = getSectionStateSnapshot(item, section.key);
       if (!snapshot || snapshot.retired) continue;
-      if (typeof predicate === 'function' && !predicate(snapshot, now, item, def)) continue;
+      if (typeof predicate === 'function' && !predicate(snapshot, now, item, section)) continue;
       results.push({
         item,
         itemId: item.id,
-        sectionKey: def.key,
-        sectionLabel: def.label,
+        sectionKey: section.key,
+        sectionLabel: section.label,
         due: snapshot.due
       });
     }

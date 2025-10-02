@@ -190,7 +190,7 @@ export function renderFlashcards(root, redraw) {
     card.appendChild(empty);
   }
 
-  sectionBlocks.forEach(({ key, label }) => {
+  sectionBlocks.forEach(({ key, label, content, extra }) => {
     const ratingId = ratingKey(item, key);
     const previousRating = active.ratings[ratingId] || null;
     const snapshot = getSectionStateSnapshot(item, key);
@@ -200,6 +200,7 @@ export function renderFlashcards(root, redraw) {
     sectionRequirements.set(key, requiresRating);
     const sec = document.createElement('div');
     sec.className = 'flash-section';
+    if (extra) sec.classList.add('flash-section-extra');
     sec.setAttribute('role', 'button');
     sec.tabIndex = 0;
 
@@ -209,7 +210,7 @@ export function renderFlashcards(root, redraw) {
 
     const body = document.createElement('div');
     body.className = 'flash-body';
-    renderRichText(body, item[key] || '', { clozeMode: 'interactive' });
+    renderRichText(body, content || '', { clozeMode: 'interactive' });
 
     const ratingRow = document.createElement('div');
     ratingRow.className = 'flash-rating';
