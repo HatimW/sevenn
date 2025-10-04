@@ -2221,13 +2221,11 @@ export async function renderMap(root) {
         }
         const targets = dragIds.map(id => {
           const source = mapState.positions[id] || positions[id] || current;
-          if (id === it.id) {
-            return { id, offset: { x: 0, y: 0 } };
-          }
-          return {
-            id,
-            offset: { x: pointer.x - source.x, y: pointer.y - source.y }
+          const offset = {
+            x: pointer.x - source.x,
+            y: pointer.y - source.y
           };
+          return { id, offset };
         });
         const primaryTarget = targets.find(target => target.id === it.id) || targets[0];
         mapState.nodeDrag = {
@@ -2984,7 +2982,8 @@ function updateSelectionBox() {
     const right = pos.x + radius;
     const top = pos.y - radius;
     const bottom = pos.y + radius;
-    if (left >= minX && right <= maxX && top >= minY && bottom <= maxY) {
+    const intersects = right >= minX && left <= maxX && bottom >= minY && top <= maxY;
+    if (intersects) {
       preview.push(id);
     }
   });
