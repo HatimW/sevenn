@@ -2192,10 +2192,7 @@ export async function renderMap(root) {
         let allowDrag = true;
 
         if (e.shiftKey) {
-          if (selectionSet.has(it.id)) {
-            selectionSet.delete(it.id);
-            allowDrag = false;
-          } else {
+          if (!selectionSet.has(it.id)) {
             selectionSet.add(it.id);
           }
         } else if (!selectionSet.has(it.id)) {
@@ -2220,6 +2217,10 @@ export async function renderMap(root) {
           dragIds.push(it.id);
         }
         const primarySource = mapState.positions[it.id] || positions[it.id] || current;
+        const pointerOffset = {
+          x: (primarySource?.x ?? 0) - pointer.x,
+          y: (primarySource?.y ?? 0) - pointer.y
+        };
         const targets = dragIds.map(id => {
           const source = mapState.positions[id] || positions[id] || current;
           return {
@@ -2235,7 +2236,8 @@ export async function renderMap(root) {
           targets,
           pointerId: e.pointerId,
           captureTarget: e.currentTarget || circle,
-          client: { x: e.clientX, y: e.clientY }
+          client: { x: e.clientX, y: e.clientY },
+          pointerOffset
         };
         if (mapState.nodeDrag.captureTarget?.setPointerCapture) {
           try {
@@ -2274,6 +2276,15 @@ export async function renderMap(root) {
       e.stopPropagation();
       if (mapState.tool === TOOL.NAVIGATE && e.shiftKey) {
         mapState.suppressNextClick = false;
+        const set = new Set(mapState.selectionIds);
+        if (set.has(it.id)) {
+          set.delete(it.id);
+        } else {
+          set.add(it.id);
+        }
+        mapState.selectionIds = Array.from(set);
+        mapState.previewSelection = null;
+        updateSelectionHighlight();
         mapState.nodeWasDragged = false;
         return;
       }
@@ -2328,6 +2339,15 @@ export async function renderMap(root) {
       e.stopPropagation();
       if (mapState.tool === TOOL.NAVIGATE && e.shiftKey) {
         mapState.suppressNextClick = false;
+        const set = new Set(mapState.selectionIds);
+        if (set.has(it.id)) {
+          set.delete(it.id);
+        } else {
+          set.add(it.id);
+        }
+        mapState.selectionIds = Array.from(set);
+        mapState.previewSelection = null;
+        updateSelectionHighlight();
         mapState.nodeWasDragged = false;
         return;
       }
@@ -2641,14 +2661,17 @@ function handlePointerMove(e) {
     mapState.nodeDrag.client = { x: e.clientX, y: e.clientY };
     updateAutoPanFromPointer(e.clientX, e.clientY, { allowDuringDrag: true });
     const pointer = clientToMap(e.clientX, e.clientY);
+    const offset = mapState.nodeDrag.pointerOffset || { x: 0, y: 0 };
+    const baseX = pointer.x + offset.x;
+    const baseY = pointer.y + offset.y;
     targets.forEach(target => {
       if (!target) return;
       const { id, delta = { x: 0, y: 0 } } = target;
       if (!id) return;
       const entry = mapState.elements.get(id);
       if (!entry || !entry.circle) return;
-      const nx = pointer.x + delta.x;
-      const ny = pointer.y + delta.y;
+      const nx = baseX + delta.x;
+      const ny = baseY + delta.y;
       scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
     });
     mapState.nodeWasDragged = true;
@@ -2970,10 +2993,18 @@ function updateSelectionBox() {
   const minY = Math.min(startMap.y, currentMap.y);
   const maxY = Math.max(startMap.y, currentMap.y);
   const preview = [];
+  const scales = getCurrentScales();
+  const nodeScale = scales.nodeScale || 1;
   Object.entries(mapState.positions).forEach(([id, pos]) => {
     if (!pos) return;
-    const inside = pos.x >= minX && pos.x <= maxX && pos.y >= minY && pos.y <= maxY;
-    if (inside) {
+    const baseRadius = getNodeBaseRadius(id);
+    const radius = baseRadius * nodeScale;
+    const nodeMinX = pos.x - radius;
+    const nodeMaxX = pos.x + radius;
+    const nodeMinY = pos.y - radius;
+    const nodeMaxY = pos.y + radius;
+    const intersects = nodeMaxX >= minX && nodeMinX <= maxX && nodeMaxY >= minY && nodeMinY <= maxY;
+    if (intersects) {
       preview.push(id);
     }
   });
@@ -3120,12 +3151,15 @@ function applyAutoPan(vector) {
   }
   if (mapState.nodeDrag?.client) {
     const pointer = clientToMap(mapState.nodeDrag.client.x, mapState.nodeDrag.client.y);
+    const offset = mapState.nodeDrag.pointerOffset || { x: 0, y: 0 };
+    const baseX = pointer.x + offset.x;
+    const baseY = pointer.y + offset.y;
     const targets = getNodeDragTargets();
     targets.forEach(target => {
       if (!target) return;
       const { id, delta = { x: 0, y: 0 } } = target;
       if (!id) return;
-      scheduleNodePositionUpdate(id, { x: pointer.x + delta.x, y: pointer.y + delta.y }, { immediate: true });
+      scheduleNodePositionUpdate(id, { x: baseX + delta.x, y: baseY + delta.y }, { immediate: true });
     });
     if (targets.length) {
       mapState.nodeWasDragged = true;
