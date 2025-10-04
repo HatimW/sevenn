@@ -164,6 +164,7 @@ const mapState = {
   edgeDrag: null,
   selectionRect: null,
   nodeWasDragged: false,
+  pendingShiftToggle: null,
   viewBox: null,
   svg: null,
   g: null,
@@ -2189,18 +2190,19 @@ export async function renderMap(root) {
       const { x, y } = pointer;
       if (isNavigateTool) {
         const selectionSet = new Set(mapState.selectionIds);
-        let allowDrag = true;
-
         if (e.shiftKey) {
           if (selectionSet.has(it.id)) {
-            selectionSet.delete(it.id);
-            allowDrag = false;
+            mapState.pendingShiftToggle = it.id;
           } else {
             selectionSet.add(it.id);
+            mapState.pendingShiftToggle = null;
           }
         } else if (!selectionSet.has(it.id)) {
           selectionSet.clear();
           selectionSet.add(it.id);
+          mapState.pendingShiftToggle = null;
+        } else {
+          mapState.pendingShiftToggle = null;
         }
 
         const uniqueSelection = Array.from(selectionSet);
@@ -2208,7 +2210,7 @@ export async function renderMap(root) {
         mapState.previewSelection = null;
         updateSelectionHighlight();
 
-        if (!allowDrag || !uniqueSelection.length) {
+        if (!uniqueSelection.length) {
           mapState.nodeDrag = null;
           mapState.nodeWasDragged = false;
           refreshCursor({ keepOverride: true });
@@ -2235,7 +2237,11 @@ export async function renderMap(root) {
           targets,
           pointerId: e.pointerId,
           captureTarget: e.currentTarget || circle,
-          client: { x: e.clientX, y: e.clientY }
+          client: { x: e.clientX, y: e.clientY },
+          offset: {
+            x: pointer.x - primarySource.x,
+            y: pointer.y - primarySource.y
+          }
         };
         if (mapState.nodeDrag.captureTarget?.setPointerCapture) {
           try {
@@ -2257,6 +2263,7 @@ export async function renderMap(root) {
           captureTarget: e.currentTarget || circle,
           client: { x: e.clientX, y: e.clientY }
         };
+        mapState.pendingShiftToggle = null;
         if (mapState.areaDrag.captureTarget?.setPointerCapture) {
           try {
             mapState.areaDrag.captureTarget.setPointerCapture(e.pointerId);
@@ -2273,6 +2280,14 @@ export async function renderMap(root) {
     circle.addEventListener('click', async e => {
       e.stopPropagation();
       if (mapState.tool === TOOL.NAVIGATE && e.shiftKey) {
+        if (!mapState.nodeWasDragged && mapState.pendingShiftToggle === it.id) {
+          const selectionSet = new Set(mapState.selectionIds);
+          selectionSet.delete(it.id);
+          mapState.selectionIds = Array.from(selectionSet);
+          mapState.previewSelection = null;
+          updateSelectionHighlight();
+        }
+        mapState.pendingShiftToggle = null;
         mapState.suppressNextClick = false;
         mapState.nodeWasDragged = false;
         return;
@@ -2280,6 +2295,7 @@ export async function renderMap(root) {
       if (mapState.suppressNextClick) {
         mapState.suppressNextClick = false;
         mapState.nodeWasDragged = false;
+        mapState.pendingShiftToggle = null;
         return;
       }
       if (mapState.tool === TOOL.NAVIGATE) {
@@ -2347,6 +2363,7 @@ export async function renderMap(root) {
         await handleAddLinkClick(it.id);
       }
       mapState.nodeWasDragged = false;
+      mapState.pendingShiftToggle = null;
     });
     nodeLayerRef.appendChild(text);
 
@@ -2641,17 +2658,21 @@ function handlePointerMove(e) {
     mapState.nodeDrag.client = { x: e.clientX, y: e.clientY };
     updateAutoPanFromPointer(e.clientX, e.clientY, { allowDuringDrag: true });
     const pointer = clientToMap(e.clientX, e.clientY);
+    const offset = mapState.nodeDrag.offset || { x: 0, y: 0 };
+    const baseX = pointer.x - offset.x;
+    const baseY = pointer.y - offset.y;
     targets.forEach(target => {
       if (!target) return;
       const { id, delta = { x: 0, y: 0 } } = target;
       if (!id) return;
       const entry = mapState.elements.get(id);
       if (!entry || !entry.circle) return;
-      const nx = pointer.x + delta.x;
-      const ny = pointer.y + delta.y;
+      const nx = baseX + delta.x;
+      const ny = baseY + delta.y;
       scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
     });
     mapState.nodeWasDragged = true;
+    mapState.pendingShiftToggle = null;
     return;
   }
 
@@ -2668,6 +2689,7 @@ function handlePointerMove(e) {
       scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
     });
     mapState.nodeWasDragged = true;
+    mapState.pendingShiftToggle = null;
     return;
   }
 
@@ -2972,8 +2994,13 @@ function updateSelectionBox() {
   const preview = [];
   Object.entries(mapState.positions).forEach(([id, pos]) => {
     if (!pos) return;
-    const inside = pos.x >= minX && pos.x <= maxX && pos.y >= minY && pos.y <= maxY;
-    if (inside) {
+    const radius = getNodeRadius(id);
+    const nodeLeft = pos.x - radius;
+    const nodeRight = pos.x + radius;
+    const nodeTop = pos.y - radius;
+    const nodeBottom = pos.y + radius;
+    const intersects = nodeRight >= minX && nodeLeft <= maxX && nodeBottom >= minY && nodeTop <= maxY;
+    if (intersects) {
       preview.push(id);
     }
   });
