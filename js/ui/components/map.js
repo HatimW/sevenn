@@ -53,7 +53,7 @@ const CURSOR_STYLE = {
 };
 
 const PAN_ACCELERATION = 1.8;
-const ZOOM_INTENSITY = 0.0032;
+const ZOOM_INTENSITY = 0.0041;
 
 const ICONS = {
   sliders:
@@ -157,6 +157,7 @@ const mapState = {
   menuPinned: false,
   listenersAttached: false,
   draggingView: false,
+  viewWasDragged: false,
   nodeDrag: null,
   areaDrag: null,
   menuDrag: null,
@@ -2188,29 +2189,41 @@ export async function renderMap(root) {
       const { x, y } = pointer;
       if (isNavigateTool) {
         const selectionSet = new Set(mapState.selectionIds);
+        let allowDrag = true;
+
         if (e.shiftKey) {
-          selectionSet.add(it.id);
-        } else if (!selectionSet.has(it.id)) {
+          if (selectionSet.has(it.id)) {
+            selectionSet.delete(it.id);
+            allowDrag = false;
+          } else {
+            selectionSet.add(it.id);
+          }
+        } else if (!selectionSet.has(it.id) || selectionSet.size > 1) {
           selectionSet.clear();
           selectionSet.add(it.id);
         }
-        let nextSelection = Array.from(selectionSet);
-        if (!nextSelection.length) {
-          nextSelection = [it.id];
-        }
-        const uniqueSelection = Array.from(new Set(nextSelection));
-        if (!uniqueSelection.includes(it.id)) {
-          uniqueSelection.push(it.id);
-        }
+
+        const uniqueSelection = Array.from(selectionSet);
         mapState.selectionIds = uniqueSelection;
         mapState.previewSelection = null;
         updateSelectionHighlight();
+
+        if (!allowDrag || !uniqueSelection.length) {
+          mapState.nodeDrag = null;
+          mapState.nodeWasDragged = false;
+          refreshCursor({ keepOverride: true });
+          return;
+        }
+
         const dragIds = uniqueSelection.filter(id => mapState.positions[id] || positions[id]);
         if (!dragIds.includes(it.id)) {
           dragIds.push(it.id);
         }
         const targets = dragIds.map(id => {
           const source = mapState.positions[id] || positions[id] || current;
+          if (id === it.id) {
+            return { id, offset: { x: 0, y: 0 } };
+          }
           return {
             id,
             offset: { x: pointer.x - source.x, y: pointer.y - source.y }
@@ -2219,7 +2232,7 @@ export async function renderMap(root) {
         const primaryTarget = targets.find(target => target.id === it.id) || targets[0];
         mapState.nodeDrag = {
           id: it.id,
-          offset: primaryTarget?.offset || { x: pointer.x - current.x, y: pointer.y - current.y },
+          offset: primaryTarget?.offset || { x: 0, y: 0 },
           targets,
           pointerId: e.pointerId,
           captureTarget: e.currentTarget || circle,
@@ -2461,6 +2474,7 @@ function beginViewDrag(e) {
   getSvgRect({ force: true });
   const startMap = clientToMap(e.clientX, e.clientY);
   mapState.draggingView = true;
+  mapState.viewWasDragged = false;
   mapState.viewPointerId = e.pointerId;
   mapState.lastPointer = {
     x: e.clientX,
@@ -2664,6 +2678,10 @@ function handlePointerMove(e) {
     if (typeof e.preventDefault === 'function') {
       e.preventDefault();
     }
+    const movedDistance = Math.hypot(e.clientX - start.clientX, e.clientY - start.clientY);
+    if (!mapState.viewWasDragged && movedDistance > 1.5) {
+      mapState.viewWasDragged = true;
+    }
     const scaleX = mapState.viewBox.w / rect.width;
     const scaleY = mapState.viewBox.h / rect.height;
     const deltaX = (e.clientX - start.clientX) * PAN_ACCELERATION;
@@ -2785,9 +2803,11 @@ async function handlePointerUp(e) {
   }
 
   if (mapState.draggingView && mapState.viewPointerId === e.pointerId) {
+    const wasDragged = mapState.viewWasDragged;
     mapState.draggingView = false;
     mapState.viewPointerId = null;
     mapState.viewDragStart = null;
+    mapState.viewWasDragged = false;
     if (mapState.svg?.releasePointerCapture) {
       try {
         mapState.svg.releasePointerCapture(e.pointerId);
@@ -2795,6 +2815,11 @@ async function handlePointerUp(e) {
     }
     cursorNeedsRefresh = true;
     setAreaInteracting(false);
+    if (!wasDragged && (mapState.selectionIds.length || mapState.previewSelection)) {
+      mapState.selectionIds = [];
+      mapState.previewSelection = null;
+      updateSelectionHighlight();
+    }
   }
 
   if (mapState.selectionRect && mapState.selectionRect.pointerId === e.pointerId) {
@@ -2959,7 +2984,7 @@ function updateSelectionBox() {
     const right = pos.x + radius;
     const top = pos.y - radius;
     const bottom = pos.y + radius;
-    if (right >= minX && left <= maxX && bottom >= minY && top <= maxY) {
+    if (left >= minX && right <= maxX && top >= minY && bottom <= maxY) {
       preview.push(id);
     }
   });

@@ -17988,7 +17988,7 @@ var Sevenn = (() => {
     )
   };
   var PAN_ACCELERATION = 1.8;
-  var ZOOM_INTENSITY = 32e-4;
+  var ZOOM_INTENSITY = 41e-4;
   var ICONS = {
     sliders: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 7h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M6 12h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M6 17h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><circle cx="16" cy="7" r="2.5" stroke="currentColor" stroke-width="1.6" /><circle cx="11" cy="12" r="2.5" stroke="currentColor" stroke-width="1.6" /><circle cx="19" cy="17" r="2.5" stroke="currentColor" stroke-width="1.6" /></svg>',
     close: '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>',
@@ -18050,6 +18050,7 @@ var Sevenn = (() => {
     menuPinned: false,
     listenersAttached: false,
     draggingView: false,
+    viewWasDragged: false,
     nodeDrag: null,
     areaDrag: null,
     menuDrag: null,
@@ -19886,29 +19887,37 @@ var Sevenn = (() => {
         const { x, y } = pointer;
         if (isNavigateTool) {
           const selectionSet = new Set(mapState.selectionIds);
+          let allowDrag = true;
           if (e.shiftKey) {
-            selectionSet.add(it.id);
-          } else if (!selectionSet.has(it.id)) {
+            if (selectionSet.has(it.id)) {
+              selectionSet.delete(it.id);
+              allowDrag = false;
+            } else {
+              selectionSet.add(it.id);
+            }
+          } else if (!selectionSet.has(it.id) || selectionSet.size > 1) {
             selectionSet.clear();
             selectionSet.add(it.id);
           }
-          let nextSelection = Array.from(selectionSet);
-          if (!nextSelection.length) {
-            nextSelection = [it.id];
-          }
-          const uniqueSelection = Array.from(new Set(nextSelection));
-          if (!uniqueSelection.includes(it.id)) {
-            uniqueSelection.push(it.id);
-          }
+          const uniqueSelection = Array.from(selectionSet);
           mapState.selectionIds = uniqueSelection;
           mapState.previewSelection = null;
           updateSelectionHighlight();
+          if (!allowDrag || !uniqueSelection.length) {
+            mapState.nodeDrag = null;
+            mapState.nodeWasDragged = false;
+            refreshCursor({ keepOverride: true });
+            return;
+          }
           const dragIds = uniqueSelection.filter((id) => mapState.positions[id] || positions[id]);
           if (!dragIds.includes(it.id)) {
             dragIds.push(it.id);
           }
           const targets = dragIds.map((id) => {
             const source = mapState.positions[id] || positions[id] || current;
+            if (id === it.id) {
+              return { id, offset: { x: 0, y: 0 } };
+            }
             return {
               id,
               offset: { x: pointer.x - source.x, y: pointer.y - source.y }
@@ -19917,7 +19926,7 @@ var Sevenn = (() => {
           const primaryTarget = targets.find((target) => target.id === it.id) || targets[0];
           mapState.nodeDrag = {
             id: it.id,
-            offset: primaryTarget?.offset || { x: pointer.x - current.x, y: pointer.y - current.y },
+            offset: primaryTarget?.offset || { x: 0, y: 0 },
             targets,
             pointerId: e.pointerId,
             captureTarget: e.currentTarget || circle,
@@ -20148,6 +20157,7 @@ var Sevenn = (() => {
     getSvgRect({ force: true });
     const startMap = clientToMap(e.clientX, e.clientY);
     mapState.draggingView = true;
+    mapState.viewWasDragged = false;
     mapState.viewPointerId = e.pointerId;
     mapState.lastPointer = {
       x: e.clientX,
@@ -20342,6 +20352,10 @@ var Sevenn = (() => {
       if (typeof e.preventDefault === "function") {
         e.preventDefault();
       }
+      const movedDistance = Math.hypot(e.clientX - start.clientX, e.clientY - start.clientY);
+      if (!mapState.viewWasDragged && movedDistance > 1.5) {
+        mapState.viewWasDragged = true;
+      }
       const scaleX = mapState.viewBox.w / rect.width;
       const scaleY = mapState.viewBox.h / rect.height;
       const deltaX = (e.clientX - start.clientX) * PAN_ACCELERATION;
@@ -20455,9 +20469,11 @@ var Sevenn = (() => {
       setAreaInteracting(false);
     }
     if (mapState.draggingView && mapState.viewPointerId === e.pointerId) {
+      const wasDragged = mapState.viewWasDragged;
       mapState.draggingView = false;
       mapState.viewPointerId = null;
       mapState.viewDragStart = null;
+      mapState.viewWasDragged = false;
       if (mapState.svg?.releasePointerCapture) {
         try {
           mapState.svg.releasePointerCapture(e.pointerId);
@@ -20466,6 +20482,11 @@ var Sevenn = (() => {
       }
       cursorNeedsRefresh = true;
       setAreaInteracting(false);
+      if (!wasDragged && (mapState.selectionIds.length || mapState.previewSelection)) {
+        mapState.selectionIds = [];
+        mapState.previewSelection = null;
+        updateSelectionHighlight();
+      }
     }
     if (mapState.selectionRect && mapState.selectionRect.pointerId === e.pointerId) {
       const selected = computeSelectionFromRect();
@@ -20620,7 +20641,7 @@ var Sevenn = (() => {
       const right = pos.x + radius;
       const top2 = pos.y - radius;
       const bottom = pos.y + radius;
-      if (right >= minX && left2 <= maxX && bottom >= minY && top2 <= maxY) {
+      if (left2 >= minX && right <= maxX && top2 >= minY && bottom <= maxY) {
         preview.push(id);
       }
     });
