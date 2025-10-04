@@ -1,4 +1,31 @@
-(() => {
+var Sevenn = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // js/main.js
+  var main_exports = {};
+  __export(main_exports, {
+    render: () => renderApp,
+    renderApp: () => renderApp,
+    resolveListKind: () => resolveListKind,
+    tabs: () => tabs
+  });
+
   // js/storage/preferences.js
   var STORAGE_KEY = "sevenn-ui-preferences";
   var cache = null;
@@ -19885,6 +19912,7 @@
           }
           const primarySource = mapState.positions[it.id] || positions[it.id] || current;
           const pointerOffset = { x: 0, y: 0 };
+
           const targets = dragIds.map((id) => {
             const source = mapState.positions[id] || positions[id] || current;
             return {
@@ -20336,6 +20364,7 @@
       updateAutoPanFromPointer(e.clientX, e.clientY, { allowDuringDrag: true });
       const pointer = clientToMap(e.clientX, e.clientY);
       applyNodeDragFromPointer(pointer);
+
       return;
     }
     if (mapState.areaDrag && mapState.areaDrag.pointerId === e.pointerId) {
@@ -22339,4 +22368,5 @@
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
+  return __toCommonJS(main_exports);
 })();
