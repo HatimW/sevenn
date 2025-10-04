@@ -1,4 +1,31 @@
-(() => {
+var Sevenn = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // js/main.js
+  var main_exports = {};
+  __export(main_exports, {
+    render: () => renderApp,
+    renderApp: () => renderApp,
+    resolveListKind: () => resolveListKind,
+    tabs: () => tabs
+  });
+
   // js/storage/preferences.js
   var STORAGE_KEY = "sevenn-ui-preferences";
   var cache = null;
@@ -19868,7 +19895,7 @@
             } else {
               selectionSet.add(it.id);
             }
-          } else if (!selectionSet.has(it.id)) {
+          } else if (!selectionSet.has(it.id) || selectionSet.size > 1) {
             selectionSet.clear();
             selectionSet.add(it.id);
           }
@@ -19886,18 +19913,22 @@
           if (!dragIds.includes(it.id)) {
             dragIds.push(it.id);
           }
-          const pointerStart = { x: pointer.x, y: pointer.y };
           const targets = dragIds.map((id) => {
             const source = mapState.positions[id] || positions[id] || current;
-            return { id, start: { x: source.x, y: source.y } };
+            const offset = {
+              x: pointer.x - source.x,
+              y: pointer.y - source.y
+            };
+            return { id, offset };
           });
+          const primaryTarget = targets.find((target) => target.id === it.id) || targets[0];
           mapState.nodeDrag = {
             id: it.id,
+            offset: primaryTarget?.offset || { x: 0, y: 0 },
             targets,
             pointerId: e.pointerId,
             captureTarget: e.currentTarget || circle,
-            client: { x: e.clientX, y: e.clientY },
-            startPointer: pointerStart
+            client: { x: e.clientX, y: e.clientY }
           };
           if (mapState.nodeDrag.captureTarget?.setPointerCapture) {
             try {
@@ -20229,30 +20260,16 @@
       mapState.updateViewBox();
     }, { passive: false });
   }
-  function getNodeDragTargets(drag = mapState.nodeDrag) {
+  function getNodeDragTargets() {
+    const drag = mapState.nodeDrag;
     if (!drag) return [];
     if (Array.isArray(drag.targets) && drag.targets.length) {
       return drag.targets;
     }
-    if (drag.id && drag.start) {
-      return [{ id: drag.id, start: drag.start }];
+    if (drag.id && drag.offset) {
+      return [{ id: drag.id, offset: drag.offset }];
     }
     return [];
-  }
-  function updateDraggedNodes(pointer) {
-    const drag = mapState.nodeDrag;
-    if (!drag || !pointer) return;
-    const targets = getNodeDragTargets(drag);
-    if (!targets.length) return;
-    const origin = drag.startPointer || pointer;
-    const dx = pointer.x - origin.x;
-    const dy = pointer.y - origin.y;
-    targets.forEach(({ id, start }) => {
-      if (!id || !start) return;
-      const nx = start.x + dx;
-      const ny = start.y + dy;
-      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
-    });
   }
   function handlePointerMove(e) {
     if (!mapState.svg) return;
@@ -20294,14 +20311,20 @@
       return;
     }
     if (mapState.nodeDrag && mapState.nodeDrag.pointerId === e.pointerId) {
+      const targets = getNodeDragTargets();
+      if (!targets.length) return;
       mapState.nodeDrag.client = { x: e.clientX, y: e.clientY };
       updateAutoPanFromPointer(e.clientX, e.clientY, { allowDuringDrag: true });
       const pointer = clientToMap(e.clientX, e.clientY);
-      updateDraggedNodes(pointer);
-      const targets = getNodeDragTargets();
-      if (targets.length) {
-        mapState.nodeWasDragged = true;
-      }
+      targets.forEach(({ id, offset }) => {
+        if (!id || !offset) return;
+        const entry = mapState.elements.get(id);
+        if (!entry || !entry.circle) return;
+        const nx = pointer.x - offset.x;
+        const ny = pointer.y - offset.y;
+        scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+      });
+      mapState.nodeWasDragged = true;
       return;
     }
     if (mapState.areaDrag && mapState.areaDrag.pointerId === e.pointerId) {
@@ -20595,13 +20618,33 @@
     mapState.selectionBox.style.top = `${top}px`;
     mapState.selectionBox.style.width = `${width}px`;
     mapState.selectionBox.style.height = `${height}px`;
-    if (!startMap || !currentMap) {
-      mapState.previewSelection = [];
-      updateSelectionHighlight();
-      return;
-    }
-    const bounds = getSelectionRectBounds(mapState.selectionRect);
-    mapState.previewSelection = collectNodesInBounds(bounds);
+    if (!startMap || !currentMap) return;
+    const minX = Math.min(startMap.x, currentMap.x);
+    const maxX = Math.max(startMap.x, currentMap.x);
+    const minY = Math.min(startMap.y, currentMap.y);
+    const maxY = Math.max(startMap.y, currentMap.y);
+    const preview = [];
+    const { nodeScale = 1 } = getCurrentScales();
+    Object.entries(mapState.positions).forEach(([id, pos]) => {
+      if (!pos) return;
+      const entry = mapState.elements.get(id);
+      let baseRadius = 0;
+      if (entry?.circle?.dataset?.radius) {
+        baseRadius = Number(entry.circle.dataset.radius) || 0;
+      } else if (mapState.nodeRadii && typeof mapState.nodeRadii.get === "function") {
+        baseRadius = Number(mapState.nodeRadii.get(id)) || 0;
+      }
+      const radius = baseRadius * (Number.isFinite(nodeScale) && nodeScale > 0 ? nodeScale : 1);
+      const left2 = pos.x - radius;
+      const right = pos.x + radius;
+      const top2 = pos.y - radius;
+      const bottom = pos.y + radius;
+      const intersects = right >= minX && left2 <= maxX && bottom >= minY && top2 <= maxY;
+      if (intersects) {
+        preview.push(id);
+      }
+    });
+    mapState.previewSelection = preview;
     updateSelectionHighlight();
   }
   function refreshSelectionRectFromClients({ updateStart = false } = {}) {
@@ -20614,28 +20657,6 @@
       rect.currentMap = clientToMap(rect.currentClient.x, rect.currentClient.y);
     }
     updateSelectionBox();
-  }
-  function getSelectionRectBounds(rect) {
-    if (!rect || !rect.startMap || !rect.currentMap) return null;
-    return {
-      minX: Math.min(rect.startMap.x, rect.currentMap.x),
-      maxX: Math.max(rect.startMap.x, rect.currentMap.x),
-      minY: Math.min(rect.startMap.y, rect.currentMap.y),
-      maxY: Math.max(rect.startMap.y, rect.currentMap.y)
-    };
-  }
-  function collectNodesInBounds(bounds) {
-    if (!bounds) return [];
-    const { minX, maxX, minY, maxY } = bounds;
-    const results = [];
-    Object.entries(mapState.positions).forEach(([id, pos]) => {
-      if (!pos) return;
-      if (!mapState.elements?.has(id)) return;
-      if (pos.x >= minX && pos.x <= maxX && pos.y >= minY && pos.y <= maxY) {
-        results.push(id);
-      }
-    });
-    return results;
   }
   function pickClusterPosition(existing = [], spacing = 200, base = { x: 0, y: 0 }) {
     const baseX = Number.isFinite(base?.x) ? base.x : 0;
@@ -20756,8 +20777,11 @@
     }
     if (mapState.nodeDrag?.client) {
       const pointer = clientToMap(mapState.nodeDrag.client.x, mapState.nodeDrag.client.y);
-      updateDraggedNodes(pointer);
       const targets = getNodeDragTargets();
+      targets.forEach(({ id, offset }) => {
+        if (!id || !offset) return;
+        scheduleNodePositionUpdate(id, { x: pointer.x - offset.x, y: pointer.y - offset.y }, { immediate: true });
+      });
       if (targets.length) {
         mapState.nodeWasDragged = true;
       }
@@ -20783,12 +20807,9 @@
     }
     mapState.autoPanFrame = null;
   }
-  function computeSelectionFromRect(rect = mapState.selectionRect) {
-    const bounds = getSelectionRectBounds(rect);
-    if (!bounds) {
-      return mapState.selectionIds.slice();
-    }
-    return collectNodesInBounds(bounds);
+  function computeSelectionFromRect() {
+    if (mapState.previewSelection) return mapState.previewSelection.slice();
+    return mapState.selectionIds.slice();
   }
   function getCurrentScales() {
     return mapState.currentScales || { nodeScale: 1, labelScale: 1, lineScale: 1 };
@@ -22297,4 +22318,5 @@
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
+  return __toCommonJS(main_exports);
 })();
