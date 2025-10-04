@@ -2217,10 +2217,7 @@ export async function renderMap(root) {
           dragIds.push(it.id);
         }
         const primarySource = mapState.positions[it.id] || positions[it.id] || current;
-        const pointerOffset = {
-          x: (primarySource?.x ?? 0) - pointer.x,
-          y: (primarySource?.y ?? 0) - pointer.y
-        };
+        const pointerOffset = { x: 0, y: 0 };
         const targets = dragIds.map(id => {
           const source = mapState.positions[id] || positions[id] || current;
           return {
@@ -2246,6 +2243,10 @@ export async function renderMap(root) {
         }
         mapState.nodeWasDragged = false;
         setAreaInteracting(true);
+        const applied = applyNodeDragFromPointer(pointer, { markDragged: false });
+        if (applied) {
+          flushNodePositionUpdates({ cancelFrame: true });
+        }
       } else {
         mapState.areaDrag = {
           ids: [...mapState.selectionIds],
@@ -2612,6 +2613,33 @@ function getNodeDragTargets() {
   return [];
 }
 
+function applyNodeDragFromPointer(pointer, options = {}) {
+  if (!pointer) return false;
+  const drag = mapState.nodeDrag;
+  if (!drag) return false;
+  const targets = getNodeDragTargets();
+  if (!targets.length) return false;
+  const offset = drag.pointerOffset || { x: 0, y: 0 };
+  const baseX = pointer.x + offset.x;
+  const baseY = pointer.y + offset.y;
+  let applied = false;
+  targets.forEach(target => {
+    if (!target) return;
+    const { id, delta = { x: 0, y: 0 } } = target;
+    if (!id) return;
+    const entry = mapState.elements.get(id);
+    if (!entry || !entry.circle) return;
+    const nx = baseX + delta.x;
+    const ny = baseY + delta.y;
+    scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+    applied = true;
+  });
+  if (applied && options.markDragged !== false) {
+    mapState.nodeWasDragged = true;
+  }
+  return applied;
+}
+
 function handlePointerMove(e) {
   if (!mapState.svg) return;
 
@@ -2656,25 +2684,10 @@ function handlePointerMove(e) {
   }
 
   if (mapState.nodeDrag && mapState.nodeDrag.pointerId === e.pointerId) {
-    const targets = getNodeDragTargets();
-    if (!targets.length) return;
     mapState.nodeDrag.client = { x: e.clientX, y: e.clientY };
     updateAutoPanFromPointer(e.clientX, e.clientY, { allowDuringDrag: true });
     const pointer = clientToMap(e.clientX, e.clientY);
-    const offset = mapState.nodeDrag.pointerOffset || { x: 0, y: 0 };
-    const baseX = pointer.x + offset.x;
-    const baseY = pointer.y + offset.y;
-    targets.forEach(target => {
-      if (!target) return;
-      const { id, delta = { x: 0, y: 0 } } = target;
-      if (!id) return;
-      const entry = mapState.elements.get(id);
-      if (!entry || !entry.circle) return;
-      const nx = baseX + delta.x;
-      const ny = baseY + delta.y;
-      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
-    });
-    mapState.nodeWasDragged = true;
+    applyNodeDragFromPointer(pointer);
     return;
   }
 
@@ -2972,6 +2985,55 @@ function clientToMap(clientX, clientY) {
   };
 }
 
+function getElementPosition(entry, id) {
+  if (entry?.circle) {
+    const cx = Number(entry.circle.getAttribute('cx'));
+    const cy = Number(entry.circle.getAttribute('cy'));
+    if (Number.isFinite(cx) && Number.isFinite(cy)) {
+      return { x: cx, y: cy };
+    }
+  }
+  return mapState.positions?.[id] || null;
+}
+
+function getElementRadius(entry, id) {
+  if (entry?.circle) {
+    const r = Number(entry.circle.getAttribute('r'));
+    if (Number.isFinite(r) && r > 0) {
+      return r;
+    }
+  }
+  return getNodeRadius(id);
+}
+
+function collectNodesInRect(minX, maxX, minY, maxY) {
+  const preview = [];
+  const epsilon = 0.0001;
+  mapState.elements.forEach((entry, id) => {
+    const pos = getElementPosition(entry, id);
+    if (!pos) return;
+    const radius = getElementRadius(entry, id);
+    const nodeMinX = pos.x - radius;
+    const nodeMaxX = pos.x + radius;
+    const nodeMinY = pos.y - radius;
+    const nodeMaxY = pos.y + radius;
+    const fullyInside =
+      nodeMinX >= minX - epsilon &&
+      nodeMaxX <= maxX + epsilon &&
+      nodeMinY >= minY - epsilon &&
+      nodeMaxY <= maxY + epsilon;
+    const intersects =
+      nodeMaxX >= minX - epsilon &&
+      nodeMinX <= maxX + epsilon &&
+      nodeMaxY >= minY - epsilon &&
+      nodeMinY <= maxY + epsilon;
+    if (fullyInside || intersects) {
+      preview.push(id);
+    }
+  });
+  return preview;
+}
+
 function updateSelectionBox() {
   if (!mapState.selectionRect || !mapState.selectionBox || !mapState.svg) return;
   const { startClient, currentClient, startMap, currentMap } = mapState.selectionRect;
@@ -2992,23 +3054,7 @@ function updateSelectionBox() {
   const maxX = Math.max(startMap.x, currentMap.x);
   const minY = Math.min(startMap.y, currentMap.y);
   const maxY = Math.max(startMap.y, currentMap.y);
-  const preview = [];
-  const scales = getCurrentScales();
-  const nodeScale = scales.nodeScale || 1;
-  Object.entries(mapState.positions).forEach(([id, pos]) => {
-    if (!pos) return;
-    const baseRadius = getNodeBaseRadius(id);
-    const radius = baseRadius * nodeScale;
-    const nodeMinX = pos.x - radius;
-    const nodeMaxX = pos.x + radius;
-    const nodeMinY = pos.y - radius;
-    const nodeMaxY = pos.y + radius;
-    const intersects = nodeMaxX >= minX && nodeMinX <= maxX && nodeMaxY >= minY && nodeMinY <= maxY;
-    if (intersects) {
-      preview.push(id);
-    }
-  });
-  mapState.previewSelection = preview;
+  mapState.previewSelection = collectNodesInRect(minX, maxX, minY, maxY);
   updateSelectionHighlight();
 }
 
@@ -3151,19 +3197,7 @@ function applyAutoPan(vector) {
   }
   if (mapState.nodeDrag?.client) {
     const pointer = clientToMap(mapState.nodeDrag.client.x, mapState.nodeDrag.client.y);
-    const offset = mapState.nodeDrag.pointerOffset || { x: 0, y: 0 };
-    const baseX = pointer.x + offset.x;
-    const baseY = pointer.y + offset.y;
-    const targets = getNodeDragTargets();
-    targets.forEach(target => {
-      if (!target) return;
-      const { id, delta = { x: 0, y: 0 } } = target;
-      if (!id) return;
-      scheduleNodePositionUpdate(id, { x: baseX + delta.x, y: baseY + delta.y }, { immediate: true });
-    });
-    if (targets.length) {
-      mapState.nodeWasDragged = true;
-    }
+    applyNodeDragFromPointer(pointer);
   }
   if (mapState.areaDrag?.client) {
     const pointer = clientToMap(mapState.areaDrag.client.x, mapState.areaDrag.client.y);
