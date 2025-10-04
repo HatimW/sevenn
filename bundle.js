@@ -4068,28 +4068,6 @@ var Sevenn = (() => {
       return canvas.toDataURL();
     }
   }
-  function cropImageFile(file) {
-    if (!(file instanceof File) || !file.type?.startsWith("image/")) {
-      return Promise.reject(new Error("File must be an image."));
-    }
-    return new Promise((resolve, reject) => {
-      const objectUrl = URL.createObjectURL(file);
-      const image = new Image();
-      image.onload = () => {
-        URL.revokeObjectURL(objectUrl);
-        try {
-          openCropDialog({ image, file }, { mimeType: file.type }).then(resolve).catch(reject);
-        } catch (err) {
-          reject(err);
-        }
-      };
-      image.onerror = () => {
-        URL.revokeObjectURL(objectUrl);
-        reject(new Error("Failed to load image file."));
-      };
-      image.src = objectUrl;
-    });
-  }
   function inferMimeFromDataUrl(src) {
     if (typeof src !== "string") return "";
     const match = src.match(/^data:([^;,]+)[;,]/i);
@@ -4731,27 +4709,60 @@ var Sevenn = (() => {
     wrapper.appendChild(mediaFileInput);
     let pendingImageTarget = null;
     let activeImageEditor = null;
-    async function insertCroppedImageFile(file, targetImage = null) {
+    function loadImageDimensions(dataUrl) {
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => {
+          resolve({
+            width: image.naturalWidth || image.width || 0,
+            height: image.naturalHeight || image.height || 0
+          });
+        };
+        image.onerror = () => reject(new Error("Failed to load image preview."));
+        image.src = dataUrl;
+      });
+    }
+    function sanitizeImageDimension(value2) {
+      if (!Number.isFinite(value2)) return null;
+      const MIN_SIZE = 32;
+      const MAX_SIZE = 4096;
+      const clamped = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(value2)));
+      return clamped > 0 ? clamped : null;
+    }
+    async function insertImageFile(file, targetImage = null) {
+      if (!(file instanceof File)) return;
       try {
-        const result = await cropImageFile(file);
-        if (!result) return;
-        const altText = result.altText || (file.name || "").replace(/\.[^.]+$/, "");
+        const dataUrl = await readFileAsDataUrl(file);
+        if (!dataUrl) return;
+        let dimensions = { width: null, height: null };
+        try {
+          dimensions = await loadImageDimensions(dataUrl);
+        } catch (err) {
+          dimensions = { width: null, height: null };
+        }
+        const width = sanitizeImageDimension(dimensions.width);
+        const height = sanitizeImageDimension(dimensions.height);
+        const defaultAlt = (file.name || "").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
         if (targetImage && wrapper.contains(targetImage)) {
-          targetImage.src = result.dataUrl;
+          const existingAlt = targetImage.getAttribute("alt") || "";
+          const altText = existingAlt.trim() || defaultAlt;
+          targetImage.src = dataUrl;
           if (altText) {
             targetImage.setAttribute("alt", altText);
           } else {
             targetImage.removeAttribute("alt");
           }
-          setImageSize(targetImage, result.width, result.height);
+          setImageSize(targetImage, width, height);
           triggerEditorChange();
           if (activeImageEditor && activeImageEditor.image === targetImage && typeof activeImageEditor.update === "function") {
             requestAnimationFrame(() => activeImageEditor.update());
           }
         } else {
-          const safeAlt = altText ? escapeHtml2(altText) : "";
+          const safeAlt = defaultAlt ? escapeHtml2(defaultAlt) : "";
           const altAttr = safeAlt ? ` alt="${safeAlt}"` : "";
-          const html = `<img src="${result.dataUrl}" width="${result.width}" height="${result.height}"${altAttr}>`;
+          const widthAttr = width ? ` width="${width}"` : "";
+          const heightAttr = height ? ` height="${height}"` : "";
+          const html = `<img src="${dataUrl}"${widthAttr}${heightAttr}${altAttr}>`;
           insertHtml(html);
         }
       } catch (err) {
@@ -4776,7 +4787,7 @@ var Sevenn = (() => {
       const file = imageFileInput.files?.[0];
       const target = pendingImageTarget;
       pendingImageTarget = null;
-      if (file) insertCroppedImageFile(file, target);
+      if (file) insertImageFile(file, target);
       imageFileInput.value = "";
     });
     mediaFileInput.addEventListener("change", () => {
@@ -4798,7 +4809,7 @@ var Sevenn = (() => {
       const imageFile = files.find((file) => file && file.type && file.type.startsWith("image/")) || null;
       if (imageFile) {
         event.preventDefault();
-        void insertCroppedImageFile(imageFile);
+        void insertImageFile(imageFile);
         return;
       }
       const mediaFile = files.find((file) => file && file.type && (file.type.startsWith("video/") || file.type.startsWith("audio/")));
@@ -5752,7 +5763,8 @@ var Sevenn = (() => {
       updateInlineState();
     });
     editable.addEventListener("dblclick", (event) => {
-      const target = event.target;
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      const target = path.find((node) => node instanceof HTMLImageElement) || event.target;
       if (target instanceof HTMLImageElement) {
         event.preventDefault();
         beginImageEditing(target);
@@ -19912,7 +19924,6 @@ var Sevenn = (() => {
           }
           const primarySource = mapState.positions[it.id] || positions[it.id] || current;
           const pointerOffset = { x: 0, y: 0 };
-
           const targets = dragIds.map((id) => {
             const source = mapState.positions[id] || positions[id] || current;
             return {
@@ -20364,7 +20375,6 @@ var Sevenn = (() => {
       updateAutoPanFromPointer(e.clientX, e.clientY, { allowDuringDrag: true });
       const pointer = clientToMap(e.clientX, e.clientY);
       applyNodeDragFromPointer(pointer);
-
       return;
     }
     if (mapState.areaDrag && mapState.areaDrag.pointerId === e.pointerId) {

@@ -1,4 +1,4 @@
-import { cropImageFile, readFileAsDataUrl, editImageSource } from './media-upload.js';
+import { readFileAsDataUrl, editImageSource } from './media-upload.js';
 
 const allowedTags = new Set([
   'a','b','strong','i','em','u','s','strike','del','mark','span','font','p','div','br','ul','ol','li','img','sub','sup','blockquote','code','pre','hr','video','audio','source','iframe'
@@ -282,27 +282,66 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   let pendingImageTarget = null;
   let activeImageEditor = null;
 
-  async function insertCroppedImageFile(file, targetImage = null) {
+  function loadImageDimensions(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        resolve({
+          width: image.naturalWidth || image.width || 0,
+          height: image.naturalHeight || image.height || 0
+        });
+      };
+      image.onerror = () => reject(new Error('Failed to load image preview.'));
+      image.src = dataUrl;
+    });
+  }
+
+  function sanitizeImageDimension(value) {
+    if (!Number.isFinite(value)) return null;
+    const MIN_SIZE = 32;
+    const MAX_SIZE = 4096;
+    const clamped = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(value)));
+    return clamped > 0 ? clamped : null;
+  }
+
+  async function insertImageFile(file, targetImage = null) {
+    if (!(file instanceof File)) return;
     try {
-      const result = await cropImageFile(file);
-      if (!result) return;
-      const altText = result.altText || (file.name || '').replace(/\.[^.]+$/, '');
+      const dataUrl = await readFileAsDataUrl(file);
+      if (!dataUrl) return;
+
+      let dimensions = { width: null, height: null };
+      try {
+        dimensions = await loadImageDimensions(dataUrl);
+      } catch (err) {
+        // Fallback to inserting without explicit dimensions if preview fails
+        dimensions = { width: null, height: null };
+      }
+
+      const width = sanitizeImageDimension(dimensions.width);
+      const height = sanitizeImageDimension(dimensions.height);
+      const defaultAlt = (file.name || '').replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+
       if (targetImage && wrapper.contains(targetImage)) {
-        targetImage.src = result.dataUrl;
+        const existingAlt = targetImage.getAttribute('alt') || '';
+        const altText = existingAlt.trim() || defaultAlt;
+        targetImage.src = dataUrl;
         if (altText) {
           targetImage.setAttribute('alt', altText);
         } else {
           targetImage.removeAttribute('alt');
         }
-        setImageSize(targetImage, result.width, result.height);
+        setImageSize(targetImage, width, height);
         triggerEditorChange();
         if (activeImageEditor && activeImageEditor.image === targetImage && typeof activeImageEditor.update === 'function') {
           requestAnimationFrame(() => activeImageEditor.update());
         }
       } else {
-        const safeAlt = altText ? escapeHtml(altText) : '';
+        const safeAlt = defaultAlt ? escapeHtml(defaultAlt) : '';
         const altAttr = safeAlt ? ` alt="${safeAlt}"` : '';
-        const html = `<img src="${result.dataUrl}" width="${result.width}" height="${result.height}"${altAttr}>`;
+        const widthAttr = width ? ` width="${width}"` : '';
+        const heightAttr = height ? ` height="${height}"` : '';
+        const html = `<img src="${dataUrl}"${widthAttr}${heightAttr}${altAttr}>`;
         insertHtml(html);
       }
     } catch (err) {
@@ -329,7 +368,7 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
     const file = imageFileInput.files?.[0];
     const target = pendingImageTarget;
     pendingImageTarget = null;
-    if (file) insertCroppedImageFile(file, target);
+    if (file) insertImageFile(file, target);
     imageFileInput.value = '';
   });
 
@@ -354,7 +393,7 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
     const imageFile = files.find(file => file && file.type && file.type.startsWith('image/')) || null;
     if (imageFile) {
       event.preventDefault();
-      void insertCroppedImageFile(imageFile);
+      void insertImageFile(imageFile);
       return;
     }
     const mediaFile = files.find(file => file && file.type && (file.type.startsWith('video/') || file.type.startsWith('audio/')));
@@ -1401,7 +1440,8 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
   });
 
   editable.addEventListener('dblclick', (event) => {
-    const target = event.target;
+    const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+    const target = path.find(node => node instanceof HTMLImageElement) || event.target;
     if (target instanceof HTMLImageElement) {
       event.preventDefault();
       beginImageEditing(target);
