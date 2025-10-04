@@ -2198,7 +2198,7 @@ export async function renderMap(root) {
           } else {
             selectionSet.add(it.id);
           }
-        } else if (!selectionSet.has(it.id) || selectionSet.size > 1) {
+        } else if (!selectionSet.has(it.id)) {
           selectionSet.clear();
           selectionSet.add(it.id);
         }
@@ -2219,18 +2219,19 @@ export async function renderMap(root) {
         if (!dragIds.includes(it.id)) {
           dragIds.push(it.id);
         }
+        const primarySource = mapState.positions[it.id] || positions[it.id] || current;
         const targets = dragIds.map(id => {
           const source = mapState.positions[id] || positions[id] || current;
-          const offset = {
-            x: pointer.x - source.x,
-            y: pointer.y - source.y
+          return {
+            id,
+            delta: {
+              x: source.x - primarySource.x,
+              y: source.y - primarySource.y
+            }
           };
-          return { id, offset };
         });
-        const primaryTarget = targets.find(target => target.id === it.id) || targets[0];
         mapState.nodeDrag = {
           id: it.id,
-          offset: primaryTarget?.offset || { x: 0, y: 0 },
           targets,
           pointerId: e.pointerId,
           captureTarget: e.currentTarget || circle,
@@ -2585,8 +2586,8 @@ function getNodeDragTargets() {
   if (Array.isArray(drag.targets) && drag.targets.length) {
     return drag.targets;
   }
-  if (drag.id && drag.offset) {
-    return [{ id: drag.id, offset: drag.offset }];
+  if (drag.id) {
+    return [{ id: drag.id, delta: { x: 0, y: 0 } }];
   }
   return [];
 }
@@ -2640,12 +2641,14 @@ function handlePointerMove(e) {
     mapState.nodeDrag.client = { x: e.clientX, y: e.clientY };
     updateAutoPanFromPointer(e.clientX, e.clientY, { allowDuringDrag: true });
     const pointer = clientToMap(e.clientX, e.clientY);
-    targets.forEach(({ id, offset }) => {
-      if (!id || !offset) return;
+    targets.forEach(target => {
+      if (!target) return;
+      const { id, delta = { x: 0, y: 0 } } = target;
+      if (!id) return;
       const entry = mapState.elements.get(id);
       if (!entry || !entry.circle) return;
-      const nx = pointer.x - offset.x;
-      const ny = pointer.y - offset.y;
+      const nx = pointer.x + delta.x;
+      const ny = pointer.y + delta.y;
       scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
     });
     mapState.nodeWasDragged = true;
@@ -2967,23 +2970,10 @@ function updateSelectionBox() {
   const minY = Math.min(startMap.y, currentMap.y);
   const maxY = Math.max(startMap.y, currentMap.y);
   const preview = [];
-  const { nodeScale = 1 } = getCurrentScales();
   Object.entries(mapState.positions).forEach(([id, pos]) => {
     if (!pos) return;
-    const entry = mapState.elements.get(id);
-    let baseRadius = 0;
-    if (entry?.circle?.dataset?.radius) {
-      baseRadius = Number(entry.circle.dataset.radius) || 0;
-    } else if (mapState.nodeRadii && typeof mapState.nodeRadii.get === 'function') {
-      baseRadius = Number(mapState.nodeRadii.get(id)) || 0;
-    }
-    const radius = baseRadius * (Number.isFinite(nodeScale) && nodeScale > 0 ? nodeScale : 1);
-    const left = pos.x - radius;
-    const right = pos.x + radius;
-    const top = pos.y - radius;
-    const bottom = pos.y + radius;
-    const intersects = right >= minX && left <= maxX && bottom >= minY && top <= maxY;
-    if (intersects) {
+    const inside = pos.x >= minX && pos.x <= maxX && pos.y >= minY && pos.y <= maxY;
+    if (inside) {
       preview.push(id);
     }
   });
@@ -3131,9 +3121,11 @@ function applyAutoPan(vector) {
   if (mapState.nodeDrag?.client) {
     const pointer = clientToMap(mapState.nodeDrag.client.x, mapState.nodeDrag.client.y);
     const targets = getNodeDragTargets();
-    targets.forEach(({ id, offset }) => {
-      if (!id || !offset) return;
-      scheduleNodePositionUpdate(id, { x: pointer.x - offset.x, y: pointer.y - offset.y }, { immediate: true });
+    targets.forEach(target => {
+      if (!target) return;
+      const { id, delta = { x: 0, y: 0 } } = target;
+      if (!id) return;
+      scheduleNodePositionUpdate(id, { x: pointer.x + delta.x, y: pointer.y + delta.y }, { immediate: true });
     });
     if (targets.length) {
       mapState.nodeWasDragged = true;
