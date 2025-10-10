@@ -3,6 +3,7 @@ import { loadBlockCatalog } from '../../storage/block-catalog.js';
 import { uid } from '../../utils.js';
 import { showPopup } from './popup.js';
 import { openEditor } from './editor.js';
+import { createFloatingWindow } from './window-manager.js';
 
 const TOOL = {
   NAVIGATE: 'navigate',
@@ -1067,17 +1068,27 @@ function createMapControlsPanel(activeTab) {
       lectureList.appendChild(empty);
     } else {
       filteredLectures.forEach(lec => {
-        const key = `${weekBlock.blockId}|${lec.id}`;
+        const keyParts = [`block:${weekBlock.blockId}`];
+        if (lec.id != null && lec.id !== '') {
+          keyParts.push(`id:${lec.id}`);
+        }
+        if (lec.name) {
+          keyParts.push(`name:${lec.name}`);
+        }
+        const key = keyParts.join('|');
+        const legacyKey = `${weekBlock.blockId}|${lec.id}`;
+        const isActive = selectedLectures.has(key) || selectedLectures.has(legacyKey);
         const label = lec.name ? lec.name : `Lecture ${lec.id}`;
         const weekLabel = Number.isFinite(lec.week) ? `Week ${lec.week}` : '';
         lectureList.appendChild(
           makeChip({
             label: weekLabel ? `${label} · ${weekLabel}` : label,
             title: weekLabel ? `${label} (${weekLabel})` : label,
-            active: selectedLectures.has(key),
+            active: isActive,
             onToggle: () => {
               const next = new Set(selectedLectures);
-              if (next.has(key)) {
+              next.delete(legacyKey);
+              if (isActive) {
                 next.delete(key);
               } else {
                 next.add(key);
@@ -1295,17 +1306,43 @@ function matchesFilter(item, filter = {}) {
   }
   if (lectureKeys.length) {
     const satisfiesLecture = lectureKeys.some(rawKey => {
-      if (!rawKey) return false;
-      const [blk, lecStr] = String(rawKey).split('|');
-      const lecId = Number(lecStr);
-      if (!Number.isFinite(lecId)) return false;
-      const blockMatch = blk || blockId || '';
+      const parsed = parseLectureFilterKey(rawKey, blockId);
+      const blockMatch = parsed.block || blockId || '';
+      const idMatch = (parsed.id || '').trim().toLowerCase();
+      const nameMatch = (parsed.name || '').trim().toLowerCase();
+      if (!idMatch && !nameMatch && !blockMatch) {
+        return false;
+      }
       return (item.lectures || []).some(lec => {
-        if (!Number.isFinite(lec?.id)) return false;
-        if (blockMatch) {
-          return lec.blockId === blockMatch && lec.id === lecId;
+        if (!lec) return false;
+        if (blockMatch && lec.blockId !== blockMatch) return false;
+        const values = new Set();
+        if (lec.id != null) {
+          const str = String(lec.id).trim();
+          if (str) {
+            values.add(str.toLowerCase());
+            const numeric = Number(str);
+            if (Number.isFinite(numeric)) {
+              values.add(String(numeric));
+            }
+          }
         }
-        return lec.id === lecId;
+        if (lec.uid != null) {
+          const uidStr = String(lec.uid).trim();
+          if (uidStr) {
+            values.add(uidStr.toLowerCase());
+          }
+        }
+        if (lec.name) {
+          values.add(lec.name.trim().toLowerCase());
+        }
+        if (idMatch && values.has(idMatch)) {
+          return true;
+        }
+        if (nameMatch && values.has(nameMatch)) {
+          return true;
+        }
+        return !idMatch && !nameMatch && (!blockMatch || lec.blockId === blockMatch);
       });
     });
     if (!satisfiesLecture) return false;
@@ -1357,7 +1394,8 @@ function openItemPopup(itemId) {
   if (!item) return;
   showPopup(item, {
     onEdit: () => openItemEditor(itemId),
-    onColorChange: color => updateItemColor(itemId, color)
+    onColorChange: color => updateItemColor(itemId, color),
+    onLink: () => openLinkAssistant(itemId)
   });
 }
 
@@ -1401,6 +1439,35 @@ async function updateItemColor(itemId, color) {
     }
   }
   refreshNodeColor(itemId);
+}
+
+function parseLectureFilterKey(rawKey, fallbackBlock = '') {
+  const info = {
+    block: fallbackBlock || '',
+    id: '',
+    name: ''
+  };
+  if (!rawKey) {
+    return info;
+  }
+  const parts = String(rawKey)
+    .split('|')
+    .map(part => part.trim())
+    .filter(Boolean);
+  parts.forEach((part, index) => {
+    if (part.startsWith('block:')) {
+      info.block = part.slice(6) || info.block;
+    } else if (part.startsWith('id:')) {
+      info.id = part.slice(3) || info.id;
+    } else if (part.startsWith('name:')) {
+      info.name = part.slice(5) || info.name;
+    } else if (index === 0 && !info.block) {
+      info.block = part;
+    } else if (!info.id) {
+      info.id = part;
+    }
+  });
+  return info;
 }
 
 function setAreaInteracting(active) {
@@ -2651,7 +2718,7 @@ function applyNodeDragFromPointer(pointer, options = {}) {
     if (!entry || !entry.circle) return;
     const nx = baseX + delta.x;
     const ny = baseY + delta.y;
-    scheduleNodePositionUpdate(id, { x: nx, y: ny });
+    scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
     const startPositions = drag.startPositions;
     if (!moved && startPositions && startPositions.has(id)) {
       const origin = startPositions.get(id);
@@ -2738,7 +2805,7 @@ function handlePointerMove(e) {
     mapState.areaDrag.origin.forEach(({ id, pos }) => {
       const nx = pos.x + dx;
       const ny = pos.y + dy;
-      scheduleNodePositionUpdate(id, { x: nx, y: ny });
+      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
     });
     mapState.nodeWasDragged = true;
     return;
@@ -3244,7 +3311,7 @@ function applyAutoPan(vector) {
     mapState.areaDrag.origin.forEach(({ id, pos }) => {
       const nx = pos.x + dx;
       const ny = pos.y + dy;
-      scheduleNodePositionUpdate(id, { x: nx, y: ny });
+      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
     });
     mapState.nodeWasDragged = true;
   }
@@ -3856,6 +3923,168 @@ async function handleAddLinkClick(nodeId) {
   mapState.pendingLink = null;
   updatePendingHighlight();
   await renderMap(mapState.root);
+}
+
+function openLinkAssistant(nodeId) {
+  const source = mapState.itemMap?.[nodeId];
+  if (!source) return;
+  mapState.pendingLink = nodeId;
+  updatePendingHighlight();
+  const win = createFloatingWindow({
+    title: `Link ${titleOf(source) || 'concept'}`,
+    width: 420,
+    onClose: () => {
+      if (mapState.pendingLink === nodeId) {
+        mapState.pendingLink = null;
+        updatePendingHighlight();
+      }
+    }
+  });
+
+  const container = document.createElement('div');
+  container.className = 'map-linker';
+
+  const hint = document.createElement('p');
+  hint.className = 'map-linker-hint';
+  hint.textContent = 'Search for another concept to connect to this one.';
+  container.appendChild(hint);
+
+  const labelField = document.createElement('label');
+  labelField.className = 'map-linker-field';
+  labelField.textContent = 'Link label (optional)';
+  const labelInput = document.createElement('input');
+  labelInput.type = 'text';
+  labelInput.className = 'input map-linker-label-input';
+  labelInput.placeholder = 'Add a short description for this relationship';
+  labelField.appendChild(labelInput);
+  container.appendChild(labelField);
+
+  const searchField = document.createElement('label');
+  searchField.className = 'map-linker-field';
+  searchField.textContent = 'Link to';
+  const searchInput = document.createElement('input');
+  searchInput.type = 'search';
+  searchInput.className = 'input map-linker-search';
+  searchInput.placeholder = 'Search concepts…';
+  searchField.appendChild(searchInput);
+  container.appendChild(searchField);
+
+  const list = document.createElement('div');
+  list.className = 'map-linker-results';
+  container.appendChild(list);
+
+  const allItems = Object.values(mapState.itemMap || {});
+  const existingLinks = new Map();
+  (source.links || []).forEach(link => {
+    if (link?.id) {
+      existingLinks.set(link.id, link);
+    }
+  });
+
+  const renderResults = () => {
+    const query = searchInput.value.trim().toLowerCase();
+    list.innerHTML = '';
+    const matches = allItems
+      .filter(item => item && item.id !== source.id)
+      .filter(item => {
+        if (!query) return true;
+        const label = (titleOf(item) || '').toLowerCase();
+        return label.includes(query);
+      })
+      .sort((a, b) => (titleOf(a) || '').localeCompare(titleOf(b) || ''))
+      .slice(0, 15);
+
+    if (!matches.length) {
+      const empty = document.createElement('div');
+      empty.className = 'map-linker-empty';
+      empty.textContent = query ? 'No matching concepts.' : 'No available concepts to link.';
+      list.appendChild(empty);
+      return;
+    }
+
+    matches.forEach(target => {
+      const row = document.createElement('div');
+      row.className = 'map-linker-result';
+
+      const info = document.createElement('div');
+      info.className = 'map-linker-result-info';
+      const name = document.createElement('div');
+      name.className = 'map-linker-result-title';
+      name.textContent = titleOf(target) || target.id;
+      info.appendChild(name);
+      if (target.kind) {
+        const meta = document.createElement('div');
+        meta.className = 'map-linker-result-meta';
+        meta.textContent = target.kind;
+        info.appendChild(meta);
+      }
+      row.appendChild(info);
+
+      const actions = document.createElement('div');
+      actions.className = 'map-linker-result-actions';
+      const linkInfo = existingLinks.get(target.id);
+      if (linkInfo) {
+        const status = document.createElement('span');
+        status.className = 'map-linker-result-status';
+        status.textContent = linkInfo.hidden ? 'Hidden link' : 'Already linked';
+        actions.appendChild(status);
+        if (linkInfo.hidden) {
+          const unhideBtn = document.createElement('button');
+          unhideBtn.type = 'button';
+          unhideBtn.className = 'btn secondary';
+          unhideBtn.textContent = 'Unhide link';
+          unhideBtn.addEventListener('click', async () => {
+            try {
+              await setLinkHidden(source.id, target.id, false);
+              mapState.pendingLink = null;
+              updatePendingHighlight();
+              await renderMap(mapState.root);
+              await win.close('unhide');
+            } catch (err) {
+              console.error(err);
+            }
+          });
+          actions.appendChild(unhideBtn);
+        }
+      } else {
+        const linkBtn = document.createElement('button');
+        linkBtn.type = 'button';
+        linkBtn.className = 'btn primary';
+        linkBtn.textContent = 'Link concepts';
+        linkBtn.addEventListener('click', async () => {
+          try {
+            const label = labelInput.value.trim();
+            await createLink(source.id, target.id, {
+              name: label,
+              color: DEFAULT_LINK_COLOR,
+              style: DEFAULT_LINE_STYLE,
+              thickness: DEFAULT_LINE_THICKNESS,
+              hidden: false
+            });
+            mapState.pendingLink = null;
+            updatePendingHighlight();
+            await renderMap(mapState.root);
+            await win.close('link');
+          } catch (err) {
+            console.error(err);
+          }
+        });
+        actions.appendChild(linkBtn);
+      }
+
+      row.appendChild(actions);
+      list.appendChild(row);
+    });
+  };
+
+  searchInput.addEventListener('input', renderResults);
+
+  renderResults();
+  win.setContent(container);
+  requestAnimationFrame(() => {
+    searchInput.focus();
+    searchInput.select();
+  });
 }
 
 function handleEdgeClick(path, aId, bId, evt) {
