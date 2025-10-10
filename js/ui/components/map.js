@@ -54,6 +54,7 @@ const CURSOR_STYLE = {
 
 const PAN_ACCELERATION = 1.8;
 const ZOOM_INTENSITY = 0.0041;
+const NODE_DRAG_DISTANCE_THRESHOLD = 1.2;
 
 const ICONS = {
   sliders:
@@ -2217,9 +2218,16 @@ export async function renderMap(root) {
           dragIds.push(it.id);
         }
         const primarySource = mapState.positions[it.id] || positions[it.id] || current;
-        const pointerOffset = { x: 0, y: 0 };
+        const pointerOffset = {
+          x: primarySource.x - pointer.x,
+          y: primarySource.y - pointer.y
+        };
+        const startPositions = new Map();
         const targets = dragIds.map(id => {
           const source = mapState.positions[id] || positions[id] || current;
+          if (!startPositions.has(id)) {
+            startPositions.set(id, { x: source.x, y: source.y });
+          }
           return {
             id,
             delta: {
@@ -2234,7 +2242,10 @@ export async function renderMap(root) {
           pointerId: e.pointerId,
           captureTarget: e.currentTarget || circle,
           client: { x: e.clientX, y: e.clientY },
-          pointerOffset
+          pointerOffset,
+          startPointer: { x: pointer.x, y: pointer.y },
+          startPositions,
+          lastPointer: { x: pointer.x, y: pointer.y }
         };
         if (mapState.nodeDrag.captureTarget?.setPointerCapture) {
           try {
@@ -2617,12 +2628,21 @@ function applyNodeDragFromPointer(pointer, options = {}) {
   if (!pointer) return false;
   const drag = mapState.nodeDrag;
   if (!drag) return false;
+  const lastPointer = drag.lastPointer;
+  if (
+    lastPointer &&
+    Math.abs(lastPointer.x - pointer.x) < 0.0001 &&
+    Math.abs(lastPointer.y - pointer.y) < 0.0001
+  ) {
+    return false;
+  }
   const targets = getNodeDragTargets();
   if (!targets.length) return false;
   const offset = drag.pointerOffset || { x: 0, y: 0 };
   const baseX = pointer.x + offset.x;
   const baseY = pointer.y + offset.y;
   let applied = false;
+  let moved = false;
   targets.forEach(target => {
     if (!target) return;
     const { id, delta = { x: 0, y: 0 } } = target;
@@ -2631,10 +2651,27 @@ function applyNodeDragFromPointer(pointer, options = {}) {
     if (!entry || !entry.circle) return;
     const nx = baseX + delta.x;
     const ny = baseY + delta.y;
-    scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+    scheduleNodePositionUpdate(id, { x: nx, y: ny });
+    const startPositions = drag.startPositions;
+    if (!moved && startPositions && startPositions.has(id)) {
+      const origin = startPositions.get(id);
+      const dx = nx - origin.x;
+      const dy = ny - origin.y;
+      if (Math.hypot(dx, dy) > NODE_DRAG_DISTANCE_THRESHOLD) {
+        moved = true;
+      }
+    }
     applied = true;
   });
-  if (applied && options.markDragged !== false) {
+  drag.lastPointer = { x: pointer.x, y: pointer.y };
+  if (!moved && drag.startPointer) {
+    const dx = pointer.x - drag.startPointer.x;
+    const dy = pointer.y - drag.startPointer.y;
+    if (Math.hypot(dx, dy) > NODE_DRAG_DISTANCE_THRESHOLD) {
+      moved = true;
+    }
+  }
+  if (applied && moved && options.markDragged !== false) {
     mapState.nodeWasDragged = true;
   }
   return applied;
@@ -2701,7 +2738,7 @@ function handlePointerMove(e) {
     mapState.areaDrag.origin.forEach(({ id, pos }) => {
       const nx = pos.x + dx;
       const ny = pos.y + dy;
-      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+      scheduleNodePositionUpdate(id, { x: nx, y: ny });
     });
     mapState.nodeWasDragged = true;
     return;
@@ -3207,7 +3244,7 @@ function applyAutoPan(vector) {
     mapState.areaDrag.origin.forEach(({ id, pos }) => {
       const nx = pos.x + dx;
       const ny = pos.y + dy;
-      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+      scheduleNodePositionUpdate(id, { x: nx, y: ny });
     });
     mapState.nodeWasDragged = true;
   }
