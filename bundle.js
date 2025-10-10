@@ -18001,6 +18001,7 @@ var Sevenn = (() => {
   };
   var PAN_ACCELERATION = 1.8;
   var ZOOM_INTENSITY = 41e-4;
+  var NODE_DRAG_DISTANCE_THRESHOLD = 1.2;
   var ICONS = {
     sliders: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 7h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M6 12h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M6 17h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><circle cx="16" cy="7" r="2.5" stroke="currentColor" stroke-width="1.6" /><circle cx="11" cy="12" r="2.5" stroke="currentColor" stroke-width="1.6" /><circle cx="19" cy="17" r="2.5" stroke="currentColor" stroke-width="1.6" /></svg>',
     close: '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>',
@@ -19923,9 +19924,16 @@ var Sevenn = (() => {
             dragIds.push(it.id);
           }
           const primarySource = mapState.positions[it.id] || positions[it.id] || current;
-          const pointerOffset = { x: 0, y: 0 };
+          const pointerOffset = {
+            x: primarySource.x - pointer.x,
+            y: primarySource.y - pointer.y
+          };
+          const startPositions = /* @__PURE__ */ new Map();
           const targets = dragIds.map((id) => {
             const source = mapState.positions[id] || positions[id] || current;
+            if (!startPositions.has(id)) {
+              startPositions.set(id, { x: source.x, y: source.y });
+            }
             return {
               id,
               delta: {
@@ -19940,7 +19948,10 @@ var Sevenn = (() => {
             pointerId: e.pointerId,
             captureTarget: e.currentTarget || circle,
             client: { x: e.clientX, y: e.clientY },
-            pointerOffset
+            pointerOffset,
+            startPointer: { x: pointer.x, y: pointer.y },
+            startPositions,
+            lastPointer: { x: pointer.x, y: pointer.y }
           };
           if (mapState.nodeDrag.captureTarget?.setPointerCapture) {
             try {
@@ -20309,12 +20320,17 @@ var Sevenn = (() => {
     if (!pointer) return false;
     const drag = mapState.nodeDrag;
     if (!drag) return false;
+    const lastPointer = drag.lastPointer;
+    if (lastPointer && Math.abs(lastPointer.x - pointer.x) < 1e-4 && Math.abs(lastPointer.y - pointer.y) < 1e-4) {
+      return false;
+    }
     const targets = getNodeDragTargets();
     if (!targets.length) return false;
     const offset = drag.pointerOffset || { x: 0, y: 0 };
     const baseX = pointer.x + offset.x;
     const baseY = pointer.y + offset.y;
     let applied = false;
+    let moved = false;
     targets.forEach((target) => {
       if (!target) return;
       const { id, delta = { x: 0, y: 0 } } = target;
@@ -20323,10 +20339,27 @@ var Sevenn = (() => {
       if (!entry || !entry.circle) return;
       const nx = baseX + delta.x;
       const ny = baseY + delta.y;
-      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+      scheduleNodePositionUpdate(id, { x: nx, y: ny });
+      const startPositions = drag.startPositions;
+      if (!moved && startPositions && startPositions.has(id)) {
+        const origin = startPositions.get(id);
+        const dx = nx - origin.x;
+        const dy = ny - origin.y;
+        if (Math.hypot(dx, dy) > NODE_DRAG_DISTANCE_THRESHOLD) {
+          moved = true;
+        }
+      }
       applied = true;
     });
-    if (applied && options.markDragged !== false) {
+    drag.lastPointer = { x: pointer.x, y: pointer.y };
+    if (!moved && drag.startPointer) {
+      const dx = pointer.x - drag.startPointer.x;
+      const dy = pointer.y - drag.startPointer.y;
+      if (Math.hypot(dx, dy) > NODE_DRAG_DISTANCE_THRESHOLD) {
+        moved = true;
+      }
+    }
+    if (applied && moved && options.markDragged !== false) {
       mapState.nodeWasDragged = true;
     }
     return applied;
@@ -20387,7 +20420,7 @@ var Sevenn = (() => {
       mapState.areaDrag.origin.forEach(({ id, pos }) => {
         const nx = pos.x + dx;
         const ny = pos.y + dy;
-        scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+        scheduleNodePositionUpdate(id, { x: nx, y: ny });
       });
       mapState.nodeWasDragged = true;
       return;
@@ -20854,7 +20887,7 @@ var Sevenn = (() => {
       mapState.areaDrag.origin.forEach(({ id, pos }) => {
         const nx = pos.x + dx;
         const ny = pos.y + dy;
-        scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+        scheduleNodePositionUpdate(id, { x: nx, y: ny });
       });
       mapState.nodeWasDragged = true;
     }
