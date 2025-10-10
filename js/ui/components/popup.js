@@ -83,7 +83,7 @@ function normalizeHex(value) {
 }
 
 export function showPopup(item, options = {}) {
-  const { onEdit, onColorChange } = options;
+  const { onEdit, onColorChange, onLink } = options;
   const titleText = item?.name || item?.concept || 'Item';
   const accent = resolveAccentColor(item);
   const win = createFloatingWindow({ title: titleText, width: 560 });
@@ -195,6 +195,18 @@ export function showPopup(item, options = {}) {
       onEdit();
     });
     actions.appendChild(editBtn);
+  }
+
+  if (typeof onLink === 'function') {
+    const linkBtn = document.createElement('button');
+    linkBtn.type = 'button';
+    linkBtn.className = 'btn secondary';
+    linkBtn.textContent = 'Link';
+    linkBtn.addEventListener('click', () => {
+      void win.close('link');
+      onLink();
+    });
+    actions.appendChild(linkBtn);
   }
 
   const closeBtn = document.createElement('button');
