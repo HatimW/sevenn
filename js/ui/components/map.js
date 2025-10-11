@@ -2291,10 +2291,6 @@ export async function renderMap(root) {
           dragIds.push(it.id);
         }
         const primarySource = mapState.positions[it.id] || positions[it.id] || current;
-        const pointerOffset = {
-          x: primarySource.x - pointer.x,
-          y: primarySource.y - pointer.y
-        };
         const startPositions = new Map();
         const targets = dragIds.map(id => {
           const source = mapState.positions[id] || positions[id] || current;
@@ -2303,7 +2299,7 @@ export async function renderMap(root) {
           }
           return {
             id,
-            delta: {
+            offset: {
               x: source.x - primarySource.x,
               y: source.y - primarySource.y
             }
@@ -2315,7 +2311,6 @@ export async function renderMap(root) {
           pointerId: e.pointerId,
           captureTarget: e.currentTarget || circle,
           client: { x: e.clientX, y: e.clientY },
-          pointerOffset,
           startPointer: { x: pointer.x, y: pointer.y },
           startPositions,
           lastPointer: { x: pointer.x, y: pointer.y }
@@ -2692,7 +2687,7 @@ function getNodeDragTargets() {
     return drag.targets;
   }
   if (drag.id) {
-    return [{ id: drag.id, delta: { x: 0, y: 0 } }];
+    return [{ id: drag.id, offset: { x: 0, y: 0 } }];
   }
   return [];
 }
@@ -2712,30 +2707,18 @@ function applyNodeDragFromPointer(pointer, options = {}) {
   const targets = getNodeDragTargets();
   if (!targets.length) return false;
   const startPositions = drag.startPositions instanceof Map ? drag.startPositions : null;
-  const pointerStart = drag.startPointer || lastPointer || pointer;
-  const deltaX = pointer.x - (pointerStart?.x ?? pointer.x);
-  const deltaY = pointer.y - (pointerStart?.y ?? pointer.y);
-  const offset = drag.pointerOffset || { x: 0, y: 0 };
-  const baseX = pointer.x + offset.x;
-  const baseY = pointer.y + offset.y;
+  const baseX = pointer.x;
+  const baseY = pointer.y;
   let applied = false;
   let moved = false;
   targets.forEach(target => {
     if (!target) return;
-    const { id, delta = { x: 0, y: 0 } } = target;
+    const { id, offset = { x: 0, y: 0 } } = target;
     if (!id) return;
     const entry = mapState.elements.get(id);
     if (!entry || !entry.circle) return;
-    let nx;
-    let ny;
-    if (startPositions?.has(id)) {
-      const origin = startPositions.get(id);
-      nx = origin.x + deltaX;
-      ny = origin.y + deltaY;
-    } else {
-      nx = baseX + delta.x;
-      ny = baseY + delta.y;
-    }
+    const nx = baseX + offset.x;
+    const ny = baseY + offset.y;
     scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
     if (!moved && startPositions && startPositions.has(id)) {
       const origin = startPositions.get(id);
@@ -3127,28 +3110,78 @@ function getElementRadius(entry, id) {
   return getNodeRadius(id);
 }
 
+function estimateCircleCoverage(cx, cy, radius, minX, maxX, minY, maxY) {
+  if (!Number.isFinite(radius) || radius <= 0) {
+    return 0;
+  }
+  const diameter = radius * 2;
+  const samplesPerAxis = Math.max(6, Math.min(26, Math.ceil(diameter / 12)));
+  const step = diameter / samplesPerAxis;
+  if (!Number.isFinite(step) || step <= 0) {
+    return 0;
+  }
+  let inside = 0;
+  let total = 0;
+  for (let iy = 0; iy < samplesPerAxis; iy += 1) {
+    const sampleY = cy - radius + (iy + 0.5) * step;
+    for (let ix = 0; ix < samplesPerAxis; ix += 1) {
+      const sampleX = cx - radius + (ix + 0.5) * step;
+      const dx = sampleX - cx;
+      const dy = sampleY - cy;
+      if (dx * dx + dy * dy > radius * radius) {
+        continue;
+      }
+      total += 1;
+      if (
+        sampleX >= minX &&
+        sampleX <= maxX &&
+        sampleY >= minY &&
+        sampleY <= maxY
+      ) {
+        inside += 1;
+      }
+    }
+  }
+  if (!total) {
+    return 0;
+  }
+  return inside / total;
+}
+
 function collectNodesInRect(minX, maxX, minY, maxY) {
   const preview = [];
   const epsilon = 0.0001;
+  if (maxX - minX < epsilon || maxY - minY < epsilon) {
+    return preview;
+  }
   mapState.elements.forEach((entry, id) => {
     const pos = getElementPosition(entry, id);
     if (!pos) return;
     const radius = getElementRadius(entry, id);
+    if (!Number.isFinite(radius) || radius <= 0) return;
     const nodeMinX = pos.x - radius;
     const nodeMaxX = pos.x + radius;
     const nodeMinY = pos.y - radius;
     const nodeMaxY = pos.y + radius;
     const fullyInside =
-      nodeMinX >= minX - epsilon &&
-      nodeMaxX <= maxX + epsilon &&
-      nodeMinY >= minY - epsilon &&
-      nodeMaxY <= maxY + epsilon;
+      nodeMinX >= minX + epsilon &&
+      nodeMaxX <= maxX - epsilon &&
+      nodeMinY >= minY + epsilon &&
+      nodeMaxY <= maxY - epsilon;
+    if (fullyInside) {
+      preview.push(id);
+      return;
+    }
     const intersects =
-      nodeMaxX >= minX - epsilon &&
-      nodeMinX <= maxX + epsilon &&
-      nodeMaxY >= minY - epsilon &&
-      nodeMinY <= maxY + epsilon;
-    if (fullyInside || intersects) {
+      nodeMaxX > minX - epsilon &&
+      nodeMinX < maxX + epsilon &&
+      nodeMaxY > minY - epsilon &&
+      nodeMinY < maxY + epsilon;
+    if (!intersects) {
+      return;
+    }
+    const coverage = estimateCircleCoverage(pos.x, pos.y, radius, minX, maxX, minY, maxY);
+    if (coverage >= 0.75) {
       preview.push(id);
     }
   });
