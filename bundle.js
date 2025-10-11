@@ -18072,6 +18072,7 @@ var Sevenn = (() => {
     hiddenMenuTab: "nodes",
     panelVisible: true,
     menuPinned: false,
+    menuOpen: false,
     listenersAttached: false,
     draggingView: false,
     viewWasDragged: false,
@@ -19136,7 +19137,7 @@ var Sevenn = (() => {
         return (item.lectures || []).some((lec) => {
           if (!lec) return false;
           if (blockMatch && lec.blockId !== blockMatch) return false;
-          const values = new Set();
+          const values = /* @__PURE__ */ new Set();
           if (lec.id != null) {
             const str = String(lec.id).trim();
             if (str) {
@@ -19429,7 +19430,7 @@ var Sevenn = (() => {
     }
     const searchOverlay = createSearchOverlay();
     overlay.appendChild(searchOverlay);
-    let menuHoverOpen = Boolean(mapState.menuPinned);
+    let menuHoverOpen = Boolean(mapState.menuPinned) || Boolean(mapState.menuOpen);
     let menuHoverCloseTimer = null;
     const clearMenuHoverClose = () => {
       if (menuHoverCloseTimer !== null) {
@@ -19439,6 +19440,7 @@ var Sevenn = (() => {
     };
     const applyMenuState = () => {
       const open = Boolean(mapState.menuPinned) || menuHoverOpen;
+      mapState.menuOpen = open;
       menu.classList.toggle("open", open);
       menu.classList.toggle("pinned", Boolean(mapState.menuPinned));
       toggle.setAttribute("aria-expanded", open ? "true" : "false");
@@ -19450,6 +19452,7 @@ var Sevenn = (() => {
         mapState.menuPinned = true;
       }
       menuHoverOpen = true;
+      mapState.menuOpen = true;
       clearMenuHoverClose();
       applyMenuState();
     };
@@ -19458,6 +19461,9 @@ var Sevenn = (() => {
         mapState.menuPinned = false;
       }
       menuHoverOpen = false;
+      if (!mapState.menuPinned) {
+        mapState.menuOpen = false;
+      }
       clearMenuHoverClose();
       applyMenuState();
     };
@@ -20399,6 +20405,10 @@ var Sevenn = (() => {
     }
     const targets = getNodeDragTargets();
     if (!targets.length) return false;
+    const startPositions = drag.startPositions instanceof Map ? drag.startPositions : null;
+    const pointerStart = drag.startPointer || lastPointer || pointer;
+    const deltaX = pointer.x - (pointerStart?.x ?? pointer.x);
+    const deltaY = pointer.y - (pointerStart?.y ?? pointer.y);
     const offset = drag.pointerOffset || { x: 0, y: 0 };
     const baseX = pointer.x + offset.x;
     const baseY = pointer.y + offset.y;
@@ -20410,10 +20420,17 @@ var Sevenn = (() => {
       if (!id) return;
       const entry = mapState.elements.get(id);
       if (!entry || !entry.circle) return;
-      const nx = baseX + delta.x;
-      const ny = baseY + delta.y;
-    scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
-      const startPositions = drag.startPositions;
+      let nx;
+      let ny;
+      if (startPositions?.has(id)) {
+        const origin = startPositions.get(id);
+        nx = origin.x + deltaX;
+        ny = origin.y + deltaY;
+      } else {
+        nx = baseX + delta.x;
+        ny = baseY + delta.y;
+      }
+      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
       if (!moved && startPositions && startPositions.has(id)) {
         const origin = startPositions.get(id);
         const dx = nx - origin.x;
@@ -20493,7 +20510,7 @@ var Sevenn = (() => {
       mapState.areaDrag.origin.forEach(({ id, pos }) => {
         const nx = pos.x + dx;
         const ny = pos.y + dy;
-      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+        scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
       });
       mapState.nodeWasDragged = true;
       return;
@@ -20960,7 +20977,7 @@ var Sevenn = (() => {
       mapState.areaDrag.origin.forEach(({ id, pos }) => {
         const nx = pos.x + dx;
         const ny = pos.y + dy;
-      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+        scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
       });
       mapState.nodeWasDragged = true;
     }
@@ -21557,14 +21574,14 @@ var Sevenn = (() => {
     const searchInput = document.createElement("input");
     searchInput.type = "search";
     searchInput.className = "input map-linker-search";
-    searchInput.placeholder = "Search concepts…";
+    searchInput.placeholder = "Search concepts\u2026";
     searchField.appendChild(searchInput);
     container.appendChild(searchField);
     const list = document.createElement("div");
     list.className = "map-linker-results";
     container.appendChild(list);
     const allItems = Object.values(mapState.itemMap || {});
-    const existingLinks = new Map();
+    const existingLinks = /* @__PURE__ */ new Map();
     (source.links || []).forEach((link) => {
       if (link?.id) {
         existingLinks.set(link.id, link);
@@ -21573,15 +21590,11 @@ var Sevenn = (() => {
     const renderResults = () => {
       const query = searchInput.value.trim().toLowerCase();
       list.innerHTML = "";
-      const matches = allItems
-        .filter((item) => item && item.id !== source.id)
-        .filter((item) => {
-          if (!query) return true;
-          const label = (titleOf4(item) || "").toLowerCase();
-          return label.includes(query);
-        })
-        .sort((a, b) => (titleOf4(a) || "").localeCompare(titleOf4(b) || ""))
-        .slice(0, 15);
+      const matches = allItems.filter((item) => item && item.id !== source.id).filter((item) => {
+        if (!query) return true;
+        const label = (titleOf4(item) || "").toLowerCase();
+        return label.includes(query);
+      }).sort((a, b) => (titleOf4(a) || "").localeCompare(titleOf4(b) || "")).slice(0, 15);
       if (!matches.length) {
         const empty = document.createElement("div");
         empty.className = "map-linker-empty";
