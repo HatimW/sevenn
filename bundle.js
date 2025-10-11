@@ -18064,6 +18064,7 @@ var Sevenn = (() => {
     drug: "var(--blue)",
     concept: "var(--green)"
   };
+  var SELECTION_COVERAGE_THRESHOLD = 0.75;
   var mapState = {
     tool: TOOL.NAVIGATE,
     selectionIds: [],
@@ -20003,10 +20004,7 @@ var Sevenn = (() => {
             dragIds.push(it.id);
           }
           const primarySource = mapState.positions[it.id] || positions[it.id] || current;
-          const pointerOffset = {
-            x: primarySource.x - pointer.x,
-            y: primarySource.y - pointer.y
-          };
+          const pointerOffset = { x: 0, y: 0 };
           const startPositions = /* @__PURE__ */ new Map();
           const targets = dragIds.map((id) => {
             const source = mapState.positions[id] || positions[id] || current;
@@ -20796,24 +20794,54 @@ var Sevenn = (() => {
     }
     return getNodeRadius(id);
   }
-  function collectNodesInRect(minX, maxX, minY, maxY) {
+  function collectNodesInRect(minX, maxX, minY, maxY, { threshold = SELECTION_COVERAGE_THRESHOLD } = {}) {
     const preview = [];
-    const epsilon = 1e-4;
+    const rect = { minX, maxX, minY, maxY };
     mapState.elements.forEach((entry, id) => {
       const pos = getElementPosition(entry, id);
       if (!pos) return;
       const radius = getElementRadius(entry, id);
-      const nodeMinX = pos.x - radius;
-      const nodeMaxX = pos.x + radius;
-      const nodeMinY = pos.y - radius;
-      const nodeMaxY = pos.y + radius;
-      const fullyInside = nodeMinX >= minX - epsilon && nodeMaxX <= maxX + epsilon && nodeMinY >= minY - epsilon && nodeMaxY <= maxY + epsilon;
-      const intersects = nodeMaxX >= minX - epsilon && nodeMinX <= maxX + epsilon && nodeMaxY >= minY - epsilon && nodeMinY <= maxY + epsilon;
-      if (fullyInside || intersects) {
+      if (!Number.isFinite(radius) || radius <= 0) return;
+      const coverage = estimateNodeCoverageWithinRect(pos, radius, rect);
+      if (coverage >= threshold) {
         preview.push(id);
       }
     });
     return preview;
+  }
+  function estimateNodeCoverageWithinRect(center, radius, rect) {
+    const epsilon = 1e-4;
+    const circleMinX = center.x - radius;
+    const circleMaxX = center.x + radius;
+    const circleMinY = center.y - radius;
+    const circleMaxY = center.y + radius;
+    if (circleMaxX <= rect.minX + epsilon || circleMinX >= rect.maxX - epsilon || circleMaxY <= rect.minY + epsilon || circleMinY >= rect.maxY - epsilon) {
+      return 0;
+    }
+    if (circleMinX >= rect.minX - epsilon && circleMaxX <= rect.maxX + epsilon && circleMinY >= rect.minY - epsilon && circleMaxY <= rect.maxY + epsilon) {
+      return 1;
+    }
+    const diameter = radius * 2;
+    const gridSize = Math.max(7, Math.min(21, Math.ceil(diameter / 12)));
+    const step = diameter / (gridSize - 1 || 1);
+    const radiusSq = radius * radius;
+    let covered = 0;
+    let total = 0;
+    for (let gx = 0; gx < gridSize; gx += 1) {
+      const offsetX = -radius + gx * step;
+      for (let gy = 0; gy < gridSize; gy += 1) {
+        const offsetY = -radius + gy * step;
+        if (offsetX * offsetX + offsetY * offsetY > radiusSq + epsilon) continue;
+        total += 1;
+        const sampleX = center.x + offsetX;
+        const sampleY = center.y + offsetY;
+        if (sampleX >= rect.minX - epsilon && sampleX <= rect.maxX + epsilon && sampleY >= rect.minY - epsilon && sampleY <= rect.maxY + epsilon) {
+          covered += 1;
+        }
+      }
+    }
+    if (!total) return 0;
+    return covered / total;
   }
   function updateSelectionBox() {
     if (!mapState.selectionRect || !mapState.selectionBox || !mapState.svg) return;

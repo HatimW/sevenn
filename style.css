@@ -6101,6 +6101,8 @@ body.map-toolbox-dragging {
   border: 1px dashed var(--blue);
   background: rgba(166, 217, 255, 0.12);
   pointer-events: none;
+  will-change: left, top, width, height;
+  box-sizing: border-box;
   z-index: 5;
 }
 
