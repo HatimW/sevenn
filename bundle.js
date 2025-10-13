@@ -1,31 +1,4 @@
-var Sevenn = (() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-    }
-    return to;
-  };
-  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
-  // js/main.js
-  var main_exports = {};
-  __export(main_exports, {
-    render: () => renderApp,
-    renderApp: () => renderApp,
-    resolveListKind: () => resolveListKind,
-    tabs: () => tabs
-  });
-
+(() => {
   // js/storage/preferences.js
   var STORAGE_KEY = "sevenn-ui-preferences";
   var cache = null;
@@ -18113,6 +18086,7 @@ var Sevenn = (() => {
     svgRect: null,
     svgRectTime: 0,
     justCompletedSelection: false,
+    selectionChangedOnPointerDown: false,
     edgeTooltip: null,
     hoveredEdge: null,
     hoveredEdgePointer: { x: 0, y: 0 },
@@ -19974,25 +19948,41 @@ var Sevenn = (() => {
         e.stopPropagation();
         e.preventDefault();
         mapState.suppressNextClick = false;
+        mapState.selectionChangedOnPointerDown = false;
         getSvgRect({ force: true });
         const pointer = clientToMap(e.clientX, e.clientY);
         const current = mapState.positions[it.id] || pos;
         const { x, y } = pointer;
         if (isNavigateTool) {
           const selectionSet = new Set(mapState.selectionIds);
+          let selectionChanged = false;
           let allowDrag = true;
-          if (e.shiftKey) {
+          if (e.metaKey || e.ctrlKey) {
+            if (selectionSet.has(it.id)) {
+              selectionSet.delete(it.id);
+              selectionChanged = true;
+              allowDrag = false;
+            } else {
+              selectionSet.add(it.id);
+              selectionChanged = true;
+            }
+          } else if (e.shiftKey) {
             if (!selectionSet.has(it.id)) {
               selectionSet.add(it.id);
+              selectionChanged = true;
             }
-          } else if (!selectionSet.has(it.id)) {
+          } else if (selectionSet.size !== 1 || !selectionSet.has(it.id)) {
             selectionSet.clear();
             selectionSet.add(it.id);
+            selectionChanged = true;
           }
           const uniqueSelection = Array.from(selectionSet);
-          mapState.selectionIds = uniqueSelection;
-          mapState.previewSelection = null;
-          updateSelectionHighlight();
+          if (selectionChanged) {
+            mapState.selectionIds = uniqueSelection;
+            mapState.previewSelection = null;
+            mapState.selectionChangedOnPointerDown = true;
+            updateSelectionHighlight();
+          }
           if (!allowDrag || !uniqueSelection.length) {
             mapState.nodeDrag = null;
             mapState.nodeWasDragged = false;
@@ -20004,19 +19994,22 @@ var Sevenn = (() => {
             dragIds.push(it.id);
           }
           const primarySource = mapState.positions[it.id] || positions[it.id] || current;
-          const pointerOffset = { x: 0, y: 0 };
-          const startPositions = /* @__PURE__ */ new Map();
+          const pointerOffset = {
+            x: primarySource.x - pointer.x,
+            y: primarySource.y - pointer.y
+          };
+          const originPositions = /* @__PURE__ */ new Map();
           const targets = dragIds.map((id) => {
             const source = mapState.positions[id] || positions[id] || current;
-            if (!startPositions.has(id)) {
-              startPositions.set(id, { x: source.x, y: source.y });
-            }
+            const origin = { x: source.x, y: source.y };
+            originPositions.set(id, origin);
             return {
               id,
-              delta: {
+              offset: {
                 x: source.x - primarySource.x,
                 y: source.y - primarySource.y
-              }
+              },
+              origin
             };
           });
           mapState.nodeDrag = {
@@ -20026,8 +20019,8 @@ var Sevenn = (() => {
             captureTarget: e.currentTarget || circle,
             client: { x: e.clientX, y: e.clientY },
             pointerOffset,
-            startPointer: { x: pointer.x, y: pointer.y },
-            startPositions,
+            originPointer: { x: pointer.x, y: pointer.y },
+            origins: originPositions,
             lastPointer: { x: pointer.x, y: pointer.y }
           };
           if (mapState.nodeDrag.captureTarget?.setPointerCapture) {
@@ -20069,17 +20062,8 @@ var Sevenn = (() => {
       circle.addEventListener("pointerdown", handleNodePointerDown);
       circle.addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (mapState.tool === TOOL.NAVIGATE && e.shiftKey) {
-          mapState.suppressNextClick = false;
-          const set = new Set(mapState.selectionIds);
-          if (set.has(it.id)) {
-            set.delete(it.id);
-          } else {
-            set.add(it.id);
-          }
-          mapState.selectionIds = Array.from(set);
-          mapState.previewSelection = null;
-          updateSelectionHighlight();
+        if (mapState.selectionChangedOnPointerDown) {
+          mapState.selectionChangedOnPointerDown = false;
           mapState.nodeWasDragged = false;
           return;
         }
@@ -20389,7 +20373,7 @@ var Sevenn = (() => {
       return drag.targets;
     }
     if (drag.id) {
-      return [{ id: drag.id, delta: { x: 0, y: 0 } }];
+      return [{ id: drag.id, offset: { x: 0, y: 0 } }];
     }
     return [];
   }
@@ -20403,10 +20387,6 @@ var Sevenn = (() => {
     }
     const targets = getNodeDragTargets();
     if (!targets.length) return false;
-    const startPositions = drag.startPositions instanceof Map ? drag.startPositions : null;
-    const pointerStart = drag.startPointer || lastPointer || pointer;
-    const deltaX = pointer.x - (pointerStart?.x ?? pointer.x);
-    const deltaY = pointer.y - (pointerStart?.y ?? pointer.y);
     const offset = drag.pointerOffset || { x: 0, y: 0 };
     const baseX = pointer.x + offset.x;
     const baseY = pointer.y + offset.y;
@@ -20414,35 +20394,29 @@ var Sevenn = (() => {
     let moved = false;
     targets.forEach((target) => {
       if (!target) return;
-      const { id, delta = { x: 0, y: 0 } } = target;
+      const { id, offset: targetOffset = { x: 0, y: 0 } } = target;
       if (!id) return;
       const entry = mapState.elements.get(id);
       if (!entry || !entry.circle) return;
-      let nx;
-      let ny;
-      if (startPositions?.has(id)) {
-        const origin = startPositions.get(id);
-        nx = origin.x + deltaX;
-        ny = origin.y + deltaY;
-      } else {
-        nx = baseX + delta.x;
-        ny = baseY + delta.y;
-      }
+      const nx = baseX + targetOffset.x;
+      const ny = baseY + targetOffset.y;
       scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
-      if (!moved && startPositions && startPositions.has(id)) {
-        const origin = startPositions.get(id);
-        const dx = nx - origin.x;
-        const dy = ny - origin.y;
-        if (Math.hypot(dx, dy) > NODE_DRAG_DISTANCE_THRESHOLD) {
-          moved = true;
+      if (!moved) {
+        const origin = drag.origins instanceof Map ? drag.origins.get(id) : target.origin;
+        if (origin) {
+          const dx = nx - origin.x;
+          const dy = ny - origin.y;
+          if (Math.hypot(dx, dy) > NODE_DRAG_DISTANCE_THRESHOLD) {
+            moved = true;
+          }
         }
       }
       applied = true;
     });
     drag.lastPointer = { x: pointer.x, y: pointer.y };
-    if (!moved && drag.startPointer) {
-      const dx = pointer.x - drag.startPointer.x;
-      const dy = pointer.y - drag.startPointer.y;
+    if (!moved && drag.originPointer) {
+      const dx = pointer.x - drag.originPointer.x;
+      const dy = pointer.y - drag.originPointer.y;
       if (Math.hypot(dx, dy) > NODE_DRAG_DISTANCE_THRESHOLD) {
         moved = true;
       }
@@ -20593,6 +20567,7 @@ var Sevenn = (() => {
         }
       }
       mapState.nodeDrag = null;
+      mapState.selectionChangedOnPointerDown = false;
       cursorNeedsRefresh = true;
       if (mapState.nodeWasDragged) {
         const ids = dragTargets.map((target) => target.id).filter(Boolean);
@@ -20810,38 +20785,42 @@ var Sevenn = (() => {
     return preview;
   }
   function estimateNodeCoverageWithinRect(center, radius, rect) {
+    if (!Number.isFinite(radius) || radius <= 0) return 0;
+    const circleArea = Math.PI * radius * radius;
+    if (!Number.isFinite(circleArea) || circleArea <= 0) return 0;
     const epsilon = 1e-4;
-    const circleMinX = center.x - radius;
-    const circleMaxX = center.x + radius;
-    const circleMinY = center.y - radius;
-    const circleMaxY = center.y + radius;
-    if (circleMaxX <= rect.minX + epsilon || circleMinX >= rect.maxX - epsilon || circleMaxY <= rect.minY + epsilon || circleMinY >= rect.maxY - epsilon) {
+    const localRect = {
+      minX: rect.minX - center.x,
+      maxX: rect.maxX - center.x,
+      minY: rect.minY - center.y,
+      maxY: rect.maxY - center.y
+    };
+    const circleMin = -radius;
+    const circleMax = radius;
+    if (localRect.maxX <= circleMin + epsilon || localRect.minX >= circleMax - epsilon || localRect.maxY <= circleMin + epsilon || localRect.minY >= circleMax - epsilon) {
       return 0;
     }
-    if (circleMinX >= rect.minX - epsilon && circleMaxX <= rect.maxX + epsilon && circleMinY >= rect.minY - epsilon && circleMaxY <= rect.maxY + epsilon) {
+    if (localRect.minX <= circleMin + epsilon && localRect.maxX >= circleMax - epsilon && localRect.minY <= circleMin + epsilon && localRect.maxY >= circleMax - epsilon) {
       return 1;
     }
-    const diameter = radius * 2;
-    const gridSize = Math.max(7, Math.min(21, Math.ceil(diameter / 12)));
-    const step = diameter / (gridSize - 1 || 1);
-    const radiusSq = radius * radius;
-    let covered = 0;
-    let total = 0;
-    for (let gx = 0; gx < gridSize; gx += 1) {
-      const offsetX = -radius + gx * step;
-      for (let gy = 0; gy < gridSize; gy += 1) {
-        const offsetY = -radius + gy * step;
-        if (offsetX * offsetX + offsetY * offsetY > radiusSq + epsilon) continue;
-        total += 1;
-        const sampleX = center.x + offsetX;
-        const sampleY = center.y + offsetY;
-        if (sampleX >= rect.minX - epsilon && sampleX <= rect.maxX + epsilon && sampleY >= rect.minY - epsilon && sampleY <= rect.maxY + epsilon) {
-          covered += 1;
-        }
-      }
+    const xStart = Math.max(localRect.minX, circleMin);
+    const xEnd = Math.min(localRect.maxX, circleMax);
+    if (xEnd <= xStart) {
+      return 0;
     }
-    if (!total) return 0;
-    return covered / total;
+    const span = xEnd - xStart;
+    const stepCount = Math.max(24, Math.ceil(span / Math.max(radius / 12, 0.5)));
+    const step = span / stepCount;
+    let intersectionArea = 0;
+    for (let i = 0; i < stepCount; i += 1) {
+      const xMid = xStart + (i + 0.5) * step;
+      const limit = Math.sqrt(Math.max(radius * radius - xMid * xMid, 0));
+      const segMin = Math.max(localRect.minY, -limit);
+      const segMax = Math.min(localRect.maxY, limit);
+      if (segMax <= segMin) continue;
+      intersectionArea += (segMax - segMin) * step;
+    }
+    return Math.max(0, Math.min(1, intersectionArea / circleArea));
   }
   function updateSelectionBox() {
     if (!mapState.selectionRect || !mapState.selectionBox || !mapState.svg) return;
@@ -22672,5 +22651,4 @@ var Sevenn = (() => {
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
-  return __toCommonJS(main_exports);
 })();
