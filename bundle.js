@@ -20204,23 +20204,23 @@
     const configs = [
       {
         id: "arrow-end",
-        viewBox: "0 0 12 12",
-        refX: 10.4,
-        refY: 6,
-        markerWidth: 7.6,
-        markerHeight: 7.6,
-        path: "M1 1 L11 6 L1 11 Z",
+        viewBox: "0 0 16 16",
+        refX: 14,
+        refY: 8,
+        markerWidth: 9,
+        markerHeight: 9,
+        path: "M2 2 L14 8 L2 14 L6 8 Z",
         units: "strokeWidth",
         scaleMode: "stroke"
       },
       {
         id: "arrow-start",
-        viewBox: "0 0 12 12",
-        refX: 1.6,
-        refY: 6,
-        markerWidth: 7.6,
-        markerHeight: 7.6,
-        path: "M11 1 L1 6 L11 11 Z",
+        viewBox: "0 0 16 16",
+        refX: 2,
+        refY: 8,
+        markerWidth: 9,
+        markerHeight: 9,
+        path: "M14 2 L2 8 L14 14 L10 8 Z",
         units: "strokeWidth",
         scaleMode: "stroke"
       }
@@ -20453,6 +20453,13 @@
     if (mapState.edgeDrag && mapState.edgeDrag.pointerId === e.pointerId) {
       const drag = mapState.edgeDrag;
       if (!drag.line || typeof drag.handleIndex !== "number") return;
+      const distance = Math.hypot(e.clientX - drag.clientStart.x, e.clientY - drag.clientStart.y);
+      if (!drag.hasDragged && distance < 2.4) {
+        return;
+      }
+      if (!drag.hasDragged) {
+        drag.hasDragged = true;
+      }
       const pointer = clientToMap(e.clientX, e.clientY);
       const base = drag.base;
       if (!pointer || !base) return;
@@ -20474,7 +20481,7 @@
       drag.currentOffsets[index] = normalized2;
       handle.offset = normalized2;
       handle.weight = weight;
-      drag.moved = drag.moved || Math.abs(normalized2 - drag.startOffsets[index]) > 5e-4;
+      drag.offsetChanged = drag.offsetChanged || Math.abs(normalized2 - drag.startOffsets[index]) > 5e-4;
       const patchHandles = handles.map((h) => ({ position: h.position, offset: h.offset }));
       applyLineStyle(drag.line, { curveHandles: patchHandles });
       return;
@@ -20554,20 +20561,10 @@
         }
       }
       const handles = drag.handles || [];
-      const changed = handles.some((handle, idx) => Math.abs((drag.currentOffsets?.[idx] ?? handle.offset) - (drag.startOffsets?.[idx] ?? handle.offset)) > 5e-4);
+      const changed = drag.offsetChanged || handles.some((handle, idx) => Math.abs((drag.currentOffsets?.[idx] ?? handle.offset) - (drag.startOffsets?.[idx] ?? handle.offset)) > 5e-4);
       if (changed) {
         const payloadHandles = handles.map((handle) => ({ position: handle.position, offset: handle.offset }));
-        let dominant = { position: DEFAULT_CURVE_ANCHOR, offset: 0 };
-        payloadHandles.forEach((handle) => {
-          if (Math.abs(handle.offset) > Math.abs(dominant.offset)) {
-            dominant = handle;
-          }
-        });
-        const patch = {
-          curveHandles: payloadHandles,
-          curve: dominant.offset,
-          curveAnchor: dominant.position
-        };
+        const patch = buildCurvePatchFromHandles(payloadHandles);
         await updateLink(drag.aId, drag.bId, patch);
         applyLineStyle(drag.line, patch);
         applyLinkPatchToState(drag.aId, drag.bId, patch);
@@ -20672,6 +20669,32 @@
     if (cursorNeedsRefresh) {
       refreshCursor({ keepOverride: true });
     }
+  }
+  function buildCurvePatchFromHandles(handles = []) {
+    const sanitized = Array.isArray(handles)
+      ? handles.map((handle) => ({
+        position: clampHandlePosition(handle.position),
+        offset: clampHandleOffset(handle.offset)
+      })).filter((handle) => Number.isFinite(handle.position) && Number.isFinite(handle.offset))
+      : [];
+    if (!sanitized.length) {
+      return {
+        curveHandles: [],
+        curve: 0,
+        curveAnchor: DEFAULT_CURVE_ANCHOR
+      };
+    }
+    let dominant = { position: DEFAULT_CURVE_ANCHOR, offset: 0 };
+    sanitized.forEach((handle) => {
+      if (Math.abs(handle.offset) > Math.abs(dominant.offset)) {
+        dominant = handle;
+      }
+    });
+    return {
+      curveHandles: sanitized,
+      curve: clampHandleOffset(dominant.offset),
+      curveAnchor: clampHandlePosition(dominant.position)
+    };
   }
   function scheduleNodePositionUpdate(id, pos, options = {}) {
     if (!id || !pos) return;
@@ -21274,7 +21297,8 @@
         uy: geometry.uy,
         trimmedLength: baseLength
       },
-      moved: false,
+      offsetChanged: false,
+      hasDragged: false,
       geometry,
       fromHandle: Boolean(evt?.target && evt.target !== line),
       clientStart: { x: evt.clientX, y: evt.clientY }
@@ -22446,42 +22470,15 @@
   }
   function resolveLineHandles(line, info = {}, overrides = {}, context = {}) {
     const datasetHandles = line?.dataset?.handles ? parseCurveHandles(line.dataset.handles) : null;
-    const datasetAuto = line?.dataset?.autoCurve === "1";
     const infoHandles = parseCurveHandles(
       info.curveHandles ?? info.curvePoints ?? info.curveOffsets ?? info.handles
     );
-    const manualRequested = Boolean(
-      infoHandles && infoHandles.length || Object.prototype.hasOwnProperty.call(info, "curve") || Object.prototype.hasOwnProperty.call(info, "curveAnchor") || Object.prototype.hasOwnProperty.call(info, "anchor") || Number.isFinite(overrides.curveOverride) || Number.isFinite(overrides.anchorOverride)
-    );
-    if (manualRequested && line?.dataset) {
-      delete line.dataset.autoCurve;
-    }
     let handles = [];
-    if (datasetHandles && datasetHandles.length && !datasetAuto) {
+    if (datasetHandles && datasetHandles.length) {
       handles = mergeCurveHandles(handles, datasetHandles);
     }
     if (infoHandles && infoHandles.length) {
       handles = mergeCurveHandles(handles, infoHandles);
-    }
-    const aId = context.aId ?? info.aId ?? line?.dataset?.a;
-    const bId = context.bId ?? info.bId ?? line?.dataset?.b;
-    if (!handles.length && !manualRequested) {
-      const autoHandles = computeAutoCurveHandles({
-        line,
-        aId,
-        bId,
-        segment: context.segment,
-        decoration: context.decoration,
-        decorationDirection: context.decorationDirection
-      });
-      if (autoHandles.length) {
-        handles = mergeCurveHandles(handles, autoHandles);
-        if (line?.dataset) {
-          line.dataset.autoCurve = "1";
-        }
-      } else if (line?.dataset) {
-        delete line.dataset.autoCurve;
-      }
     }
     if (!handles.length) {
       handles = createDefaultCurveHandles();
@@ -22489,9 +22486,6 @@
     if (Number.isFinite(overrides.curveOverride)) {
       const anchor = Number.isFinite(overrides.anchorOverride) ? overrides.anchorOverride : DEFAULT_CURVE_ANCHOR;
       handles = mergeCurveHandles(handles, [{ position: anchor, offset: overrides.curveOverride }]);
-      if (line?.dataset) {
-        delete line.dataset.autoCurve;
-      }
     }
     return handles.map((handle) => ({
       position: clampHandlePosition(handle.position),
@@ -22904,8 +22898,8 @@
     return { handles, index };
   }
   function computeDecorationTrim(decoration, direction, baseWidth) {
-    const arrowAllowance = Math.max(18, baseWidth * 3.4);
-    const inhibitAllowance = Math.max(10, baseWidth * 2.2);
+    const arrowAllowance = Math.max(22, baseWidth * 4.2);
+    const inhibitAllowance = Math.max(12, baseWidth * 2.6);
     let trimA = 0;
     let trimB = 0;
     if (decoration === "arrow") {
@@ -23000,6 +22994,9 @@
   }
   function applyLineStyle(line, info = {}) {
     if (!line) return;
+    if (line.dataset && Object.prototype.hasOwnProperty.call(line.dataset, "autoCurve")) {
+      delete line.dataset.autoCurve;
+    }
     const previousColor = line.dataset.color;
     const previousThickness = line.dataset.thickness;
     const previousLabel = line.dataset.label;
@@ -23095,11 +23092,7 @@
       }
     }
     updateLineStrokeWidth(line);
-    if (geometry) {
-      syncLineHandles(line, geometry);
-    } else {
-      removeLineHandles(line);
-    }
+    removeLineHandles(line);
     LINE_STYLE_CLASSNAMES.forEach((cls) => line.classList.remove(cls));
     if (style) {
       line.classList.add(`map-edge--${style}`);
@@ -23179,64 +23172,13 @@
       }
     }
   }
-  function ensureHandleElements(line, count) {
-    if (!line) return [];
-    if (!line._handleElements) {
-      line._handleElements = [];
-    }
-    const parent = line.parentNode;
-    if (!parent) return line._handleElements;
-    while (line._handleElements.length < count) {
-      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      circle.classList.add("map-edge-handle");
-      circle.setAttribute("r", "6");
-      circle.addEventListener("pointerdown", (evt) => {
-        if (evt.button !== 0) return;
-        if (mapState.tool !== TOOL.NAVIGATE) return;
-        evt.stopPropagation();
-        evt.preventDefault();
-        const index = Number(circle.dataset.index) || 0;
-        mapState.suppressNextClick = false;
-        beginEdgeHandleDrag(line, index, evt);
-      });
-      parent.appendChild(circle);
-      line._handleElements.push(circle);
-    }
-    while (line._handleElements.length > count) {
-      const circle = line._handleElements.pop();
-      if (circle) circle.remove();
-    }
-    return line._handleElements;
-  }
   function removeLineHandles(line) {
     if (!line?._handleElements) return;
     line._handleElements.forEach((circle) => circle.remove());
     line._handleElements = null;
   }
-  function syncLineHandles(line, geometry) {
-    if (!line) return;
-    const handles = Array.isArray(geometry?.handles) ? geometry.handles : [];
-    if (!handles.length) {
-      removeLineHandles(line);
-      return;
-    }
-    const elements = ensureHandleElements(line, handles.length);
-    const { lineScale = 1 } = getCurrentScales();
-    const baseSize = Math.max(6, (geometry?.baseWidth || getLineThicknessValue(line.dataset.thickness)) * 0.95);
-    handles.forEach((handle, index) => {
-      const circle = elements[index];
-      if (!circle) return;
-      circle.dataset.index = String(index);
-      circle.dataset.position = String(handle.position ?? DEFAULT_CURVE_ANCHOR);
-      circle.dataset.offset = String(handle.offset ?? 0);
-      circle.dataset.a = line.dataset.a || "";
-      circle.dataset.b = line.dataset.b || "";
-      const radius = Math.max(5, baseSize * lineScale * 0.8);
-      circle.setAttribute("cx", handle.point?.x ?? geometry.startX ?? 0);
-      circle.setAttribute("cy", handle.point?.y ?? geometry.startY ?? 0);
-      circle.setAttribute("r", radius);
-      circle.classList.toggle("active", Math.abs(handle.offset ?? 0) > 1e-3);
-    });
+  function syncLineHandles(line) {
+    removeLineHandles(line);
   }
   function syncLineDecoration(line) {
     const decoration = line?.dataset?.decoration || DEFAULT_LINE_DECORATION;
@@ -23299,7 +23241,7 @@
     const overlayBase = Math.max(geometry.baseWidth * 1.35, 2.8);
     overlay.dataset.baseWidth = String(overlayBase);
     overlay.dataset.decoration = "block";
-    const color = line.dataset.color || line.getAttribute("stroke") || "#f43f5e";
+    const color = "#ef4444";
     overlay.setAttribute("stroke", color);
     overlay.style.stroke = color;
     overlay.setAttribute("stroke-width", overlayBase * lineScale);
@@ -23466,6 +23408,39 @@
     nameInput.value = link.name || "";
     nameLabel.appendChild(nameInput);
     menu.appendChild(nameLabel);
+    const autoBtn = document.createElement("button");
+    autoBtn.type = "button";
+    autoBtn.className = "btn secondary";
+    autoBtn.textContent = "Find best path";
+    autoBtn.addEventListener("click", async () => {
+      autoBtn.disabled = true;
+      try {
+        const decorationValue = line.dataset.decoration || appearance.decoration || DEFAULT_LINE_DECORATION;
+        const storedDirection = line.dataset.direction || line.dataset.decorationDirection || appearance.decorationDirection || DEFAULT_DECORATION_DIRECTION;
+        const directionValue = decorationValue === "none" || decorationValue === "block" ? DEFAULT_DECORATION_DIRECTION : storedDirection;
+        const thicknessValue = line.dataset.thickness || link.thickness || DEFAULT_LINE_THICKNESS;
+        const trims = computeDecorationTrim(decorationValue, directionValue, getLineThicknessValue(thicknessValue));
+        const segment = computeTrimmedSegment(aId, bId, trims);
+        if (!segment) return;
+        const autoHandles = computeAutoCurveHandles({
+          line,
+          aId,
+          bId,
+          segment,
+          decoration: decorationValue,
+          decorationDirection: directionValue
+        });
+        const patch = buildCurvePatchFromHandles(autoHandles);
+        await updateLink(aId, bId, patch);
+        applyLineStyle(line, patch);
+        applyLinkPatchToState(aId, bId, patch);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        autoBtn.disabled = false;
+      }
+    });
+    menu.appendChild(autoBtn);
     const updateDirectionDisabled = () => {
       const deco = decorationSel.value;
       const disable = deco === "none" || deco === "block";
