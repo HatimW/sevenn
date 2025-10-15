@@ -4939,6 +4939,11 @@ button.builder-pill.builder-pill-outline {
   transition: stroke 160ms ease, stroke-width 160ms ease, opacity 160ms ease, filter 160ms ease;
 }
 
+.map-edge--hover {
+  opacity: 1;
+  filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.28));
+}
+
 .map-edge--solid {
   opacity: 0.92;
 }
@@ -5032,41 +5037,101 @@ button.builder-pill.builder-pill-outline {
   cursor: grabbing;
 }
 
+
 .line-menu {
   position: absolute;
-  background: rgba(15, 23, 42, 0.95);
+  background: rgba(15, 23, 42, 0.92);
   border: 1px solid rgba(148, 163, 184, 0.35);
-  padding: 14px;
-  border-radius: 14px;
+  padding: 20px;
+  border-radius: var(--radius);
   color: var(--text);
   z-index: 1000;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-width: 260px;
-  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.55);
-  backdrop-filter: blur(14px);
+  gap: 18px;
+  min-width: 300px;
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(18px);
 }
-.line-menu label {
+
+.line-menu__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.line-menu__header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.line-menu__close {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--text-muted);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.line-menu__close:hover,
+.line-menu__close:focus-visible {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(56, 189, 248, 0.55);
+  color: var(--text);
+}
+
+.line-menu__body {
   display: flex;
   flex-direction: column;
-  font-size: 13px;
+  gap: 16px;
+}
+
+.line-menu__field {
+  display: flex;
+  flex-direction: column;
   gap: 6px;
+  font-size: 13px;
   color: var(--text-muted);
+}
+
+.line-menu__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.line-menu__row .line-menu__field {
+  flex: 1 1 auto;
 }
 
 .line-menu-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-size: 13px;
-  color: var(--gray);
-  padding: 2px 0;
+  color: var(--text-muted);
 }
 
 .line-menu-toggle input {
   width: 16px;
   height: 16px;
+}
+
+.line-menu__actions {
+  display: flex;
+  gap: 12px;
+}
+
+.line-menu__actions .btn {
+  flex: 1 1 0;
 }
 
 .line-menu input[type="text"],
@@ -5089,15 +5154,25 @@ button.builder-pill.builder-pill-outline {
 }
 
 .line-menu input[type="color"] {
-  height: 42px;
+  width: 100%;
+  height: 44px;
   border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.4);
   padding: 0;
   background: transparent;
 }
 
-.line-menu .btn {
-  width: 100%;
+.btn.ghost {
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: var(--text-muted);
+}
+
+.btn.ghost:hover,
+.btn.ghost:focus-visible {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.55);
+  color: var(--text);
 }
 
 .map-wrapper {
