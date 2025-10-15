@@ -1,31 +1,4 @@
-var Sevenn = (() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-    }
-    return to;
-  };
-  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
-  // js/main.js
-  var main_exports = {};
-  __export(main_exports, {
-    render: () => renderApp,
-    renderApp: () => renderApp,
-    resolveListKind: () => resolveListKind,
-    tabs: () => tabs
-  });
-
+(() => {
   // js/storage/preferences.js
   var STORAGE_KEY = "sevenn-ui-preferences";
   var cache = null;
@@ -18112,6 +18085,10 @@ var Sevenn = (() => {
   var DEFAULT_LINE_GLOW = false;
   var DEFAULT_LINE_THICKNESS = "regular";
   var DEFAULT_CURVE_ANCHOR = 0.5;
+  var CURVE_HANDLE_COUNT = 8;
+  var CURVE_HANDLE_MAX_OFFSET = 3.5;
+  var CURVE_HANDLE_WEIGHT_POWER = 1.35;
+  var CURVE_HANDLE_WEIGHT_GAIN = 1.2;
   var LINE_STYLE_OPTIONS = [
     { value: "solid", label: "Smooth" },
     { value: "dashed", label: "Dashed" },
@@ -20350,14 +20327,7 @@ var Sevenn = (() => {
         beginViewDrag(e);
       } else {
         e.preventDefault();
-        mapState.selectionRect = {
-          pointerId: e.pointerId,
-          startClient: { x: e.clientX, y: e.clientY },
-          currentClient: { x: e.clientX, y: e.clientY },
-          startMap: clientToMap(e.clientX, e.clientY),
-          currentMap: clientToMap(e.clientX, e.clientY)
-        };
-        mapState.selectionBox.classList.remove("hidden");
+        startSelectionDrag(e.pointerId, e.clientX, e.clientY);
         if (svg.setPointerCapture) {
           try {
             svg.setPointerCapture(e.pointerId);
@@ -20482,31 +20452,31 @@ var Sevenn = (() => {
     }
     if (mapState.edgeDrag && mapState.edgeDrag.pointerId === e.pointerId) {
       const drag = mapState.edgeDrag;
-      if (!drag.line) return;
-      const geometry = getLineGeometry(drag.aId, drag.bId, { line: drag.line, curve: drag.currentCurve, anchor: drag.anchor });
-      if (!geometry) return;
+      if (!drag.line || typeof drag.handleIndex !== "number") return;
       const pointer = clientToMap(e.clientX, e.clientY);
-      const dx = geometry.endX - geometry.startX;
-      const dy = geometry.endY - geometry.startY;
-      const lenSq = Math.max(dx * dx + dy * dy, 1);
-      const projection = ((pointer.x - geometry.startX) * dx + (pointer.y - geometry.startY) * dy) / lenSq;
-      const range = getAnchorRange(drag.handle);
-      drag.anchor = clamp2(projection, range.min, range.max);
-      const anchorPoint = {
-        x: geometry.startX + dx * drag.anchor,
-        y: geometry.startY + dy * drag.anchor
-      };
-      const normal = { x: -geometry.uy, y: geometry.ux };
-      const offset = (pointer.x - anchorPoint.x) * normal.x + (pointer.y - anchorPoint.y) * normal.y;
-      const length = Math.max(geometry.trimmedLength || Math.hypot(dx, dy) || 1, 1);
-      const normalized2 = clamp2(offset / length, -3.5, 3.5);
-      drag.currentCurve = normalized2;
-      const curveDelta = Math.abs((drag.startCurve ?? 0) - normalized2);
-      const anchorDelta = Math.abs((drag.startAnchor ?? DEFAULT_CURVE_ANCHOR) - drag.anchor);
-      if (curveDelta > 2e-3 || anchorDelta > 0.01) {
-        drag.moved = true;
-        applyLineStyle(drag.line, { curve: normalized2, anchor: drag.anchor });
-      }
+      const base = drag.base;
+      if (!pointer || !base) return;
+      const dx = base.endX - base.startX;
+      const dy = base.endY - base.startY;
+      const length = base.trimmedLength || Math.hypot(dx, dy) || 1;
+      const nx = -base.uy;
+      const ny = base.ux;
+      const handles = drag.handles || [];
+      const index = clamp2(drag.handleIndex, 0, handles.length - 1);
+      const handle = handles[index];
+      if (!handle) return;
+      const position = clampHandlePosition(handle.position);
+      const baseX = base.startX + dx * position;
+      const baseY = base.startY + dy * position;
+      const projection = ((pointer.x - baseX) * nx + (pointer.y - baseY) * ny) / length;
+      const weight = handle.weight ?? getHandleWeight(position);
+      const normalized2 = clampHandleOffset(projection / (weight || 1));
+      drag.currentOffsets[index] = normalized2;
+      handle.offset = normalized2;
+      handle.weight = weight;
+      drag.moved = drag.moved || Math.abs(normalized2 - drag.startOffsets[index]) > 5e-4;
+      const patchHandles = handles.map((h) => ({ position: h.position, offset: h.offset }));
+      applyLineStyle(drag.line, { curveHandles: patchHandles });
       return;
     }
     if (mapState.nodeDrag && mapState.nodeDrag.pointerId === e.pointerId) {
@@ -20553,15 +20523,13 @@ var Sevenn = (() => {
       mapState.lastPointer = { x: e.clientX, y: e.clientY };
       mapState.updateViewBox({ immediate: true });
       if (mapState.selectionRect) {
-        refreshSelectionRectFromClients();
+        refreshSelectionMaps();
       }
       return;
     }
     if (mapState.selectionRect && mapState.selectionRect.pointerId === e.pointerId) {
       updateAutoPanFromPointer(e.clientX, e.clientY);
-      mapState.selectionRect.currentClient = { x: e.clientX, y: e.clientY };
-      mapState.selectionRect.currentMap = clientToMap(e.clientX, e.clientY);
-      updateSelectionBox();
+      updateSelectionDragPosition(e.clientX, e.clientY);
     }
   }
   async function handlePointerUp(e) {
@@ -20585,14 +20553,23 @@ var Sevenn = (() => {
         } catch {
         }
       }
-      if (drag.moved && Number.isFinite(drag.currentCurve)) {
-        const anchorValue = Number.isFinite(drag.anchor) ? clamp2(drag.anchor, 0.1, 0.9) : void 0;
+      const handles = drag.handles || [];
+      const changed = handles.some((handle, idx) => Math.abs((drag.currentOffsets?.[idx] ?? handle.offset) - (drag.startOffsets?.[idx] ?? handle.offset)) > 5e-4);
+      if (changed) {
+        const payloadHandles = handles.map((handle) => ({ position: handle.position, offset: handle.offset }));
+        let dominant = { position: DEFAULT_CURVE_ANCHOR, offset: 0 };
+        payloadHandles.forEach((handle) => {
+          if (Math.abs(handle.offset) > Math.abs(dominant.offset)) {
+            dominant = handle;
+          }
+        });
         const patch = {
-          curve: drag.currentCurve,
-          ...Number.isFinite(anchorValue) ? { curveAnchor: anchorValue } : {}
+          curveHandles: payloadHandles,
+          curve: dominant.offset,
+          curveAnchor: dominant.position
         };
         await updateLink(drag.aId, drag.bId, patch);
-        applyLineStyle(drag.line, { curve: drag.currentCurve, anchor: anchorValue });
+        applyLineStyle(drag.line, patch);
         applyLinkPatchToState(drag.aId, drag.bId, patch);
         mapState.edgeDragJustCompleted = true;
         setTimeout(() => {
@@ -20681,13 +20658,7 @@ var Sevenn = (() => {
       }
     }
     if (mapState.selectionRect && mapState.selectionRect.pointerId === e.pointerId) {
-      const selected = computeSelectionFromRect();
-      mapState.selectionIds = selected;
-      mapState.previewSelection = null;
-      mapState.selectionPreviewSignature = "";
-      mapState.selectionRect = null;
-      mapState.selectionBox.classList.add("hidden");
-      updateSelectionHighlight();
+      finalizeSelectionDrag();
       stopAutoPan();
       setAreaInteracting(false);
       mapState.justCompletedSelection = true;
@@ -20837,25 +20808,63 @@ var Sevenn = (() => {
     });
     return preview;
   }
-  function updateSelectionBox() {
-    if (!mapState.selectionRect || !mapState.selectionBox || !mapState.svg) return;
-    const { startClient, currentClient, startMap, currentMap } = mapState.selectionRect;
-    if (!startClient || !currentClient) return;
-    const rect = getSvgRect();
+  function startSelectionDrag(pointerId, clientX, clientY) {
+    const originClient = { x: clientX, y: clientY };
+    const originMap = clientToMap(clientX, clientY);
+    mapState.selectionRect = {
+      pointerId,
+      originClient,
+      originMap,
+      currentClient: { ...originClient },
+      currentMap: { ...originMap },
+      changed: false
+    };
+    if (mapState.selectionBox) {
+      mapState.selectionBox.classList.remove("hidden");
+    }
+    mapState.previewSelection = [];
+    mapState.selectionPreviewSignature = "";
+    syncSelectionOverlay();
+  }
+  function updateSelectionDragPosition(clientX, clientY) {
+    const rect = mapState.selectionRect;
     if (!rect) return;
-    const left = Math.min(startClient.x, currentClient.x) - rect.left;
-    const top = Math.min(startClient.y, currentClient.y) - rect.top;
-    const width = Math.abs(startClient.x - currentClient.x);
-    const height = Math.abs(startClient.y - currentClient.y);
+    rect.currentClient = { x: clientX, y: clientY };
+    rect.currentMap = clientToMap(clientX, clientY);
+    syncSelectionOverlay();
+  }
+  function refreshSelectionMaps({ updateOrigin = false } = {}) {
+    const rect = mapState.selectionRect;
+    if (!rect) return;
+    if (updateOrigin && rect.originClient) {
+      rect.originMap = clientToMap(rect.originClient.x, rect.originClient.y);
+    }
+    if (rect.currentClient) {
+      rect.currentMap = clientToMap(rect.currentClient.x, rect.currentClient.y);
+    }
+    syncSelectionOverlay();
+  }
+  function syncSelectionOverlay() {
+    const rect = mapState.selectionRect;
+    if (!rect || !mapState.selectionBox) return;
+    const { originClient, currentClient, originMap, currentMap } = rect;
+    if (!originClient || !currentClient) return;
+    const svgRect = getSvgRect();
+    if (!svgRect) return;
+    const left = Math.min(originClient.x, currentClient.x) - svgRect.left;
+    const top = Math.min(originClient.y, currentClient.y) - svgRect.top;
+    const width = Math.abs(originClient.x - currentClient.x);
+    const height = Math.abs(originClient.y - currentClient.y);
     mapState.selectionBox.style.left = `${left}px`;
     mapState.selectionBox.style.top = `${top}px`;
     mapState.selectionBox.style.width = `${width}px`;
     mapState.selectionBox.style.height = `${height}px`;
-    if (!startMap || !currentMap) return;
-    const minX = Math.min(startMap.x, currentMap.x);
-    const maxX = Math.max(startMap.x, currentMap.x);
-    const minY = Math.min(startMap.y, currentMap.y);
-    const maxY = Math.max(startMap.y, currentMap.y);
+    rect.changed = width > 3 || height > 3;
+    if (!originMap || !currentMap) return;
+    const minX = Math.min(originMap.x, currentMap.x);
+    const maxX = Math.max(originMap.x, currentMap.x);
+    const minY = Math.min(originMap.y, currentMap.y);
+    const maxY = Math.max(originMap.y, currentMap.y);
     const preview = collectNodesInRect(minX, maxX, minY, maxY);
     const signature = preview.length ? preview.slice().sort().join("|") : "";
     if (signature !== mapState.selectionPreviewSignature) {
@@ -20864,16 +20873,21 @@ var Sevenn = (() => {
       updateSelectionHighlight();
     }
   }
-  function refreshSelectionRectFromClients({ updateStart = false } = {}) {
-    if (!mapState.selectionRect) return;
-    const rect = mapState.selectionRect;
-    if (updateStart && rect.startClient) {
-      rect.startMap = clientToMap(rect.startClient.x, rect.startClient.y);
+  function finalizeSelectionDrag({ commit = true } = {}) {
+    if (mapState.selectionBox) {
+      mapState.selectionBox.classList.add("hidden");
+      mapState.selectionBox.style.width = "0px";
+      mapState.selectionBox.style.height = "0px";
     }
-    if (rect.currentClient) {
-      rect.currentMap = clientToMap(rect.currentClient.x, rect.currentClient.y);
+    const shouldCommit = commit !== false && (mapState.selectionRect?.changed || (mapState.previewSelection?.length ?? 0) > 0);
+    if (shouldCommit) {
+      const ids = mapState.previewSelection ? mapState.previewSelection.slice() : [];
+      mapState.selectionIds = ids;
     }
-    updateSelectionBox();
+    mapState.selectionRect = null;
+    mapState.previewSelection = null;
+    mapState.selectionPreviewSignature = "";
+    updateSelectionHighlight();
   }
   function pickClusterPosition(existing = [], spacing = 200, base = { x: 0, y: 0 }) {
     const baseX = Number.isFinite(base?.x) ? base.x : 0;
@@ -20990,7 +21004,7 @@ var Sevenn = (() => {
     constrainViewBox();
     mapState.updateViewBox({ immediate: true });
     if (mapState.selectionRect) {
-      refreshSelectionRectFromClients({ updateStart: true });
+      refreshSelectionMaps({ updateOrigin: true });
     }
     if (mapState.nodeDrag?.client) {
       const pointer = clientToMap(mapState.nodeDrag.client.x, mapState.nodeDrag.client.y);
@@ -21016,18 +21030,6 @@ var Sevenn = (() => {
       window.cancelAnimationFrame(mapState.autoPanFrame);
     }
     mapState.autoPanFrame = null;
-  }
-  function computeSelectionFromRect() {
-    const rect = mapState.selectionRect;
-    if (rect?.startMap && rect?.currentMap) {
-      const minX = Math.min(rect.startMap.x, rect.currentMap.x);
-      const maxX = Math.max(rect.startMap.x, rect.currentMap.x);
-      const minY = Math.min(rect.startMap.y, rect.currentMap.y);
-      const maxY = Math.max(rect.startMap.y, rect.currentMap.y);
-      return collectNodesInRect(minX, maxX, minY, maxY);
-    }
-    if (mapState.previewSelection) return mapState.previewSelection.slice();
-    return mapState.selectionIds.slice();
   }
   function getCurrentScales() {
     return mapState.currentScales || { nodeScale: 1, labelScale: 1, lineScale: 1 };
@@ -21150,8 +21152,10 @@ var Sevenn = (() => {
     if (!edge) return;
     ensureEdgeRegistry();
     mapState.allEdges.add(edge);
-    edge[EDGE_NODE_KEY] = { aId, bId };
-    [aId, bId].forEach((id) => {
+    const keyA = String(aId);
+    const keyB = String(bId);
+    edge[EDGE_NODE_KEY] = { aId: keyA, bId: keyB };
+    [keyA, keyB].forEach((id) => {
       if (!id) return;
       let set = mapState.edgeRefs.get(id);
       if (!set) {
@@ -21166,11 +21170,12 @@ var Sevenn = (() => {
     const info = edge[EDGE_NODE_KEY];
     if (info) {
       [info.aId, info.bId].forEach((id) => {
-        const set = mapState.edgeRefs?.get(id);
+        const key = String(id);
+        const set = mapState.edgeRefs?.get(key);
         if (!set) return;
         set.delete(edge);
         if (!set.size) {
-          mapState.edgeRefs.delete(id);
+          mapState.edgeRefs.delete(key);
         }
       });
       delete edge[EDGE_NODE_KEY];
@@ -21230,62 +21235,71 @@ var Sevenn = (() => {
     }
     return null;
   }
+  function beginEdgeHandleDrag(line, handleIndex, evt, options = {}) {
+    if (!line || !line.dataset) return;
+    const aId = line.dataset.a;
+    const bId = line.dataset.b;
+    if (!aId || !bId) return;
+    const pointerId = evt.pointerId;
+    const geometry = options.geometry || getLineGeometry(aId, bId, { line });
+    if (!geometry || !Array.isArray(geometry.handles) || !geometry.handles.length) return;
+    const maxIndex = geometry.handles.length - 1;
+    const index = clamp2(Math.round(handleIndex), 0, maxIndex);
+    const handles = geometry.handles.map((handle) => ({
+      position: handle.position,
+      offset: handle.offset,
+      weight: handle.weight ?? getHandleWeight(handle.position)
+    }));
+    const captureTarget = evt.currentTarget || line;
+    const baseLength = geometry.trimmedLength || Math.hypot(geometry.endX - geometry.startX, geometry.endY - geometry.startY) || 1;
+    mapState.edgeDrag = {
+      pointerId,
+      line,
+      aId,
+      bId,
+      captureTarget,
+      handleIndex: index,
+      handles,
+      handlePositions: handles.map((handle) => handle.position),
+      startOffsets: handles.map((handle) => handle.offset),
+      currentOffsets: handles.map((handle) => handle.offset),
+      base: {
+        startX: geometry.startX,
+        startY: geometry.startY,
+        endX: geometry.endX,
+        endY: geometry.endY,
+        ux: geometry.ux,
+        uy: geometry.uy,
+        trimmedLength: baseLength
+      },
+      moved: false,
+      geometry,
+      fromHandle: Boolean(evt?.target && evt.target !== line),
+      clientStart: { x: evt.clientX, y: evt.clientY }
+    };
+    if (mapState.edgeDrag.captureTarget?.setPointerCapture) {
+      try {
+        mapState.edgeDrag.captureTarget.setPointerCapture(pointerId);
+      } catch {
+      }
+    }
+  }
   function attachEdgeInteraction(path, aId, bId) {
     if (!path || path.dataset.interactive === "1") return;
     path.dataset.interactive = "1";
-    path.addEventListener("pointerdown", (evt) => {
+    const startDragFromPath = (evt) => {
       if (evt.button !== 0) return;
       if (mapState.tool !== TOOL.NAVIGATE) return;
       mapState.suppressNextClick = false;
       evt.stopPropagation();
-      const pointerId = evt.pointerId;
-      const existingCurve = Number(path.dataset.curve);
-      const linkData = getLinkInfo(aId, bId) || {};
-      const initialCurve = Number.isFinite(existingCurve) ? existingCurve : Number.isFinite(Number(linkData.curve)) ? Number(linkData.curve) : 0;
-      const existingAnchor = normalizeAnchorValue(
-        Object.prototype.hasOwnProperty.call(path.dataset || {}, "anchor") ? path.dataset.anchor : Object.prototype.hasOwnProperty.call(linkData || {}, "curveAnchor") ? linkData.curveAnchor : DEFAULT_CURVE_ANCHOR
-      ) ?? DEFAULT_CURVE_ANCHOR;
+      const geometry = getLineGeometry(aId, bId, { line: path });
+      if (!geometry) return;
       const pointerMap = clientToMap(evt.clientX, evt.clientY);
-      const geometryForHandle = getLineGeometry(aId, bId, {
-        line: path,
-        curve: initialCurve,
-        anchor: existingAnchor
-      });
-      let handle = "mid";
-      let anchorValue = existingAnchor;
-      if (geometryForHandle && pointerMap) {
-        const startPoint = { x: geometryForHandle.startX, y: geometryForHandle.startY };
-        const endPoint = { x: geometryForHandle.endX, y: geometryForHandle.endY };
-        const startDist = Math.hypot(pointerMap.x - startPoint.x, pointerMap.y - startPoint.y);
-        const endDist = Math.hypot(pointerMap.x - endPoint.x, pointerMap.y - endPoint.y);
-        const threshold = Math.max(36, (geometryForHandle.trimmedLength || 0) * 0.12);
-        if (startDist <= threshold) {
-          handle = "start";
-          anchorValue = normalizeAnchorValue(existingAnchor < 0.45 ? existingAnchor : 0.22) ?? 0.22;
-        } else if (endDist <= threshold) {
-          handle = "end";
-          anchorValue = normalizeAnchorValue(existingAnchor > 0.55 ? existingAnchor : 0.78) ?? 0.78;
-        }
-      }
-      mapState.edgeDrag = {
-        pointerId,
-        line: path,
-        aId,
-        bId,
-        startCurve: initialCurve,
-        currentCurve: initialCurve,
-        moved: false,
-        captureTarget: evt.currentTarget || path,
-        handle,
-        anchor: anchorValue,
-        startAnchor: anchorValue
-      };
-      if (mapState.edgeDrag.captureTarget?.setPointerCapture) {
-        try {
-          mapState.edgeDrag.captureTarget.setPointerCapture(pointerId);
-        } catch {
-        }
-      }
+      const index = findNearestHandleIndex(geometry, pointerMap);
+      beginEdgeHandleDrag(path, index, evt, { geometry });
+    };
+    path.addEventListener("pointerdown", (evt) => {
+      startDragFromPath(evt);
     });
     path.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -21342,6 +21356,7 @@ var Sevenn = (() => {
     if (!edge) return;
     hideEdgeTooltip(edge);
     removeLineOverlay(edge);
+    removeLineHandles(edge);
     unregisterEdgeElement(edge);
     edge.remove();
   }
@@ -21378,6 +21393,15 @@ var Sevenn = (() => {
       const anchor = normalizeAnchorValue(info.curveAnchor);
       if (Number.isFinite(anchor)) entry.curveAnchor = anchor;
     }
+    const handles = parseCurveHandles(
+      info.curveHandles ?? info.curvePoints ?? info.curveOffsets ?? info.handles
+    );
+    if (handles && handles.length) {
+      entry.curveHandles = handles.map((handle) => ({
+        position: clampHandlePosition(handle.position),
+        offset: clampHandleOffset(handle.offset)
+      }));
+    }
     return entry;
   }
   function updatePendingHighlight() {
@@ -21392,8 +21416,10 @@ var Sevenn = (() => {
     });
   }
   function updateEdgesFor(id) {
+    ensureEdgeRegistry();
     if (!mapState.edgeRefs) return;
-    const edges = mapState.edgeRefs.get(id);
+    const key = String(id);
+    const edges = mapState.edgeRefs.get(key);
     if (!edges || !edges.size) return;
     const stale = [];
     edges.forEach((edge) => {
@@ -21401,7 +21427,13 @@ var Sevenn = (() => {
         stale.push(edge);
         return;
       }
-      edge.setAttribute("d", calcPath(edge.dataset.a, edge.dataset.b, edge));
+      const geometry = getLineGeometry(edge.dataset.a, edge.dataset.b, { line: edge });
+      if (geometry?.pathData) {
+        edge.setAttribute("d", geometry.pathData);
+        syncLineHandles(edge, geometry);
+      } else {
+        removeLineHandles(edge);
+      }
       syncLineDecoration(edge);
     });
     if (stale.length) {
@@ -22178,7 +22210,13 @@ var Sevenn = (() => {
           return;
         }
         if (line.dataset.a && line.dataset.b) {
-          line.setAttribute("d", calcPath(line.dataset.a, line.dataset.b, line));
+          const geometry = getLineGeometry(line.dataset.a, line.dataset.b, { line });
+          if (geometry?.pathData) {
+            line.setAttribute("d", geometry.pathData);
+            syncLineHandles(line, geometry);
+          } else {
+            removeLineHandles(line);
+          }
         }
         updateLineStrokeWidth(line);
         syncLineDecoration(line);
@@ -22190,7 +22228,13 @@ var Sevenn = (() => {
       const edgeContainer = mapState.edgeLayer || svg;
       edgeContainer.querySelectorAll(".map-edge").forEach((line) => {
         if (line.dataset.a && line.dataset.b) {
-          line.setAttribute("d", calcPath(line.dataset.a, line.dataset.b, line));
+          const geometry = getLineGeometry(line.dataset.a, line.dataset.b, { line });
+          if (geometry?.pathData) {
+            line.setAttribute("d", geometry.pathData);
+            syncLineHandles(line, geometry);
+          } else {
+            removeLineHandles(line);
+          }
         }
         updateLineStrokeWidth(line);
         syncLineDecoration(line);
@@ -22258,13 +22302,289 @@ var Sevenn = (() => {
       trimmedLength: trimmedLength || 0
     };
   }
-  function computeCurveOffset(aId, bId, segment, manualCurve) {
-    const trimmedLength = segment.trimmedLength || Math.hypot(segment.endX - segment.startX, segment.endY - segment.startY) || 1;
-    if (Number.isFinite(manualCurve)) {
-      const normalized2 = clamp2(manualCurve, -3.5, 3.5);
-      return normalized2 * trimmedLength;
+  function getDefaultHandlePositions(count = CURVE_HANDLE_COUNT) {
+    const total = Math.max(1, Math.round(Number(count) || 0));
+    return Array.from({ length: total }, (_, idx) => {
+      const raw = (idx + 1) / (total + 1);
+      return clampHandlePosition(raw);
+    });
+  }
+  function createDefaultCurveHandles() {
+    return getDefaultHandlePositions().map((position) => ({ position, offset: 0 }));
+  }
+  function clampHandleOffset(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return 0;
+    return clamp2(num, -CURVE_HANDLE_MAX_OFFSET, CURVE_HANDLE_MAX_OFFSET);
+  }
+  function clampHandlePosition(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return DEFAULT_CURVE_ANCHOR;
+    return clamp2(num, 0.08, 0.92);
+  }
+  function normalizeCurveHandle(entry) {
+    if (!entry) return null;
+    if (Array.isArray(entry)) {
+      if (entry.length < 2) return null;
+      return {
+        position: clampHandlePosition(entry[0]),
+        offset: clampHandleOffset(entry[1])
+      };
     }
-    return 0;
+    if (typeof entry === "object") {
+      if (Object.prototype.hasOwnProperty.call(entry, "position") || Object.prototype.hasOwnProperty.call(entry, "offset")) {
+        return {
+          position: clampHandlePosition(entry.position),
+          offset: clampHandleOffset(entry.offset)
+        };
+      }
+    }
+    const num = Number(entry);
+    if (Number.isFinite(num)) {
+      return {
+        position: DEFAULT_CURVE_ANCHOR,
+        offset: clampHandleOffset(num)
+      };
+    }
+    return null;
+  }
+  function parseCurveHandles(value) {
+    if (!value) return null;
+    if (Array.isArray(value)) {
+      const normalized2 = value.map(normalizeCurveHandle).filter(Boolean);
+      return normalized2.length ? normalized2 : null;
+    }
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          const normalized2 = parsed.map(normalizeCurveHandle).filter(Boolean);
+          if (normalized2.length) return normalized2;
+        }
+      } catch {
+      }
+      const pieces = value.split(/[|,\s]+/).map(Number).filter((n) => Number.isFinite(n));
+      if (pieces.length) {
+        const positions = getDefaultHandlePositions(pieces.length);
+        return pieces.map((offset, idx) => ({
+          position: positions[idx] ?? DEFAULT_CURVE_ANCHOR,
+          offset: clampHandleOffset(offset)
+        }));
+      }
+      return null;
+    }
+    if (typeof value === "object") {
+      return parseCurveHandles(Object.values(value));
+    }
+    return null;
+  }
+  function mergeCurveHandles(baseHandles, overrides) {
+    const base = Array.isArray(baseHandles) && baseHandles.length ? baseHandles.map((handle) => ({ position: handle.position, offset: handle.offset })) : createDefaultCurveHandles();
+    if (!Array.isArray(overrides) || !overrides.length) {
+      return base;
+    }
+    overrides.forEach((override) => {
+      const handle = normalizeCurveHandle(override);
+      if (!handle) return;
+      let bestIndex = 0;
+      let bestDist = Infinity;
+      base.forEach((candidate, idx) => {
+        const dist = Math.abs(candidate.position - handle.position);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIndex = idx;
+        }
+      });
+      const nextPosition = Object.prototype.hasOwnProperty.call(handle, "position") ? clampHandlePosition(handle.position) : clampHandlePosition(base[bestIndex].position);
+      base[bestIndex] = {
+        position: nextPosition,
+        offset: clampHandleOffset(handle.offset)
+      };
+    });
+    return base;
+  }
+  function encodeCurveHandles(handles) {
+    if (!Array.isArray(handles)) return "";
+    const simplified = handles.map((handle) => ({
+      position: clampHandlePosition(handle.position),
+      offset: clampHandleOffset(handle.offset)
+    }));
+    return JSON.stringify(simplified);
+  }
+  function getHandleWeight(position) {
+    const centered = clamp2(1 - Math.abs(0.5 - position) * 1.9, 0, 1);
+    return 1 + Math.pow(centered, CURVE_HANDLE_WEIGHT_POWER) * CURVE_HANDLE_WEIGHT_GAIN;
+  }
+  function resolveLineHandles(line, info = {}, overrides = {}) {
+    const datasetHandles = line?.dataset?.handles ? parseCurveHandles(line.dataset.handles) : null;
+    const infoHandles = parseCurveHandles(
+      info.curveHandles ?? info.curvePoints ?? info.curveOffsets ?? info.handles
+    );
+    let handles = createDefaultCurveHandles();
+    if (datasetHandles) {
+      handles = mergeCurveHandles(handles, datasetHandles);
+    }
+    if (infoHandles) {
+      handles = mergeCurveHandles(handles, infoHandles);
+    }
+    if (Number.isFinite(overrides.curveOverride)) {
+      const anchor = Number.isFinite(overrides.anchorOverride) ? overrides.anchorOverride : DEFAULT_CURVE_ANCHOR;
+      handles = mergeCurveHandles(handles, [{ position: anchor, offset: overrides.curveOverride }]);
+    }
+    return handles.map((handle) => ({
+      position: clampHandlePosition(handle.position),
+      offset: clampHandleOffset(handle.offset)
+    }));
+  }
+  function buildCurvePoints(segment, handles) {
+    const { startX, startY, endX, endY, ux, uy } = segment;
+    const dx = endX - startX;
+    const dy = endY - startY;
+    const length = segment.trimmedLength || Math.hypot(dx, dy) || 1;
+    const nx = -uy;
+    const ny = ux;
+    const points = [{ x: startX, y: startY }];
+    const meta = [];
+    handles.forEach((handle) => {
+      const position = clampHandlePosition(handle.position);
+      const baseX = startX + dx * position;
+      const baseY = startY + dy * position;
+      const normalized2 = clampHandleOffset(handle.offset);
+      const weight = getHandleWeight(position);
+      const offset = normalized2 * length * weight;
+      const point = {
+        x: baseX + nx * offset,
+        y: baseY + ny * offset
+      };
+      points.push(point);
+      meta.push({
+        position,
+        offset: normalized2,
+        base: { x: baseX, y: baseY },
+        weight,
+        point
+      });
+    });
+    points.push({ x: endX, y: endY });
+    return { points, meta };
+  }
+  function buildCurveSegments(points) {
+    if (!Array.isArray(points) || points.length < 2) return [];
+    const segments = [];
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const p0 = points[i === 0 ? i : i - 1];
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const p3 = points[i + 2 < points.length ? i + 2 : points.length - 1];
+      const c1 = {
+        x: p1.x + (p2.x - p0.x) / 6,
+        y: p1.y + (p2.y - p0.y) / 6
+      };
+      const c2 = {
+        x: p2.x - (p3.x - p1.x) / 6,
+        y: p2.y - (p3.y - p1.y) / 6
+      };
+      segments.push({
+        from: p1,
+        to: p2,
+        c1,
+        c2
+      });
+    }
+    return segments;
+  }
+  function cubicPoint(p0, c1, c2, p1, t) {
+    const mt = 1 - t;
+    const mt2 = mt * mt;
+    const t2 = t * t;
+    return {
+      x: mt2 * mt * p0.x + 3 * mt2 * t * c1.x + 3 * mt * t2 * c2.x + t * t2 * p1.x,
+      y: mt2 * mt * p0.y + 3 * mt2 * t * c1.y + 3 * mt * t2 * c2.y + t * t2 * p1.y
+    };
+  }
+  function cubicTangent(p0, c1, c2, p1, t) {
+    const dx = 3 * (1 - t) * (1 - t) * (c1.x - p0.x) + 6 * (1 - t) * t * (c2.x - c1.x) + 3 * t * t * (p1.x - c2.x);
+    const dy = 3 * (1 - t) * (1 - t) * (c1.y - p0.y) + 6 * (1 - t) * t * (c2.y - c1.y) + 3 * t * t * (p1.y - c2.y);
+    const len = Math.hypot(dx, dy) || 1;
+    return { x: dx / len, y: dy / len };
+  }
+  function approximateCubicLength(p0, c1, c2, p1) {
+    let prev = p0;
+    let length = 0;
+    const steps = 12;
+    for (let i = 1; i <= steps; i += 1) {
+      const t = i / steps;
+      const next = cubicPoint(p0, c1, c2, p1, t);
+      length += Math.hypot(next.x - prev.x, next.y - prev.y);
+      prev = next;
+    }
+    return length;
+  }
+  function buildPathData(start, segments) {
+    if (!start) return "";
+    if (!segments.length) return "";
+    let path = `M${start.x} ${start.y}`;
+    segments.forEach((segment) => {
+      path += ` C${segment.c1.x} ${segment.c1.y} ${segment.c2.x} ${segment.c2.y} ${segment.to.x} ${segment.to.y}`;
+    });
+    return path;
+  }
+  function getPointAlongSegments(segments, ratio) {
+    if (!segments.length) return null;
+    const clamped = clamp2(ratio, 0, 1);
+    let total = 0;
+    const lengths = segments.map((segment) => {
+      const length = approximateCubicLength(segment.from, segment.c1, segment.c2, segment.to);
+      total += length;
+      return length;
+    });
+    if (!total) {
+      const first = segments[0].from;
+      const last = segments[segments.length - 1].to;
+      return {
+        point: {
+          x: first.x + (last.x - first.x) * clamped,
+          y: first.y + (last.y - first.y) * clamped
+        },
+        tangent: normalizeVector(last.x - first.x, last.y - first.y)
+      };
+    }
+    let accumulated = 0;
+    for (let i = 0; i < segments.length; i += 1) {
+      const segment = segments[i];
+      const length = lengths[i];
+      const nextAccum = accumulated + length;
+      const threshold = clamped * total;
+      if (threshold <= nextAccum || i === segments.length - 1) {
+        const remaining = threshold - accumulated;
+        const localT = length ? clamp2(remaining / length, 0, 1) : 0;
+        const point = cubicPoint(segment.from, segment.c1, segment.c2, segment.to, localT);
+        const tangent2 = cubicTangent(segment.from, segment.c1, segment.c2, segment.to, localT);
+        return { point, tangent: tangent2 };
+      }
+      accumulated = nextAccum;
+    }
+    const lastSegment = segments[segments.length - 1];
+    const lastPoint = { ...lastSegment.to };
+    const tangent = cubicTangent(lastSegment.from, lastSegment.c1, lastSegment.c2, lastSegment.to, 1);
+    return { point: lastPoint, tangent };
+  }
+  function findNearestHandleIndex(geometry, pointer) {
+    if (!geometry || !Array.isArray(geometry.handles) || !geometry.handles.length || !pointer) {
+      return 0;
+    }
+    let bestIndex = 0;
+    let bestDist = Infinity;
+    geometry.handles.forEach((handle, index) => {
+      const px = handle.point?.x ?? handle.base?.x ?? 0;
+      const py = handle.point?.y ?? handle.base?.y ?? 0;
+      const dist = Math.hypot(pointer.x - px, pointer.y - py);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIndex = index;
+      }
+    });
+    return bestIndex;
   }
   function computeDecorationTrim(decoration, direction, baseWidth) {
     const arrowAllowance = Math.max(18, baseWidth * 3.4);
@@ -22289,18 +22609,6 @@ var Sevenn = (() => {
     }
     return { trimA, trimB };
   }
-  function computeCurveControlPoint(aId, bId, segment, manualCurve, manualAnchor) {
-    const { startX, startY, endX, endY, ux, uy } = segment;
-    const nx = -uy;
-    const ny = ux;
-    const anchor = clamp2(Number.isFinite(Number(manualAnchor)) ? Number(manualAnchor) : DEFAULT_CURVE_ANCHOR, 0.1, 0.9);
-    const baseX = startX + (endX - startX) * anchor;
-    const baseY = startY + (endY - startY) * anchor;
-    const offset = computeCurveOffset(aId, bId, segment, manualCurve);
-    const cx = baseX + nx * offset;
-    const cy = baseY + ny * offset;
-    return { cx, cy, anchor };
-  }
   function getLineGeometry(aId, bId, options = {}) {
     const line = options.line || null;
     const appearanceSource = {
@@ -22319,11 +22627,10 @@ var Sevenn = (() => {
     let curveOverride;
     if (Object.prototype.hasOwnProperty.call(options, "curve")) {
       const manual = Number(options.curve);
-      curveOverride = Number.isFinite(manual) ? clamp2(manual, -3.5, 3.5) : void 0;
-    } else if (Object.prototype.hasOwnProperty.call(options, "curveAnchor") && !Object.prototype.hasOwnProperty.call(options, "curve")) {
+      curveOverride = Number.isFinite(manual) ? clampHandleOffset(manual) : void 0;
     } else if (line && Object.prototype.hasOwnProperty.call(line.dataset || {}, "curve")) {
       const manual = Number(line.dataset.curve);
-      curveOverride = Number.isFinite(manual) ? clamp2(manual, -3.5, 3.5) : void 0;
+      curveOverride = Number.isFinite(manual) ? clampHandleOffset(manual) : void 0;
     }
     let anchorOverride;
     if (Object.prototype.hasOwnProperty.call(options, "anchor")) {
@@ -22333,70 +22640,43 @@ var Sevenn = (() => {
     } else if (line && Object.prototype.hasOwnProperty.call(line.dataset || {}, "anchor")) {
       anchorOverride = normalizeAnchorValue(line.dataset.anchor);
     }
-    const { cx, cy, anchor } = computeCurveControlPoint(aId, bId, segment, curveOverride, anchorOverride);
+    const handles = resolveLineHandles(line, options, { curveOverride, anchorOverride });
+    const { points, meta } = buildCurvePoints(segment, handles);
+    const segments = buildCurveSegments(points);
+    const pathData = buildPathData(points[0], segments);
+    const mid = getPointAlongSegments(segments, 0.5) || { point: points[Math.floor(points.length / 2)], tangent: { x: segment.ux, y: segment.uy } };
+    const firstSegment = segments[0];
+    const lastSegment = segments[segments.length - 1];
+    const startTangent = firstSegment ? cubicTangent(firstSegment.from, firstSegment.c1, firstSegment.c2, firstSegment.to, 0) : { x: segment.ux, y: segment.uy };
+    const endTangent = lastSegment ? cubicTangent(lastSegment.from, lastSegment.c1, lastSegment.c2, lastSegment.to, 1) : { x: segment.ux, y: segment.uy };
+    let dominant = { position: DEFAULT_CURVE_ANCHOR, offset: 0 };
+    meta.forEach((handle) => {
+      if (Math.abs(handle.offset) > Math.abs(dominant.offset)) {
+        dominant = { position: handle.position, offset: handle.offset };
+      }
+    });
     return {
       ...segment,
-      cx,
-      cy,
       style,
       decoration,
       decorationDirection,
       baseWidth,
-      anchor: anchor ?? DEFAULT_CURVE_ANCHOR
+      anchor: dominant.position,
+      curve: dominant.offset,
+      handles: meta,
+      pathData,
+      startTangent,
+      endTangent,
+      midPoint: mid.point,
+      midTangent: mid.tangent,
+      segments
     };
-  }
-  function getQuadraticPoint(start, control, end, t) {
-    const mt = 1 - t;
-    const x = mt * mt * start.x + 2 * mt * t * control.x + t * t * end.x;
-    const y = mt * mt * start.y + 2 * mt * t * control.y + t * t * end.y;
-    return { x, y };
-  }
-  function getQuadraticTangent(start, control, end, t) {
-    const mt = 1 - t;
-    const dx = 2 * mt * (control.x - start.x) + 2 * t * (end.x - control.x);
-    const dy = 2 * mt * (control.y - start.y) + 2 * t * (end.y - control.y);
-    const len = Math.hypot(dx, dy) || 1;
-    return { x: dx / len, y: dy / len };
-  }
-  function calcPath(aId, bId, line = null, info = {}) {
-    const geometry = getLineGeometry(aId, bId, { ...info, line });
-    if (!geometry) return "";
-    const { startX, startY, endX, endY, cx, cy } = geometry;
-    return `M${startX} ${startY} Q${cx} ${cy} ${endX} ${endY}`;
   }
   function applyLineStyle(line, info = {}) {
     if (!line) return;
     const previousColor = line.dataset.color;
     const previousThickness = line.dataset.thickness;
     const previousLabel = line.dataset.label;
-    const hadCurveAttr = Object.prototype.hasOwnProperty.call(line.dataset || {}, "curve");
-    const previousCurve = hadCurveAttr ? Number(line.dataset.curve) : void 0;
-    const hasCurveOverride = Object.prototype.hasOwnProperty.call(info, "curve");
-    const hadAnchorAttr = Object.prototype.hasOwnProperty.call(line.dataset || {}, "anchor");
-    const previousAnchor = hadAnchorAttr ? Number(line.dataset.anchor) : void 0;
-    const hasAnchorOverride = Object.prototype.hasOwnProperty.call(info, "anchor") || Object.prototype.hasOwnProperty.call(info, "curveAnchor");
-    let curve = hasCurveOverride ? Number(info.curve) : previousCurve;
-    if (!Number.isFinite(curve)) {
-      curve = void 0;
-    }
-    if (hasCurveOverride) {
-      if (Number.isFinite(curve)) {
-        line.dataset.curve = String(curve);
-      } else {
-        delete line.dataset.curve;
-      }
-    }
-    let anchor = hasAnchorOverride ? normalizeAnchorValue(Object.prototype.hasOwnProperty.call(info, "anchor") ? info.anchor : info.curveAnchor) : normalizeAnchorValue(previousAnchor);
-    if (!Number.isFinite(anchor)) {
-      anchor = void 0;
-    }
-    if (hasAnchorOverride) {
-      if (Number.isFinite(anchor)) {
-        line.dataset.anchor = String(anchor);
-      } else {
-        delete line.dataset.anchor;
-      }
-    }
     const color = info.color ?? previousColor ?? DEFAULT_LINK_COLOR;
     const thickness = info.thickness ?? previousThickness ?? DEFAULT_LINE_THICKNESS;
     const label = info.name ?? previousLabel ?? "";
@@ -22415,10 +22695,11 @@ var Sevenn = (() => {
       overrideAppearance.decorationDirection = info.direction;
     }
     if (Object.prototype.hasOwnProperty.call(info, "glow")) overrideAppearance.glow = info.glow;
-    const { style, decoration, decorationDirection, glow } = normalizeLinkAppearance({
+    const appearance = normalizeLinkAppearance({
       ...datasetAppearance,
       ...overrideAppearance
     });
+    const { style, decoration, decorationDirection, glow } = appearance;
     line.dataset.color = color;
     line.dataset.style = style;
     if (decoration && decoration !== "none") {
@@ -22439,6 +22720,48 @@ var Sevenn = (() => {
     line.dataset.thickness = thickness;
     line.dataset.baseWidth = String(getLineThicknessValue(thickness));
     line.dataset.label = label;
+    const curveOverride = Object.prototype.hasOwnProperty.call(info, "curve") ? clampHandleOffset(info.curve) : void 0;
+    const anchorOverride = Object.prototype.hasOwnProperty.call(info, "anchor") ? normalizeAnchorValue(info.anchor) : Object.prototype.hasOwnProperty.call(info, "curveAnchor") ? normalizeAnchorValue(info.curveAnchor) : void 0;
+    const handles = resolveLineHandles(line, info, { curveOverride, anchorOverride });
+    line.dataset.handles = encodeCurveHandles(handles);
+    let dominant = { position: DEFAULT_CURVE_ANCHOR, offset: 0 };
+    handles.forEach((handle) => {
+      if (Math.abs(handle.offset) > Math.abs(dominant.offset)) {
+        dominant = handle;
+      }
+    });
+    if (Math.abs(dominant.offset) > 1e-4) {
+      line.dataset.curve = String(clampHandleOffset(dominant.offset));
+    } else {
+      delete line.dataset.curve;
+    }
+    if (Number.isFinite(dominant.position)) {
+      line.dataset.anchor = String(clampHandlePosition(dominant.position));
+    } else {
+      delete line.dataset.anchor;
+    }
+    let geometry = null;
+    if (line.dataset.a && line.dataset.b) {
+      geometry = getLineGeometry(line.dataset.a, line.dataset.b, {
+        ...info,
+        style,
+        decoration,
+        decorationDirection,
+        curveHandles: handles,
+        curve: dominant.offset,
+        anchor: dominant.position,
+        line
+      });
+      if (geometry?.pathData) {
+        line.setAttribute("d", geometry.pathData);
+      }
+    }
+    updateLineStrokeWidth(line);
+    if (geometry) {
+      syncLineHandles(line, geometry);
+    } else {
+      removeLineHandles(line);
+    }
     LINE_STYLE_CLASSNAMES.forEach((cls) => line.classList.remove(cls));
     if (style) {
       line.classList.add(`map-edge--${style}`);
@@ -22458,20 +22781,6 @@ var Sevenn = (() => {
     line.removeAttribute("marker-end");
     line.removeAttribute("marker-mid");
     line.removeAttribute("stroke-dasharray");
-    const effectiveAnchor = Number.isFinite(anchor) ? anchor : normalizeAnchorValue(line.dataset.anchor) ?? DEFAULT_CURVE_ANCHOR;
-    const geometryInfo = {
-      ...info,
-      style,
-      decoration,
-      decorationDirection,
-      curve,
-      anchor: effectiveAnchor,
-      curveAnchor: effectiveAnchor
-    };
-    if (line.dataset.a && line.dataset.b) {
-      line.setAttribute("d", calcPath(line.dataset.a, line.dataset.b, line, geometryInfo));
-    }
-    updateLineStrokeWidth(line);
     if (style === "dashed") {
       const base = getLineThicknessValue(thickness);
       line.setAttribute("stroke-dasharray", `${base * 3},${base * 2}`);
@@ -22516,15 +22825,6 @@ var Sevenn = (() => {
     if (!Number.isFinite(num)) return void 0;
     return clamp2(num, 0.1, 0.9);
   }
-  function getAnchorRange(handle) {
-    if (handle === "start") {
-      return { min: 0.1, max: 0.45 };
-    }
-    if (handle === "end") {
-      return { min: 0.55, max: 0.9 };
-    }
-    return { min: 0.3, max: 0.7 };
-  }
   function updateLineStrokeWidth(line) {
     if (!line) return;
     const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
@@ -22540,6 +22840,65 @@ var Sevenn = (() => {
         line._overlay.setAttribute("stroke-width", overlayWidth);
       }
     }
+  }
+  function ensureHandleElements(line, count) {
+    if (!line) return [];
+    if (!line._handleElements) {
+      line._handleElements = [];
+    }
+    const parent = line.parentNode;
+    if (!parent) return line._handleElements;
+    while (line._handleElements.length < count) {
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      circle.classList.add("map-edge-handle");
+      circle.setAttribute("r", "6");
+      circle.addEventListener("pointerdown", (evt) => {
+        if (evt.button !== 0) return;
+        if (mapState.tool !== TOOL.NAVIGATE) return;
+        evt.stopPropagation();
+        evt.preventDefault();
+        const index = Number(circle.dataset.index) || 0;
+        mapState.suppressNextClick = false;
+        beginEdgeHandleDrag(line, index, evt);
+      });
+      parent.appendChild(circle);
+      line._handleElements.push(circle);
+    }
+    while (line._handleElements.length > count) {
+      const circle = line._handleElements.pop();
+      if (circle) circle.remove();
+    }
+    return line._handleElements;
+  }
+  function removeLineHandles(line) {
+    if (!line?._handleElements) return;
+    line._handleElements.forEach((circle) => circle.remove());
+    line._handleElements = null;
+  }
+  function syncLineHandles(line, geometry) {
+    if (!line) return;
+    const handles = Array.isArray(geometry?.handles) ? geometry.handles : [];
+    if (!handles.length) {
+      removeLineHandles(line);
+      return;
+    }
+    const elements = ensureHandleElements(line, handles.length);
+    const { lineScale = 1 } = getCurrentScales();
+    const baseSize = Math.max(6, (geometry?.baseWidth || getLineThicknessValue(line.dataset.thickness)) * 0.95);
+    handles.forEach((handle, index) => {
+      const circle = elements[index];
+      if (!circle) return;
+      circle.dataset.index = String(index);
+      circle.dataset.position = String(handle.position ?? DEFAULT_CURVE_ANCHOR);
+      circle.dataset.offset = String(handle.offset ?? 0);
+      circle.dataset.a = line.dataset.a || "";
+      circle.dataset.b = line.dataset.b || "";
+      const radius = Math.max(5, baseSize * lineScale * 0.8);
+      circle.setAttribute("cx", handle.point?.x ?? geometry.startX ?? 0);
+      circle.setAttribute("cy", handle.point?.y ?? geometry.startY ?? 0);
+      circle.setAttribute("r", radius);
+      circle.classList.toggle("active", Math.abs(handle.offset ?? 0) > 1e-3);
+    });
   }
   function syncLineDecoration(line) {
     const decoration = line?.dataset?.decoration || DEFAULT_LINE_DECORATION;
@@ -22586,11 +22945,11 @@ var Sevenn = (() => {
     if (!line || !overlay) return;
     const geometry = getLineGeometry(line.dataset.a, line.dataset.b, { line });
     if (!geometry) return;
-    const start = { x: geometry.startX, y: geometry.startY };
-    const control = { x: geometry.cx, y: geometry.cy };
-    const end = { x: geometry.endX, y: geometry.endY };
-    const mid = getQuadraticPoint(start, control, end, 0.5);
-    const tangent = getQuadraticTangent(start, control, end, 0.5);
+    const mid = geometry.midPoint || {
+      x: (geometry.startX + geometry.endX) / 2,
+      y: (geometry.startY + geometry.endY) / 2
+    };
+    const tangent = geometry.midTangent || { x: geometry.ux, y: geometry.uy };
     const normal = { x: -tangent.y, y: tangent.x };
     const diag1 = normalizeVector(tangent.x + normal.x, tangent.y + normal.y);
     const diag2 = normalizeVector(tangent.x - normal.x, tangent.y - normal.y);
@@ -22612,7 +22971,6 @@ var Sevenn = (() => {
     const geometry = getLineGeometry(line.dataset.a, line.dataset.b, { line });
     if (!geometry) return;
     const start = { x: geometry.startX, y: geometry.startY };
-    const control = { x: geometry.cx, y: geometry.cy };
     const end = { x: geometry.endX, y: geometry.endY };
     const { lineScale = 1 } = getCurrentScales();
     const scaledWidth = geometry.baseWidth * lineScale;
@@ -22631,11 +22989,11 @@ var Sevenn = (() => {
     };
     const direction = geometry.decorationDirection || line.dataset.direction || DEFAULT_DECORATION_DIRECTION;
     if (direction === "start" || direction === "both") {
-      const tangentStart = getQuadraticTangent(start, control, end, 0);
+      const tangentStart = geometry.startTangent || { x: geometry.ux, y: geometry.uy };
       segments.push(buildSegment(start, tangentStart, -1));
     }
     if (direction === "end" || direction === "both") {
-      const tangentEnd = getQuadraticTangent(start, control, end, 1);
+      const tangentEnd = geometry.endTangent || { x: geometry.ux, y: geometry.uy };
       segments.push(buildSegment(end, tangentEnd, 1));
     }
     overlay.setAttribute("d", segments.join(" "));
@@ -23197,5 +23555,4 @@ var Sevenn = (() => {
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
-  return __toCommonJS(main_exports);
 })();
