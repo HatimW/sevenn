@@ -1,31 +1,4 @@
-var Sevenn = (() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-    }
-    return to;
-  };
-  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
-  // js/main.js
-  var main_exports = {};
-  __export(main_exports, {
-    render: () => renderApp,
-    renderApp: () => renderApp,
-    resolveListKind: () => resolveListKind,
-    tabs: () => tabs
-  });
-
+(() => {
   // js/storage/preferences.js
   var STORAGE_KEY = "sevenn-ui-preferences";
   var cache = null;
@@ -18160,6 +18133,9 @@ var Sevenn = (() => {
   var LINE_TYPE_PRESET_LOOKUP = new Map(LINE_TYPE_PRESETS.map((option) => [option.value, option]));
   var LINE_GAP_MIN_DISTANCE = 12;
   var LINE_GAP_STROKE_MULTIPLIER = 2.4;
+  var EDGE_DRAG_HOLD_DELAY = 160;
+  var EDGE_DRAG_MOVE_THRESHOLD = 3.5;
+  var EDGE_CLICK_DISTANCE = 6;
   var LEGACY_STYLE_MAPPINGS = {
     "arrow": { style: "solid", decoration: "arrow", decorationDirection: "end" },
     "arrow-end": { style: "solid", decoration: "arrow", decorationDirection: "end" },
@@ -18231,6 +18207,7 @@ var Sevenn = (() => {
     currentScales: { nodeScale: 1, labelScale: 1, lineScale: 1 },
     suppressNextClick: false,
     edgeDragJustCompleted: false,
+    edgePress: null,
     viewPointerId: null,
     viewDragStart: null,
     mapConfig: null,
@@ -20492,6 +20469,15 @@ var Sevenn = (() => {
   }
   function handlePointerMove(e) {
     if (!mapState.svg) return;
+    const pendingPress = mapState.edgePress;
+    if (pendingPress && pendingPress.pointerId === e.pointerId && !pendingPress.activated) {
+      const dx = e.clientX - pendingPress.startClient.x;
+      const dy = e.clientY - pendingPress.startClient.y;
+      if (Math.hypot(dx, dy) > EDGE_DRAG_MOVE_THRESHOLD) {
+        const pointer = clientToMap(e.clientX, e.clientY);
+        activateEdgePress(pendingPress, pointer, { fromMove: true });
+      }
+    }
     if (mapState.toolboxDrag) {
       moveToolboxDrag(e.clientX, e.clientY);
       return;
@@ -20600,6 +20586,18 @@ var Sevenn = (() => {
       await finishMenuDrag(e.clientX, e.clientY);
       return;
     }
+    const edgePress = mapState.edgePress;
+    if (edgePress && edgePress.pointerId === e.pointerId) {
+      clearEdgePressTimer(edgePress);
+      mapState.edgePress = null;
+      if (!edgePress.activated && edgePress.type === "handle") {
+        const dx = e.clientX - edgePress.startClient.x;
+        const dy = e.clientY - edgePress.startClient.y;
+        if (Math.hypot(dx, dy) <= EDGE_CLICK_DISTANCE) {
+          await removeHandleAt(edgePress.line, edgePress.handleIndex);
+        }
+      }
+    }
     let cursorNeedsRefresh = false;
     if (mapState.edgeDrag && mapState.edgeDrag.pointerId === e.pointerId) {
       const drag = mapState.edgeDrag;
@@ -20612,7 +20610,19 @@ var Sevenn = (() => {
       }
       const handles = drag.handles || [];
       const changed = drag.offsetChanged || handles.some((handle, idx) => Math.abs((drag.currentOffsets?.[idx] ?? handle.offset) - (drag.startOffsets?.[idx] ?? handle.offset)) > 5e-4);
-      if (changed) {
+      const createdIndex = Number.isInteger(drag.createdIndex) ? drag.createdIndex : -1;
+      const shouldAutoRemove = drag.insertedHandle && !drag.hasDragged;
+      if (shouldAutoRemove) {
+        const trimmed = handles.filter((_, idx) => idx !== createdIndex);
+        const patch = buildCurvePatchFromHandles(trimmed);
+        await updateLink(drag.aId, drag.bId, patch);
+        applyLineStyle(drag.line, patch);
+        applyLinkPatchToState(drag.aId, drag.bId, patch);
+        mapState.edgeDragJustCompleted = true;
+        setTimeout(() => {
+          mapState.edgeDragJustCompleted = false;
+        }, 0);
+      } else if (changed) {
         const payloadHandles = handles.map((handle) => ({ position: handle.position, offset: handle.offset }));
         const patch = buildCurvePatchFromHandles(payloadHandles);
         await updateLink(drag.aId, drag.bId, patch);
@@ -20802,7 +20812,7 @@ var Sevenn = (() => {
       const entry = mapState.elements.get(id);
       if (entry) {
         updateNodeGeometry(id, entry);
-        queueEdgeUpdate(id);
+        queueEdgeUpdate(id, { immediate: true });
       }
       return;
     }
@@ -20838,7 +20848,7 @@ var Sevenn = (() => {
     });
     updates.clear();
     touched.forEach((id) => {
-      queueEdgeUpdate(id);
+      queueEdgeUpdate(id, { immediate: true });
     });
     flushQueuedEdgeUpdates({ force: true });
   }
@@ -21404,6 +21414,8 @@ var Sevenn = (() => {
     }));
     if (!handles.length) return;
     const index = clamp2(prepared.index, 0, handles.length - 1);
+    const createdIndex = Number.isInteger(prepared.createdIndex) ? prepared.createdIndex : -1;
+    const insertedHandle = Number.isFinite(prepared.originalLength) ? handles.length > prepared.originalLength : createdIndex >= 0;
     const captureTarget = evt.currentTarget || line;
     const baseLength = geometry.trimmedLength || Math.hypot(geometry.endX - geometry.startX, geometry.endY - geometry.startY) || 1;
     mapState.edgeDrag = {
@@ -21430,7 +21442,11 @@ var Sevenn = (() => {
       hasDragged: false,
       geometry,
       fromHandle: Boolean(evt?.target && evt.target !== line),
-      clientStart: { x: evt.clientX, y: evt.clientY }
+      clientStart: { x: evt.clientX, y: evt.clientY },
+      createdIndex,
+      insertedHandle,
+      trigger: options.trigger || "handle",
+      activatedByHold: options.activatedByHold === true
     };
     setLineHandlesVisible(line, true, { force: true, sticky: true });
     if (mapState.edgeDrag.captureTarget?.setPointerCapture) {
@@ -21440,22 +21456,140 @@ var Sevenn = (() => {
       }
     }
   }
+  function clearEdgePressTimer(press) {
+    if (!press) return;
+    if (press.holdTimer) {
+      clearTimeout(press.holdTimer);
+      press.holdTimer = null;
+    }
+  }
+  function resetEdgePress() {
+    if (mapState.edgePress) {
+      clearEdgePressTimer(mapState.edgePress);
+    }
+    mapState.edgePress = null;
+  }
+  function activateEdgePress(press, pointer, options = {}) {
+    if (!press || press.activated) return;
+    clearEdgePressTimer(press);
+    press.activated = true;
+    const line = press.line;
+    const aId = press.aId;
+    const bId = press.bId;
+    if (!line || !aId || !bId) {
+      resetEdgePress();
+      return;
+    }
+    const geometry = getLineGeometry(aId, bId, { line });
+    if (!geometry) {
+      resetEdgePress();
+      return;
+    }
+    const evt = press.originalEvent || press.event;
+    if (!evt) {
+      resetEdgePress();
+      return;
+    }
+    const pointerMeta = pointer || press.pointerStart || clientToMap(evt.clientX, evt.clientY);
+    beginEdgeHandleDrag(line, press.type === "handle" ? press.handleIndex : press.handleIndex ?? 0, evt, {
+      geometry,
+      pointer: pointerMeta,
+      trigger: press.type,
+      activatedByHold: options.fromHold === true || options.fromTimer === true
+    });
+    mapState.edgePress = null;
+  }
+  function startLinePress(line, aId, bId, evt) {
+    resetEdgePress();
+    const pointer = clientToMap(evt.clientX, evt.clientY);
+    const press = {
+      type: "line",
+      pointerId: evt.pointerId,
+      line,
+      aId,
+      bId,
+      event: evt,
+      originalEvent: evt,
+      pointerStart: pointer,
+      startClient: { x: evt.clientX, y: evt.clientY },
+      holdTimer: null,
+      activated: false,
+      handleIndex: 0
+    };
+    if (typeof window !== "undefined") {
+      press.holdTimer = window.setTimeout(() => {
+        activateEdgePress(press, press.pointerStart, { fromTimer: true, fromHold: true });
+      }, EDGE_DRAG_HOLD_DELAY);
+    }
+    mapState.edgePress = press;
+  }
+  function startHandlePress(line, handleIndex, evt) {
+    resetEdgePress();
+    const pointer = clientToMap(evt.clientX, evt.clientY);
+    const press = {
+      type: "handle",
+      pointerId: evt.pointerId,
+      line,
+      aId: line?.dataset?.a,
+      bId: line?.dataset?.b,
+      handleIndex,
+      event: evt,
+      originalEvent: evt,
+      pointerStart: pointer,
+      startClient: { x: evt.clientX, y: evt.clientY },
+      holdTimer: null,
+      activated: false
+    };
+    if (typeof window !== "undefined") {
+      press.holdTimer = window.setTimeout(() => {
+        activateEdgePress(press, press.pointerStart, { fromTimer: true, fromHold: true });
+      }, EDGE_DRAG_HOLD_DELAY);
+    }
+    mapState.edgePress = press;
+  }
+  async function removeHandleAt(line, handleIndex) {
+    if (!line || !line.dataset) return;
+    const aId = line.dataset.a;
+    const bId = line.dataset.b;
+    if (!aId || !bId) return;
+    const handles = parseCurveHandles(line.dataset.handles) || [];
+    if (handleIndex < 0 || handleIndex >= handles.length) return;
+    const nextHandles = handles.filter((_, idx) => idx !== handleIndex);
+    const patch = buildCurvePatchFromHandles(nextHandles);
+    await updateLink(aId, bId, patch);
+    applyLineStyle(line, patch);
+    applyLinkPatchToState(aId, bId, patch);
+    mapState.edgeDragJustCompleted = true;
+    setTimeout(() => {
+      mapState.edgeDragJustCompleted = false;
+    }, 0);
+  }
+  async function straightenLine(line) {
+    if (!line || !line.dataset) return;
+    const aId = line.dataset.a;
+    const bId = line.dataset.b;
+    if (!aId || !bId) return;
+    const patch = buildCurvePatchFromHandles([]);
+    await updateLink(aId, bId, patch);
+    applyLineStyle(line, patch);
+    applyLinkPatchToState(aId, bId, patch);
+    mapState.edgeDragJustCompleted = true;
+    setTimeout(() => {
+      mapState.edgeDragJustCompleted = false;
+    }, 0);
+  }
   function attachEdgeInteraction(path, aId, bId) {
     if (!path || path.dataset.interactive === "1") return;
     path.dataset.interactive = "1";
-    const startDragFromPath = (evt) => {
+    path.addEventListener("pointerdown", (evt) => {
       if (evt.button !== 0) return;
       if (mapState.tool !== TOOL.NAVIGATE) return;
       mapState.suppressNextClick = false;
       evt.stopPropagation();
-      const geometry = getLineGeometry(aId, bId, { line: path });
-      if (!geometry) return;
-      const pointerMap = clientToMap(evt.clientX, evt.clientY);
-      const index = Array.isArray(geometry.handles) && geometry.handles.length ? findNearestHandleIndex(geometry, pointerMap) : 0;
-      beginEdgeHandleDrag(path, index, evt, { geometry, pointer: pointerMap });
-    };
-    path.addEventListener("pointerdown", (evt) => {
-      startDragFromPath(evt);
+      if (typeof evt.preventDefault === "function") {
+        evt.preventDefault();
+      }
+      startLinePress(path, aId, bId, evt);
     });
     path.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -21470,6 +21604,7 @@ var Sevenn = (() => {
       const geometry = getLineGeometry(aId, bId, { line: path });
       showLineHandles(path, geometry);
       showEdgeTooltip(path, evt);
+      path.classList.add("map-edge--hover");
     });
     path.addEventListener("mouseleave", () => {
       if (mapState.tool === TOOL.HIDE) {
@@ -21480,6 +21615,7 @@ var Sevenn = (() => {
       }
       hideLineHandles(path);
       hideEdgeTooltip(path);
+      path.classList.remove("map-edge--hover");
     });
     path.addEventListener("mousemove", (evt) => moveEdgeTooltip(path, evt));
   }
@@ -22472,9 +22608,6 @@ var Sevenn = (() => {
       return clampHandlePosition(raw);
     });
   }
-  function createDefaultCurveHandles() {
-    return getDefaultHandlePositions().map((position) => ({ position, offset: 0 }));
-  }
   function clampHandleOffset(value) {
     const num = Number(value);
     if (!Number.isFinite(num)) return 0;
@@ -22581,7 +22714,7 @@ var Sevenn = (() => {
     return base;
   }
   function encodeCurveHandles(handles) {
-    if (!Array.isArray(handles)) return "";
+    if (!Array.isArray(handles) || !handles.length) return "";
     const simplified = handles.map((handle) => ({
       position: clampHandlePosition(handle.position),
       offset: clampHandleOffset(handle.offset)
@@ -22602,9 +22735,6 @@ var Sevenn = (() => {
     }
     if (infoHandles && infoHandles.length) {
       handles = mergeCurveHandles(handles, infoHandles);
-    }
-    if (!handles.length) {
-      handles = createDefaultCurveHandles();
     }
     if (Number.isFinite(overrides.curveOverride)) {
       const anchor = Number.isFinite(overrides.anchorOverride) ? overrides.anchorOverride : DEFAULT_CURVE_ANCHOR;
@@ -23032,6 +23162,8 @@ var Sevenn = (() => {
       point: handle.point,
       weight: handle.weight ?? getHandleWeight(handle.position)
     })) : [];
+    const originalLength = handles.length;
+    let createdIndex = -1;
     let index = clamp2(Math.round(hintIndex ?? 0), 0, Math.max(0, handles.length - 1));
     const pointerMeta = pointer ? { x: pointer.x, y: pointer.y } : null;
     if (pointerMeta) {
@@ -23050,24 +23182,15 @@ var Sevenn = (() => {
           handles.push(inserted);
           handles.sort((a, b) => a.position - b.position);
           nearestIndex = handles.indexOf(inserted);
+          createdIndex = nearestIndex;
         }
       }
       if (handles.length) {
         index = clamp2(nearestIndex, 0, handles.length - 1);
       }
     }
-    if (!handles.length) {
-      const fallback = buildHandleMetaFromPointer(geometry, {
-        x: geometry.startX + (geometry.endX - geometry.startX) * DEFAULT_CURVE_ANCHOR,
-        y: geometry.startY + (geometry.endY - geometry.startY) * DEFAULT_CURVE_ANCHOR
-      });
-      if (fallback) {
-        handles.push(fallback);
-        index = 0;
-      }
-    }
     geometry.handles = handles;
-    return { handles, index };
+    return { handles, index, createdIndex, originalLength };
   }
   function computeDecorationTrim(decoration, direction, baseWidth) {
     const arrowAllowance = Math.max(22, baseWidth * 4.2);
@@ -23291,7 +23414,12 @@ var Sevenn = (() => {
       { curveOverride, anchorOverride },
       { segment: segmentContext, aId, bId, decoration, decorationDirection }
     );
-    line.dataset.handles = encodeCurveHandles(handles);
+    const encodedHandles = encodeCurveHandles(handles);
+    if (encodedHandles) {
+      line.dataset.handles = encodedHandles;
+    } else {
+      delete line.dataset.handles;
+    }
     let dominant = { position: DEFAULT_CURVE_ANCHOR, offset: 0 };
     handles.forEach((handle) => {
       if (Math.abs(handle.offset) > Math.abs(dominant.offset)) {
@@ -23465,10 +23593,11 @@ var Sevenn = (() => {
           if (evt.button !== 0) return;
           if (mapState.tool !== TOOL.NAVIGATE) return;
           evt.stopPropagation();
+          if (typeof evt.preventDefault === "function") {
+            evt.preventDefault();
+          }
           const handleIndex = Number(evt.currentTarget?.dataset?.index) || 0;
-          const geometryNow = getLineGeometry(line.dataset.a, line.dataset.b, { line });
-          const pointer = clientToMap(evt.clientX, evt.clientY);
-          beginEdgeHandleDrag(line, handleIndex, evt, { geometry: geometryNow, pointer });
+          startHandlePress(line, handleIndex, evt);
         });
         circle.addEventListener("pointerenter", () => {
           showLineHandles(line);
@@ -23743,16 +23872,36 @@ var Sevenn = (() => {
       thickness: line?.dataset?.thickness || link.thickness || DEFAULT_LINE_THICKNESS,
       name: line?.dataset?.label || link.name || ""
     };
+    const existingHandles = parseCurveHandles(line?.dataset?.handles) || [];
+    const initialCurveMagnitude = Math.abs(Number(line?.dataset?.curve || 0));
+    const canStraighten = existingHandles.length > 0 || initialCurveMagnitude > 1e-3;
     const menu = document.createElement("div");
     menu.className = "line-menu";
+    const header = document.createElement("div");
+    header.className = "line-menu__header";
+    const titleEl = document.createElement("h3");
+    titleEl.textContent = "Line styling";
+    header.appendChild(titleEl);
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "line-menu__close";
+    closeBtn.innerHTML = ICONS.close;
+    closeBtn.addEventListener("click", () => closeLineMenu());
+    header.appendChild(closeBtn);
+    menu.appendChild(header);
+    const body = document.createElement("div");
+    body.className = "line-menu__body";
+    menu.appendChild(body);
     const colorLabel = document.createElement("label");
+    colorLabel.className = "line-menu__field";
     colorLabel.textContent = "Color";
     const colorInput = document.createElement("input");
     colorInput.type = "color";
     colorInput.value = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(initial.color) ? initial.color : "#888888";
     colorLabel.appendChild(colorInput);
-    menu.appendChild(colorLabel);
+    body.appendChild(colorLabel);
     const typeLabel = document.createElement("label");
+    typeLabel.className = "line-menu__field";
     typeLabel.textContent = "Line type";
     const typeSel = document.createElement("select");
     LINE_TYPE_PRESETS.forEach((option) => {
@@ -23764,12 +23913,15 @@ var Sevenn = (() => {
     const initialPresetValue = inferLineTypePreset(initial.style, initial.decoration);
     typeSel.value = initialPresetValue;
     typeLabel.appendChild(typeSel);
-    menu.appendChild(typeLabel);
+    const typeRow = document.createElement("div");
+    typeRow.className = "line-menu__row";
+    typeRow.appendChild(typeLabel);
     const flipBtn = document.createElement("button");
     flipBtn.type = "button";
-    flipBtn.className = "btn secondary";
+    flipBtn.className = "btn ghost";
     flipBtn.textContent = "Flip direction";
-    menu.appendChild(flipBtn);
+    typeRow.appendChild(flipBtn);
+    body.appendChild(typeRow);
     let currentDirection = initial.decoration === "arrow" || initial.decoration === "inhibit" ? initial.decorationDirection : DEFAULT_DECORATION_DIRECTION;
     const glowField = document.createElement("label");
     glowField.className = "line-menu-toggle";
@@ -23778,8 +23930,9 @@ var Sevenn = (() => {
     glowInput.checked = initial.glow;
     glowField.appendChild(glowInput);
     glowField.appendChild(document.createTextNode(" Glow highlight"));
-    menu.appendChild(glowField);
+    body.appendChild(glowField);
     const thickLabel = document.createElement("label");
+    thickLabel.className = "line-menu__field";
     thickLabel.textContent = "Thickness";
     const thickSel = document.createElement("select");
     LINE_THICKNESS_OPTIONS.forEach((option) => {
@@ -23790,14 +23943,17 @@ var Sevenn = (() => {
     });
     thickSel.value = initial.thickness;
     thickLabel.appendChild(thickSel);
-    menu.appendChild(thickLabel);
+    body.appendChild(thickLabel);
     const nameLabel = document.createElement("label");
+    nameLabel.className = "line-menu__field";
     nameLabel.textContent = "Label";
     const nameInput = document.createElement("input");
     nameInput.type = "text";
     nameInput.value = initial.name;
     nameLabel.appendChild(nameInput);
-    menu.appendChild(nameLabel);
+    body.appendChild(nameLabel);
+    let updateStraightenState = () => {
+    };
     const buildPatch = () => {
       const preset = getLineTypePreset(typeSel.value);
       const styleValue = preset?.style ?? DEFAULT_LINE_STYLE;
@@ -23816,6 +23972,7 @@ var Sevenn = (() => {
     };
     const applyPreview = () => {
       applyLineStyle(line, buildPatch());
+      updateStraightenState();
     };
     const updateFlipState = () => {
       const preset = getLineTypePreset(typeSel.value);
@@ -23853,16 +24010,43 @@ var Sevenn = (() => {
       updateFlipState();
       applyPreview();
     });
-    const btn = document.createElement("button");
-    btn.className = "btn primary";
-    btn.textContent = "Save";
-    btn.addEventListener("click", async () => {
+    const actions = document.createElement("div");
+    actions.className = "line-menu__actions";
+    const straightenBtn = document.createElement("button");
+    straightenBtn.type = "button";
+    straightenBtn.className = "btn ghost";
+    straightenBtn.textContent = "Straighten line";
+    straightenBtn.disabled = !canStraighten;
+    straightenBtn.addEventListener("click", async () => {
+      if (straightenBtn.disabled) return;
+      straightenBtn.disabled = true;
+      await straightenLine(line);
+      applyPreview();
+    });
+    actions.appendChild(straightenBtn);
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "btn primary";
+    saveBtn.textContent = "Save changes";
+    saveBtn.addEventListener("click", async () => {
       const patch = buildPatch();
       await updateLink(aId, bId, patch);
       applyLineStyle(line, patch);
       closeLineMenu({ commit: true });
     });
-    menu.appendChild(btn);
+    actions.appendChild(saveBtn);
+    menu.appendChild(actions);
+    updateStraightenState = () => {
+      const handles = parseCurveHandles(line?.dataset?.handles) || [];
+      const magnitude = Math.abs(Number(line?.dataset?.curve || 0));
+      straightenBtn.disabled = !(handles.length || magnitude > 1e-3);
+    };
+    updateStraightenState();
+    let observer = null;
+    if (typeof MutationObserver !== "undefined" && line) {
+      observer = new MutationObserver(updateStraightenState);
+      observer.observe(line, { attributes: true, attributeFilter: ["data-handles", "data-curve"] });
+    }
     colorInput.addEventListener("input", applyPreview);
     glowInput.addEventListener("change", applyPreview);
     thickSel.addEventListener("change", applyPreview);
@@ -23881,7 +24065,10 @@ var Sevenn = (() => {
     const menuState = {
       menu,
       restore: () => applyLineStyle(line, initial),
-      cleanup: () => document.removeEventListener("pointerdown", handleOutside, true)
+      cleanup: () => {
+        document.removeEventListener("pointerdown", handleOutside, true);
+        if (observer) observer.disconnect();
+      }
     };
     mapState.activeLineMenu = menuState;
   }
@@ -24275,6 +24462,5 @@ var Sevenn = (() => {
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
-  return __toCommonJS(main_exports);
 })();
 //# sourceMappingURL=bundle.js.map
