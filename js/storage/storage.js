@@ -23,6 +23,7 @@ import { exportJSON, importJSON, exportAnkiCSV } from './export.js';
 import { DEFAULT_REVIEW_STEPS } from '../review/constants.js';
 import { normalizeReviewSteps } from '../review/settings.js';
 import { DEFAULT_PLANNER_DEFAULTS, normalizePlannerDefaults } from '../lectures/scheduler.js';
+import { deepClone } from '../utils.js';
 
 let dbPromise;
 
@@ -233,7 +234,7 @@ export async function saveSettings(patch) {
 }
 
 function cloneConfig(config) {
-  return JSON.parse(JSON.stringify(config));
+  return deepClone(config);
 }
 
 export async function getMapConfig() {

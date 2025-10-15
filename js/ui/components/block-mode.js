@@ -2,6 +2,7 @@ import { state, setBlockMode, setSubtab, setStudySelectedMode, resetBlockMode } 
 import { sanitizeHtml } from './rich-text.js';
 import { sectionDefsForKind } from './sections.js';
 import { persistStudySession, removeStudySession } from '../../study/study-sessions.js';
+import { deepClone } from '../../utils.js';
 
 export function renderBlockMode(root, redraw) {
   const shell = document.createElement('section');
@@ -143,7 +144,7 @@ function drawBlockMode(shell, globalRedraw) {
 
 function snapshotBlockState() {
   const source = state.blockMode || {};
-  const clone = (value) => JSON.parse(JSON.stringify(value ?? {}));
+  const clone = (value) => deepClone(value ?? {});
   return {
     section: source.section || '',
     assignments: clone(source.assignments),

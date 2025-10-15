@@ -1,6 +1,6 @@
 import { listItemsByKind, getItem, upsertItem, getMapConfig, saveMapConfig } from '../../storage/storage.js';
 import { loadBlockCatalog } from '../../storage/block-catalog.js';
-import { uid } from '../../utils.js';
+import { uid, deepClone } from '../../utils.js';
 import { showPopup } from './popup.js';
 import { openEditor } from './editor.js';
 import { createFloatingWindow } from './window-manager.js';
@@ -447,7 +447,7 @@ async function ensureMapConfig() {
 
 async function persistMapConfig() {
   if (!mapState.mapConfig) return;
-  const snapshot = JSON.parse(JSON.stringify(mapState.mapConfig));
+  const snapshot = deepClone(mapState.mapConfig);
   await saveMapConfig(snapshot);
 }
 

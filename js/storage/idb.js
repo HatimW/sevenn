@@ -1,4 +1,5 @@
 import { normalizeLectureRecord } from './lecture-schema.js';
+import { deepClone } from '../utils.js';
 
 const DB_NAME = 'sevenn-db';
 const DB_VERSION = 5;
@@ -18,10 +19,7 @@ const enqueue = typeof queueMicrotask === 'function'
   ? queueMicrotask.bind(globalThis)
   : (cb => Promise.resolve().then(cb));
 
-function clone(value) {
-  if (value == null) return value;
-  return JSON.parse(JSON.stringify(value));
-}
+const clone = deepClone;
 
 class MemoryRequest {
   constructor(tx, executor) {

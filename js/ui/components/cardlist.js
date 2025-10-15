@@ -287,23 +287,6 @@ export function createItemCard(item, onChange){
 
 export async function renderCardList(container, itemSource, kind, onChange){
   container.innerHTML = '';
-  const items = [];
-  if (itemSource) {
-    if (typeof itemSource?.[Symbol.asyncIterator] === 'function') {
-      for await (const batch of itemSource) {
-        if (Array.isArray(batch)) {
-          items.push(...batch);
-        } else if (batch) {
-          items.push(batch);
-        }
-      }
-    } else if (typeof itemSource?.toArray === 'function') {
-      const collected = await itemSource.toArray();
-      items.push(...collected);
-    } else if (Array.isArray(itemSource)) {
-      items.push(...itemSource);
-    }
-  }
   const { blocks } = await loadBlockCatalog();
   const blockTitle = id => blocks.find(b => b.blockId === id)?.title || id;
   const orderMap = new Map(blocks.map((b,i)=>[b.blockId,i]));
@@ -324,12 +307,17 @@ export async function renderCardList(container, itemSource, kind, onChange){
   });
   const sortedAllWeeks = Array.from(allWeeks).sort((a, b) => a - b);
   const groups = new Map();
-  items.forEach(it => {
+
+  function addItem(it) {
+    if (!it) return;
     let block = '_';
     let week = '_';
-    if (it.lectures && it.lectures.length) {
-      let bestOrd = Infinity, bestWeek = -Infinity, bestLec = -Infinity;
+    if (Array.isArray(it.lectures) && it.lectures.length) {
+      let bestOrd = Infinity;
+      let bestWeek = -Infinity;
+      let bestLec = -Infinity;
       it.lectures.forEach(l => {
+        if (!l) return;
         const ord = orderMap.has(l.blockId) ? orderMap.get(l.blockId) : Infinity;
         if (
           ord < bestOrd ||
@@ -344,18 +332,43 @@ export async function renderCardList(container, itemSource, kind, onChange){
       });
     } else {
       let bestOrd = Infinity;
-      (it.blocks || []).forEach(id => {
+      (Array.isArray(it.blocks) ? it.blocks : []).forEach(id => {
         const ord = orderMap.has(id) ? orderMap.get(id) : Infinity;
-        if (ord < bestOrd) { block = id; bestOrd = ord; }
+        if (ord < bestOrd) {
+          block = id;
+          bestOrd = ord;
+        }
       });
-      if (it.weeks && it.weeks.length) week = Math.max(...it.weeks);
+      if (Array.isArray(it.weeks) && it.weeks.length) {
+        week = Math.max(...it.weeks);
+      }
     }
-    if (!groups.has(block)) groups.set(block, new Map());
+    if (!groups.has(block)) {
+      groups.set(block, new Map());
+    }
     const wkMap = groups.get(block);
-    const arr = wkMap.get(week) || [];
-    arr.push(it);
-    wkMap.set(week, arr);
-  });
+    const current = wkMap.get(week) || [];
+    current.push(it);
+    wkMap.set(week, current);
+  }
+
+  if (itemSource) {
+    if (typeof itemSource?.[Symbol.asyncIterator] === 'function') {
+      for await (const batch of itemSource) {
+        if (Array.isArray(batch)) {
+          batch.forEach(addItem);
+        } else if (batch) {
+          addItem(batch);
+        }
+      }
+    } else if (typeof itemSource?.toArray === 'function') {
+      const collected = await itemSource.toArray();
+      collected.forEach(addItem);
+    } else if (Array.isArray(itemSource)) {
+      itemSource.forEach(addItem);
+    }
+  }
+
   const sortedBlocks = Array.from(groups.keys()).sort((a,b)=>{
     const ao = orderMap.has(a) ? orderMap.get(a) : Infinity;
     const bo = orderMap.has(b) ? orderMap.get(b) : Infinity;
@@ -735,6 +748,9 @@ export async function renderCardList(container, itemSource, kind, onChange){
     });
     blockSec.appendChild(blockHeader);
     const wkMap = groups.get(b);
+    if (!wkMap) {
+      return;
+    }
     const sortedWeeks = Array.from(wkMap.keys()).sort((a,b)=>{
       if (a === '_' && b !== '_') return 1;
       if (b === '_' && a !== '_') return -1;
@@ -765,11 +781,17 @@ export async function renderCardList(container, itemSource, kind, onChange){
       list.style.setProperty('--entry-scale', state.entryLayout.scale);
       list.style.setProperty('--entry-columns', state.entryLayout.columns);
       list.classList.toggle('grid-layout', state.entryLayout.mode === 'grid');
-      const rows = wkMap.get(w);
-      function renderChunk(start=0){
-        const slice = rows.slice(start,start+200);
-        slice.forEach(it=>{ list.appendChild(createItemCard(it,onChange)); });
-        if (start+200 < rows.length) requestAnimationFrame(()=>renderChunk(start+200));
+      const rows = wkMap.get(w) || [];
+      function renderChunk(start = 0) {
+        if (!rows.length) return;
+        const slice = rows.slice(start, start + 200);
+        if (!slice.length) return;
+        const fragment = document.createDocumentFragment();
+        slice.forEach(it => {
+          fragment.appendChild(createItemCard(it, onChange));
+        });
+        list.appendChild(fragment);
+        if (start + 200 < rows.length) requestAnimationFrame(() => renderChunk(start + 200));
       }
       renderChunk();
       weekSec.appendChild(list);

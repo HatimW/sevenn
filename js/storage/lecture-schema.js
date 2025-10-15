@@ -6,14 +6,10 @@ import {
   deriveLectureStatus,
   normalizePlannerDefaults
 } from '../lectures/scheduler.js';
+import { deepClone } from '../utils.js';
 export { DEFAULT_PASS_PLAN } from '../lectures/scheduler.js';
 
 const KEY_SEPARATOR = '|';
-
-function deepClone(value) {
-  if (value == null) return value;
-  return JSON.parse(JSON.stringify(value));
-}
 
 export const DEFAULT_LECTURE_STATUS = {
   state: 'pending',

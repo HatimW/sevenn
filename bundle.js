@@ -437,6 +437,188 @@
     state.studySessionsLoaded = false;
   }
 
+  // js/utils.js
+  function uid() {
+    const g = globalThis;
+    return g.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+  }
+  function debounce(fn, delay = 150) {
+    let t;
+    return (...args) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), delay);
+    };
+  }
+  var structuredCloneFn = typeof globalThis.structuredClone === "function" ? globalThis.structuredClone.bind(globalThis) : null;
+  function cloneArrayBuffer(buffer) {
+    if (typeof buffer.slice === "function") {
+      return buffer.slice(0);
+    }
+    const copy = new ArrayBuffer(buffer.byteLength);
+    new Uint8Array(copy).set(new Uint8Array(buffer));
+    return copy;
+  }
+  function cloneArrayBufferView(view, seen) {
+    if (typeof view?.constructor?.from === "function") {
+      return view.constructor.from(view);
+    }
+    if (ArrayBuffer.isView(view)) {
+      const bufferCopy = deepClone(view.buffer, seen);
+      if (typeof DataView !== "undefined" && view instanceof DataView) {
+        return new DataView(bufferCopy, view.byteOffset, view.byteLength);
+      }
+      return new view.constructor(bufferCopy, view.byteOffset, view.length ?? void 0);
+    }
+    return view;
+  }
+  function deepClone(value, seen = /* @__PURE__ */ new WeakMap()) {
+    if (value == null || typeof value !== "object") {
+      return value;
+    }
+    if (structuredCloneFn) {
+      try {
+        return structuredCloneFn(value);
+      } catch (err) {
+      }
+    }
+    if (seen.has(value)) {
+      return seen.get(value);
+    }
+    if (value instanceof Date) {
+      return new Date(value.getTime());
+    }
+    if (value instanceof RegExp) {
+      const copy = new RegExp(value.source, value.flags);
+      copy.lastIndex = value.lastIndex;
+      return copy;
+    }
+    if (ArrayBuffer.isView(value)) {
+      const cloned = cloneArrayBufferView(value, seen);
+      seen.set(value, cloned);
+      return cloned;
+    }
+    if (value instanceof ArrayBuffer) {
+      const copy = cloneArrayBuffer(value);
+      seen.set(value, copy);
+      return copy;
+    }
+    if (Array.isArray(value)) {
+      const result2 = [];
+      seen.set(value, result2);
+      for (let i = 0; i < value.length; i += 1) {
+        result2[i] = deepClone(value[i], seen);
+      }
+      return result2;
+    }
+    if (value instanceof Map) {
+      const result2 = /* @__PURE__ */ new Map();
+      seen.set(value, result2);
+      value.forEach((mapValue, key) => {
+        const clonedKey = typeof key === "object" && key !== null ? deepClone(key, seen) : key;
+        result2.set(clonedKey, deepClone(mapValue, seen));
+      });
+      return result2;
+    }
+    if (value instanceof Set) {
+      const result2 = /* @__PURE__ */ new Set();
+      seen.set(value, result2);
+      value.forEach((entry) => {
+        result2.add(deepClone(entry, seen));
+      });
+      return result2;
+    }
+    const result = {};
+    seen.set(value, result);
+    for (const [key, val] of Object.entries(value)) {
+      result[key] = deepClone(val, seen);
+    }
+    return result;
+  }
+  function parseDateValue(value) {
+    if (!value) return Number.NaN;
+    if (value instanceof Date) {
+      const time2 = value.getTime();
+      return Number.isNaN(time2) ? Number.NaN : time2;
+    }
+    const date = new Date(value);
+    const time = date.getTime();
+    return Number.isNaN(time) ? Number.NaN : time;
+  }
+  function findActiveBlockId(blocks, now = Date.now()) {
+    if (!Array.isArray(blocks) || blocks.length === 0) return "";
+    const nowTs = Number.isFinite(now) ? now : Date.now();
+    let current = null;
+    let upcoming = null;
+    let recent = null;
+    blocks.forEach((block) => {
+      if (!block || block.blockId == null) return;
+      const id = String(block.blockId);
+      const start = parseDateValue(block.startDate);
+      const end = parseDateValue(block.endDate);
+      const hasStart = Number.isFinite(start);
+      const hasEnd = Number.isFinite(end);
+      if (hasStart && hasEnd) {
+        if (start <= nowTs && nowTs <= end) {
+          if (!current || start < current.start || start === current.start && end < current.end) {
+            current = { id, start, end };
+          }
+          return;
+        }
+        if (start > nowTs) {
+          if (!upcoming || start < upcoming.start) {
+            upcoming = { id, start };
+          }
+          return;
+        }
+        if (!recent || end > recent.end) {
+          recent = { id, end };
+        }
+        return;
+      }
+      if (hasStart) {
+        if (start <= nowTs) {
+          if (!recent || start > recent.end) {
+            recent = { id, end: start };
+          }
+        } else if (!upcoming || start < upcoming.start) {
+          upcoming = { id, start };
+        }
+        return;
+      }
+      if (hasEnd) {
+        if (nowTs <= end) {
+          if (!current || end < current.end) {
+            current = { id, start: end, end };
+          }
+        } else if (!recent || end > recent.end) {
+          recent = { id, end };
+        }
+      }
+    });
+    if (current) return current.id;
+    if (upcoming) return upcoming.id;
+    if (recent) return recent.id;
+    const first = blocks.find((block) => block && block.blockId != null);
+    return first ? String(first.blockId) : "";
+  }
+  function setToggleState(element, active, className = "active") {
+    if (!element) return;
+    const isActive = Boolean(active);
+    if (element.dataset) {
+      element.dataset.toggle = "true";
+      element.dataset.active = isActive ? "true" : "false";
+    }
+    if (className && element.classList) {
+      element.classList.toggle(className, isActive);
+    }
+    if (typeof HTMLElement !== "undefined" && element instanceof HTMLElement) {
+      const role = element.getAttribute("role");
+      if ((element.tagName === "BUTTON" || role === "button") && typeof element.setAttribute === "function") {
+        element.setAttribute("aria-pressed", isActive ? "true" : "false");
+      }
+    }
+  }
+
   // js/lectures/scheduler.js
   var DAY_MINUTES = 24 * 60;
   var MINUTE_MS = 60 * 1e3;
@@ -452,10 +634,7 @@
     "#6366f1",
     "#14b8a6"
   ];
-  function clone(value) {
-    if (value == null) return value;
-    return JSON.parse(JSON.stringify(value));
-  }
+  var clone = deepClone;
   function toNumber(value, fallback = 0) {
     const num = Number(value);
     return Number.isFinite(num) ? num : fallback;
@@ -574,7 +753,7 @@
   }
   function sanitizeAttachments(raw) {
     if (!Array.isArray(raw)) return [];
-    return raw.filter((att) => att != null).map((att) => typeof att === "object" ? JSON.parse(JSON.stringify(att)) : att);
+    return raw.filter((att) => att != null).map((att) => typeof att === "object" ? deepClone(att) : att);
   }
   function normalizeLecturePasses({
     plan,
@@ -744,10 +923,6 @@
 
   // js/storage/lecture-schema.js
   var KEY_SEPARATOR = "|";
-  function deepClone(value) {
-    if (value == null) return value;
-    return JSON.parse(JSON.stringify(value));
-  }
   var DEFAULT_LECTURE_STATUS = {
     state: "pending",
     completedPasses: 0,
@@ -834,10 +1009,7 @@
     lectures: "key"
   };
   var enqueue = typeof queueMicrotask === "function" ? queueMicrotask.bind(globalThis) : ((cb) => Promise.resolve().then(cb));
-  function clone2(value) {
-    if (value == null) return value;
-    return JSON.parse(JSON.stringify(value));
-  }
+  var clone2 = deepClone;
   var MemoryRequest = class {
     constructor(tx, executor) {
       this.result = void 0;
@@ -1253,10 +1425,7 @@
   }
 
   // js/storage/lectures.js
-  function clone3(value) {
-    if (value == null) return value;
-    return JSON.parse(JSON.stringify(value));
-  }
+  var clone3 = deepClone;
   function prom(req) {
     return new Promise((resolve, reject) => {
       req.onsuccess = () => resolve(req.result);
@@ -1551,8 +1720,8 @@
         const key = record.key || lectureKey(blockId, lectureId);
         if (!key) return;
         if (preferExisting && lectureRecords.has(key)) return;
-        const clone7 = JSON.parse(JSON.stringify({ ...record, key, blockId, id: lectureId }));
-        lectureRecords.set(key, clone7);
+        const payload = deepClone({ ...record, key, blockId, id: lectureId });
+        lectureRecords.set(key, payload);
       };
       if (Array.isArray(dbDump?.lectures)) {
         for (const lecture of dbDump.lectures) {
@@ -1994,7 +2163,7 @@
     scheduleBackup();
   }
   function cloneConfig(config) {
-    return JSON.parse(JSON.stringify(config));
+    return deepClone(config);
   }
   async function getMapConfig() {
     try {
@@ -3741,103 +3910,6 @@
     layout.appendChild(dataCard);
   }
 
-  // js/utils.js
-  function uid() {
-    const g = globalThis;
-    return g.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
-  }
-  function debounce(fn, delay = 150) {
-    let t;
-    return (...args) => {
-      clearTimeout(t);
-      t = setTimeout(() => fn(...args), delay);
-    };
-  }
-  function parseDateValue(value) {
-    if (!value) return Number.NaN;
-    if (value instanceof Date) {
-      const time2 = value.getTime();
-      return Number.isNaN(time2) ? Number.NaN : time2;
-    }
-    const date = new Date(value);
-    const time = date.getTime();
-    return Number.isNaN(time) ? Number.NaN : time;
-  }
-  function findActiveBlockId(blocks, now = Date.now()) {
-    if (!Array.isArray(blocks) || blocks.length === 0) return "";
-    const nowTs = Number.isFinite(now) ? now : Date.now();
-    let current = null;
-    let upcoming = null;
-    let recent = null;
-    blocks.forEach((block) => {
-      if (!block || block.blockId == null) return;
-      const id = String(block.blockId);
-      const start = parseDateValue(block.startDate);
-      const end = parseDateValue(block.endDate);
-      const hasStart = Number.isFinite(start);
-      const hasEnd = Number.isFinite(end);
-      if (hasStart && hasEnd) {
-        if (start <= nowTs && nowTs <= end) {
-          if (!current || start < current.start || start === current.start && end < current.end) {
-            current = { id, start, end };
-          }
-          return;
-        }
-        if (start > nowTs) {
-          if (!upcoming || start < upcoming.start) {
-            upcoming = { id, start };
-          }
-          return;
-        }
-        if (!recent || end > recent.end) {
-          recent = { id, end };
-        }
-        return;
-      }
-      if (hasStart) {
-        if (start <= nowTs) {
-          if (!recent || start > recent.end) {
-            recent = { id, end: start };
-          }
-        } else if (!upcoming || start < upcoming.start) {
-          upcoming = { id, start };
-        }
-        return;
-      }
-      if (hasEnd) {
-        if (nowTs <= end) {
-          if (!current || end < current.end) {
-            current = { id, start: end, end };
-          }
-        } else if (!recent || end > recent.end) {
-          recent = { id, end };
-        }
-      }
-    });
-    if (current) return current.id;
-    if (upcoming) return upcoming.id;
-    if (recent) return recent.id;
-    const first = blocks.find((block) => block && block.blockId != null);
-    return first ? String(first.blockId) : "";
-  }
-  function setToggleState(element, active, className = "active") {
-    if (!element) return;
-    const isActive = Boolean(active);
-    if (element.dataset) {
-      element.dataset.toggle = "true";
-      element.dataset.active = isActive ? "true" : "false";
-    }
-    if (className && element.classList) {
-      element.classList.toggle(className, isActive);
-    }
-    if (typeof HTMLElement !== "undefined" && element instanceof HTMLElement) {
-      const role = element.getAttribute("role");
-      if ((element.tagName === "BUTTON" || role === "button") && typeof element.setAttribute === "function") {
-        element.setAttribute("aria-pressed", isActive ? "true" : "false");
-      }
-    }
-  }
-
   // js/ui/components/window-manager.js
   var windows = /* @__PURE__ */ new Set();
   var zIndexCounter = 2e3;
@@ -5070,9 +5142,9 @@
       const selection = window.getSelection();
       if (!selection) return false;
       selection.removeAllRanges();
-      const clone7 = range.cloneRange();
-      selection.addRange(clone7);
-      savedRange = clone7.cloneRange();
+      const clone6 = range.cloneRange();
+      selection.addRange(clone6);
+      savedRange = clone6.cloneRange();
       return true;
     }
     function runCommand(action, { requireSelection = false } = {}) {
@@ -7020,23 +7092,6 @@
   }
   async function renderCardList(container, itemSource, kind, onChange) {
     container.innerHTML = "";
-    const items = [];
-    if (itemSource) {
-      if (typeof itemSource?.[Symbol.asyncIterator] === "function") {
-        for await (const batch of itemSource) {
-          if (Array.isArray(batch)) {
-            items.push(...batch);
-          } else if (batch) {
-            items.push(batch);
-          }
-        }
-      } else if (typeof itemSource?.toArray === "function") {
-        const collected = await itemSource.toArray();
-        items.push(...collected);
-      } else if (Array.isArray(itemSource)) {
-        items.push(...itemSource);
-      }
-    }
     const { blocks } = await loadBlockCatalog();
     const blockTitle = (id) => blocks.find((b) => b.blockId === id)?.title || id;
     const orderMap = new Map(blocks.map((b, i) => [b.blockId, i]));
@@ -7057,12 +7112,16 @@
     });
     const sortedAllWeeks = Array.from(allWeeks).sort((a, b) => a - b);
     const groups = /* @__PURE__ */ new Map();
-    items.forEach((it) => {
+    function addItem(it) {
+      if (!it) return;
       let block = "_";
       let week = "_";
-      if (it.lectures && it.lectures.length) {
-        let bestOrd = Infinity, bestWeek = -Infinity, bestLec = -Infinity;
+      if (Array.isArray(it.lectures) && it.lectures.length) {
+        let bestOrd = Infinity;
+        let bestWeek = -Infinity;
+        let bestLec = -Infinity;
         it.lectures.forEach((l) => {
+          if (!l) return;
           const ord = orderMap.has(l.blockId) ? orderMap.get(l.blockId) : Infinity;
           if (ord < bestOrd || ord === bestOrd && (l.week > bestWeek || l.week === bestWeek && l.id > bestLec)) {
             block = l.blockId;
@@ -7074,21 +7133,41 @@
         });
       } else {
         let bestOrd = Infinity;
-        (it.blocks || []).forEach((id) => {
+        (Array.isArray(it.blocks) ? it.blocks : []).forEach((id) => {
           const ord = orderMap.has(id) ? orderMap.get(id) : Infinity;
           if (ord < bestOrd) {
             block = id;
             bestOrd = ord;
           }
         });
-        if (it.weeks && it.weeks.length) week = Math.max(...it.weeks);
+        if (Array.isArray(it.weeks) && it.weeks.length) {
+          week = Math.max(...it.weeks);
+        }
       }
-      if (!groups.has(block)) groups.set(block, /* @__PURE__ */ new Map());
+      if (!groups.has(block)) {
+        groups.set(block, /* @__PURE__ */ new Map());
+      }
       const wkMap = groups.get(block);
-      const arr = wkMap.get(week) || [];
-      arr.push(it);
-      wkMap.set(week, arr);
-    });
+      const current = wkMap.get(week) || [];
+      current.push(it);
+      wkMap.set(week, current);
+    }
+    if (itemSource) {
+      if (typeof itemSource?.[Symbol.asyncIterator] === "function") {
+        for await (const batch of itemSource) {
+          if (Array.isArray(batch)) {
+            batch.forEach(addItem);
+          } else if (batch) {
+            addItem(batch);
+          }
+        }
+      } else if (typeof itemSource?.toArray === "function") {
+        const collected = await itemSource.toArray();
+        collected.forEach(addItem);
+      } else if (Array.isArray(itemSource)) {
+        itemSource.forEach(addItem);
+      }
+    }
     const sortedBlocks = Array.from(groups.keys()).sort((a, b) => {
       const ao = orderMap.has(a) ? orderMap.get(a) : Infinity;
       const bo = orderMap.has(b) ? orderMap.get(b) : Infinity;
@@ -7428,6 +7507,9 @@
       });
       blockSec.appendChild(blockHeader);
       const wkMap = groups.get(b);
+      if (!wkMap) {
+        return;
+      }
       const sortedWeeks = Array.from(wkMap.keys()).sort((a, b2) => {
         if (a === "_" && b2 !== "_") return 1;
         if (b2 === "_" && a !== "_") return -1;
@@ -7459,12 +7541,16 @@
         list.style.setProperty("--entry-scale", state.entryLayout.scale);
         list.style.setProperty("--entry-columns", state.entryLayout.columns);
         list.classList.toggle("grid-layout", state.entryLayout.mode === "grid");
-        const rows = wkMap.get(w);
+        const rows = wkMap.get(w) || [];
         function renderChunk(start = 0) {
+          if (!rows.length) return;
           const slice = rows.slice(start, start + 200);
+          if (!slice.length) return;
+          const fragment = document.createDocumentFragment();
           slice.forEach((it) => {
-            list.appendChild(createItemCard(it, onChange));
+            fragment.appendChild(createItemCard(it, onChange));
           });
+          list.appendChild(fragment);
           if (start + 200 < rows.length) requestAnimationFrame(() => renderChunk(start + 200));
         }
         renderChunk();
@@ -8480,7 +8566,8 @@
   // js/study/study-sessions.js
   var pendingLoad = null;
   function clone4(value) {
-    return JSON.parse(JSON.stringify(value ?? null));
+    if (value === void 0) return null;
+    return deepClone(value);
   }
   function safeClone(value, fallback = null) {
     try {
@@ -10058,13 +10145,9 @@
       req.onerror = () => reject(req.error);
     });
   }
-  function clone5(value) {
-    if (value == null) return value;
-    return JSON.parse(JSON.stringify(value));
-  }
   function sanitizeBlock(block) {
     if (!block || typeof block !== "object") return null;
-    const copy = clone5(block);
+    const copy = deepClone(block);
     return {
       blockId: copy.blockId,
       title: copy.title || "",
@@ -10076,15 +10159,15 @@
   }
   function sanitizeLecture(lecture) {
     if (!lecture || typeof lecture !== "object") return null;
-    const copy = clone5(lecture);
+    const copy = deepClone(lecture);
     return {
       blockId: copy.blockId,
       id: copy.id,
       name: copy.name || "",
       week: copy.week ?? null,
       tags: Array.isArray(copy.tags) ? copy.tags.slice() : [],
-      passPlan: copy.passPlan ? clone5(copy.passPlan) : null,
-      plannerDefaults: copy.plannerDefaults ? clone5(copy.plannerDefaults) : null,
+      passPlan: copy.passPlan ? deepClone(copy.passPlan) : null,
+      plannerDefaults: copy.plannerDefaults ? deepClone(copy.plannerDefaults) : null,
       notes: typeof copy.notes === "string" ? copy.notes : "",
       position: Number.isFinite(copy.position) ? copy.position : null
     };
@@ -10177,7 +10260,7 @@
   }
   function sanitizeItems(items) {
     return items.map((item) => {
-      const copy = clone5(item);
+      const copy = deepClone(item);
       delete copy.tokens;
       delete copy.searchMeta;
       return copy;
@@ -10197,7 +10280,7 @@
   async function readMapConfig() {
     try {
       const raw = await getMapConfig();
-      return clone5(raw);
+      return deepClone(raw);
     } catch (err) {
       console.warn("Failed to read map config for transfer", err);
       return { tabs: [] };
@@ -10288,7 +10371,7 @@
     const block = sanitizeBlock(bundle.block || {});
     const lectures = Array.isArray(bundle.lectures) ? bundle.lectures.map(ensureLectureDefaults).filter(Boolean) : [];
     const items = Array.isArray(bundle.items) ? bundle.items.map((item) => {
-      const cleaned = cleanItem({ ...clone5(item) });
+      const cleaned = cleanItem({ ...deepClone(item) });
       delete cleaned.tokens;
       delete cleaned.searchMeta;
       return cleaned;
@@ -10517,7 +10600,7 @@
   async function mergeMapConfig(map, lectureIdMap, itemIdMap) {
     if (!map || !Array.isArray(map.tabs) || !map.tabs.length) return;
     const config = await getMapConfig();
-    const copy = clone5(config);
+    const copy = deepClone(config);
     const appended = remapMapTabs(map, lectureIdMap, itemIdMap);
     appended.forEach((tab) => {
       let name = tab.name;
@@ -14348,12 +14431,12 @@
   }
   function snapshotBlockState() {
     const source = state.blockMode || {};
-    const clone7 = (value) => JSON.parse(JSON.stringify(value ?? {}));
+    const clone6 = (value) => deepClone(value ?? {});
     return {
       section: source.section || "",
-      assignments: clone7(source.assignments),
-      reveal: clone7(source.reveal),
-      order: clone7(source.order)
+      assignments: clone6(source.assignments),
+      reveal: clone6(source.reveal),
+      order: clone6(source.order)
     };
   }
   function renderFooter({ globalRedraw, sectionLabel, filledCount, total }) {
@@ -16070,8 +16153,8 @@
       totalChanges: switched
     };
   }
-  function clone6(value) {
-    return value ? JSON.parse(JSON.stringify(value)) : value;
+  function clone5(value) {
+    return value != null ? deepClone(value) : value;
   }
   function totalExamTimeMs(exam) {
     const seconds = typeof exam.secondsPerQuestion === "number" ? exam.secondsPerQuestion : DEFAULT_SECONDS;
@@ -16196,7 +16279,7 @@
     }
   }
   function ensureExamShape(exam) {
-    const next = clone6(exam) || {};
+    const next = clone5(exam) || {};
     let changed = false;
     if (!next.id) {
       next.id = uid();
@@ -16312,7 +16395,7 @@
     };
   }
   function createTakingSession(exam) {
-    const snapshot = clone6(exam);
+    const snapshot = clone5(exam);
     const totalMs = snapshot.timerMode === "timed" ? totalExamTimeMs(snapshot) : null;
     return {
       mode: "taking",
@@ -16335,7 +16418,7 @@
   }
   function hydrateSavedSession(saved, fallbackExam) {
     const baseExam = saved?.exam ? ensureExamShape(saved.exam).exam : fallbackExam;
-    const exam = clone6(baseExam);
+    const exam = clone5(baseExam);
     const questionCount = exam.questions.length;
     const idx = Math.min(Math.max(Number(saved?.idx) || 0, 0), Math.max(0, questionCount - 1));
     const remaining = typeof saved?.remainingMs === "number" ? Math.max(0, saved.remainingMs) : exam.timerMode === "timed" ? totalExamTimeMs(exam) : null;
@@ -16530,7 +16613,7 @@
       reviewBtn.className = "btn secondary";
       reviewBtn.textContent = "Review Last Attempt";
       reviewBtn.addEventListener("click", () => {
-        setExamSession({ mode: "review", exam: clone6(exam), result: clone6(last), idx: 0 });
+        setExamSession({ mode: "review", exam: clone5(exam), result: clone5(last), idx: 0 });
         render();
       });
       actions.appendChild(reviewBtn);
@@ -16625,7 +16708,7 @@
     review.className = "btn secondary";
     review.textContent = "Review";
     review.addEventListener("click", () => {
-      setExamSession({ mode: "review", exam: clone6(exam), result: clone6(result), idx: 0 });
+      setExamSession({ mode: "review", exam: clone5(exam), result: clone5(result), idx: 0 });
       render();
     });
     row.appendChild(review);
@@ -17236,7 +17319,7 @@
     const questionStats = snapshotQuestionStats(sess);
     const payload = {
       examId: sess.exam.id,
-      exam: clone6(sess.exam),
+      exam: clone5(sess.exam),
       idx: sess.idx,
       answers: { ...sess.answers || {} },
       flagged: { ...sess.flagged || {} },
@@ -17287,7 +17370,7 @@
       questionStats,
       changeSummary
     };
-    const updatedExam = clone6(sess.exam);
+    const updatedExam = clone5(sess.exam);
     updatedExam.results = [...updatedExam.results || [], result];
     updatedExam.updatedAt = Date.now();
     await upsertExam(updatedExam);
@@ -17325,10 +17408,10 @@
     reviewBtn.addEventListener("click", () => {
       setExamSession({
         mode: "review",
-        exam: clone6(sess.exam),
-        result: clone6(sess.latestResult),
+        exam: clone5(sess.exam),
+        result: clone5(sess.latestResult),
         idx: 0,
-        fromSummary: clone6(sess.latestResult)
+        fromSummary: clone5(sess.latestResult)
       });
       render();
     });
@@ -18282,9 +18365,9 @@
     const deduped = [];
     tabs2.forEach((tab) => {
       if (ids.has(tab.id)) {
-        const clone7 = { ...tab, id: uid() };
-        ids.add(clone7.id);
-        deduped.push(clone7);
+        const clone6 = { ...tab, id: uid() };
+        ids.add(clone6.id);
+        deduped.push(clone6);
       } else {
         ids.add(tab.id);
         deduped.push(tab);
@@ -18318,7 +18401,7 @@
   }
   async function persistMapConfig() {
     if (!mapState.mapConfig) return;
-    const snapshot = JSON.parse(JSON.stringify(mapState.mapConfig));
+    const snapshot = deepClone(mapState.mapConfig);
     await saveMapConfig(snapshot);
   }
   function getActiveTab() {

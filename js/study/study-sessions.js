@@ -1,10 +1,12 @@
 import { state, setStudySessions, setStudySessionEntry, clearStudySessionsState } from '../state.js';
 import { listStudySessions, saveStudySessionRecord, deleteStudySessionRecord, clearAllStudySessionRecords } from '../storage/storage.js';
+import { deepClone } from '../utils.js';
 
 let pendingLoad = null;
 
 function clone(value) {
-  return JSON.parse(JSON.stringify(value ?? null));
+  if (value === undefined) return null;
+  return deepClone(value);
 }
 
 function safeClone(value, fallback = null) {
