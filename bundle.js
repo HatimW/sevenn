@@ -18135,7 +18135,7 @@
   var LINE_GAP_STROKE_MULTIPLIER = 2.4;
   var EDGE_DRAG_HOLD_DELAY = 160;
   var EDGE_DRAG_MOVE_THRESHOLD = 3.5;
-  var EDGE_CLICK_DISTANCE = 6;
+  var EDGE_CLICK_DISTANCE = 9;
   var LEGACY_STYLE_MAPPINGS = {
     "arrow": { style: "solid", decoration: "arrow", decorationDirection: "end" },
     "arrow-end": { style: "solid", decoration: "arrow", decorationDirection: "end" },
@@ -20607,7 +20607,9 @@
         const dy = e.clientY - edgePress.startClient.y;
         if (Math.hypot(dx, dy) <= EDGE_CLICK_DISTANCE) {
           const line = edgePress.line;
-          if (line && confirm("Remove this anchor point?")) {
+          const hoveredNow = edgePress.handleElement && typeof edgePress.handleElement.matches === "function" && edgePress.handleElement.matches(":hover");
+          const allowRemoval = hoveredNow || edgePress.hoveredAtPress;
+          if (allowRemoval && line && confirm("Remove this anchor point?")) {
             await removeHandleAt(line, edgePress.handleIndex);
           } else if (line) {
             showLineHandles(line);
@@ -21568,7 +21570,9 @@
       pointerStart: pointer,
       startClient: { x: evt.clientX, y: evt.clientY },
       holdTimer: null,
-      activated: false
+      activated: false,
+      handleElement: evt.currentTarget || null,
+      hoveredAtPress: Boolean(evt.currentTarget?.classList?.contains("map-edge-handle--hover"))
     };
     if (typeof window !== "undefined") {
       press.holdTimer = window.setTimeout(() => {
@@ -22521,7 +22525,7 @@
     const zoomRatio = w / defaultSize;
     const nodeScale = clamp2(Math.pow(zoomRatio, 0.02), 0.85, 1.35);
     const labelScale = clamp2(Math.pow(zoomRatio, 0.18), 0.95, 2.6);
-    const lineScale = 1;
+    const lineScale = clamp2(Math.pow(zoomRatio, -0.24), 0.85, 1.85);
     mapState.lastScaleSize = { w, h: height };
     mapState.currentScales = { nodeScale, labelScale, lineScale, zoomRatio };
     updateMarkerSizes();
@@ -22755,17 +22759,20 @@
   function getHandleWeight() {
     return 1;
   }
-  function resolveLineHandles(line, info = {}, overrides = {}, context = {}) {
+  function resolveLineHandles(line, info = {}, overrides = {}, context = {}, options = {}) {
     const datasetHandles = line?.dataset?.handles ? parseCurveHandles(line.dataset.handles) : null;
-    const infoHandles = parseCurveHandles(
-      info.curveHandles ?? info.curvePoints ?? info.curveOffsets ?? info.handles
-    );
+    const hasExplicitHandles = Object.prototype.hasOwnProperty.call(info, "curveHandles") || Object.prototype.hasOwnProperty.call(info, "curvePoints") || Object.prototype.hasOwnProperty.call(info, "curveOffsets") || Object.prototype.hasOwnProperty.call(info, "handles");
+    const infoHandleSource = hasExplicitHandles ? info.curveHandles ?? info.curvePoints ?? info.curveOffsets ?? info.handles : void 0;
+    const infoHandles = parseCurveHandles(infoHandleSource);
+    const clearExisting = options?.clearExisting === true || hasExplicitHandles && (!infoHandles || !infoHandles.length) && (Array.isArray(infoHandleSource) ? infoHandleSource.length === 0 : infoHandleSource == null || infoHandleSource === "");
     let handles = [];
-    if (datasetHandles && datasetHandles.length) {
+    if (!clearExisting && datasetHandles && datasetHandles.length) {
       handles = mergeCurveHandles(handles, datasetHandles);
     }
     if (infoHandles && infoHandles.length) {
       handles = mergeCurveHandles(handles, infoHandles);
+    } else if (clearExisting) {
+      handles = [];
     }
     if (Number.isFinite(overrides.curveOverride)) {
       const anchor = Number.isFinite(overrides.anchorOverride) ? overrides.anchorOverride : DEFAULT_CURVE_ANCHOR;
@@ -23237,8 +23244,17 @@
     line.dataset.thickness = thickness;
     line.dataset.baseWidth = String(baseWidthValue);
     line.dataset.label = label;
-    const curveOverride = Object.prototype.hasOwnProperty.call(info, "curve") ? clampHandleOffset(info.curve) : void 0;
-    const anchorOverride = Object.prototype.hasOwnProperty.call(info, "anchor") ? normalizeAnchorValue(info.anchor) : Object.prototype.hasOwnProperty.call(info, "curveAnchor") ? normalizeAnchorValue(info.curveAnchor) : void 0;
+    const hasExplicitHandles = Object.prototype.hasOwnProperty.call(info, "curveHandles") || Object.prototype.hasOwnProperty.call(info, "curvePoints") || Object.prototype.hasOwnProperty.call(info, "curveOffsets") || Object.prototype.hasOwnProperty.call(info, "handles");
+    const handleSource = hasExplicitHandles ? info.curveHandles ?? info.curvePoints ?? info.curveOffsets ?? info.handles : void 0;
+    const shouldClearHandles = hasExplicitHandles && (!handleSource || Array.isArray(handleSource) && handleSource.length === 0);
+    let curveOverride = Object.prototype.hasOwnProperty.call(info, "curve") ? clampHandleOffset(info.curve) : void 0;
+    let anchorOverride = Object.prototype.hasOwnProperty.call(info, "anchor") ? normalizeAnchorValue(info.anchor) : Object.prototype.hasOwnProperty.call(info, "curveAnchor") ? normalizeAnchorValue(info.curveAnchor) : void 0;
+    if (shouldClearHandles) {
+      curveOverride = void 0;
+      if (!Number.isFinite(anchorOverride)) {
+        anchorOverride = void 0;
+      }
+    }
     const aId = line.dataset.a;
     const bId = line.dataset.b;
     let segmentContext = null;
@@ -23249,7 +23265,8 @@
       line,
       info,
       { curveOverride, anchorOverride },
-      { segment: segmentContext, aId, bId, decoration, decorationDirection }
+      { segment: segmentContext, aId, bId, decoration, decorationDirection },
+      { clearExisting: shouldClearHandles }
     );
     const encodedHandles = encodeCurveHandles(handles);
     if (encodedHandles) {
@@ -23263,12 +23280,12 @@
         dominant = handle;
       }
     });
-    if (Math.abs(dominant.offset) > 1e-4) {
+    if (handles.length && Math.abs(dominant.offset) > 1e-4) {
       line.dataset.curve = String(clampHandleOffset(dominant.offset));
     } else {
       delete line.dataset.curve;
     }
-    if (Number.isFinite(dominant.position)) {
+    if (handles.length && Number.isFinite(dominant.position)) {
       line.dataset.anchor = String(clampHandlePosition(dominant.position));
     } else {
       delete line.dataset.anchor;
@@ -23433,7 +23450,7 @@
     const nextElements = [];
     const color = getLineStrokeColor(line);
     const { lineScale = 1 } = getCurrentScales();
-    const baseRadius = Math.max(7, Math.min(16, (geometry?.baseWidth || 3) * lineScale * 1.6 + 4));
+    const baseRadius = Math.max(10, Math.min(22, (geometry?.baseWidth || 3) * lineScale * 1.8 + 6));
     const updateCircle = (circle, handle, index) => {
       const point = handle?.point || handle?.base || {
         x: geometry.startX + (geometry.endX - geometry.startX) * (handle?.position ?? DEFAULT_CURVE_ANCHOR),
@@ -23446,6 +23463,9 @@
       circle.setAttribute("r", baseRadius);
       circle.style.stroke = color;
       circle.style.color = color;
+      if (!circle._hoverActive) {
+        circle.style.strokeWidth = "2";
+      }
     };
     handles.forEach((handle, index) => {
       let circle = elements.shift();
@@ -23455,6 +23475,12 @@
         circle.style.fill = "rgba(15, 23, 42, 0.92)";
         circle.style.strokeWidth = "2";
         circle.style.pointerEvents = "none";
+        circle._hoverActive = false;
+        circle._setHover = (active) => {
+          circle._hoverActive = active;
+          circle.classList.toggle("map-edge-handle--hover", active);
+          circle.style.strokeWidth = active ? "2.6" : "2";
+        };
         circle.addEventListener("pointerdown", (evt) => {
           if (evt.button !== 0) return;
           if (mapState.tool !== TOOL.NAVIGATE) return;
@@ -23466,10 +23492,16 @@
           startHandlePress(line, handleIndex, evt);
         });
         circle.addEventListener("pointerenter", () => {
+          if (typeof circle._setHover === "function") {
+            circle._setHover(true);
+          }
           showLineHandles(line);
           applyLineHover(line);
         });
         circle.addEventListener("pointerleave", () => {
+          if (typeof circle._setHover === "function") {
+            circle._setHover(false);
+          }
           hideLineHandles(line);
           clearLineHover(line);
         });
@@ -23496,6 +23528,9 @@
       line._handleHideTimer = null;
     }
     line._handleElements.forEach((circle) => {
+      if (!visible && typeof circle._setHover === "function") {
+        circle._setHover(false);
+      }
       circle.classList.toggle("visible", visible);
       circle.style.pointerEvents = visible ? "auto" : "none";
     });
@@ -23520,7 +23555,12 @@
     const delay = force ? 0 : 120;
     line._handleHideTimer = setTimeout(() => {
       line._handleHideTimer = null;
-      if (line._handleSticky && !force) return;
+      if (line._handleSticky && !force || !force && isLineHovered(line)) {
+        if (!force) {
+          setLineHandlesVisible(line, true, { force: true });
+        }
+        return;
+      }
       setLineHandlesVisible(line, false, { force: true });
       if (!isLineHovered(line) || force) {
         clearLineHover(line, { force: true });

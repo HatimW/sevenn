@@ -171,7 +171,7 @@ const LINE_GAP_STROKE_MULTIPLIER = 2.4;
 
 const EDGE_DRAG_HOLD_DELAY = 160;
 const EDGE_DRAG_MOVE_THRESHOLD = 3.5;
-const EDGE_CLICK_DISTANCE = 6;
+const EDGE_CLICK_DISTANCE = 9;
 
 const LEGACY_STYLE_MAPPINGS = {
   'arrow': { style: 'solid', decoration: 'arrow', decorationDirection: 'end' },
@@ -2879,7 +2879,11 @@ async function handlePointerUp(e) {
       const dy = e.clientY - edgePress.startClient.y;
       if (Math.hypot(dx, dy) <= EDGE_CLICK_DISTANCE) {
         const line = edgePress.line;
-        if (line && confirm('Remove this anchor point?')) {
+        const hoveredNow = edgePress.handleElement
+          && typeof edgePress.handleElement.matches === 'function'
+          && edgePress.handleElement.matches(':hover');
+        const allowRemoval = hoveredNow || edgePress.hoveredAtPress;
+        if (allowRemoval && line && confirm('Remove this anchor point?')) {
           await removeHandleAt(line, edgePress.handleIndex);
         } else if (line) {
           showLineHandles(line);
@@ -3911,7 +3915,9 @@ function startHandlePress(line, handleIndex, evt) {
     pointerStart: pointer,
     startClient: { x: evt.clientX, y: evt.clientY },
     holdTimer: null,
-    activated: false
+    activated: false,
+    handleElement: evt.currentTarget || null,
+    hoveredAtPress: Boolean(evt.currentTarget?.classList?.contains('map-edge-handle--hover'))
   };
   if (typeof window !== 'undefined') {
     press.holdTimer = window.setTimeout(() => {
@@ -4945,7 +4951,7 @@ function adjustScale() {
   const zoomRatio = w / defaultSize;
   const nodeScale = clamp(Math.pow(zoomRatio, 0.02), 0.85, 1.35);
   const labelScale = clamp(Math.pow(zoomRatio, 0.18), 0.95, 2.6);
-  const lineScale = 1;
+  const lineScale = clamp(Math.pow(zoomRatio, -0.24), 0.85, 1.85);
 
   mapState.lastScaleSize = { w, h: height };
   mapState.currentScales = { nodeScale, labelScale, lineScale, zoomRatio };
@@ -5201,20 +5207,29 @@ function getHandleWeight() {
   return 1;
 }
 
-function resolveLineHandles(line, info = {}, overrides = {}, context = {}) {
+function resolveLineHandles(line, info = {}, overrides = {}, context = {}, options = {}) {
   const datasetHandles = line?.dataset?.handles ? parseCurveHandles(line.dataset.handles) : null;
-  const infoHandles = parseCurveHandles(
-    info.curveHandles
-    ?? info.curvePoints
-    ?? info.curveOffsets
-    ?? info.handles
-  );
+  const hasExplicitHandles =
+    Object.prototype.hasOwnProperty.call(info, 'curveHandles')
+    || Object.prototype.hasOwnProperty.call(info, 'curvePoints')
+    || Object.prototype.hasOwnProperty.call(info, 'curveOffsets')
+    || Object.prototype.hasOwnProperty.call(info, 'handles');
+  const infoHandleSource = hasExplicitHandles
+    ? info.curveHandles ?? info.curvePoints ?? info.curveOffsets ?? info.handles
+    : undefined;
+  const infoHandles = parseCurveHandles(infoHandleSource);
+  const clearExisting = options?.clearExisting === true
+    || (hasExplicitHandles
+      && (!infoHandles || !infoHandles.length)
+      && (Array.isArray(infoHandleSource) ? infoHandleSource.length === 0 : infoHandleSource == null || infoHandleSource === ''));
   let handles = [];
-  if (datasetHandles && datasetHandles.length) {
+  if (!clearExisting && datasetHandles && datasetHandles.length) {
     handles = mergeCurveHandles(handles, datasetHandles);
   }
   if (infoHandles && infoHandles.length) {
     handles = mergeCurveHandles(handles, infoHandles);
+  } else if (clearExisting) {
+    handles = [];
   }
 
   if (Number.isFinite(overrides.curveOverride)) {
@@ -5890,14 +5905,31 @@ function applyLineStyle(line, info = {}) {
   line.dataset.baseWidth = String(baseWidthValue);
   line.dataset.label = label;
 
-  const curveOverride = Object.prototype.hasOwnProperty.call(info, 'curve')
+  const hasExplicitHandles =
+    Object.prototype.hasOwnProperty.call(info, 'curveHandles')
+    || Object.prototype.hasOwnProperty.call(info, 'curvePoints')
+    || Object.prototype.hasOwnProperty.call(info, 'curveOffsets')
+    || Object.prototype.hasOwnProperty.call(info, 'handles');
+  const handleSource = hasExplicitHandles
+    ? info.curveHandles ?? info.curvePoints ?? info.curveOffsets ?? info.handles
+    : undefined;
+  const shouldClearHandles = hasExplicitHandles
+    && (!handleSource || (Array.isArray(handleSource) && handleSource.length === 0));
+
+  let curveOverride = Object.prototype.hasOwnProperty.call(info, 'curve')
     ? clampHandleOffset(info.curve)
     : undefined;
-  const anchorOverride = Object.prototype.hasOwnProperty.call(info, 'anchor')
+  let anchorOverride = Object.prototype.hasOwnProperty.call(info, 'anchor')
     ? normalizeAnchorValue(info.anchor)
     : Object.prototype.hasOwnProperty.call(info, 'curveAnchor')
       ? normalizeAnchorValue(info.curveAnchor)
       : undefined;
+  if (shouldClearHandles) {
+    curveOverride = undefined;
+    if (!Number.isFinite(anchorOverride)) {
+      anchorOverride = undefined;
+    }
+  }
 
   const aId = line.dataset.a;
   const bId = line.dataset.b;
@@ -5909,7 +5941,8 @@ function applyLineStyle(line, info = {}) {
     line,
     info,
     { curveOverride, anchorOverride },
-    { segment: segmentContext, aId, bId, decoration, decorationDirection }
+    { segment: segmentContext, aId, bId, decoration, decorationDirection },
+    { clearExisting: shouldClearHandles }
   );
   const encodedHandles = encodeCurveHandles(handles);
   if (encodedHandles) {
@@ -5924,12 +5957,12 @@ function applyLineStyle(line, info = {}) {
       dominant = handle;
     }
   });
-  if (Math.abs(dominant.offset) > 0.0001) {
+  if (handles.length && Math.abs(dominant.offset) > 0.0001) {
     line.dataset.curve = String(clampHandleOffset(dominant.offset));
   } else {
     delete line.dataset.curve;
   }
-  if (Number.isFinite(dominant.position)) {
+  if (handles.length && Number.isFinite(dominant.position)) {
     line.dataset.anchor = String(clampHandlePosition(dominant.position));
   } else {
     delete line.dataset.anchor;
@@ -6114,7 +6147,7 @@ function ensureLineHandles(line, geometry) {
   const nextElements = [];
   const color = getLineStrokeColor(line);
   const { lineScale = 1 } = getCurrentScales();
-  const baseRadius = Math.max(7, Math.min(16, (geometry?.baseWidth || 3) * lineScale * 1.6 + 4));
+  const baseRadius = Math.max(10, Math.min(22, (geometry?.baseWidth || 3) * lineScale * 1.8 + 6));
 
   const updateCircle = (circle, handle, index) => {
     const point = handle?.point || handle?.base || {
@@ -6128,6 +6161,9 @@ function ensureLineHandles(line, geometry) {
     circle.setAttribute('r', baseRadius);
     circle.style.stroke = color;
     circle.style.color = color;
+    if (!circle._hoverActive) {
+      circle.style.strokeWidth = '2';
+    }
   };
 
   handles.forEach((handle, index) => {
@@ -6138,6 +6174,12 @@ function ensureLineHandles(line, geometry) {
       circle.style.fill = 'rgba(15, 23, 42, 0.92)';
       circle.style.strokeWidth = '2';
       circle.style.pointerEvents = 'none';
+      circle._hoverActive = false;
+      circle._setHover = active => {
+        circle._hoverActive = active;
+        circle.classList.toggle('map-edge-handle--hover', active);
+        circle.style.strokeWidth = active ? '2.6' : '2';
+      };
       circle.addEventListener('pointerdown', evt => {
         if (evt.button !== 0) return;
         if (mapState.tool !== TOOL.NAVIGATE) return;
@@ -6149,10 +6191,16 @@ function ensureLineHandles(line, geometry) {
         startHandlePress(line, handleIndex, evt);
       });
       circle.addEventListener('pointerenter', () => {
+        if (typeof circle._setHover === 'function') {
+          circle._setHover(true);
+        }
         showLineHandles(line);
         applyLineHover(line);
       });
       circle.addEventListener('pointerleave', () => {
+        if (typeof circle._setHover === 'function') {
+          circle._setHover(false);
+        }
         hideLineHandles(line);
         clearLineHover(line);
       });
@@ -6181,6 +6229,9 @@ function setLineHandlesVisible(line, visible, options = {}) {
     line._handleHideTimer = null;
   }
   line._handleElements.forEach(circle => {
+    if (!visible && typeof circle._setHover === 'function') {
+      circle._setHover(false);
+    }
     circle.classList.toggle('visible', visible);
     circle.style.pointerEvents = visible ? 'auto' : 'none';
   });
@@ -6207,7 +6258,12 @@ function hideLineHandles(line, options = {}) {
   const delay = force ? 0 : 120;
   line._handleHideTimer = setTimeout(() => {
     line._handleHideTimer = null;
-    if (line._handleSticky && !force) return;
+    if ((line._handleSticky && !force) || (!force && isLineHovered(line))) {
+      if (!force) {
+        setLineHandlesVisible(line, true, { force: true });
+      }
+      return;
+    }
     setLineHandlesVisible(line, false, { force: true });
     if (!isLineHovered(line) || force) {
       clearLineHover(line, { force: true });
