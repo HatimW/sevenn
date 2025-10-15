@@ -4941,7 +4941,7 @@ button.builder-pill.builder-pill-outline {
 
 .map-edge--hover {
   opacity: 1;
-  filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.28));
+  filter: drop-shadow(0 0 16px rgba(56, 189, 248, 0.4)) brightness(1.08);
 }
 
 .map-edge--solid {
