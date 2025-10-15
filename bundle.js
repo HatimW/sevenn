@@ -18166,6 +18166,8 @@
     elements: /* @__PURE__ */ new Map(),
     root: null,
     container: null,
+    lineMenu: null,
+    lineMenuCloser: null,
     updateViewBox: () => {
     },
     selectionBox: null,
@@ -18215,6 +18217,7 @@
     edgeLayer: null,
     nodeLayer: null,
     lineMarkers: /* @__PURE__ */ new Map(),
+    coloredMarkers: /* @__PURE__ */ new Map(),
     edgeRefs: /* @__PURE__ */ new Map(),
     allEdges: /* @__PURE__ */ new Set(),
     pendingNodeUpdates: /* @__PURE__ */ new Map(),
@@ -19369,6 +19372,7 @@
       mapState.root.classList.remove("map-area-interacting");
     }
     mapState.root = root;
+    closeLineMenu();
     const fragment = document.createDocumentFragment();
     mapState.nodeDrag = null;
     mapState.areaDrag = null;
@@ -19404,6 +19408,11 @@
     } else {
       mapState.lineMarkers = /* @__PURE__ */ new Map();
     }
+    if (mapState.coloredMarkers) {
+      mapState.coloredMarkers.clear();
+    } else {
+      mapState.coloredMarkers = /* @__PURE__ */ new Map();
+    }
     if (mapState.edgeRefs) {
       mapState.edgeRefs.clear();
     } else {
@@ -19429,11 +19438,12 @@
       ...block,
       lectures: (catalog.lectureLists?.[block.blockId] || []).map((lecture) => ({ ...lecture }))
     }));
-    const items = [
-      ...await listItemsByKind("disease"),
-      ...await listItemsByKind("drug"),
-      ...await listItemsByKind("concept")
-    ];
+    const [diseases, drugs, concepts] = await Promise.all([
+      listItemsByKind("disease"),
+      listItemsByKind("drug"),
+      listItemsByKind("concept")
+    ]);
+    const items = [...diseases, ...drugs, ...concepts];
     const hiddenNodes = items.filter((it) => it.mapHidden);
     const itemMap = Object.fromEntries(items.map((it) => [it.id, it]));
     mapState.itemMap = itemMap;
@@ -19460,6 +19470,9 @@
     stage.appendChild(container);
     mapState.container = container;
     container.addEventListener("pointerdown", (e) => {
+      if (mapState.lineMenu) {
+        closeLineMenu();
+      }
       if (mapState.tool === TOOL.AREA) return;
       if (e.button !== 0) return;
       if (e.target !== container) return;
@@ -20284,6 +20297,56 @@
       }
     });
   }
+  function normalizeMarkerColor(color) {
+    if (typeof color !== "string") return "";
+    const trimmed = color.trim();
+    if (!trimmed) return "";
+    return trimmed.toLowerCase();
+  }
+  function sanitizeMarkerIdPart(input) {
+    return input.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "") || "default";
+  }
+  function ensureMarkerForColor(baseId, color) {
+    const normalized2 = normalizeMarkerColor(color);
+    if (!normalized2) {
+      return baseId;
+    }
+    if (!mapState.lineMarkers || !mapState.lineMarkers.size) {
+      return baseId;
+    }
+    const key = `${baseId}:${normalized2}`;
+    if (mapState.coloredMarkers?.has(key)) {
+      return mapState.coloredMarkers.get(key);
+    }
+    const base = mapState.lineMarkers.get(baseId);
+    if (!base || !base.parentNode) {
+      return baseId;
+    }
+    const clone6 = base.cloneNode(true);
+    const idPart = sanitizeMarkerIdPart(normalized2);
+    const newId = `${baseId}-${idPart}`;
+    clone6.setAttribute("id", newId);
+    clone6.dataset.baseId = baseId;
+    clone6.dataset.markerColor = normalized2;
+    clone6.dataset.baseRefX = base.dataset.baseRefX || clone6.dataset.baseRefX;
+    clone6.dataset.baseRefY = base.dataset.baseRefY || clone6.dataset.baseRefY;
+    clone6.dataset.baseWidth = base.dataset.baseWidth || clone6.dataset.baseWidth;
+    clone6.dataset.baseHeight = base.dataset.baseHeight || clone6.dataset.baseHeight;
+    clone6.dataset.scaleMode = base.dataset.scaleMode || clone6.dataset.scaleMode;
+    const path = clone6.querySelector("path");
+    if (path) {
+      path.setAttribute("fill", normalized2);
+      path.setAttribute("stroke", normalized2);
+    }
+    base.parentNode.appendChild(clone6);
+    mapState.lineMarkers.set(newId, clone6);
+    if (!mapState.coloredMarkers) {
+      mapState.coloredMarkers = /* @__PURE__ */ new Map();
+    }
+    mapState.coloredMarkers.set(key, newId);
+    updateMarkerSizes();
+    return newId;
+  }
   function beginViewDrag(e) {
     if (!mapState.svg || !mapState.viewBox) return false;
     if (e.button !== 0) return false;
@@ -20671,12 +20734,10 @@
     }
   }
   function buildCurvePatchFromHandles(handles = []) {
-    const sanitized = Array.isArray(handles)
-      ? handles.map((handle) => ({
-        position: clampHandlePosition(handle.position),
-        offset: clampHandleOffset(handle.offset)
-      })).filter((handle) => Number.isFinite(handle.position) && Number.isFinite(handle.offset))
-      : [];
+    const sanitized = Array.isArray(handles) ? handles.map((handle) => ({
+      position: clampHandlePosition(handle.position),
+      offset: clampHandleOffset(handle.offset)
+    })).filter((handle) => Number.isFinite(handle.position) && Number.isFinite(handle.offset)) : [];
     if (!sanitized.length) {
       return {
         curveHandles: [],
@@ -20804,6 +20865,13 @@
     return mapState.positions?.[id] || null;
   }
   function getElementRadius(entry, id) {
+    if (mapState.nodeRadii && mapState.nodeRadii.has(id)) {
+      const base = mapState.nodeRadii.get(id);
+      const { nodeScale = 1 } = getCurrentScales();
+      if (Number.isFinite(base) && Number.isFinite(nodeScale)) {
+        return base * nodeScale;
+      }
+    }
     if (entry?.circle) {
       const r = Number(entry.circle.getAttribute("r"));
       if (Number.isFinite(r) && r > 0) {
@@ -21275,7 +21343,7 @@
     }));
     if (!handles.length) return;
     const index = clamp2(prepared.index, 0, handles.length - 1);
-    const captureTarget = evt.currentTarget || line;
+    const captureTarget = options.captureTarget || evt.currentTarget || line;
     const baseLength = geometry.trimmedLength || Math.hypot(geometry.endX - geometry.startX, geometry.endY - geometry.startY) || 1;
     mapState.edgeDrag = {
       pointerId,
@@ -21313,7 +21381,7 @@
   function attachEdgeInteraction(path, aId, bId) {
     if (!path || path.dataset.interactive === "1") return;
     path.dataset.interactive = "1";
-    const startDragFromPath = (evt) => {
+    const startDragFromPath = (evt, options = {}) => {
       if (evt.button !== 0) return;
       if (mapState.tool !== TOOL.NAVIGATE) return;
       mapState.suppressNextClick = false;
@@ -21322,24 +21390,21 @@
       if (!geometry) return;
       const pointerMap = clientToMap(evt.clientX, evt.clientY);
       const index = Array.isArray(geometry.handles) && geometry.handles.length ? findNearestHandleIndex(geometry, pointerMap) : 0;
-      beginEdgeHandleDrag(path, index, evt, { geometry, pointer: pointerMap });
+      beginEdgeHandleDrag(path, index, evt, { geometry, pointer: pointerMap, captureTarget: options.captureTarget });
     };
-    path.addEventListener("pointerdown", (evt) => {
-      startDragFromPath(evt);
-    });
-    path.addEventListener("click", (e) => {
+    const handleClick = (e) => {
       e.stopPropagation();
       handleEdgeClick(path, aId, bId, e);
-    });
-    path.addEventListener("mouseenter", (evt) => {
+    };
+    const handleEnter = (evt) => {
       if (mapState.tool === TOOL.HIDE) {
         applyCursorOverride("hide");
       } else if (mapState.tool === TOOL.BREAK) {
         applyCursorOverride("break");
       }
       showEdgeTooltip(path, evt);
-    });
-    path.addEventListener("mouseleave", () => {
+    };
+    const handleLeave = () => {
       if (mapState.tool === TOOL.HIDE) {
         clearCursorOverride("hide");
       }
@@ -21347,8 +21412,25 @@
         clearCursorOverride("break");
       }
       hideEdgeTooltip(path);
+    };
+    const handleMove = (evt) => moveEdgeTooltip(path, evt);
+    path.addEventListener("pointerdown", (evt) => {
+      startDragFromPath(evt);
     });
-    path.addEventListener("mousemove", (evt) => moveEdgeTooltip(path, evt));
+    path.addEventListener("click", handleClick);
+    path.addEventListener("mouseenter", handleEnter);
+    path.addEventListener("mouseleave", handleLeave);
+    path.addEventListener("mousemove", handleMove);
+    const hitbox = ensureEdgeHitbox(path);
+    if (hitbox) {
+      hitbox.addEventListener("pointerdown", (evt) => {
+        startDragFromPath(evt, { captureTarget: path });
+      });
+      hitbox.addEventListener("click", handleClick);
+      hitbox.addEventListener("mouseenter", handleEnter);
+      hitbox.addEventListener("mouseleave", handleLeave);
+      hitbox.addEventListener("mousemove", handleMove);
+    }
   }
   function ensureEdgeBetween(aId, bId, linkInfo = {}) {
     if (!mapState.positions?.[aId] || !mapState.positions?.[bId]) {
@@ -21381,8 +21463,12 @@
     const edge = getEdgeElement(aId, bId);
     if (!edge) return;
     hideEdgeTooltip(edge);
+    if (mapState.lineMenu) {
+      closeLineMenu();
+    }
     removeLineOverlay(edge);
     removeLineHandles(edge);
+    removeEdgeHitbox(edge);
     unregisterEdgeElement(edge);
     edge.remove();
   }
@@ -21457,8 +21543,10 @@
       if (geometry?.pathData) {
         edge.setAttribute("d", geometry.pathData);
         syncLineHandles(edge, geometry);
+        syncEdgeHitbox(edge, geometry);
       } else {
         removeLineHandles(edge);
+        removeEdgeHitbox(edge);
       }
       syncLineDecoration(edge);
     });
@@ -22240,8 +22328,10 @@
           if (geometry?.pathData) {
             line.setAttribute("d", geometry.pathData);
             syncLineHandles(line, geometry);
+            syncEdgeHitbox(line, geometry);
           } else {
             removeLineHandles(line);
+            removeEdgeHitbox(line);
           }
         }
         updateLineStrokeWidth(line);
@@ -23089,7 +23179,11 @@
       });
       if (geometry?.pathData) {
         line.setAttribute("d", geometry.pathData);
+        syncEdgeHitbox(line, geometry);
       }
+    }
+    if (!geometry?.pathData) {
+      removeEdgeHitbox(line);
     }
     updateLineStrokeWidth(line);
     removeLineHandles(line);
@@ -23126,10 +23220,12 @@
     }
     if (decoration === "arrow") {
       if (decorationDirection === "start" || decorationDirection === "both") {
-        line.setAttribute("marker-start", "url(#arrow-start)");
+        const startMarker = ensureMarkerForColor("arrow-start", color);
+        line.setAttribute("marker-start", `url(#${startMarker})`);
       }
       if (decorationDirection === "end" || decorationDirection === "both") {
-        line.setAttribute("marker-end", "url(#arrow-end)");
+        const endMarker = ensureMarkerForColor("arrow-end", color);
+        line.setAttribute("marker-end", `url(#${endMarker})`);
       }
     }
     const title = line.querySelector("title");
@@ -23171,6 +23267,7 @@
         line._overlay.setAttribute("stroke-width", overlayWidth);
       }
     }
+    syncEdgeHitbox(line);
   }
   function removeLineHandles(line) {
     if (!line?._handleElements) return;
@@ -23179,6 +23276,44 @@
   }
   function syncLineHandles(line) {
     removeLineHandles(line);
+  }
+  function ensureEdgeHitbox(line) {
+    if (!line || !line.parentNode) return null;
+    let hitbox = line._hitbox;
+    if (hitbox && hitbox.parentNode !== line.parentNode) {
+      hitbox.remove();
+      hitbox = null;
+    }
+    if (!hitbox) {
+      hitbox = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      hitbox.classList.add("map-edge-hitbox");
+      hitbox.setAttribute("fill", "none");
+      hitbox.setAttribute("stroke", "transparent");
+      hitbox.setAttribute("pointer-events", "stroke");
+      hitbox.setAttribute("stroke-linecap", "round");
+      hitbox.setAttribute("stroke-linejoin", "round");
+      line.parentNode.insertBefore(hitbox, line);
+      line._hitbox = hitbox;
+    }
+    return hitbox;
+  }
+  function removeEdgeHitbox(line) {
+    if (!line?._hitbox) return;
+    line._hitbox.remove();
+    line._hitbox = null;
+  }
+  function syncEdgeHitbox(line, geometry = null) {
+    const hitbox = ensureEdgeHitbox(line);
+    if (!hitbox) return;
+    const pathData = geometry?.pathData || line.getAttribute("d");
+    if (pathData) {
+      hitbox.setAttribute("d", pathData);
+    }
+    const baseWidth = geometry?.baseWidth || Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
+    const { lineScale = 1 } = getCurrentScales();
+    const scaledBase = Number.isFinite(baseWidth) ? baseWidth * lineScale : 3;
+    const width = Math.max(scaledBase * 3.2, scaledBase + 14, 18);
+    hitbox.setAttribute("stroke-width", width);
   }
   function syncLineDecoration(line) {
     const decoration = line?.dataset?.decoration || DEFAULT_LINE_DECORATION;
@@ -23325,7 +23460,44 @@
   function titleOf4(item) {
     return item?.name || item?.concept || "";
   }
+  function closeLineMenu() {
+    if (typeof document === "undefined") {
+      mapState.lineMenu = null;
+      mapState.lineMenuCloser = null;
+      return;
+    }
+    if (mapState.lineMenu && mapState.lineMenu.parentNode) {
+      mapState.lineMenu.parentNode.removeChild(mapState.lineMenu);
+    }
+    if (mapState.lineMenuCloser) {
+      document.removeEventListener("pointerdown", mapState.lineMenuCloser, true);
+      mapState.lineMenuCloser = null;
+    }
+    mapState.lineMenu = null;
+  }
+  function positionLineMenu(menu, evt) {
+    if (!menu || typeof window === "undefined") return;
+    const margin = 12;
+    const scrollX = window.scrollX ?? window.pageXOffset ?? 0;
+    const scrollY = window.scrollY ?? window.pageYOffset ?? 0;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || menu.offsetWidth;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || menu.offsetHeight;
+    const rect = menu.getBoundingClientRect();
+    const width = rect.width || menu.offsetWidth || 0;
+    const height = rect.height || menu.offsetHeight || 0;
+    const baseLeft = Number.isFinite(evt?.pageX) ? evt.pageX : scrollX + viewportWidth / 2;
+    const baseTop = Number.isFinite(evt?.pageY) ? evt.pageY : scrollY + viewportHeight / 2;
+    const maxLeft = scrollX + viewportWidth - width - margin;
+    const maxTop = scrollY + viewportHeight - height - margin;
+    const minLeft = scrollX + margin;
+    const minTop = scrollY + margin;
+    const finalLeft = clamp2(baseLeft, minLeft, Math.max(minLeft, maxLeft));
+    const finalTop = clamp2(baseTop, minTop, Math.max(minTop, maxTop));
+    menu.style.left = `${finalLeft}px`;
+    menu.style.top = `${finalTop}px`;
+  }
   async function openLineMenu(evt, line, aId, bId) {
+    closeLineMenu();
     const existing = await getItem(aId);
     const link = existing.links.find((l) => l.id === bId) || {};
     const appearance = normalizeLinkAppearance({
@@ -23336,8 +23508,9 @@
     });
     const menu = document.createElement("div");
     menu.className = "line-menu";
-    menu.style.left = evt.pageX + "px";
-    menu.style.top = evt.pageY + "px";
+    menu.style.left = "0px";
+    menu.style.top = "0px";
+    menu.style.visibility = "hidden";
     const colorLabel = document.createElement("label");
     colorLabel.textContent = "Color";
     const colorInput = document.createElement("input");
@@ -23381,6 +23554,23 @@
     directionSel.value = appearance.decorationDirection;
     directionLabel.appendChild(directionSel);
     menu.appendChild(directionLabel);
+    const swapBtn = document.createElement("button");
+    swapBtn.type = "button";
+    swapBtn.className = "btn secondary";
+    swapBtn.textContent = "Swap direction";
+    swapBtn.addEventListener("click", () => {
+      if (directionSel.disabled) return;
+      const current = directionSel.value;
+      if (current === "start") {
+        directionSel.value = "end";
+      } else if (current === "end") {
+        directionSel.value = "start";
+      } else if (current === "both") {
+        directionSel.value = "start";
+      } else {
+        directionSel.value = DEFAULT_DECORATION_DIRECTION;
+      }
+    });
     const glowField = document.createElement("label");
     glowField.className = "line-menu-toggle";
     const glowInput = document.createElement("input");
@@ -23440,7 +23630,11 @@
         autoBtn.disabled = false;
       }
     });
-    menu.appendChild(autoBtn);
+    const utilitiesRow = document.createElement("div");
+    utilitiesRow.className = "line-menu-actions";
+    utilitiesRow.appendChild(autoBtn);
+    utilitiesRow.appendChild(swapBtn);
+    menu.appendChild(utilitiesRow);
     const updateDirectionDisabled = () => {
       const deco = decorationSel.value;
       const disable = deco === "none" || deco === "block";
@@ -23448,6 +23642,7 @@
       if (disable) {
         directionSel.value = DEFAULT_DECORATION_DIRECTION;
       }
+      swapBtn.disabled = disable;
     };
     decorationSel.addEventListener("change", updateDirectionDisabled);
     updateDirectionDisabled();
@@ -23466,17 +23661,23 @@
       };
       await updateLink(aId, bId, patch);
       applyLineStyle(line, patch);
-      document.body.removeChild(menu);
+      closeLineMenu();
     });
-    menu.appendChild(btn);
+    const footer = document.createElement("div");
+    footer.className = "line-menu-footer";
+    footer.appendChild(btn);
+    menu.appendChild(footer);
     document.body.appendChild(menu);
-    const closer = (e) => {
-      if (!menu.contains(e.target)) {
-        document.body.removeChild(menu);
-        document.removeEventListener("mousedown", closer);
+    positionLineMenu(menu, evt);
+    menu.style.visibility = "";
+    mapState.lineMenu = menu;
+    const closer = (event) => {
+      if (!menu.contains(event.target)) {
+        closeLineMenu();
       }
     };
-    setTimeout(() => document.addEventListener("mousedown", closer), 0);
+    mapState.lineMenuCloser = closer;
+    document.addEventListener("pointerdown", closer, true);
   }
   async function updateLink(aId, bId, patch) {
     const a = await getItem(aId);
@@ -23869,4 +24070,3 @@
     bootstrap();
   }
 })();
-//# sourceMappingURL=bundle.js.map
