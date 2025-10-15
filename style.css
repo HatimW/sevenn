@@ -4925,7 +4925,7 @@ button.builder-pill.builder-pill-outline {
   filter: drop-shadow(0 14px 28px rgba(37, 99, 235, 0.45));
   stroke: #ffffff;
 }
-.map-edge {
+.map-edge { 
   stroke: var(--gray);
   stroke-width: 2.8;
   cursor: inherit;
@@ -4997,23 +4997,50 @@ button.builder-pill.builder-pill-outline {
   line-height: 1.4;
 }
 
+.map-edge-handle {
+  fill: rgba(15, 23, 42, 0.92);
+  stroke: currentColor;
+  stroke-width: 2px;
+  opacity: 0;
+  pointer-events: none;
+  cursor: grab;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.map-edge-handle.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.map-edge-handle:hover {
+  transform: scale(1.08);
+}
+
+.map-edge-handle:active {
+  cursor: grabbing;
+}
+
 .line-menu {
   position: absolute;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  padding: 8px;
-  border-radius: var(--radius);
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  padding: 14px;
+  border-radius: 14px;
   color: var(--text);
   z-index: 1000;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 10px;
+  min-width: 260px;
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.55);
+  backdrop-filter: blur(14px);
 }
 .line-menu label {
   display: flex;
   flex-direction: column;
-  font-size: 12px;
-  gap: 2px;
+  font-size: 13px;
+  gap: 6px;
+  color: var(--text-muted);
 }
 
 .line-menu-toggle {
@@ -5028,6 +5055,37 @@ button.builder-pill.builder-pill-outline {
 .line-menu-toggle input {
   width: 16px;
   height: 16px;
+}
+
+.line-menu input[type="text"],
+.line-menu select {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.line-menu input[type="text"]:focus,
+.line-menu select:focus {
+  outline: none;
+  border-color: rgba(56, 189, 248, 0.65);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35);
+}
+
+.line-menu input[type="color"] {
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  padding: 0;
+  background: transparent;
+}
+
+.line-menu .btn {
+  width: 100%;
 }
 
 .map-wrapper {

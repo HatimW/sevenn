@@ -246,10 +246,15 @@ const mapState = {
   edgeLayer: null,
   nodeLayer: null,
   lineMarkers: new Map(),
+  markerDefs: null,
+  lineMarkerCache: new Map(),
   edgeRefs: new Map(),
   allEdges: new Set(),
   pendingNodeUpdates: new Map(),
-  nodeUpdateFrame: null
+  pendingEdgeUpdates: new Set(),
+  nodeUpdateFrame: null,
+  edgeUpdateFrame: null,
+  activeLineMenu: null
 };
 
 function normalizeMapTab(tab = {}) {
@@ -1506,12 +1511,17 @@ export async function renderMap(root) {
     mapState.root.classList.remove('map-area-interacting');
   }
   mapState.root = root;
+  closeLineMenu();
   const fragment = document.createDocumentFragment();
   mapState.nodeDrag = null;
   mapState.areaDrag = null;
   mapState.draggingView = false;
   mapState.menuDrag = null;
   mapState.edgeDrag = null;
+  if (mapState.pendingEdgeUpdates) {
+    mapState.pendingEdgeUpdates.clear();
+  }
+  mapState.edgeUpdateFrame = null;
   mapState.selectionRect = null;
   mapState.previewSelection = null;
   mapState.selectionPreviewSignature = '';
@@ -1611,6 +1621,7 @@ export async function renderMap(root) {
     if (mapState.tool === TOOL.AREA) return;
     if (e.button !== 0) return;
     if (e.target !== container) return;
+    closeLineMenu();
     if (beginViewDrag(e)) {
       e.preventDefault();
     }
@@ -2463,10 +2474,12 @@ function buildLineMarkers(defs) {
       scaleMode: 'stroke'
     }
   ];
-  if (!mapState.lineMarkers) {
-    mapState.lineMarkers = new Map();
+  mapState.markerDefs = defs;
+  mapState.lineMarkers = new Map();
+  if (!mapState.lineMarkerCache) {
+    mapState.lineMarkerCache = new Map();
   } else {
-    mapState.lineMarkers.clear();
+    mapState.lineMarkerCache.clear();
   }
   configs.forEach(cfg => {
     const marker = document.createElementNS(svgNS, 'marker');
@@ -2559,6 +2572,7 @@ function attachSvgEvents(svg) {
   svg.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
     if (e.target !== svg) return;
+    closeLineMenu();
     mapState.justCompletedSelection = false;
     getSvgRect({ force: true });
     mapState.lastPointerDownInfo = null;
@@ -2835,6 +2849,15 @@ async function handlePointerUp(e) {
         mapState.edgeDragJustCompleted = false;
       }, 0);
     }
+    if (drag.line) {
+      drag.line._handleSticky = false;
+      const hovered = typeof drag.line.matches === 'function' && drag.line.matches(':hover');
+      if (hovered) {
+        showLineHandles(drag.line);
+      } else {
+        hideLineHandles(drag.line, { force: true });
+      }
+    }
     cursorNeedsRefresh = true;
   }
 
@@ -2963,6 +2986,48 @@ function buildCurvePatchFromHandles(handles = []) {
   };
 }
 
+function queueEdgeUpdate(id, options = {}) {
+  if (!id) return;
+  if (!mapState.pendingEdgeUpdates) {
+    mapState.pendingEdgeUpdates = new Set();
+  }
+  mapState.pendingEdgeUpdates.add(String(id));
+  const { immediate = false } = options;
+  const needsImmediateFlush = immediate
+    || typeof window === 'undefined'
+    || typeof window.requestAnimationFrame !== 'function';
+  if (needsImmediateFlush) {
+    flushQueuedEdgeUpdates({ force: true });
+    return;
+  }
+  if (mapState.edgeUpdateFrame) {
+    return;
+  }
+  mapState.edgeUpdateFrame = window.requestAnimationFrame(() => {
+    mapState.edgeUpdateFrame = null;
+    flushQueuedEdgeUpdates();
+  });
+}
+
+function flushQueuedEdgeUpdates({ force = false } = {}) {
+  const pending = mapState.pendingEdgeUpdates;
+  if (!pending || !pending.size) return;
+  if (mapState.edgeUpdateFrame && typeof window !== 'undefined') {
+    if (force && typeof window.cancelAnimationFrame === 'function') {
+      window.cancelAnimationFrame(mapState.edgeUpdateFrame);
+      mapState.edgeUpdateFrame = null;
+    } else if (!force) {
+      return;
+    }
+  }
+  const ids = Array.from(pending);
+  pending.clear();
+  mapState.edgeUpdateFrame = null;
+  ids.forEach(id => {
+    updateEdgesFor(id);
+  });
+}
+
 function scheduleNodePositionUpdate(id, pos, options = {}) {
   if (!id || !pos) return;
   const { immediate = false } = options;
@@ -2974,7 +3039,7 @@ function scheduleNodePositionUpdate(id, pos, options = {}) {
     const entry = mapState.elements.get(id);
     if (entry) {
       updateNodeGeometry(id, entry);
-      updateEdgesFor(id);
+      queueEdgeUpdate(id);
     }
     return;
   }
@@ -3002,13 +3067,18 @@ function flushNodePositionUpdates({ cancelFrame = false } = {}) {
   }
   const updates = mapState.pendingNodeUpdates;
   if (!updates || !updates.size) return;
+  const touched = [];
   updates.forEach((_, id) => {
     const entry = mapState.elements.get(id);
     if (!entry) return;
     updateNodeGeometry(id, entry);
-    updateEdgesFor(id);
+    touched.push(id);
   });
   updates.clear();
+  touched.forEach(id => {
+    queueEdgeUpdate(id);
+  });
+  flushQueuedEdgeUpdates({ force: true });
 }
 
 function getNow() {
@@ -3096,9 +3166,16 @@ function collectNodesInRect(minX, maxX, minY, maxY) {
     if (!pos) return;
     const radius = getElementRadius(entry, id);
     if (!Number.isFinite(radius) || radius < 0) return;
+    const label = entry?.label || null;
+    const labelHeight = label ? (Number(label.getAttribute('font-size')) || 16) * 0.7 : 0;
+    const verticalRadius = radius + labelHeight + 10;
+    const expandedRadius = radius + 6;
     const insideBox = pos.x >= minX && pos.x <= maxX && pos.y >= minY && pos.y <= maxY;
     const intersectsBox = !insideBox
-      ? pos.x + radius >= minX && pos.x - radius <= maxX && pos.y + radius >= minY && pos.y - radius <= maxY
+      ? pos.x + expandedRadius >= minX
+        && pos.x - expandedRadius <= maxX
+        && pos.y + radius >= minY
+        && pos.y - verticalRadius <= maxY
       : true;
     if (insideBox || intersectsBox) {
       if (!seen.has(id)) {
@@ -3615,6 +3692,7 @@ function beginEdgeHandleDrag(line, handleIndex, evt, options = {}) {
     fromHandle: Boolean(evt?.target && evt.target !== line),
     clientStart: { x: evt.clientX, y: evt.clientY }
   };
+  setLineHandlesVisible(line, true, { force: true, sticky: true });
   if (mapState.edgeDrag.captureTarget?.setPointerCapture) {
     try {
       mapState.edgeDrag.captureTarget.setPointerCapture(pointerId);
@@ -3651,6 +3729,8 @@ function attachEdgeInteraction(path, aId, bId) {
     } else if (mapState.tool === TOOL.BREAK) {
       applyCursorOverride('break');
     }
+    const geometry = getLineGeometry(aId, bId, { line: path });
+    showLineHandles(path, geometry);
     showEdgeTooltip(path, evt);
   });
   path.addEventListener('mouseleave', () => {
@@ -3660,6 +3740,7 @@ function attachEdgeInteraction(path, aId, bId) {
     if (mapState.tool === TOOL.BREAK) {
       clearCursorOverride('break');
     }
+    hideLineHandles(path);
     hideEdgeTooltip(path);
   });
   path.addEventListener('mousemove', evt => moveEdgeTooltip(path, evt));
@@ -5470,6 +5551,70 @@ function calcPath(aId, bId, line = null, info = {}) {
   return geometry.pathData || '';
 }
 
+function hashMarkerKey(input = '') {
+  const text = String(input);
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function applyMarkerColor(marker, color) {
+  if (!marker) return;
+  marker.setAttribute('color', color);
+  marker.style.color = color;
+  marker.querySelectorAll('path').forEach(path => {
+    path.setAttribute('fill', color);
+    path.setAttribute('stroke', color);
+  });
+}
+
+function ensureArrowMarker(color, direction) {
+  const defs = mapState.markerDefs;
+  if (!defs || !direction) {
+    return direction === 'start' ? 'arrow-start' : 'arrow-end';
+  }
+  const normalizedColor = (color || DEFAULT_LINK_COLOR).trim();
+  if (!mapState.lineMarkerCache) {
+    mapState.lineMarkerCache = new Map();
+  }
+  const key = `${direction}:${normalizedColor}`;
+  if (mapState.lineMarkerCache.has(key)) {
+    return mapState.lineMarkerCache.get(key);
+  }
+  const baseId = direction === 'start' ? 'arrow-start' : 'arrow-end';
+  const baseMarker = mapState.lineMarkers?.get(baseId) || document.getElementById(baseId);
+  const uniqueId = `${baseId}-${hashMarkerKey(key)}`;
+  let marker = mapState.lineMarkers?.get(uniqueId) || document.getElementById(uniqueId);
+  if (!marker) {
+    if (baseMarker) {
+      marker = baseMarker.cloneNode(true);
+    } else {
+      marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+      marker.setAttribute('viewBox', '0 0 16 16');
+      marker.setAttribute('markerUnits', 'strokeWidth');
+      marker.setAttribute('markerWidth', '9');
+      marker.setAttribute('markerHeight', '9');
+      marker.setAttribute('orient', 'auto');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      const d = direction === 'start' ? 'M14 2 L2 8 L14 14 L10 8 Z' : 'M2 2 L14 8 L2 14 L6 8 Z';
+      path.setAttribute('d', d);
+      marker.appendChild(path);
+    }
+    marker.setAttribute('id', uniqueId);
+    defs.appendChild(marker);
+  }
+  applyMarkerColor(marker, normalizedColor);
+  if (mapState.lineMarkers) {
+    mapState.lineMarkers.set(uniqueId, marker);
+  }
+  mapState.lineMarkerCache.set(key, uniqueId);
+  updateMarkerSizes();
+  return uniqueId;
+}
+
 
 function applyLineStyle(line, info = {}) {
   if (!line) return;
@@ -5585,7 +5730,7 @@ function applyLineStyle(line, info = {}) {
 
   updateLineStrokeWidth(line);
 
-  removeLineHandles(line);
+  syncLineHandles(line, geometry);
 
   LINE_STYLE_CLASSNAMES.forEach(cls => line.classList.remove(cls));
   if (style) {
@@ -5623,10 +5768,12 @@ function applyLineStyle(line, info = {}) {
 
   if (decoration === 'arrow') {
     if (decorationDirection === 'start' || decorationDirection === 'both') {
-      line.setAttribute('marker-start', 'url(#arrow-start)');
+      const startId = ensureArrowMarker(color, 'start');
+      line.setAttribute('marker-start', `url(#${startId})`);
     }
     if (decorationDirection === 'end' || decorationDirection === 'both') {
-      line.setAttribute('marker-end', 'url(#arrow-end)');
+      const endId = ensureArrowMarker(color, 'end');
+      line.setAttribute('marker-end', `url(#${endId})`);
     }
   }
 
@@ -5677,13 +5824,141 @@ function updateLineStrokeWidth(line) {
 }
 
 function removeLineHandles(line) {
-  if (!line?._handleElements) return;
-  line._handleElements.forEach(circle => circle.remove());
+  if (!line) return;
+  if (line._handleElements) {
+    line._handleElements.forEach(circle => circle.remove());
+  }
   line._handleElements = null;
+  if (line._handleHideTimer) {
+    clearTimeout(line._handleHideTimer);
+    line._handleHideTimer = null;
+  }
+  line._handleVisible = false;
+  line._handleSticky = false;
 }
 
-function syncLineHandles(line) {
-  removeLineHandles(line);
+function ensureLineHandles(line, geometry) {
+  if (!line) return;
+  const parent = line.parentNode;
+  if (!parent) {
+    removeLineHandles(line);
+    return;
+  }
+  const handles = Array.isArray(geometry?.handles) ? geometry.handles : [];
+  if (!handles.length) {
+    removeLineHandles(line);
+    return;
+  }
+  const elements = Array.isArray(line._handleElements) ? line._handleElements.slice() : [];
+  const nextElements = [];
+  const color = getLineStrokeColor(line);
+  const { lineScale = 1 } = getCurrentScales();
+  const baseRadius = Math.max(7, Math.min(16, (geometry?.baseWidth || 3) * lineScale * 1.6 + 4));
+
+  const updateCircle = (circle, handle, index) => {
+    const point = handle?.point || handle?.base || {
+      x: geometry.startX + (geometry.endX - geometry.startX) * (handle?.position ?? DEFAULT_CURVE_ANCHOR),
+      y: geometry.startY + (geometry.endY - geometry.startY) * (handle?.position ?? DEFAULT_CURVE_ANCHOR)
+    };
+    circle.dataset.index = String(index);
+    circle.dataset.position = String(handle?.position ?? DEFAULT_CURVE_ANCHOR);
+    circle.setAttribute('cx', point.x);
+    circle.setAttribute('cy', point.y);
+    circle.setAttribute('r', baseRadius);
+    circle.style.stroke = color;
+    circle.style.color = color;
+  };
+
+  handles.forEach((handle, index) => {
+    let circle = elements.shift();
+    if (!circle) {
+      circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.classList.add('map-edge-handle');
+      circle.style.fill = 'rgba(15, 23, 42, 0.92)';
+      circle.style.strokeWidth = '2';
+      circle.style.pointerEvents = 'none';
+      circle.addEventListener('pointerdown', evt => {
+        if (evt.button !== 0) return;
+        if (mapState.tool !== TOOL.NAVIGATE) return;
+        evt.stopPropagation();
+        const handleIndex = Number(evt.currentTarget?.dataset?.index) || 0;
+        const geometryNow = getLineGeometry(line.dataset.a, line.dataset.b, { line });
+        const pointer = clientToMap(evt.clientX, evt.clientY);
+        beginEdgeHandleDrag(line, handleIndex, evt, { geometry: geometryNow, pointer });
+      });
+      circle.addEventListener('pointerenter', () => {
+        showLineHandles(line);
+      });
+      circle.addEventListener('pointerleave', () => {
+        hideLineHandles(line);
+      });
+      parent.appendChild(circle);
+    }
+    updateCircle(circle, handle, index);
+    nextElements.push(circle);
+  });
+
+  elements.forEach(circle => circle.remove());
+  line._handleElements = nextElements;
+  line._handleGeometry = geometry || null;
+}
+
+function setLineHandlesVisible(line, visible, options = {}) {
+  if (!line?._handleElements) return;
+  const { force = false, sticky } = options;
+  if (typeof sticky === 'boolean') {
+    line._handleSticky = sticky;
+  }
+  if (!visible && line._handleSticky && !force) {
+    return;
+  }
+  if (line._handleHideTimer) {
+    clearTimeout(line._handleHideTimer);
+    line._handleHideTimer = null;
+  }
+  line._handleElements.forEach(circle => {
+    circle.classList.toggle('visible', visible);
+    circle.style.pointerEvents = visible ? 'auto' : 'none';
+  });
+  line._handleVisible = visible;
+}
+
+function showLineHandles(line, geometry = null) {
+  if (!line) return;
+  const geo = geometry || getLineGeometry(line.dataset?.a, line.dataset?.b, { line });
+  if (!geo) return;
+  ensureLineHandles(line, geo);
+  setLineHandlesVisible(line, true);
+}
+
+function hideLineHandles(line, options = {}) {
+  if (!line) return;
+  const { force = false } = options;
+  if (line._handleSticky && !force) {
+    return;
+  }
+  if (line._handleHideTimer) {
+    clearTimeout(line._handleHideTimer);
+  }
+  const delay = force ? 0 : 120;
+  line._handleHideTimer = setTimeout(() => {
+    line._handleHideTimer = null;
+    if (line._handleSticky && !force) return;
+    setLineHandlesVisible(line, false, { force: true });
+  }, delay);
+}
+
+function syncLineHandles(line, geometry = null) {
+  if (!line) return;
+  if (!line._handleElements || (!line._handleVisible && !line._handleSticky && mapState.edgeDrag?.line !== line)) {
+    return;
+  }
+  const geo = geometry || getLineGeometry(line.dataset?.a, line.dataset?.b, { line });
+  if (!geo) return;
+  ensureLineHandles(line, geo);
+  if (line._handleVisible) {
+    setLineHandlesVisible(line, true, { force: true });
+  }
 }
 
 function syncLineDecoration(line) {
@@ -5697,6 +5972,11 @@ function syncLineDecoration(line) {
   } else {
     removeLineOverlay(line);
   }
+}
+
+function getLineStrokeColor(line) {
+  if (!line) return DEFAULT_LINK_COLOR;
+  return line.dataset?.color || line.getAttribute?.('stroke') || DEFAULT_LINK_COLOR;
 }
 
 function ensureLineOverlay(line) {
@@ -5755,7 +6035,7 @@ function updateBlockedOverlay(line, overlay) {
   const overlayBase = Math.max(geometry.baseWidth * 1.35, 2.8);
   overlay.dataset.baseWidth = String(overlayBase);
   overlay.dataset.decoration = 'block';
-  const color = '#ef4444';
+  const color = getLineStrokeColor(line);
   overlay.setAttribute('stroke', color);
   overlay.style.stroke = color;
   overlay.setAttribute('stroke-width', overlayBase * lineScale);
@@ -5796,7 +6076,7 @@ function updateInhibitOverlay(line, overlay) {
   overlay.dataset.baseWidth = String(overlayBase);
   overlay.dataset.decoration = 'inhibit';
   overlay.dataset.direction = direction;
-  const color = line.dataset.color || line.getAttribute('stroke') || DEFAULT_LINK_COLOR;
+  const color = getLineStrokeColor(line);
   overlay.setAttribute('stroke', color);
   overlay.style.stroke = color;
   overlay.setAttribute('stroke-width', overlayBase * lineScale);
@@ -5846,8 +6126,46 @@ function titleOf(item) {
   return item?.name || item?.concept || '';
 }
 
+function closeLineMenu(options = {}) {
+  const { commit = false } = options;
+  const active = mapState.activeLineMenu;
+  if (!active) return;
+  if (active.cleanup) {
+    try {
+      active.cleanup();
+    } catch {}
+  }
+  if (!commit && active.restore) {
+    try {
+      active.restore();
+    } catch {}
+  }
+  if (active.menu?.parentNode) {
+    active.menu.remove();
+  }
+  mapState.activeLineMenu = null;
+}
+
+function positionLineMenu(menu, pageX, pageY) {
+  if (!menu) return;
+  const margin = 12;
+  const width = menu.offsetWidth || 0;
+  const height = menu.offsetHeight || 0;
+  const viewportWidth = (typeof window !== 'undefined' && window.innerWidth) || document.documentElement.clientWidth || width;
+  const viewportHeight = (typeof window !== 'undefined' && window.innerHeight) || document.documentElement.clientHeight || height;
+  const scrollX = typeof window !== 'undefined' ? window.scrollX : document.documentElement?.scrollLeft || 0;
+  const scrollY = typeof window !== 'undefined' ? window.scrollY : document.documentElement?.scrollTop || 0;
+  const left = clamp(pageX + margin, margin + scrollX, scrollX + viewportWidth - width - margin);
+  const top = clamp(pageY + margin, margin + scrollY, scrollY + viewportHeight - height - margin);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
 async function openLineMenu(evt, line, aId, bId) {
+  closeLineMenu();
+
   const existing = await getItem(aId);
+  if (!existing) return;
   const link = existing.links.find(l => l.id === bId) || {};
   const appearance = normalizeLinkAppearance({
     style: link.style ?? link.linkStyle ?? DEFAULT_LINE_STYLE,
@@ -5855,16 +6173,28 @@ async function openLineMenu(evt, line, aId, bId) {
     decorationDirection: link.decorationDirection,
     glow: link.glow
   });
+  const initial = {
+    color: line?.dataset?.color || link.color || DEFAULT_LINK_COLOR,
+    style: line?.dataset?.style || appearance.style,
+    decoration: line?.dataset?.decoration || appearance.decoration,
+    decorationDirection:
+      line?.dataset?.direction
+        || line?.dataset?.decorationDirection
+        || appearance.decorationDirection
+        || DEFAULT_DECORATION_DIRECTION,
+    glow: line?.dataset?.glow === '1' || Boolean(appearance.glow),
+    thickness: line?.dataset?.thickness || link.thickness || DEFAULT_LINE_THICKNESS,
+    name: line?.dataset?.label || link.name || ''
+  };
+
   const menu = document.createElement('div');
   menu.className = 'line-menu';
-  menu.style.left = evt.pageX + 'px';
-  menu.style.top = evt.pageY + 'px';
 
   const colorLabel = document.createElement('label');
   colorLabel.textContent = 'Color';
   const colorInput = document.createElement('input');
   colorInput.type = 'color';
-  colorInput.value = link.color || '#888888';
+  colorInput.value = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(initial.color) ? initial.color : '#888888';
   colorLabel.appendChild(colorInput);
   menu.appendChild(colorLabel);
 
@@ -5877,7 +6207,7 @@ async function openLineMenu(evt, line, aId, bId) {
     opt.textContent = option.label;
     typeSel.appendChild(opt);
   });
-  typeSel.value = appearance.style;
+  typeSel.value = initial.style;
   typeLabel.appendChild(typeSel);
   menu.appendChild(typeLabel);
 
@@ -5890,7 +6220,7 @@ async function openLineMenu(evt, line, aId, bId) {
     opt.textContent = option.label;
     decorationSel.appendChild(opt);
   });
-  decorationSel.value = appearance.decoration;
+  decorationSel.value = initial.decoration;
   decorationLabel.appendChild(decorationSel);
   menu.appendChild(decorationLabel);
 
@@ -5903,7 +6233,7 @@ async function openLineMenu(evt, line, aId, bId) {
     opt.textContent = option.label;
     directionSel.appendChild(opt);
   });
-  directionSel.value = appearance.decorationDirection;
+  directionSel.value = initial.decorationDirection;
   directionLabel.appendChild(directionSel);
   menu.appendChild(directionLabel);
 
@@ -5911,7 +6241,7 @@ async function openLineMenu(evt, line, aId, bId) {
   glowField.className = 'line-menu-toggle';
   const glowInput = document.createElement('input');
   glowInput.type = 'checkbox';
-  glowInput.checked = Boolean(appearance.glow);
+  glowInput.checked = initial.glow;
   glowField.appendChild(glowInput);
   glowField.appendChild(document.createTextNode(' Glow highlight'));
   menu.appendChild(glowField);
@@ -5925,7 +6255,7 @@ async function openLineMenu(evt, line, aId, bId) {
     opt.textContent = option.label;
     thickSel.appendChild(opt);
   });
-  thickSel.value = link.thickness || DEFAULT_LINE_THICKNESS;
+  thickSel.value = initial.thickness;
   thickLabel.appendChild(thickSel);
   menu.appendChild(thickLabel);
 
@@ -5933,9 +6263,23 @@ async function openLineMenu(evt, line, aId, bId) {
   nameLabel.textContent = 'Label';
   const nameInput = document.createElement('input');
   nameInput.type = 'text';
-  nameInput.value = link.name || '';
+  nameInput.value = initial.name;
   nameLabel.appendChild(nameInput);
   menu.appendChild(nameLabel);
+
+  const applyPreview = () => {
+    const previewPatch = {
+      color: colorInput.value,
+      style: typeSel.value,
+      decoration: decorationSel.value,
+      decorationDirection: decorationSel.value === 'none' || decorationSel.value === 'block'
+        ? DEFAULT_DECORATION_DIRECTION
+        : directionSel.value,
+      glow: glowInput.checked,
+      thickness: thickSel.value
+    };
+    applyLineStyle(line, previewPatch);
+  };
 
   const autoBtn = document.createElement('button');
   autoBtn.type = 'button';
@@ -5968,6 +6312,19 @@ async function openLineMenu(evt, line, aId, bId) {
       await updateLink(aId, bId, patch);
       applyLineStyle(line, patch);
       applyLinkPatchToState(aId, bId, patch);
+      if (mapState.activeLineMenu?.menu === menu) {
+        mapState.activeLineMenu.restore = () => {
+          applyLineStyle(line, {
+            color: line.dataset.color || DEFAULT_LINK_COLOR,
+            style: line.dataset.style || DEFAULT_LINE_STYLE,
+            decoration: line.dataset.decoration || DEFAULT_LINE_DECORATION,
+            decorationDirection: line.dataset.direction || line.dataset.decorationDirection || DEFAULT_DECORATION_DIRECTION,
+            glow: line.dataset.glow === '1',
+            thickness: line.dataset.thickness || DEFAULT_LINE_THICKNESS,
+            name: line.dataset.label || ''
+          });
+        };
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -5976,10 +6333,26 @@ async function openLineMenu(evt, line, aId, bId) {
   });
   menu.appendChild(autoBtn);
 
+  const swapBtn = document.createElement('button');
+  swapBtn.type = 'button';
+  swapBtn.className = 'btn secondary';
+  swapBtn.textContent = 'Swap direction';
+  swapBtn.addEventListener('click', () => {
+    if (directionSel.disabled) return;
+    if (directionSel.value === 'end') {
+      directionSel.value = 'start';
+    } else if (directionSel.value === 'start') {
+      directionSel.value = 'end';
+    }
+    applyPreview();
+  });
+  menu.appendChild(swapBtn);
+
   const updateDirectionDisabled = () => {
     const deco = decorationSel.value;
     const disable = deco === 'none' || deco === 'block';
     directionSel.disabled = disable;
+    swapBtn.disabled = disable;
     if (disable) {
       directionSel.value = DEFAULT_DECORATION_DIRECTION;
     }
@@ -5988,7 +6361,7 @@ async function openLineMenu(evt, line, aId, bId) {
   updateDirectionDisabled();
 
   const btn = document.createElement('button');
-  btn.className = 'btn';
+  btn.className = 'btn primary';
   btn.textContent = 'Save';
   btn.addEventListener('click', async () => {
     const patch = {
@@ -6004,18 +6377,32 @@ async function openLineMenu(evt, line, aId, bId) {
     };
     await updateLink(aId, bId, patch);
     applyLineStyle(line, patch);
-    document.body.removeChild(menu);
+    closeLineMenu({ commit: true });
   });
   menu.appendChild(btn);
 
+  [colorInput, typeSel, decorationSel, directionSel, glowInput, thickSel].forEach(input => {
+    const eventName = input instanceof HTMLInputElement && input.type === 'color' ? 'input' : 'change';
+    input.addEventListener(eventName, applyPreview);
+  });
+
   document.body.appendChild(menu);
-  const closer = e => {
-    if (!menu.contains(e.target)) {
-      document.body.removeChild(menu);
-      document.removeEventListener('mousedown', closer);
-    }
+  requestAnimationFrame(() => {
+    positionLineMenu(menu, evt.pageX, evt.pageY);
+  });
+
+  const handleOutside = event => {
+    if (menu.contains(event.target)) return;
+    closeLineMenu();
   };
-  setTimeout(() => document.addEventListener('mousedown', closer), 0);
+  document.addEventListener('pointerdown', handleOutside, true);
+
+  const menuState = {
+    menu,
+    restore: () => applyLineStyle(line, initial),
+    cleanup: () => document.removeEventListener('pointerdown', handleOutside, true)
+  };
+  mapState.activeLineMenu = menuState;
 }
 
 async function updateLink(aId, bId, patch) {
