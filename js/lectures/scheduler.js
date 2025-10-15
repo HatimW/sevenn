@@ -1,3 +1,5 @@
+import { deepClone } from '../utils.js';
+
 const DAY_MINUTES = 24 * 60;
 const MINUTE_MS = 60 * 1000;
 
@@ -14,10 +16,7 @@ export const DEFAULT_PASS_COLORS = [
   '#14b8a6'
 ];
 
-function clone(value) {
-  if (value == null) return value;
-  return JSON.parse(JSON.stringify(value));
-}
+const clone = deepClone;
 
 function toNumber(value, fallback = 0) {
   const num = Number(value);
@@ -166,7 +165,7 @@ function sanitizeAttachments(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter(att => att != null)
-    .map(att => (typeof att === 'object' ? JSON.parse(JSON.stringify(att)) : att));
+    .map(att => (typeof att === 'object' ? deepClone(att) : att));
 }
 
 export function normalizeLecturePasses({

@@ -1,10 +1,8 @@
 import { openDB } from './idb.js';
 import { lectureKey, normalizeLectureRecord } from './lecture-schema.js';
+import { deepClone } from '../utils.js';
 
-function clone(value) {
-  if (value == null) return value;
-  return JSON.parse(JSON.stringify(value));
-}
+const clone = deepClone;
 
 function prom(req) {
   return new Promise((resolve, reject) => {

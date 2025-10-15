@@ -1,6 +1,7 @@
 import { openDB } from './idb.js';
 import { buildTokens, buildSearchMeta } from '../search.js';
 import { lectureKey, normalizeLectureRecord } from './lecture-schema.js';
+import { deepClone } from '../utils.js';
 
 const MAP_CONFIG_KEY = 'map-config';
 const TRANSACTION_STORES = [
@@ -117,8 +118,8 @@ export async function importJSON(dbDump){
       const key = record.key || lectureKey(blockId, lectureId);
       if (!key) return;
       if (preferExisting && lectureRecords.has(key)) return;
-      const clone = JSON.parse(JSON.stringify({ ...record, key, blockId, id: lectureId }));
-      lectureRecords.set(key, clone);
+      const payload = deepClone({ ...record, key, blockId, id: lectureId });
+      lectureRecords.set(key, payload);
     };
 
     if (Array.isArray(dbDump?.lectures)) {

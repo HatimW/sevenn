@@ -13,7 +13,7 @@ import {
 } from './storage.js';
 import { buildTokens, buildSearchMeta } from '../search.js';
 import { cleanItem } from '../validators.js';
-import { uid } from '../utils.js';
+import { uid, deepClone } from '../utils.js';
 
 const TRANSFER_VERSION = 1;
 
@@ -24,14 +24,9 @@ function prom(req) {
   });
 }
 
-function clone(value) {
-  if (value == null) return value;
-  return JSON.parse(JSON.stringify(value));
-}
-
 function sanitizeBlock(block) {
   if (!block || typeof block !== 'object') return null;
-  const copy = clone(block);
+  const copy = deepClone(block);
   return {
     blockId: copy.blockId,
     title: copy.title || '',
@@ -44,15 +39,15 @@ function sanitizeBlock(block) {
 
 function sanitizeLecture(lecture) {
   if (!lecture || typeof lecture !== 'object') return null;
-  const copy = clone(lecture);
+  const copy = deepClone(lecture);
   return {
     blockId: copy.blockId,
     id: copy.id,
     name: copy.name || '',
     week: copy.week ?? null,
     tags: Array.isArray(copy.tags) ? copy.tags.slice() : [],
-    passPlan: copy.passPlan ? clone(copy.passPlan) : null,
-    plannerDefaults: copy.plannerDefaults ? clone(copy.plannerDefaults) : null,
+    passPlan: copy.passPlan ? deepClone(copy.passPlan) : null,
+    plannerDefaults: copy.plannerDefaults ? deepClone(copy.plannerDefaults) : null,
     notes: typeof copy.notes === 'string' ? copy.notes : '',
     position: Number.isFinite(copy.position) ? copy.position : null
   };
@@ -159,7 +154,7 @@ function extractMapData(mapConfig, itemIds) {
 
 function sanitizeItems(items) {
   return items.map(item => {
-    const copy = clone(item);
+    const copy = deepClone(item);
     delete copy.tokens;
     delete copy.searchMeta;
     return copy;
@@ -180,7 +175,7 @@ function buildBundle({ scope, block, lectures, items, map }) {
 async function readMapConfig() {
   try {
     const raw = await getMapConfig();
-    return clone(raw);
+    return deepClone(raw);
   } catch (err) {
     console.warn('Failed to read map config for transfer', err);
     return { tabs: [] };
@@ -278,7 +273,7 @@ function normalizeTransferPayload(bundle) {
   const lectures = Array.isArray(bundle.lectures) ? bundle.lectures.map(ensureLectureDefaults).filter(Boolean) : [];
   const items = Array.isArray(bundle.items)
     ? bundle.items.map(item => {
-        const cleaned = cleanItem({ ...clone(item) });
+        const cleaned = cleanItem({ ...deepClone(item) });
         delete cleaned.tokens;
         delete cleaned.searchMeta;
         return cleaned;
@@ -523,7 +518,7 @@ function remapMapTabs(map, lectureIdMap, itemIdMap) {
 async function mergeMapConfig(map, lectureIdMap, itemIdMap) {
   if (!map || !Array.isArray(map.tabs) || !map.tabs.length) return;
   const config = await getMapConfig();
-  const copy = clone(config);
+  const copy = deepClone(config);
   const appended = remapMapTabs(map, lectureIdMap, itemIdMap);
   appended.forEach(tab => {
     let name = tab.name;

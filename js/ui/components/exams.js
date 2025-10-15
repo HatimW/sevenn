@@ -1,6 +1,6 @@
 import { listExams, upsertExam, deleteExam, listExamSessions, loadExamSession, saveExamSessionProgress, deleteExamSessionProgress } from '../../storage/storage.js';
 import { state, setExamSession, setExamAttemptExpanded } from '../../state.js';
-import { uid, setToggleState } from '../../utils.js';
+import { uid, setToggleState, deepClone } from '../../utils.js';
 import { confirmModal } from './confirm.js';
 
 const DEFAULT_SECONDS = 60;
@@ -328,7 +328,7 @@ function summarizeAnswerChanges(questionStats, exam, answers = {}) {
 }
 
 function clone(value) {
-  return value ? JSON.parse(JSON.stringify(value)) : value;
+  return value != null ? deepClone(value) : value;
 }
 
 function totalExamTimeMs(exam) {
