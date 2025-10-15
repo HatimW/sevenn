@@ -18122,6 +18122,7 @@
     { value: "regular", label: "Regular" },
     { value: "bold", label: "Bold" }
   ];
+  var LINE_HOVER_WIDTH_MULTIPLIER = 1.2;
   var LINE_TYPE_PRESETS = [
     { value: "line", label: "Line", style: "solid", decoration: "none", direction: DEFAULT_DECORATION_DIRECTION },
     { value: "arrow", label: "Arrow", style: "solid", decoration: "arrow", direction: "end", directional: true },
@@ -18131,7 +18132,6 @@
     { value: "dotted", label: "Dotted", style: "dotted", decoration: "none", direction: DEFAULT_DECORATION_DIRECTION }
   ];
   var LINE_TYPE_PRESET_LOOKUP = new Map(LINE_TYPE_PRESETS.map((option) => [option.value, option]));
-  var LINE_GAP_MIN_DISTANCE = 12;
   var LINE_GAP_STROKE_MULTIPLIER = 2.4;
   var EDGE_DRAG_HOLD_DELAY = 160;
   var EDGE_DRAG_MOVE_THRESHOLD = 3.5;
@@ -20594,7 +20594,13 @@
         const dx = e.clientX - edgePress.startClient.x;
         const dy = e.clientY - edgePress.startClient.y;
         if (Math.hypot(dx, dy) <= EDGE_CLICK_DISTANCE) {
-          await removeHandleAt(edgePress.line, edgePress.handleIndex);
+          const line = edgePress.line;
+          if (line && confirm("Remove this anchor point?")) {
+            await removeHandleAt(line, edgePress.handleIndex);
+          } else if (line) {
+            showLineHandles(line);
+            applyLineHover(line);
+          }
         }
       }
     }
@@ -20813,6 +20819,7 @@
       if (entry) {
         updateNodeGeometry(id, entry);
         queueEdgeUpdate(id, { immediate: true });
+        updateEdgesFor(id);
       }
       return;
     }
@@ -21406,7 +21413,9 @@
     const geometry = options.geometry || getLineGeometry(aId, bId, { line });
     if (!geometry) return;
     const pointer = options.pointer || clientToMap(evt.clientX, evt.clientY);
-    const prepared = prepareHandlesForDrag(geometry, pointer, handleIndex);
+    const prepared = prepareHandlesForDrag(geometry, pointer, handleIndex, {
+      forceCreate: options.trigger === "line"
+    });
     const handles = prepared.handles.map((handle) => ({
       position: handle.position,
       offset: handle.offset,
@@ -21604,7 +21613,7 @@
       const geometry = getLineGeometry(aId, bId, { line: path });
       showLineHandles(path, geometry);
       showEdgeTooltip(path, evt);
-      path.classList.add("map-edge--hover");
+      applyLineHover(path);
     });
     path.addEventListener("mouseleave", () => {
       if (mapState.tool === TOOL.HIDE) {
@@ -21615,7 +21624,7 @@
       }
       hideLineHandles(path);
       hideEdgeTooltip(path);
-      path.classList.remove("map-edge--hover");
+      clearLineHover(path);
     });
     path.addEventListener("mousemove", (evt) => moveEdgeTooltip(path, evt));
   }
@@ -21650,6 +21659,7 @@
     const edge = getEdgeElement(aId, bId);
     if (!edge) return;
     hideEdgeTooltip(edge);
+    clearLineHover(edge, { force: true });
     removeLineOverlay(edge);
     removeLineHandles(edge);
     removeLineGap(edge);
@@ -22745,36 +22755,6 @@
       offset: clampHandleOffset(handle.offset)
     }));
   }
-  function distanceSq(a, b) {
-    if (!a || !b) return Infinity;
-    const dx = (a.x ?? 0) - (b.x ?? 0);
-    const dy = (a.y ?? 0) - (b.y ?? 0);
-    return dx * dx + dy * dy;
-  }
-  function segmentsIntersect(p1, p2, p3, p4) {
-    if (!p1 || !p2 || !p3 || !p4) return false;
-    const threshold = 1e-6;
-    if (distanceSq(p1, p3) < threshold || distanceSq(p1, p4) < threshold || distanceSq(p2, p3) < threshold || distanceSq(p2, p4) < threshold) {
-      return false;
-    }
-    const orient = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-    const o1 = orient(p1, p2, p3);
-    const o2 = orient(p1, p2, p4);
-    const o3 = orient(p3, p4, p1);
-    const o4 = orient(p3, p4, p2);
-    if (Math.abs(o1) < threshold && onSegment(p1, p2, p3)) return true;
-    if (Math.abs(o2) < threshold && onSegment(p1, p2, p4)) return true;
-    if (Math.abs(o3) < threshold && onSegment(p3, p4, p1)) return true;
-    if (Math.abs(o4) < threshold && onSegment(p3, p4, p2)) return true;
-    return o1 > 0 !== o2 > 0 && o3 > 0 !== o4 > 0;
-  }
-  function onSegment(p, q, r) {
-    const minX = Math.min(p.x, r.x) - 1e-3;
-    const maxX = Math.max(p.x, r.x) + 1e-3;
-    const minY = Math.min(p.y, r.y) - 1e-3;
-    const maxY = Math.max(p.y, r.y) + 1e-3;
-    return q.x >= minX && q.x <= maxX && q.y >= minY && q.y <= maxY;
-  }
   function buildCurvePoints(segment, handles) {
     const { startX, startY, endX, endY, ux, uy } = segment;
     const dx = endX - startX;
@@ -22868,117 +22848,6 @@
     });
     return path;
   }
-  function computeSegmentIntersectionPoint(a1, a2, b1, b2) {
-    const denom = (a1.x - a2.x) * (b1.y - b2.y) - (a1.y - a2.y) * (b1.x - b2.x);
-    if (!Number.isFinite(denom) || Math.abs(denom) < 1e-9) {
-      return null;
-    }
-    const detA = a1.x * a2.y - a1.y * a2.x;
-    const detB = b1.x * b2.y - b1.y * b2.x;
-    const x = (detA * (b1.x - b2.x) - (a1.x - a2.x) * detB) / denom;
-    const y = (detA * (b1.y - b2.y) - (a1.y - a2.y) * detB) / denom;
-    if (!Number.isFinite(x) || !Number.isFinite(y)) {
-      return null;
-    }
-    return { x, y };
-  }
-  function boundsOverlap(a, b, buffer = LINE_GAP_MIN_DISTANCE) {
-    if (!a || !b) return false;
-    return !(a.maxX + buffer < b.minX || a.minX - buffer > b.maxX || a.maxY + buffer < b.minY || a.minY - buffer > b.maxY);
-  }
-  function segmentBoundsOverlap(a, b) {
-    return boundsOverlap(a, b, LINE_GAP_MIN_DISTANCE * 0.6);
-  }
-  function edgesShareEndpoint(lineA, lineB) {
-    if (!lineA?.dataset || !lineB?.dataset) return false;
-    const a1 = String(lineA.dataset.a ?? "");
-    const a2 = String(lineA.dataset.b ?? "");
-    const b1 = String(lineB.dataset.a ?? "");
-    const b2 = String(lineB.dataset.b ?? "");
-    return a1 === b1 || a1 === b2 || a2 === b1 || a2 === b2;
-  }
-  function computeSampledGeometry(geometry) {
-    if (!geometry) {
-      return { points: [], segments: [], bounds: null };
-    }
-    const points = [];
-    const segments = geometry.segments || [];
-    const start = { x: geometry.startX, y: geometry.startY };
-    if (Number.isFinite(start.x) && Number.isFinite(start.y)) {
-      points.push(start);
-    }
-    if (Array.isArray(segments) && segments.length) {
-      segments.forEach((segment) => {
-        const length = approximateCubicLength(segment.from, segment.c1, segment.c2, segment.to);
-        const steps = Math.max(4, Math.ceil(length / 24));
-        for (let i = 1; i <= steps; i += 1) {
-          const t = i / steps;
-          const point = cubicPoint(segment.from, segment.c1, segment.c2, segment.to, t);
-          points.push(point);
-        }
-      });
-    } else {
-      points.push({ x: geometry.endX, y: geometry.endY });
-    }
-    const filtered = [];
-    points.forEach((point) => {
-      if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-      const last = filtered[filtered.length - 1];
-      if (last && distanceSq(last, point) < 1e-6) return;
-      filtered.push(point);
-    });
-    const sampleSegments = [];
-    const bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
-    filtered.forEach((point, index) => {
-      bounds.minX = Math.min(bounds.minX, point.x);
-      bounds.maxX = Math.max(bounds.maxX, point.x);
-      bounds.minY = Math.min(bounds.minY, point.y);
-      bounds.maxY = Math.max(bounds.maxY, point.y);
-      if (index === 0) return;
-      const prev = filtered[index - 1];
-      const segmentBounds = {
-        minX: Math.min(prev.x, point.x),
-        maxX: Math.max(prev.x, point.x),
-        minY: Math.min(prev.y, point.y),
-        maxY: Math.max(prev.y, point.y)
-      };
-      sampleSegments.push({ from: prev, to: point, bounds: segmentBounds });
-    });
-    if (!sampleSegments.length) {
-      return { points: filtered, segments: [], bounds: null };
-    }
-    return { points: filtered, segments: sampleSegments, bounds };
-  }
-  function getLineGapSample(line, geometry) {
-    if (!line) {
-      return computeSampledGeometry(geometry);
-    }
-    const key = geometry?.pathData || "";
-    const cached = line._gapSample;
-    if (cached && cached.key === key) {
-      return cached.value;
-    }
-    const value = computeSampledGeometry(geometry);
-    line._gapSample = { key, value };
-    return value;
-  }
-  function ensureLineGapLayer(line) {
-    if (!line) return null;
-    const parent = line.parentNode;
-    if (!parent) return null;
-    let layer = line._gapLayer;
-    if (!layer || layer.parentNode !== parent) {
-      if (layer?.parentNode) {
-        layer.remove();
-      }
-      layer = document.createElementNS("http://www.w3.org/2000/svg", "g");
-      layer.classList.add("map-edge-gap-layer");
-      layer.setAttribute("pointer-events", "none");
-      parent.appendChild(layer);
-      line._gapLayer = layer;
-    }
-    return layer;
-  }
   function removeLineGap(line) {
     if (!line) return;
     if (line._gapLayer) {
@@ -23000,77 +22869,7 @@
     });
   }
   function updateLineCrossovers(line, geometry, options = {}) {
-    if (!line) return;
-    const visited = options.visited || /* @__PURE__ */ new Set();
-    if (visited.has(line)) return;
-    visited.add(line);
-    if (!geometry) {
-      removeLineGap(line);
-      return;
-    }
-    const sample = getLineGapSample(line, geometry);
-    if (!sample.segments.length) {
-      removeLineGap(line);
-      return;
-    }
-    const intersections = [];
-    const touched = /* @__PURE__ */ new Set();
-    const allEdges = mapState.allEdges;
-    if (allEdges && allEdges.size) {
-      const seen = /* @__PURE__ */ new Set();
-      allEdges.forEach((other) => {
-        if (!other || other === line || visited.has(other)) return;
-        if (edgesShareEndpoint(line, other)) return;
-        if (!other.dataset?.a || !other.dataset?.b) return;
-        const otherGeometry = other._lastGeometry || getLineGeometry(other.dataset.a, other.dataset.b, { line: other });
-        if (!otherGeometry) return;
-        const otherSample = getLineGapSample(other, otherGeometry);
-        if (!otherSample.segments.length) return;
-        if (!boundsOverlap(sample.bounds, otherSample.bounds)) return;
-        const minDistanceSq = LINE_GAP_MIN_DISTANCE * LINE_GAP_MIN_DISTANCE;
-        sample.segments.forEach((segA) => {
-          otherSample.segments.forEach((segB) => {
-            if (!segmentBoundsOverlap(segA.bounds, segB.bounds)) return;
-            if (!segmentsIntersect(segA.from, segA.to, segB.from, segB.to)) return;
-            const point = computeSegmentIntersectionPoint(segA.from, segA.to, segB.from, segB.to);
-            if (!point) return;
-            if (distanceSq(point, segA.from) < minDistanceSq || distanceSq(point, segA.to) < minDistanceSq || distanceSq(point, segB.from) < minDistanceSq || distanceSq(point, segB.to) < minDistanceSq) {
-              return;
-            }
-            const key = `${Math.round(point.x * 100)}|${Math.round(point.y * 100)}`;
-            if (seen.has(key)) return;
-            seen.add(key);
-            intersections.push(point);
-            touched.add(other);
-          });
-        });
-      });
-    }
-    if (!intersections.length) {
-      removeLineGap(line);
-    } else {
-      const layer = ensureLineGapLayer(line);
-      if (!layer) return;
-      while (layer.firstChild) {
-        layer.firstChild.remove();
-      }
-      intersections.forEach((point) => {
-        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        circle.classList.add("map-edge-gap");
-        circle.setAttribute("cx", point.x);
-        circle.setAttribute("cy", point.y);
-        circle.setAttribute("fill", "none");
-        circle.setAttribute("vector-effect", "non-scaling-stroke");
-        layer.appendChild(circle);
-      });
-      updateLineGapVisuals(line);
-    }
-    touched.forEach((other) => {
-      const otherGeometry = other._lastGeometry || getLineGeometry(other.dataset.a, other.dataset.b, { line: other });
-      if (otherGeometry) {
-        updateLineCrossovers(other, otherGeometry, { visited });
-      }
-    });
+    removeLineGap(line);
   }
   function getPointAlongSegments(segments, ratio) {
     if (!segments.length) return null;
@@ -23151,7 +22950,7 @@
     };
     return { position, offset: normalized2, base: { x: baseX, y: baseY }, weight, point };
   }
-  function prepareHandlesForDrag(geometry, pointer, hintIndex = 0) {
+  function prepareHandlesForDrag(geometry, pointer, hintIndex = 0, options = {}) {
     if (!geometry) {
       return { handles: [], index: -1 };
     }
@@ -23164,6 +22963,8 @@
     })) : [];
     const originalLength = handles.length;
     let createdIndex = -1;
+    const { forceCreate = false } = options;
+    let insertedHandle = null;
     let index = clamp2(Math.round(hintIndex ?? 0), 0, Math.max(0, handles.length - 1));
     const pointerMeta = pointer ? { x: pointer.x, y: pointer.y } : null;
     if (pointerMeta) {
@@ -23176,17 +22977,32 @@
         nearestDistance = Math.hypot(pointerMeta.x - px, pointerMeta.y - py);
       }
       const threshold = Math.max((geometry.baseWidth || 6) * 2.4, 26);
-      if (!handles.length || nearestDistance > threshold) {
+      const shouldInsert = forceCreate || !handles.length || nearestDistance > threshold;
+      if (shouldInsert) {
         const inserted = buildHandleMetaFromPointer(geometry, pointerMeta);
         if (inserted) {
           handles.push(inserted);
           handles.sort((a, b) => a.position - b.position);
           nearestIndex = handles.indexOf(inserted);
           createdIndex = nearestIndex;
+          insertedHandle = inserted;
         }
       }
       if (handles.length) {
-        index = clamp2(nearestIndex, 0, handles.length - 1);
+        const targetIndex = nearestIndex >= 0 ? nearestIndex : handles.indexOf(insertedHandle);
+        index = clamp2(targetIndex >= 0 ? targetIndex : index, 0, handles.length - 1);
+      }
+    } else if (forceCreate) {
+      const defaultPointer = {
+        x: geometry.startX + (geometry.endX - geometry.startX) * DEFAULT_CURVE_ANCHOR,
+        y: geometry.startY + (geometry.endY - geometry.startY) * DEFAULT_CURVE_ANCHOR
+      };
+      const inserted = buildHandleMetaFromPointer(geometry, defaultPointer);
+      if (inserted) {
+        handles.push(inserted);
+        handles.sort((a, b) => a.position - b.position);
+        createdIndex = handles.indexOf(inserted);
+        index = clamp2(createdIndex, 0, handles.length - 1);
       }
     }
     geometry.handles = handles;
@@ -23525,18 +23341,47 @@
     if (!line) return;
     const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
     const { lineScale = 1 } = getCurrentScales();
-    const strokeWidth = baseWidth * lineScale;
+    const multiplier = line._hoverActive ? LINE_HOVER_WIDTH_MULTIPLIER : 1;
+    const strokeWidth = baseWidth * lineScale * multiplier;
     if (Number.isFinite(strokeWidth)) {
       line.setAttribute("stroke-width", strokeWidth);
     }
     if (line._overlay) {
       const overlayBase = Number(line._overlay.dataset.baseWidth) || baseWidth * 0.85;
-      const overlayWidth = overlayBase * lineScale;
+      const overlayWidth = overlayBase * lineScale * multiplier;
       if (Number.isFinite(overlayWidth)) {
         line._overlay.setAttribute("stroke-width", overlayWidth);
       }
     }
     updateLineGapVisuals(line);
+  }
+  function isLineHovered(line) {
+    if (!line) return false;
+    if (typeof line.matches === "function" && line.matches(":hover")) {
+      return true;
+    }
+    if (Array.isArray(line._handleElements)) {
+      return line._handleElements.some((handle) => typeof handle.matches === "function" && handle.matches(":hover"));
+    }
+    return false;
+  }
+  function applyLineHover(line) {
+    if (!line || line._hoverActive) return;
+    line._hoverActive = true;
+    updateLineStrokeWidth(line);
+    line.classList.add("map-edge--hover");
+  }
+  function clearLineHover(line, options = {}) {
+    if (!line) return;
+    const { force = false } = options;
+    if (!force && isLineHovered(line)) {
+      return;
+    }
+    if (line._hoverActive) {
+      line._hoverActive = false;
+      updateLineStrokeWidth(line);
+    }
+    line.classList.remove("map-edge--hover");
   }
   function removeLineHandles(line) {
     if (!line) return;
@@ -23601,9 +23446,11 @@
         });
         circle.addEventListener("pointerenter", () => {
           showLineHandles(line);
+          applyLineHover(line);
         });
         circle.addEventListener("pointerleave", () => {
           hideLineHandles(line);
+          clearLineHover(line);
         });
         parent.appendChild(circle);
       }
@@ -23654,6 +23501,9 @@
       line._handleHideTimer = null;
       if (line._handleSticky && !force) return;
       setLineHandlesVisible(line, false, { force: true });
+      if (!isLineHovered(line) || force) {
+        clearLineHover(line, { force: true });
+      }
     }, delay);
   }
   function syncLineHandles(line, geometry = null) {

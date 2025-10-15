@@ -152,6 +152,8 @@ const LINE_THICKNESS_OPTIONS = [
   { value: 'bold', label: 'Bold' }
 ];
 
+const LINE_HOVER_WIDTH_MULTIPLIER = 1.2;
+
 const LINE_TYPE_PRESETS = [
   { value: 'line', label: 'Line', style: 'solid', decoration: 'none', direction: DEFAULT_DECORATION_DIRECTION },
   { value: 'arrow', label: 'Arrow', style: 'solid', decoration: 'arrow', direction: 'end', directional: true },
@@ -2861,7 +2863,13 @@ async function handlePointerUp(e) {
       const dx = e.clientX - edgePress.startClient.x;
       const dy = e.clientY - edgePress.startClient.y;
       if (Math.hypot(dx, dy) <= EDGE_CLICK_DISTANCE) {
-        await removeHandleAt(edgePress.line, edgePress.handleIndex);
+        const line = edgePress.line;
+        if (line && confirm('Remove this anchor point?')) {
+          await removeHandleAt(line, edgePress.handleIndex);
+        } else if (line) {
+          showLineHandles(line);
+          applyLineHover(line);
+        }
       }
     }
   }
@@ -3093,6 +3101,7 @@ function scheduleNodePositionUpdate(id, pos, options = {}) {
     if (entry) {
       updateNodeGeometry(id, entry);
       queueEdgeUpdate(id, { immediate: true });
+      updateEdgesFor(id);
     }
     return;
   }
@@ -3737,7 +3746,9 @@ function beginEdgeHandleDrag(line, handleIndex, evt, options = {}) {
   const geometry = options.geometry || getLineGeometry(aId, bId, { line });
   if (!geometry) return;
   const pointer = options.pointer || clientToMap(evt.clientX, evt.clientY);
-  const prepared = prepareHandlesForDrag(geometry, pointer, handleIndex);
+  const prepared = prepareHandlesForDrag(geometry, pointer, handleIndex, {
+    forceCreate: options.trigger === 'line'
+  });
   const handles = prepared.handles.map(handle => ({
     position: handle.position,
     offset: handle.offset,
@@ -3944,7 +3955,7 @@ function attachEdgeInteraction(path, aId, bId) {
     const geometry = getLineGeometry(aId, bId, { line: path });
     showLineHandles(path, geometry);
     showEdgeTooltip(path, evt);
-    path.classList.add('map-edge--hover');
+    applyLineHover(path);
   });
   path.addEventListener('mouseleave', () => {
     if (mapState.tool === TOOL.HIDE) {
@@ -3955,7 +3966,7 @@ function attachEdgeInteraction(path, aId, bId) {
     }
     hideLineHandles(path);
     hideEdgeTooltip(path);
-    path.classList.remove('map-edge--hover');
+    clearLineHover(path);
   });
   path.addEventListener('mousemove', evt => moveEdgeTooltip(path, evt));
 }
@@ -3992,6 +4003,7 @@ function removeEdgeBetween(aId, bId) {
   const edge = getEdgeElement(aId, bId);
   if (!edge) return;
   hideEdgeTooltip(edge);
+  clearLineHover(edge, { force: true });
   removeLineOverlay(edge);
   removeLineHandles(edge);
   removeLineGap(edge);
@@ -5475,87 +5487,7 @@ function updateLineGapVisuals(line) {
 }
 
 function updateLineCrossovers(line, geometry, options = {}) {
-  if (!line) return;
-  const visited = options.visited || new Set();
-  if (visited.has(line)) return;
-  visited.add(line);
-
-  if (!geometry) {
-    removeLineGap(line);
-    return;
-  }
-
-  const sample = getLineGapSample(line, geometry);
-  if (!sample.segments.length) {
-    removeLineGap(line);
-    return;
-  }
-
-  const intersections = [];
-  const touched = new Set();
-  const allEdges = mapState.allEdges;
-  if (allEdges && allEdges.size) {
-    const seen = new Set();
-    allEdges.forEach(other => {
-      if (!other || other === line || visited.has(other)) return;
-      if (edgesShareEndpoint(line, other)) return;
-      if (!other.dataset?.a || !other.dataset?.b) return;
-      const otherGeometry = other._lastGeometry || getLineGeometry(other.dataset.a, other.dataset.b, { line: other });
-      if (!otherGeometry) return;
-      const otherSample = getLineGapSample(other, otherGeometry);
-      if (!otherSample.segments.length) return;
-      if (!boundsOverlap(sample.bounds, otherSample.bounds)) return;
-      const minDistanceSq = LINE_GAP_MIN_DISTANCE * LINE_GAP_MIN_DISTANCE;
-      sample.segments.forEach(segA => {
-        otherSample.segments.forEach(segB => {
-          if (!segmentBoundsOverlap(segA.bounds, segB.bounds)) return;
-          if (!segmentsIntersect(segA.from, segA.to, segB.from, segB.to)) return;
-          const point = computeSegmentIntersectionPoint(segA.from, segA.to, segB.from, segB.to);
-          if (!point) return;
-          if (
-            distanceSq(point, segA.from) < minDistanceSq
-            || distanceSq(point, segA.to) < minDistanceSq
-            || distanceSq(point, segB.from) < minDistanceSq
-            || distanceSq(point, segB.to) < minDistanceSq
-          ) {
-            return;
-          }
-          const key = `${Math.round(point.x * 100)}|${Math.round(point.y * 100)}`;
-          if (seen.has(key)) return;
-          seen.add(key);
-          intersections.push(point);
-          touched.add(other);
-        });
-      });
-    });
-  }
-
-  if (!intersections.length) {
-    removeLineGap(line);
-  } else {
-    const layer = ensureLineGapLayer(line);
-    if (!layer) return;
-    while (layer.firstChild) {
-      layer.firstChild.remove();
-    }
-    intersections.forEach(point => {
-      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      circle.classList.add('map-edge-gap');
-      circle.setAttribute('cx', point.x);
-      circle.setAttribute('cy', point.y);
-      circle.setAttribute('fill', 'none');
-      circle.setAttribute('vector-effect', 'non-scaling-stroke');
-      layer.appendChild(circle);
-    });
-    updateLineGapVisuals(line);
-  }
-
-  touched.forEach(other => {
-    const otherGeometry = other._lastGeometry || getLineGeometry(other.dataset.a, other.dataset.b, { line: other });
-    if (otherGeometry) {
-      updateLineCrossovers(other, otherGeometry, { visited });
-    }
-  });
+  removeLineGap(line);
 }
 
 function getPointAlongSegments(segments, ratio) {
@@ -5640,7 +5572,7 @@ function buildHandleMetaFromPointer(geometry, pointer) {
   return { position, offset: normalized, base: { x: baseX, y: baseY }, weight, point };
 }
 
-function prepareHandlesForDrag(geometry, pointer, hintIndex = 0) {
+function prepareHandlesForDrag(geometry, pointer, hintIndex = 0, options = {}) {
   if (!geometry) {
     return { handles: [], index: -1 };
   }
@@ -5656,6 +5588,8 @@ function prepareHandlesForDrag(geometry, pointer, hintIndex = 0) {
 
   const originalLength = handles.length;
   let createdIndex = -1;
+  const { forceCreate = false } = options;
+  let insertedHandle = null;
   let index = clamp(Math.round(hintIndex ?? 0), 0, Math.max(0, handles.length - 1));
   const pointerMeta = pointer ? { x: pointer.x, y: pointer.y } : null;
 
@@ -5669,17 +5603,32 @@ function prepareHandlesForDrag(geometry, pointer, hintIndex = 0) {
       nearestDistance = Math.hypot(pointerMeta.x - px, pointerMeta.y - py);
     }
     const threshold = Math.max((geometry.baseWidth || 6) * 2.4, 26);
-    if (!handles.length || nearestDistance > threshold) {
+    const shouldInsert = forceCreate || !handles.length || nearestDistance > threshold;
+    if (shouldInsert) {
       const inserted = buildHandleMetaFromPointer(geometry, pointerMeta);
       if (inserted) {
         handles.push(inserted);
         handles.sort((a, b) => a.position - b.position);
         nearestIndex = handles.indexOf(inserted);
         createdIndex = nearestIndex;
+        insertedHandle = inserted;
       }
     }
     if (handles.length) {
-      index = clamp(nearestIndex, 0, handles.length - 1);
+      const targetIndex = nearestIndex >= 0 ? nearestIndex : handles.indexOf(insertedHandle);
+      index = clamp(targetIndex >= 0 ? targetIndex : index, 0, handles.length - 1);
+    }
+  } else if (forceCreate) {
+    const defaultPointer = {
+      x: geometry.startX + (geometry.endX - geometry.startX) * DEFAULT_CURVE_ANCHOR,
+      y: geometry.startY + (geometry.endY - geometry.startY) * DEFAULT_CURVE_ANCHOR
+    };
+    const inserted = buildHandleMetaFromPointer(geometry, defaultPointer);
+    if (inserted) {
+      handles.push(inserted);
+      handles.sort((a, b) => a.position - b.position);
+      createdIndex = handles.indexOf(inserted);
+      index = clamp(createdIndex, 0, handles.length - 1);
     }
   }
 
@@ -6064,18 +6013,50 @@ function updateLineStrokeWidth(line) {
   if (!line) return;
   const baseWidth = Number(line.dataset.baseWidth) || getLineThicknessValue(line.dataset.thickness);
   const { lineScale = 1 } = getCurrentScales();
-  const strokeWidth = baseWidth * lineScale;
+  const multiplier = line._hoverActive ? LINE_HOVER_WIDTH_MULTIPLIER : 1;
+  const strokeWidth = baseWidth * lineScale * multiplier;
   if (Number.isFinite(strokeWidth)) {
     line.setAttribute('stroke-width', strokeWidth);
   }
   if (line._overlay) {
     const overlayBase = Number(line._overlay.dataset.baseWidth) || baseWidth * 0.85;
-    const overlayWidth = overlayBase * lineScale;
+    const overlayWidth = overlayBase * lineScale * multiplier;
     if (Number.isFinite(overlayWidth)) {
       line._overlay.setAttribute('stroke-width', overlayWidth);
     }
   }
   updateLineGapVisuals(line);
+}
+
+function isLineHovered(line) {
+  if (!line) return false;
+  if (typeof line.matches === 'function' && line.matches(':hover')) {
+    return true;
+  }
+  if (Array.isArray(line._handleElements)) {
+    return line._handleElements.some(handle => typeof handle.matches === 'function' && handle.matches(':hover'));
+  }
+  return false;
+}
+
+function applyLineHover(line) {
+  if (!line || line._hoverActive) return;
+  line._hoverActive = true;
+  updateLineStrokeWidth(line);
+  line.classList.add('map-edge--hover');
+}
+
+function clearLineHover(line, options = {}) {
+  if (!line) return;
+  const { force = false } = options;
+  if (!force && isLineHovered(line)) {
+    return;
+  }
+  if (line._hoverActive) {
+    line._hoverActive = false;
+    updateLineStrokeWidth(line);
+  }
+  line.classList.remove('map-edge--hover');
 }
 
 function removeLineHandles(line) {
@@ -6144,9 +6125,11 @@ function ensureLineHandles(line, geometry) {
       });
       circle.addEventListener('pointerenter', () => {
         showLineHandles(line);
+        applyLineHover(line);
       });
       circle.addEventListener('pointerleave', () => {
         hideLineHandles(line);
+        clearLineHover(line);
       });
       parent.appendChild(circle);
     }
@@ -6201,6 +6184,9 @@ function hideLineHandles(line, options = {}) {
     line._handleHideTimer = null;
     if (line._handleSticky && !force) return;
     setLineHandlesVisible(line, false, { force: true });
+    if (!isLineHovered(line) || force) {
+      clearLineHover(line, { force: true });
+    }
   }, delay);
 }
 
