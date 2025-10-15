@@ -18085,10 +18085,10 @@
   var DEFAULT_LINE_GLOW = false;
   var DEFAULT_LINE_THICKNESS = "regular";
   var DEFAULT_CURVE_ANCHOR = 0.5;
-  var CURVE_HANDLE_COUNT = 8;
+  var CURVE_HANDLE_COUNT = 0;
   var CURVE_HANDLE_MAX_OFFSET = 3.5;
-  var CURVE_HANDLE_WEIGHT_POWER = 1.35;
-  var CURVE_HANDLE_WEIGHT_GAIN = 1.2;
+  var CURVE_HANDLE_WEIGHT_POWER = 2.1;
+  var CURVE_HANDLE_WEIGHT_GAIN = 1.8;
   var LINE_STYLE_OPTIONS = [
     { value: "solid", label: "Smooth" },
     { value: "dashed", label: "Dashed" },
@@ -21242,14 +21242,16 @@
     if (!aId || !bId) return;
     const pointerId = evt.pointerId;
     const geometry = options.geometry || getLineGeometry(aId, bId, { line });
-    if (!geometry || !Array.isArray(geometry.handles) || !geometry.handles.length) return;
-    const maxIndex = geometry.handles.length - 1;
-    const index = clamp2(Math.round(handleIndex), 0, maxIndex);
-    const handles = geometry.handles.map((handle) => ({
+    if (!geometry) return;
+    const pointer = options.pointer || clientToMap(evt.clientX, evt.clientY);
+    const prepared = prepareHandlesForDrag(geometry, pointer, handleIndex);
+    const handles = prepared.handles.map((handle) => ({
       position: handle.position,
       offset: handle.offset,
       weight: handle.weight ?? getHandleWeight(handle.position)
     }));
+    if (!handles.length) return;
+    const index = clamp2(prepared.index, 0, handles.length - 1);
     const captureTarget = evt.currentTarget || line;
     const baseLength = geometry.trimmedLength || Math.hypot(geometry.endX - geometry.startX, geometry.endY - geometry.startY) || 1;
     mapState.edgeDrag = {
@@ -21295,8 +21297,8 @@
       const geometry = getLineGeometry(aId, bId, { line: path });
       if (!geometry) return;
       const pointerMap = clientToMap(evt.clientX, evt.clientY);
-      const index = findNearestHandleIndex(geometry, pointerMap);
-      beginEdgeHandleDrag(path, index, evt, { geometry });
+      const index = Array.isArray(geometry.handles) && geometry.handles.length ? findNearestHandleIndex(geometry, pointerMap) : 0;
+      beginEdgeHandleDrag(path, index, evt, { geometry, pointer: pointerMap });
     };
     path.addEventListener("pointerdown", (evt) => {
       startDragFromPath(evt);
@@ -22302,8 +22304,21 @@
       trimmedLength: trimmedLength || 0
     };
   }
+  function getPairCurveSeed(aId, bId) {
+    const key = [String(aId ?? ""), String(bId ?? "")].sort().join("|");
+    let hash = 2166136261;
+    for (let i = 0; i < key.length; i += 1) {
+      hash ^= key.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    const normalized2 = (hash >>> 0) / 4294967295;
+    return normalized2 * 2 - 1;
+  }
   function getDefaultHandlePositions(count = CURVE_HANDLE_COUNT) {
-    const total = Math.max(1, Math.round(Number(count) || 0));
+    const total = Math.max(0, Math.round(Number(count) || 0));
+    if (total <= 0) {
+      return [];
+    }
     return Array.from({ length: total }, (_, idx) => {
       const raw = (idx + 1) / (total + 1);
       return clampHandlePosition(raw);
@@ -22379,28 +22394,42 @@
     return null;
   }
   function mergeCurveHandles(baseHandles, overrides) {
-    const base = Array.isArray(baseHandles) && baseHandles.length ? baseHandles.map((handle) => ({ position: handle.position, offset: handle.offset })) : createDefaultCurveHandles();
+    const base = Array.isArray(baseHandles) ? baseHandles.map((handle) => ({ position: handle.position, offset: handle.offset })) : [];
     if (!Array.isArray(overrides) || !overrides.length) {
       return base;
     }
     overrides.forEach((override) => {
       const handle = normalizeCurveHandle(override);
       if (!handle) return;
+      if (!base.length) {
+        base.push({
+          position: clampHandlePosition(handle.position),
+          offset: clampHandleOffset(handle.offset)
+        });
+        return;
+      }
       let bestIndex = 0;
       let bestDist = Infinity;
       base.forEach((candidate, idx) => {
-        const dist = Math.abs(candidate.position - handle.position);
+        const candidatePos = candidate?.position ?? DEFAULT_CURVE_ANCHOR;
+        const dist = Math.abs(candidatePos - handle.position);
         if (dist < bestDist) {
           bestDist = dist;
           bestIndex = idx;
         }
       });
       const nextPosition = Object.prototype.hasOwnProperty.call(handle, "position") ? clampHandlePosition(handle.position) : clampHandlePosition(base[bestIndex].position);
-      base[bestIndex] = {
+      const replacement = {
         position: nextPosition,
         offset: clampHandleOffset(handle.offset)
       };
+      if (bestDist > 0.12) {
+        base.splice(bestIndex + (replacement.position > base[bestIndex].position ? 1 : 0), 0, replacement);
+      } else {
+        base[bestIndex] = replacement;
+      }
     });
+    base.sort((a, b) => a.position - b.position);
     return base;
   }
   function encodeCurveHandles(handles) {
@@ -22412,29 +22441,247 @@
     return JSON.stringify(simplified);
   }
   function getHandleWeight(position) {
-    const centered = clamp2(1 - Math.abs(0.5 - position) * 1.9, 0, 1);
+    const centered = clamp2(1 - Math.abs(0.5 - position) * 2.2, 0, 1);
     return 1 + Math.pow(centered, CURVE_HANDLE_WEIGHT_POWER) * CURVE_HANDLE_WEIGHT_GAIN;
   }
-  function resolveLineHandles(line, info = {}, overrides = {}) {
+  function resolveLineHandles(line, info = {}, overrides = {}, context = {}) {
     const datasetHandles = line?.dataset?.handles ? parseCurveHandles(line.dataset.handles) : null;
+    const datasetAuto = line?.dataset?.autoCurve === "1";
     const infoHandles = parseCurveHandles(
       info.curveHandles ?? info.curvePoints ?? info.curveOffsets ?? info.handles
     );
-    let handles = createDefaultCurveHandles();
-    if (datasetHandles) {
+    const manualRequested = Boolean(
+      infoHandles && infoHandles.length || Object.prototype.hasOwnProperty.call(info, "curve") || Object.prototype.hasOwnProperty.call(info, "curveAnchor") || Object.prototype.hasOwnProperty.call(info, "anchor") || Number.isFinite(overrides.curveOverride) || Number.isFinite(overrides.anchorOverride)
+    );
+    if (manualRequested && line?.dataset) {
+      delete line.dataset.autoCurve;
+    }
+    let handles = [];
+    if (datasetHandles && datasetHandles.length && !datasetAuto) {
       handles = mergeCurveHandles(handles, datasetHandles);
     }
-    if (infoHandles) {
+    if (infoHandles && infoHandles.length) {
       handles = mergeCurveHandles(handles, infoHandles);
+    }
+    const aId = context.aId ?? info.aId ?? line?.dataset?.a;
+    const bId = context.bId ?? info.bId ?? line?.dataset?.b;
+    if (!handles.length && !manualRequested) {
+      const autoHandles = computeAutoCurveHandles({
+        line,
+        aId,
+        bId,
+        segment: context.segment,
+        decoration: context.decoration,
+        decorationDirection: context.decorationDirection
+      });
+      if (autoHandles.length) {
+        handles = mergeCurveHandles(handles, autoHandles);
+        if (line?.dataset) {
+          line.dataset.autoCurve = "1";
+        }
+      } else if (line?.dataset) {
+        delete line.dataset.autoCurve;
+      }
+    }
+    if (!handles.length) {
+      handles = createDefaultCurveHandles();
     }
     if (Number.isFinite(overrides.curveOverride)) {
       const anchor = Number.isFinite(overrides.anchorOverride) ? overrides.anchorOverride : DEFAULT_CURVE_ANCHOR;
       handles = mergeCurveHandles(handles, [{ position: anchor, offset: overrides.curveOverride }]);
+      if (line?.dataset) {
+        delete line.dataset.autoCurve;
+      }
     }
     return handles.map((handle) => ({
       position: clampHandlePosition(handle.position),
       offset: clampHandleOffset(handle.offset)
     }));
+  }
+  function computeAutoCurveHandles(context = {}) {
+    const { line = null, aId, bId } = context;
+    if (!aId || !bId) return [];
+    const decoration = context.decoration ?? line?.dataset?.decoration ?? DEFAULT_LINE_DECORATION;
+    const direction = context.decorationDirection ?? line?.dataset?.direction ?? line?.dataset?.decorationDirection ?? DEFAULT_DECORATION_DIRECTION;
+    const thicknessKey = line?.dataset?.thickness ?? DEFAULT_LINE_THICKNESS;
+    const baseWidth = getLineThicknessValue(thicknessKey);
+    const segment = context.segment || computeTrimmedSegment(aId, bId, computeDecorationTrim(decoration, direction, baseWidth));
+    if (!segment) return [];
+    const obstacles = gatherAutoCurveObstacles(line, aId, bId);
+    if (!obstacles.length) return [];
+    const straight = evaluateAutoCurveCandidate(segment, [], obstacles);
+    if (!straight || straight.intersections <= 0) {
+      return [];
+    }
+    const directions = getPairCurveSeed(aId, bId) >= 0 ? [1, -1] : [-1, 1];
+    const offsets = [0.16, 0.24, 0.32, 0.44, 0.58];
+    const builders = [
+      (offset) => [{ position: DEFAULT_CURVE_ANCHOR, offset }],
+      (offset) => [
+        { position: 0.38, offset: offset * 0.92 },
+        { position: 0.62, offset: offset * 0.92 }
+      ]
+    ];
+    let best = { intersections: straight.intersections, length: straight.length, handles: [] };
+    let bestOffset = Infinity;
+    directions.forEach((sign) => {
+      offsets.forEach((baseOffset) => {
+        const offset = sign * baseOffset;
+        builders.forEach((builder) => {
+          const candidateHandles = builder(offset).map((handle) => ({
+            position: clampHandlePosition(handle.position),
+            offset: clampHandleOffset(handle.offset)
+          }));
+          const evaluation = evaluateAutoCurveCandidate(segment, candidateHandles, obstacles);
+          if (!evaluation) return;
+          const betterIntersections = evaluation.intersections < best.intersections;
+          const shorterLength = evaluation.intersections === best.intersections && evaluation.length + 0.5 < best.length;
+          const smallerOffset = evaluation.intersections === best.intersections && Math.abs(offset) + 1e-3 < bestOffset;
+          if (betterIntersections || shorterLength || smallerOffset) {
+            best = { intersections: evaluation.intersections, length: evaluation.length, handles: candidateHandles };
+            bestOffset = Math.abs(offset);
+          }
+        });
+      });
+    });
+    if (!best.handles.length) {
+      return [];
+    }
+    if (best.intersections < straight.intersections || best.length + 0.5 < straight.length) {
+      return best.handles;
+    }
+    return [];
+  }
+  function gatherAutoCurveObstacles(currentLine, aId, bId) {
+    const edges = mapState.allEdges;
+    if (!edges || !edges.size) return [];
+    const obstacles = [];
+    const skipA = String(aId);
+    const skipB = String(bId);
+    const limit = 220;
+    let scanned = 0;
+    edges.forEach((edge) => {
+      if (scanned >= limit) return;
+      if (!edge || edge === currentLine) return;
+      const dataA = edge.dataset?.a;
+      const dataB = edge.dataset?.b;
+      if (!dataA || !dataB) return;
+      if (dataA === skipA || dataA === skipB || dataB === skipA || dataB === skipB) return;
+      const cached = edge._lastSegment;
+      const segment = cached || computeTrimmedSegment(dataA, dataB);
+      if (!segment) return;
+      if (!cached) {
+        edge._lastSegment = segment;
+      }
+      obstacles.push({
+        start: { x: segment.startX, y: segment.startY },
+        end: { x: segment.endX, y: segment.endY }
+      });
+      scanned += 1;
+    });
+    return obstacles;
+  }
+  function evaluateAutoCurveCandidate(segment, handles, obstacles) {
+    if (!segment) return null;
+    const polyline = buildCandidatePolyline(segment, handles);
+    if (!polyline.length) {
+      return { intersections: 0, length: 0, handles };
+    }
+    let intersections = 0;
+    obstacles.forEach((obstacle) => {
+      intersections += countPolylineIntersections(polyline, obstacle);
+    });
+    const length = approximatePolylineLength(polyline);
+    return { intersections, length, handles };
+  }
+  function buildCandidatePolyline(segment, handles) {
+    if (!segment) return [];
+    const sanitized = Array.isArray(handles) ? handles.map((handle) => ({
+      position: clampHandlePosition(handle.position),
+      offset: clampHandleOffset(handle.offset)
+    })) : [];
+    if (!sanitized.length) {
+      return [
+        { x: segment.startX, y: segment.startY },
+        { x: segment.endX, y: segment.endY }
+      ];
+    }
+    const { points } = buildCurvePoints(segment, sanitized);
+    const segments = buildCurveSegments(points);
+    const sampleCount = Math.max(6, segments.length * 6);
+    const polyline = [];
+    for (let i = 0; i <= sampleCount; i += 1) {
+      const ratio = i / sampleCount;
+      if (i === 0) {
+        polyline.push(points[0]);
+      } else if (i === sampleCount) {
+        polyline.push(points[points.length - 1]);
+      } else {
+        const sample = getPointAlongSegments(segments, ratio);
+        if (sample?.point) {
+          polyline.push(sample.point);
+        }
+      }
+    }
+    return polyline;
+  }
+  function approximatePolylineLength(polyline) {
+    if (!Array.isArray(polyline) || polyline.length < 2) return 0;
+    let length = 0;
+    for (let i = 1; i < polyline.length; i += 1) {
+      const prev = polyline[i - 1];
+      const curr = polyline[i];
+      length += Math.hypot(curr.x - prev.x, curr.y - prev.y);
+    }
+    return length;
+  }
+  function countPolylineIntersections(polyline, obstacle) {
+    if (!Array.isArray(polyline) || polyline.length < 2 || !obstacle) return 0;
+    let total = 0;
+    for (let i = 0; i < polyline.length - 1; i += 1) {
+      const a1 = polyline[i];
+      const a2 = polyline[i + 1];
+      if (sharesEndpoint(a1, a2, obstacle)) continue;
+      if (segmentsIntersect(a1, a2, obstacle.start, obstacle.end)) {
+        total += 1;
+      }
+    }
+    return total;
+  }
+  function sharesEndpoint(a1, a2, obstacle) {
+    if (!obstacle) return false;
+    const threshold = 144;
+    return distanceSq(a1, obstacle.start) <= threshold || distanceSq(a1, obstacle.end) <= threshold || distanceSq(a2, obstacle.start) <= threshold || distanceSq(a2, obstacle.end) <= threshold;
+  }
+  function distanceSq(a, b) {
+    if (!a || !b) return Infinity;
+    const dx = (a.x ?? 0) - (b.x ?? 0);
+    const dy = (a.y ?? 0) - (b.y ?? 0);
+    return dx * dx + dy * dy;
+  }
+  function segmentsIntersect(p1, p2, p3, p4) {
+    if (!p1 || !p2 || !p3 || !p4) return false;
+    const threshold = 1e-6;
+    if (distanceSq(p1, p3) < threshold || distanceSq(p1, p4) < threshold || distanceSq(p2, p3) < threshold || distanceSq(p2, p4) < threshold) {
+      return false;
+    }
+    const orient = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    const o1 = orient(p1, p2, p3);
+    const o2 = orient(p1, p2, p4);
+    const o3 = orient(p3, p4, p1);
+    const o4 = orient(p3, p4, p2);
+    if (Math.abs(o1) < threshold && onSegment(p1, p2, p3)) return true;
+    if (Math.abs(o2) < threshold && onSegment(p1, p2, p4)) return true;
+    if (Math.abs(o3) < threshold && onSegment(p3, p4, p1)) return true;
+    if (Math.abs(o4) < threshold && onSegment(p3, p4, p2)) return true;
+    return o1 > 0 !== o2 > 0 && o3 > 0 !== o4 > 0;
+  }
+  function onSegment(p, q, r) {
+    const minX = Math.min(p.x, r.x) - 1e-3;
+    const maxX = Math.max(p.x, r.x) + 1e-3;
+    const minY = Math.min(p.y, r.y) - 1e-3;
+    const maxY = Math.max(p.y, r.y) + 1e-3;
+    return q.x >= minX && q.x <= maxX && q.y >= minY && q.y <= maxY;
   }
   function buildCurvePoints(segment, handles) {
     const { startX, startY, endX, endY, ux, uy } = segment;
@@ -22586,6 +22833,76 @@
     });
     return bestIndex;
   }
+  function buildHandleMetaFromPointer(geometry, pointer) {
+    if (!geometry || !pointer) return null;
+    const dx = geometry.endX - geometry.startX;
+    const dy = geometry.endY - geometry.startY;
+    const baseLength = geometry.trimmedLength || Math.hypot(dx, dy) || 1;
+    if (!baseLength) return null;
+    const projection = ((pointer.x - geometry.startX) * dx + (pointer.y - geometry.startY) * dy) / (baseLength * baseLength);
+    const position = clampHandlePosition(projection);
+    const baseX = geometry.startX + dx * position;
+    const baseY = geometry.startY + dy * position;
+    const nx = -geometry.uy;
+    const ny = geometry.ux;
+    const weight = getHandleWeight(position);
+    const rawOffset = ((pointer.x - baseX) * nx + (pointer.y - baseY) * ny) / (baseLength || 1);
+    const normalized2 = clampHandleOffset(rawOffset / (weight || 1));
+    const offsetDistance = normalized2 * baseLength * weight;
+    const point = {
+      x: baseX + nx * offsetDistance,
+      y: baseY + ny * offsetDistance
+    };
+    return { position, offset: normalized2, base: { x: baseX, y: baseY }, weight, point };
+  }
+  function prepareHandlesForDrag(geometry, pointer, hintIndex = 0) {
+    if (!geometry) {
+      return { handles: [], index: -1 };
+    }
+    const handles = Array.isArray(geometry.handles) ? geometry.handles.map((handle) => ({
+      position: clampHandlePosition(handle.position),
+      offset: clampHandleOffset(handle.offset),
+      base: handle.base,
+      point: handle.point,
+      weight: handle.weight ?? getHandleWeight(handle.position)
+    })) : [];
+    let index = clamp2(Math.round(hintIndex ?? 0), 0, Math.max(0, handles.length - 1));
+    const pointerMeta = pointer ? { x: pointer.x, y: pointer.y } : null;
+    if (pointerMeta) {
+      let nearestIndex = handles.length ? findNearestHandleIndex({ ...geometry, handles }, pointerMeta) : -1;
+      let nearestDistance = Infinity;
+      if (handles.length && nearestIndex >= 0) {
+        const candidate = handles[nearestIndex];
+        const px = candidate?.point?.x ?? candidate?.base?.x ?? geometry.startX;
+        const py = candidate?.point?.y ?? candidate?.base?.y ?? geometry.startY;
+        nearestDistance = Math.hypot(pointerMeta.x - px, pointerMeta.y - py);
+      }
+      const threshold = Math.max((geometry.baseWidth || 6) * 2.4, 26);
+      if (!handles.length || nearestDistance > threshold) {
+        const inserted = buildHandleMetaFromPointer(geometry, pointerMeta);
+        if (inserted) {
+          handles.push(inserted);
+          handles.sort((a, b) => a.position - b.position);
+          nearestIndex = handles.indexOf(inserted);
+        }
+      }
+      if (handles.length) {
+        index = clamp2(nearestIndex, 0, handles.length - 1);
+      }
+    }
+    if (!handles.length) {
+      const fallback = buildHandleMetaFromPointer(geometry, {
+        x: geometry.startX + (geometry.endX - geometry.startX) * DEFAULT_CURVE_ANCHOR,
+        y: geometry.startY + (geometry.endY - geometry.startY) * DEFAULT_CURVE_ANCHOR
+      });
+      if (fallback) {
+        handles.push(fallback);
+        index = 0;
+      }
+    }
+    geometry.handles = handles;
+    return { handles, index };
+  }
   function computeDecorationTrim(decoration, direction, baseWidth) {
     const arrowAllowance = Math.max(18, baseWidth * 3.4);
     const inhibitAllowance = Math.max(10, baseWidth * 2.2);
@@ -22640,7 +22957,12 @@
     } else if (line && Object.prototype.hasOwnProperty.call(line.dataset || {}, "anchor")) {
       anchorOverride = normalizeAnchorValue(line.dataset.anchor);
     }
-    const handles = resolveLineHandles(line, options, { curveOverride, anchorOverride });
+    const handles = resolveLineHandles(
+      line,
+      options,
+      { curveOverride, anchorOverride },
+      { segment, aId, bId, decoration, decorationDirection }
+    );
     const { points, meta } = buildCurvePoints(segment, handles);
     const segments = buildCurveSegments(points);
     const pathData = buildPathData(points[0], segments);
@@ -22655,7 +22977,7 @@
         dominant = { position: handle.position, offset: handle.offset };
       }
     });
-    return {
+    const geometry = {
       ...segment,
       style,
       decoration,
@@ -22671,6 +22993,10 @@
       midTangent: mid.tangent,
       segments
     };
+    if (line) {
+      line._lastSegment = segment;
+    }
+    return geometry;
   }
   function applyLineStyle(line, info = {}) {
     if (!line) return;
@@ -22717,12 +23043,24 @@
     } else {
       delete line.dataset.glow;
     }
+    const baseWidthValue = getLineThicknessValue(thickness);
     line.dataset.thickness = thickness;
-    line.dataset.baseWidth = String(getLineThicknessValue(thickness));
+    line.dataset.baseWidth = String(baseWidthValue);
     line.dataset.label = label;
     const curveOverride = Object.prototype.hasOwnProperty.call(info, "curve") ? clampHandleOffset(info.curve) : void 0;
     const anchorOverride = Object.prototype.hasOwnProperty.call(info, "anchor") ? normalizeAnchorValue(info.anchor) : Object.prototype.hasOwnProperty.call(info, "curveAnchor") ? normalizeAnchorValue(info.curveAnchor) : void 0;
-    const handles = resolveLineHandles(line, info, { curveOverride, anchorOverride });
+    const aId = line.dataset.a;
+    const bId = line.dataset.b;
+    let segmentContext = null;
+    if (aId && bId) {
+      segmentContext = computeTrimmedSegment(aId, bId, computeDecorationTrim(decoration, decorationDirection, baseWidthValue));
+    }
+    const handles = resolveLineHandles(
+      line,
+      info,
+      { curveOverride, anchorOverride },
+      { segment: segmentContext, aId, bId, decoration, decorationDirection }
+    );
     line.dataset.handles = encodeCurveHandles(handles);
     let dominant = { position: DEFAULT_CURVE_ANCHOR, offset: 0 };
     handles.forEach((handle) => {
@@ -23556,3 +23894,4 @@
     bootstrap();
   }
 })();
+//# sourceMappingURL=bundle.js.map
