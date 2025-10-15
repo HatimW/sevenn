@@ -198,6 +198,8 @@ const mapState = {
   elements: new Map(),
   root: null,
   container: null,
+  lineMenu: null,
+  lineMenuCloser: null,
   updateViewBox: () => {},
   selectionBox: null,
   sizeLimit: 2000,
@@ -246,6 +248,7 @@ const mapState = {
   edgeLayer: null,
   nodeLayer: null,
   lineMarkers: new Map(),
+  coloredMarkers: new Map(),
   edgeRefs: new Map(),
   allEdges: new Set(),
   pendingNodeUpdates: new Map(),
@@ -1506,6 +1509,7 @@ export async function renderMap(root) {
     mapState.root.classList.remove('map-area-interacting');
   }
   mapState.root = root;
+  closeLineMenu();
   const fragment = document.createDocumentFragment();
   mapState.nodeDrag = null;
   mapState.areaDrag = null;
@@ -1541,6 +1545,11 @@ export async function renderMap(root) {
   } else {
     mapState.lineMarkers = new Map();
   }
+  if (mapState.coloredMarkers) {
+    mapState.coloredMarkers.clear();
+  } else {
+    mapState.coloredMarkers = new Map();
+  }
   if (mapState.edgeRefs) {
     mapState.edgeRefs.clear();
   } else {
@@ -1569,11 +1578,12 @@ export async function renderMap(root) {
     lectures: (catalog.lectureLists?.[block.blockId] || []).map(lecture => ({ ...lecture }))
   }));
 
-  const items = [
-    ...(await listItemsByKind('disease')),
-    ...(await listItemsByKind('drug')),
-    ...(await listItemsByKind('concept'))
-  ];
+  const [diseases, drugs, concepts] = await Promise.all([
+    listItemsByKind('disease'),
+    listItemsByKind('drug'),
+    listItemsByKind('concept')
+  ]);
+  const items = [...diseases, ...drugs, ...concepts];
 
   const hiddenNodes = items.filter(it => it.mapHidden);
 
@@ -1608,6 +1618,9 @@ export async function renderMap(root) {
   stage.appendChild(container);
   mapState.container = container;
   container.addEventListener('pointerdown', e => {
+    if (mapState.lineMenu) {
+      closeLineMenu();
+    }
     if (mapState.tool === TOOL.AREA) return;
     if (e.button !== 0) return;
     if (e.target !== container) return;
@@ -2524,6 +2537,59 @@ function updateMarkerSizes() {
   });
 }
 
+function normalizeMarkerColor(color) {
+  if (typeof color !== 'string') return '';
+  const trimmed = color.trim();
+  if (!trimmed) return '';
+  return trimmed.toLowerCase();
+}
+
+function sanitizeMarkerIdPart(input) {
+  return input.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') || 'default';
+}
+
+function ensureMarkerForColor(baseId, color) {
+  const normalized = normalizeMarkerColor(color);
+  if (!normalized) {
+    return baseId;
+  }
+  if (!mapState.lineMarkers || !mapState.lineMarkers.size) {
+    return baseId;
+  }
+  const key = `${baseId}:${normalized}`;
+  if (mapState.coloredMarkers?.has(key)) {
+    return mapState.coloredMarkers.get(key);
+  }
+  const base = mapState.lineMarkers.get(baseId);
+  if (!base || !base.parentNode) {
+    return baseId;
+  }
+  const clone = base.cloneNode(true);
+  const idPart = sanitizeMarkerIdPart(normalized);
+  const newId = `${baseId}-${idPart}`;
+  clone.setAttribute('id', newId);
+  clone.dataset.baseId = baseId;
+  clone.dataset.markerColor = normalized;
+  clone.dataset.baseRefX = base.dataset.baseRefX || clone.dataset.baseRefX;
+  clone.dataset.baseRefY = base.dataset.baseRefY || clone.dataset.baseRefY;
+  clone.dataset.baseWidth = base.dataset.baseWidth || clone.dataset.baseWidth;
+  clone.dataset.baseHeight = base.dataset.baseHeight || clone.dataset.baseHeight;
+  clone.dataset.scaleMode = base.dataset.scaleMode || clone.dataset.scaleMode;
+  const path = clone.querySelector('path');
+  if (path) {
+    path.setAttribute('fill', normalized);
+    path.setAttribute('stroke', normalized);
+  }
+  base.parentNode.appendChild(clone);
+  mapState.lineMarkers.set(newId, clone);
+  if (!mapState.coloredMarkers) {
+    mapState.coloredMarkers = new Map();
+  }
+  mapState.coloredMarkers.set(key, newId);
+  updateMarkerSizes();
+  return newId;
+}
+
 function beginViewDrag(e) {
   if (!mapState.svg || !mapState.viewBox) return false;
   if (e.button !== 0) return false;
@@ -3079,6 +3145,13 @@ function getElementPosition(entry, id) {
 }
 
 function getElementRadius(entry, id) {
+  if (mapState.nodeRadii && mapState.nodeRadii.has(id)) {
+    const base = mapState.nodeRadii.get(id);
+    const { nodeScale = 1 } = getCurrentScales();
+    if (Number.isFinite(base) && Number.isFinite(nodeScale)) {
+      return base * nodeScale;
+    }
+  }
   if (entry?.circle) {
     const r = Number(entry.circle.getAttribute('r'));
     if (Number.isFinite(r) && r > 0) {
@@ -3587,7 +3660,7 @@ function beginEdgeHandleDrag(line, handleIndex, evt, options = {}) {
   }));
   if (!handles.length) return;
   const index = clamp(prepared.index, 0, handles.length - 1);
-  const captureTarget = evt.currentTarget || line;
+  const captureTarget = options.captureTarget || evt.currentTarget || line;
   const baseLength = geometry.trimmedLength || Math.hypot(geometry.endX - geometry.startX, geometry.endY - geometry.startY) || 1;
   mapState.edgeDrag = {
     pointerId,
@@ -3625,7 +3698,7 @@ function beginEdgeHandleDrag(line, handleIndex, evt, options = {}) {
 function attachEdgeInteraction(path, aId, bId) {
   if (!path || path.dataset.interactive === '1') return;
   path.dataset.interactive = '1';
-  const startDragFromPath = evt => {
+  const startDragFromPath = (evt, options = {}) => {
     if (evt.button !== 0) return;
     if (mapState.tool !== TOOL.NAVIGATE) return;
     mapState.suppressNextClick = false;
@@ -3636,24 +3709,21 @@ function attachEdgeInteraction(path, aId, bId) {
     const index = Array.isArray(geometry.handles) && geometry.handles.length
       ? findNearestHandleIndex(geometry, pointerMap)
       : 0;
-    beginEdgeHandleDrag(path, index, evt, { geometry, pointer: pointerMap });
+    beginEdgeHandleDrag(path, index, evt, { geometry, pointer: pointerMap, captureTarget: options.captureTarget });
   };
-  path.addEventListener('pointerdown', evt => {
-    startDragFromPath(evt);
-  });
-  path.addEventListener('click', e => {
+  const handleClick = e => {
     e.stopPropagation();
     handleEdgeClick(path, aId, bId, e);
-  });
-  path.addEventListener('mouseenter', evt => {
+  };
+  const handleEnter = evt => {
     if (mapState.tool === TOOL.HIDE) {
       applyCursorOverride('hide');
     } else if (mapState.tool === TOOL.BREAK) {
       applyCursorOverride('break');
     }
     showEdgeTooltip(path, evt);
-  });
-  path.addEventListener('mouseleave', () => {
+  };
+  const handleLeave = () => {
     if (mapState.tool === TOOL.HIDE) {
       clearCursorOverride('hide');
     }
@@ -3661,8 +3731,27 @@ function attachEdgeInteraction(path, aId, bId) {
       clearCursorOverride('break');
     }
     hideEdgeTooltip(path);
+  };
+  const handleMove = evt => moveEdgeTooltip(path, evt);
+
+  path.addEventListener('pointerdown', evt => {
+    startDragFromPath(evt);
   });
-  path.addEventListener('mousemove', evt => moveEdgeTooltip(path, evt));
+  path.addEventListener('click', handleClick);
+  path.addEventListener('mouseenter', handleEnter);
+  path.addEventListener('mouseleave', handleLeave);
+  path.addEventListener('mousemove', handleMove);
+
+  const hitbox = ensureEdgeHitbox(path);
+  if (hitbox) {
+    hitbox.addEventListener('pointerdown', evt => {
+      startDragFromPath(evt, { captureTarget: path });
+    });
+    hitbox.addEventListener('click', handleClick);
+    hitbox.addEventListener('mouseenter', handleEnter);
+    hitbox.addEventListener('mouseleave', handleLeave);
+    hitbox.addEventListener('mousemove', handleMove);
+  }
 }
 
 function ensureEdgeBetween(aId, bId, linkInfo = {}) {
@@ -3697,8 +3786,12 @@ function removeEdgeBetween(aId, bId) {
   const edge = getEdgeElement(aId, bId);
   if (!edge) return;
   hideEdgeTooltip(edge);
+  if (mapState.lineMenu) {
+    closeLineMenu();
+  }
   removeLineOverlay(edge);
   removeLineHandles(edge);
+  removeEdgeHitbox(edge);
   unregisterEdgeElement(edge);
   edge.remove();
 }
@@ -3780,8 +3873,10 @@ function updateEdgesFor(id) {
     if (geometry?.pathData) {
       edge.setAttribute('d', geometry.pathData);
       syncLineHandles(edge, geometry);
+      syncEdgeHitbox(edge, geometry);
     } else {
       removeLineHandles(edge);
+      removeEdgeHitbox(edge);
     }
     syncLineDecoration(edge);
   });
@@ -4635,8 +4730,10 @@ function adjustScale() {
         if (geometry?.pathData) {
           line.setAttribute('d', geometry.pathData);
           syncLineHandles(line, geometry);
+          syncEdgeHitbox(line, geometry);
         } else {
           removeLineHandles(line);
+          removeEdgeHitbox(line);
         }
       }
       updateLineStrokeWidth(line);
@@ -5580,7 +5677,11 @@ function applyLineStyle(line, info = {}) {
     });
     if (geometry?.pathData) {
       line.setAttribute('d', geometry.pathData);
+      syncEdgeHitbox(line, geometry);
     }
+  }
+  if (!geometry?.pathData) {
+    removeEdgeHitbox(line);
   }
 
   updateLineStrokeWidth(line);
@@ -5623,10 +5724,12 @@ function applyLineStyle(line, info = {}) {
 
   if (decoration === 'arrow') {
     if (decorationDirection === 'start' || decorationDirection === 'both') {
-      line.setAttribute('marker-start', 'url(#arrow-start)');
+      const startMarker = ensureMarkerForColor('arrow-start', color);
+      line.setAttribute('marker-start', `url(#${startMarker})`);
     }
     if (decorationDirection === 'end' || decorationDirection === 'both') {
-      line.setAttribute('marker-end', 'url(#arrow-end)');
+      const endMarker = ensureMarkerForColor('arrow-end', color);
+      line.setAttribute('marker-end', `url(#${endMarker})`);
     }
   }
 
@@ -5674,6 +5777,7 @@ function updateLineStrokeWidth(line) {
       line._overlay.setAttribute('stroke-width', overlayWidth);
     }
   }
+  syncEdgeHitbox(line);
 }
 
 function removeLineHandles(line) {
@@ -5684,6 +5788,49 @@ function removeLineHandles(line) {
 
 function syncLineHandles(line) {
   removeLineHandles(line);
+}
+
+function ensureEdgeHitbox(line) {
+  if (!line || !line.parentNode) return null;
+  let hitbox = line._hitbox;
+  if (hitbox && hitbox.parentNode !== line.parentNode) {
+    hitbox.remove();
+    hitbox = null;
+  }
+  if (!hitbox) {
+    hitbox = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    hitbox.classList.add('map-edge-hitbox');
+    hitbox.setAttribute('fill', 'none');
+    hitbox.setAttribute('stroke', 'transparent');
+    hitbox.setAttribute('pointer-events', 'stroke');
+    hitbox.setAttribute('stroke-linecap', 'round');
+    hitbox.setAttribute('stroke-linejoin', 'round');
+    line.parentNode.insertBefore(hitbox, line);
+    line._hitbox = hitbox;
+  }
+  return hitbox;
+}
+
+function removeEdgeHitbox(line) {
+  if (!line?._hitbox) return;
+  line._hitbox.remove();
+  line._hitbox = null;
+}
+
+function syncEdgeHitbox(line, geometry = null) {
+  const hitbox = ensureEdgeHitbox(line);
+  if (!hitbox) return;
+  const pathData = geometry?.pathData || line.getAttribute('d');
+  if (pathData) {
+    hitbox.setAttribute('d', pathData);
+  }
+  const baseWidth = geometry?.baseWidth
+    || Number(line.dataset.baseWidth)
+    || getLineThicknessValue(line.dataset.thickness);
+  const { lineScale = 1 } = getCurrentScales();
+  const scaledBase = Number.isFinite(baseWidth) ? baseWidth * lineScale : 3;
+  const width = Math.max(scaledBase * 3.2, scaledBase + 14, 18);
+  hitbox.setAttribute('stroke-width', width);
 }
 
 function syncLineDecoration(line) {
@@ -5846,7 +5993,46 @@ function titleOf(item) {
   return item?.name || item?.concept || '';
 }
 
+function closeLineMenu() {
+  if (typeof document === 'undefined') {
+    mapState.lineMenu = null;
+    mapState.lineMenuCloser = null;
+    return;
+  }
+  if (mapState.lineMenu && mapState.lineMenu.parentNode) {
+    mapState.lineMenu.parentNode.removeChild(mapState.lineMenu);
+  }
+  if (mapState.lineMenuCloser) {
+    document.removeEventListener('pointerdown', mapState.lineMenuCloser, true);
+    mapState.lineMenuCloser = null;
+  }
+  mapState.lineMenu = null;
+}
+
+function positionLineMenu(menu, evt) {
+  if (!menu || typeof window === 'undefined') return;
+  const margin = 12;
+  const scrollX = window.scrollX ?? window.pageXOffset ?? 0;
+  const scrollY = window.scrollY ?? window.pageYOffset ?? 0;
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || menu.offsetWidth;
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || menu.offsetHeight;
+  const rect = menu.getBoundingClientRect();
+  const width = rect.width || menu.offsetWidth || 0;
+  const height = rect.height || menu.offsetHeight || 0;
+  const baseLeft = Number.isFinite(evt?.pageX) ? evt.pageX : scrollX + viewportWidth / 2;
+  const baseTop = Number.isFinite(evt?.pageY) ? evt.pageY : scrollY + viewportHeight / 2;
+  const maxLeft = scrollX + viewportWidth - width - margin;
+  const maxTop = scrollY + viewportHeight - height - margin;
+  const minLeft = scrollX + margin;
+  const minTop = scrollY + margin;
+  const finalLeft = clamp(baseLeft, minLeft, Math.max(minLeft, maxLeft));
+  const finalTop = clamp(baseTop, minTop, Math.max(minTop, maxTop));
+  menu.style.left = `${finalLeft}px`;
+  menu.style.top = `${finalTop}px`;
+}
+
 async function openLineMenu(evt, line, aId, bId) {
+  closeLineMenu();
   const existing = await getItem(aId);
   const link = existing.links.find(l => l.id === bId) || {};
   const appearance = normalizeLinkAppearance({
@@ -5857,8 +6043,9 @@ async function openLineMenu(evt, line, aId, bId) {
   });
   const menu = document.createElement('div');
   menu.className = 'line-menu';
-  menu.style.left = evt.pageX + 'px';
-  menu.style.top = evt.pageY + 'px';
+  menu.style.left = '0px';
+  menu.style.top = '0px';
+  menu.style.visibility = 'hidden';
 
   const colorLabel = document.createElement('label');
   colorLabel.textContent = 'Color';
@@ -5906,6 +6093,24 @@ async function openLineMenu(evt, line, aId, bId) {
   directionSel.value = appearance.decorationDirection;
   directionLabel.appendChild(directionSel);
   menu.appendChild(directionLabel);
+
+  const swapBtn = document.createElement('button');
+  swapBtn.type = 'button';
+  swapBtn.className = 'btn secondary';
+  swapBtn.textContent = 'Swap direction';
+  swapBtn.addEventListener('click', () => {
+    if (directionSel.disabled) return;
+    const current = directionSel.value;
+    if (current === 'start') {
+      directionSel.value = 'end';
+    } else if (current === 'end') {
+      directionSel.value = 'start';
+    } else if (current === 'both') {
+      directionSel.value = 'start';
+    } else {
+      directionSel.value = DEFAULT_DECORATION_DIRECTION;
+    }
+  });
 
   const glowField = document.createElement('label');
   glowField.className = 'line-menu-toggle';
@@ -5974,7 +6179,11 @@ async function openLineMenu(evt, line, aId, bId) {
       autoBtn.disabled = false;
     }
   });
-  menu.appendChild(autoBtn);
+  const utilitiesRow = document.createElement('div');
+  utilitiesRow.className = 'line-menu-actions';
+  utilitiesRow.appendChild(autoBtn);
+  utilitiesRow.appendChild(swapBtn);
+  menu.appendChild(utilitiesRow);
 
   const updateDirectionDisabled = () => {
     const deco = decorationSel.value;
@@ -5983,6 +6192,7 @@ async function openLineMenu(evt, line, aId, bId) {
     if (disable) {
       directionSel.value = DEFAULT_DECORATION_DIRECTION;
     }
+    swapBtn.disabled = disable;
   };
   decorationSel.addEventListener('change', updateDirectionDisabled);
   updateDirectionDisabled();
@@ -6004,18 +6214,24 @@ async function openLineMenu(evt, line, aId, bId) {
     };
     await updateLink(aId, bId, patch);
     applyLineStyle(line, patch);
-    document.body.removeChild(menu);
+    closeLineMenu();
   });
-  menu.appendChild(btn);
+  const footer = document.createElement('div');
+  footer.className = 'line-menu-footer';
+  footer.appendChild(btn);
+  menu.appendChild(footer);
 
   document.body.appendChild(menu);
-  const closer = e => {
-    if (!menu.contains(e.target)) {
-      document.body.removeChild(menu);
-      document.removeEventListener('mousedown', closer);
+  positionLineMenu(menu, evt);
+  menu.style.visibility = '';
+  mapState.lineMenu = menu;
+  const closer = event => {
+    if (!menu.contains(event.target)) {
+      closeLineMenu();
     }
   };
-  setTimeout(() => document.addEventListener('mousedown', closer), 0);
+  mapState.lineMenuCloser = closer;
+  document.addEventListener('pointerdown', closer, true);
 }
 
 async function updateLink(aId, bId, patch) {
