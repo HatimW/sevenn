@@ -2761,22 +2761,37 @@ function handlePointerMove(e) {
     const dx = base.endX - base.startX;
     const dy = base.endY - base.startY;
     const length = base.trimmedLength || Math.hypot(dx, dy) || 1;
+    if (!length) return;
     const nx = -base.uy;
     const ny = base.ux;
-    const handles = drag.handles || [];
+    let handles = drag.handles || [];
     const index = clamp(drag.handleIndex, 0, handles.length - 1);
     const handle = handles[index];
     if (!handle) return;
-    const position = clampHandlePosition(handle.position);
-    const baseX = base.startX + dx * position;
-    const baseY = base.startY + dy * position;
-    const projection = ((pointer.x - baseX) * nx + (pointer.y - baseY) * ny) / length;
-    const weight = handle.weight ?? getHandleWeight(position);
-    const normalized = clampHandleOffset(projection / (weight || 1));
-    drag.currentOffsets[index] = normalized;
+    const projectionAlong = ((pointer.x - base.startX) * dx + (pointer.y - base.startY) * dy) / (length * length);
+    const nextPosition = clampHandlePosition(projectionAlong);
+    const baseX = base.startX + dx * nextPosition;
+    const baseY = base.startY + dy * nextPosition;
+    const weight = getHandleWeight(nextPosition);
+    const rawOffset = ((pointer.x - baseX) * nx + (pointer.y - baseY) * ny) / length;
+    const normalized = clampHandleOffset(rawOffset / (weight || 1));
+    handle.position = nextPosition;
     handle.offset = normalized;
     handle.weight = weight;
-    drag.offsetChanged = drag.offsetChanged || Math.abs(normalized - drag.startOffsets[index]) > 0.0005;
+    drag.offsetChanged =
+      drag.offsetChanged
+      || Math.abs((handle.startOffset ?? handle.offset) - handle.offset) > 0.0005
+      || Math.abs((handle.startPosition ?? handle.position) - handle.position) > 0.0005;
+    const sortedHandles = handles.slice().sort((a, b) => a.position - b.position);
+    const newIndex = sortedHandles.indexOf(handle);
+    handles = sortedHandles;
+    drag.handles = handles;
+    if (newIndex >= 0) {
+      drag.handleIndex = newIndex;
+    }
+    if (drag.createdHandle) {
+      drag.createdIndex = handles.indexOf(drag.createdHandle);
+    }
     const patchHandles = handles.map(h => ({ position: h.position, offset: h.offset }));
     applyLineStyle(drag.line, { curveHandles: patchHandles });
     return;
@@ -2885,12 +2900,18 @@ async function handlePointerUp(e) {
       } catch {}
     }
     const handles = drag.handles || [];
-    const changed = drag.offsetChanged
-      || handles.some((handle, idx) => Math.abs((drag.currentOffsets?.[idx] ?? handle.offset) - (drag.startOffsets?.[idx] ?? handle.offset)) > 0.0005);
     const createdIndex = Number.isInteger(drag.createdIndex) ? drag.createdIndex : -1;
+    const createdHandle = drag.createdHandle || (createdIndex >= 0 ? handles[createdIndex] : null);
+    const changed =
+      drag.offsetChanged
+      || handles.some(handle => {
+        const startOffset = handle.startOffset ?? handle.offset;
+        const startPosition = handle.startPosition ?? handle.position;
+        return Math.abs(handle.offset - startOffset) > 0.0005 || Math.abs(handle.position - startPosition) > 0.0005;
+      });
     const shouldAutoRemove = drag.insertedHandle && !drag.hasDragged;
-    if (shouldAutoRemove) {
-      const trimmed = handles.filter((_, idx) => idx !== createdIndex);
+    if (shouldAutoRemove && createdHandle) {
+      const trimmed = handles.filter(handle => handle !== createdHandle);
       const patch = buildCurvePatchFromHandles(trimmed);
       await updateLink(drag.aId, drag.bId, patch);
       applyLineStyle(drag.line, patch);
@@ -3749,17 +3770,23 @@ function beginEdgeHandleDrag(line, handleIndex, evt, options = {}) {
   const prepared = prepareHandlesForDrag(geometry, pointer, handleIndex, {
     forceCreate: options.trigger === 'line'
   });
-  const handles = prepared.handles.map(handle => ({
-    position: handle.position,
-    offset: handle.offset,
-    weight: handle.weight ?? getHandleWeight(handle.position)
-  }));
+  const handles = prepared.handles.map(handle => {
+    const weight = handle.weight ?? getHandleWeight(handle.position);
+    return {
+      position: handle.position,
+      offset: handle.offset,
+      weight,
+      startOffset: handle.offset,
+      startPosition: handle.position
+    };
+  });
   if (!handles.length) return;
   const index = clamp(prepared.index, 0, handles.length - 1);
   const createdIndex = Number.isInteger(prepared.createdIndex) ? prepared.createdIndex : -1;
   const insertedHandle = Number.isFinite(prepared.originalLength)
     ? handles.length > prepared.originalLength
     : createdIndex >= 0;
+  const createdHandle = insertedHandle ? handles[index] : null;
   const captureTarget = evt.currentTarget || line;
   const baseLength = geometry.trimmedLength || Math.hypot(geometry.endX - geometry.startX, geometry.endY - geometry.startY) || 1;
   mapState.edgeDrag = {
@@ -3770,9 +3797,6 @@ function beginEdgeHandleDrag(line, handleIndex, evt, options = {}) {
     captureTarget,
     handleIndex: index,
     handles,
-    handlePositions: handles.map(handle => handle.position),
-    startOffsets: handles.map(handle => handle.offset),
-    currentOffsets: handles.map(handle => handle.offset),
     base: {
       startX: geometry.startX,
       startY: geometry.startY,
@@ -3788,6 +3812,7 @@ function beginEdgeHandleDrag(line, handleIndex, evt, options = {}) {
     fromHandle: Boolean(evt?.target && evt.target !== line),
     clientStart: { x: evt.clientX, y: evt.clientY },
     createdIndex,
+    createdHandle,
     insertedHandle,
     trigger: options.trigger || 'handle',
     activatedByHold: options.activatedByHold === true
