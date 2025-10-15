@@ -22,6 +22,7 @@
   --rose: #f472b6;
   --indigo: #6366f1;
   --cyan: #22d3ee;
+  --map-gap: rgba(11, 17, 32, 0.96);
   --surface-1: rgba(12, 18, 32, 0.75);
   --surface-2: rgba(14, 21, 35, 0.82);
   --surface-3: rgba(148, 163, 184, 0.24);
@@ -4964,6 +4965,17 @@ button.builder-pill.builder-pill-outline {
   pointer-events: none;
   vector-effect: non-scaling-stroke;
   stroke: currentColor;
+}
+
+.map-edge-gap-layer {
+  pointer-events: none;
+}
+
+.map-edge-gap {
+  stroke: var(--map-gap);
+  fill: none;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
 }
 
 .map-label {

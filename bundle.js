@@ -1,4 +1,31 @@
-(() => {
+var Sevenn = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // js/main.js
+  var main_exports = {};
+  __export(main_exports, {
+    render: () => renderApp,
+    renderApp: () => renderApp,
+    resolveListKind: () => resolveListKind,
+    tabs: () => tabs
+  });
+
   // js/storage/preferences.js
   var STORAGE_KEY = "sevenn-ui-preferences";
   var cache = null;
@@ -18085,10 +18112,8 @@
   var DEFAULT_LINE_GLOW = false;
   var DEFAULT_LINE_THICKNESS = "regular";
   var DEFAULT_CURVE_ANCHOR = 0.5;
-  var CURVE_HANDLE_COUNT = 0;
+  var CURVE_HANDLE_COUNT = 1;
   var CURVE_HANDLE_MAX_OFFSET = 3.5;
-  var CURVE_HANDLE_WEIGHT_POWER = 2.1;
-  var CURVE_HANDLE_WEIGHT_GAIN = 1.8;
   var LINE_STYLE_OPTIONS = [
     { value: "solid", label: "Smooth" },
     { value: "dashed", label: "Dashed" },
@@ -18124,6 +18149,17 @@
     { value: "regular", label: "Regular" },
     { value: "bold", label: "Bold" }
   ];
+  var LINE_TYPE_PRESETS = [
+    { value: "line", label: "Line", style: "solid", decoration: "none", direction: DEFAULT_DECORATION_DIRECTION },
+    { value: "arrow", label: "Arrow", style: "solid", decoration: "arrow", direction: "end", directional: true },
+    { value: "inhibit", label: "Inhibitor \u22A3", style: "solid", decoration: "inhibit", direction: "end", directional: true },
+    { value: "blocked", label: "Blocked \u2715", style: "solid", decoration: "block", direction: DEFAULT_DECORATION_DIRECTION },
+    { value: "dashed", label: "Dashed", style: "dashed", decoration: "none", direction: DEFAULT_DECORATION_DIRECTION },
+    { value: "dotted", label: "Dotted", style: "dotted", decoration: "none", direction: DEFAULT_DECORATION_DIRECTION }
+  ];
+  var LINE_TYPE_PRESET_LOOKUP = new Map(LINE_TYPE_PRESETS.map((option) => [option.value, option]));
+  var LINE_GAP_MIN_DISTANCE = 12;
+  var LINE_GAP_STROKE_MULTIPLIER = 2.4;
   var LEGACY_STYLE_MAPPINGS = {
     "arrow": { style: "solid", decoration: "arrow", decorationDirection: "end" },
     "arrow-end": { style: "solid", decoration: "arrow", decorationDirection: "end" },
@@ -21192,6 +21228,31 @@
     const glow = normalizeLineGlow(info.glow, styleHint);
     return { style, decoration, decorationDirection, glow };
   }
+  function getLineTypePreset(value) {
+    return LINE_TYPE_PRESET_LOOKUP.get(value) || LINE_TYPE_PRESET_LOOKUP.get("line");
+  }
+  function inferLineTypePreset(style, decoration) {
+    const normalizedStyle = normalizeLineStyle(style);
+    const normalizedDecoration = normalizeLineDecoration(decoration, style);
+    for (const option of LINE_TYPE_PRESETS) {
+      if (option.style === normalizedStyle && option.decoration === normalizedDecoration) {
+        return option.value;
+      }
+    }
+    if (normalizedDecoration === "block") {
+      return "blocked";
+    }
+    if (normalizedStyle === "dashed") {
+      return "dashed";
+    }
+    if (normalizedStyle === "dotted") {
+      return "dotted";
+    }
+    return "line";
+  }
+  function isDirectionalPreset(preset) {
+    return Boolean(preset && preset.directional);
+  }
   function flipDecorationDirection(direction) {
     if (direction === "start") return "end";
     if (direction === "end") return "start";
@@ -21455,6 +21516,7 @@
     hideEdgeTooltip(edge);
     removeLineOverlay(edge);
     removeLineHandles(edge);
+    removeLineGap(edge);
     unregisterEdgeElement(edge);
     edge.remove();
   }
@@ -22400,16 +22462,6 @@
       trimmedLength: trimmedLength || 0
     };
   }
-  function getPairCurveSeed(aId, bId) {
-    const key = [String(aId ?? ""), String(bId ?? "")].sort().join("|");
-    let hash = 2166136261;
-    for (let i = 0; i < key.length; i += 1) {
-      hash ^= key.charCodeAt(i);
-      hash = Math.imul(hash, 16777619);
-    }
-    const normalized2 = (hash >>> 0) / 4294967295;
-    return normalized2 * 2 - 1;
-  }
   function getDefaultHandlePositions(count = CURVE_HANDLE_COUNT) {
     const total = Math.max(0, Math.round(Number(count) || 0));
     if (total <= 0) {
@@ -22536,9 +22588,8 @@
     }));
     return JSON.stringify(simplified);
   }
-  function getHandleWeight(position) {
-    const centered = clamp2(1 - Math.abs(0.5 - position) * 2.2, 0, 1);
-    return 1 + Math.pow(centered, CURVE_HANDLE_WEIGHT_POWER) * CURVE_HANDLE_WEIGHT_GAIN;
+  function getHandleWeight() {
+    return 1;
   }
   function resolveLineHandles(line, info = {}, overrides = {}, context = {}) {
     const datasetHandles = line?.dataset?.handles ? parseCurveHandles(line.dataset.handles) : null;
@@ -22563,161 +22614,6 @@
       position: clampHandlePosition(handle.position),
       offset: clampHandleOffset(handle.offset)
     }));
-  }
-  function computeAutoCurveHandles(context = {}) {
-    const { line = null, aId, bId } = context;
-    if (!aId || !bId) return [];
-    const decoration = context.decoration ?? line?.dataset?.decoration ?? DEFAULT_LINE_DECORATION;
-    const direction = context.decorationDirection ?? line?.dataset?.direction ?? line?.dataset?.decorationDirection ?? DEFAULT_DECORATION_DIRECTION;
-    const thicknessKey = line?.dataset?.thickness ?? DEFAULT_LINE_THICKNESS;
-    const baseWidth = getLineThicknessValue(thicknessKey);
-    const segment = context.segment || computeTrimmedSegment(aId, bId, computeDecorationTrim(decoration, direction, baseWidth));
-    if (!segment) return [];
-    const obstacles = gatherAutoCurveObstacles(line, aId, bId);
-    if (!obstacles.length) return [];
-    const straight = evaluateAutoCurveCandidate(segment, [], obstacles);
-    if (!straight || straight.intersections <= 0) {
-      return [];
-    }
-    const directions = getPairCurveSeed(aId, bId) >= 0 ? [1, -1] : [-1, 1];
-    const offsets = [0.16, 0.24, 0.32, 0.44, 0.58];
-    const builders = [
-      (offset) => [{ position: DEFAULT_CURVE_ANCHOR, offset }],
-      (offset) => [
-        { position: 0.38, offset: offset * 0.92 },
-        { position: 0.62, offset: offset * 0.92 }
-      ]
-    ];
-    let best = { intersections: straight.intersections, length: straight.length, handles: [] };
-    let bestOffset = Infinity;
-    directions.forEach((sign) => {
-      offsets.forEach((baseOffset) => {
-        const offset = sign * baseOffset;
-        builders.forEach((builder) => {
-          const candidateHandles = builder(offset).map((handle) => ({
-            position: clampHandlePosition(handle.position),
-            offset: clampHandleOffset(handle.offset)
-          }));
-          const evaluation = evaluateAutoCurveCandidate(segment, candidateHandles, obstacles);
-          if (!evaluation) return;
-          const betterIntersections = evaluation.intersections < best.intersections;
-          const shorterLength = evaluation.intersections === best.intersections && evaluation.length + 0.5 < best.length;
-          const smallerOffset = evaluation.intersections === best.intersections && Math.abs(offset) + 1e-3 < bestOffset;
-          if (betterIntersections || shorterLength || smallerOffset) {
-            best = { intersections: evaluation.intersections, length: evaluation.length, handles: candidateHandles };
-            bestOffset = Math.abs(offset);
-          }
-        });
-      });
-    });
-    if (!best.handles.length) {
-      return [];
-    }
-    if (best.intersections < straight.intersections || best.length + 0.5 < straight.length) {
-      return best.handles;
-    }
-    return [];
-  }
-  function gatherAutoCurveObstacles(currentLine, aId, bId) {
-    const edges = mapState.allEdges;
-    if (!edges || !edges.size) return [];
-    const obstacles = [];
-    const skipA = String(aId);
-    const skipB = String(bId);
-    const limit = 220;
-    let scanned = 0;
-    edges.forEach((edge) => {
-      if (scanned >= limit) return;
-      if (!edge || edge === currentLine) return;
-      const dataA = edge.dataset?.a;
-      const dataB = edge.dataset?.b;
-      if (!dataA || !dataB) return;
-      if (dataA === skipA || dataA === skipB || dataB === skipA || dataB === skipB) return;
-      const cached = edge._lastSegment;
-      const segment = cached || computeTrimmedSegment(dataA, dataB);
-      if (!segment) return;
-      if (!cached) {
-        edge._lastSegment = segment;
-      }
-      obstacles.push({
-        start: { x: segment.startX, y: segment.startY },
-        end: { x: segment.endX, y: segment.endY }
-      });
-      scanned += 1;
-    });
-    return obstacles;
-  }
-  function evaluateAutoCurveCandidate(segment, handles, obstacles) {
-    if (!segment) return null;
-    const polyline = buildCandidatePolyline(segment, handles);
-    if (!polyline.length) {
-      return { intersections: 0, length: 0, handles };
-    }
-    let intersections = 0;
-    obstacles.forEach((obstacle) => {
-      intersections += countPolylineIntersections(polyline, obstacle);
-    });
-    const length = approximatePolylineLength(polyline);
-    return { intersections, length, handles };
-  }
-  function buildCandidatePolyline(segment, handles) {
-    if (!segment) return [];
-    const sanitized = Array.isArray(handles) ? handles.map((handle) => ({
-      position: clampHandlePosition(handle.position),
-      offset: clampHandleOffset(handle.offset)
-    })) : [];
-    if (!sanitized.length) {
-      return [
-        { x: segment.startX, y: segment.startY },
-        { x: segment.endX, y: segment.endY }
-      ];
-    }
-    const { points } = buildCurvePoints(segment, sanitized);
-    const segments = buildCurveSegments(points);
-    const sampleCount = Math.max(6, segments.length * 6);
-    const polyline = [];
-    for (let i = 0; i <= sampleCount; i += 1) {
-      const ratio = i / sampleCount;
-      if (i === 0) {
-        polyline.push(points[0]);
-      } else if (i === sampleCount) {
-        polyline.push(points[points.length - 1]);
-      } else {
-        const sample = getPointAlongSegments(segments, ratio);
-        if (sample?.point) {
-          polyline.push(sample.point);
-        }
-      }
-    }
-    return polyline;
-  }
-  function approximatePolylineLength(polyline) {
-    if (!Array.isArray(polyline) || polyline.length < 2) return 0;
-    let length = 0;
-    for (let i = 1; i < polyline.length; i += 1) {
-      const prev = polyline[i - 1];
-      const curr = polyline[i];
-      length += Math.hypot(curr.x - prev.x, curr.y - prev.y);
-    }
-    return length;
-  }
-  function countPolylineIntersections(polyline, obstacle) {
-    if (!Array.isArray(polyline) || polyline.length < 2 || !obstacle) return 0;
-    let total = 0;
-    for (let i = 0; i < polyline.length - 1; i += 1) {
-      const a1 = polyline[i];
-      const a2 = polyline[i + 1];
-      if (sharesEndpoint(a1, a2, obstacle)) continue;
-      if (segmentsIntersect(a1, a2, obstacle.start, obstacle.end)) {
-        total += 1;
-      }
-    }
-    return total;
-  }
-  function sharesEndpoint(a1, a2, obstacle) {
-    if (!obstacle) return false;
-    const threshold = 144;
-    return distanceSq(a1, obstacle.start) <= threshold || distanceSq(a1, obstacle.end) <= threshold || distanceSq(a2, obstacle.start) <= threshold || distanceSq(a2, obstacle.end) <= threshold;
   }
   function distanceSq(a, b) {
     if (!a || !b) return Infinity;
@@ -22841,6 +22737,210 @@
       path += ` C${segment.c1.x} ${segment.c1.y} ${segment.c2.x} ${segment.c2.y} ${segment.to.x} ${segment.to.y}`;
     });
     return path;
+  }
+  function computeSegmentIntersectionPoint(a1, a2, b1, b2) {
+    const denom = (a1.x - a2.x) * (b1.y - b2.y) - (a1.y - a2.y) * (b1.x - b2.x);
+    if (!Number.isFinite(denom) || Math.abs(denom) < 1e-9) {
+      return null;
+    }
+    const detA = a1.x * a2.y - a1.y * a2.x;
+    const detB = b1.x * b2.y - b1.y * b2.x;
+    const x = (detA * (b1.x - b2.x) - (a1.x - a2.x) * detB) / denom;
+    const y = (detA * (b1.y - b2.y) - (a1.y - a2.y) * detB) / denom;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return null;
+    }
+    return { x, y };
+  }
+  function boundsOverlap(a, b, buffer = LINE_GAP_MIN_DISTANCE) {
+    if (!a || !b) return false;
+    return !(a.maxX + buffer < b.minX || a.minX - buffer > b.maxX || a.maxY + buffer < b.minY || a.minY - buffer > b.maxY);
+  }
+  function segmentBoundsOverlap(a, b) {
+    return boundsOverlap(a, b, LINE_GAP_MIN_DISTANCE * 0.6);
+  }
+  function edgesShareEndpoint(lineA, lineB) {
+    if (!lineA?.dataset || !lineB?.dataset) return false;
+    const a1 = String(lineA.dataset.a ?? "");
+    const a2 = String(lineA.dataset.b ?? "");
+    const b1 = String(lineB.dataset.a ?? "");
+    const b2 = String(lineB.dataset.b ?? "");
+    return a1 === b1 || a1 === b2 || a2 === b1 || a2 === b2;
+  }
+  function computeSampledGeometry(geometry) {
+    if (!geometry) {
+      return { points: [], segments: [], bounds: null };
+    }
+    const points = [];
+    const segments = geometry.segments || [];
+    const start = { x: geometry.startX, y: geometry.startY };
+    if (Number.isFinite(start.x) && Number.isFinite(start.y)) {
+      points.push(start);
+    }
+    if (Array.isArray(segments) && segments.length) {
+      segments.forEach((segment) => {
+        const length = approximateCubicLength(segment.from, segment.c1, segment.c2, segment.to);
+        const steps = Math.max(4, Math.ceil(length / 24));
+        for (let i = 1; i <= steps; i += 1) {
+          const t = i / steps;
+          const point = cubicPoint(segment.from, segment.c1, segment.c2, segment.to, t);
+          points.push(point);
+        }
+      });
+    } else {
+      points.push({ x: geometry.endX, y: geometry.endY });
+    }
+    const filtered = [];
+    points.forEach((point) => {
+      if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+      const last = filtered[filtered.length - 1];
+      if (last && distanceSq(last, point) < 1e-6) return;
+      filtered.push(point);
+    });
+    const sampleSegments = [];
+    const bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+    filtered.forEach((point, index) => {
+      bounds.minX = Math.min(bounds.minX, point.x);
+      bounds.maxX = Math.max(bounds.maxX, point.x);
+      bounds.minY = Math.min(bounds.minY, point.y);
+      bounds.maxY = Math.max(bounds.maxY, point.y);
+      if (index === 0) return;
+      const prev = filtered[index - 1];
+      const segmentBounds = {
+        minX: Math.min(prev.x, point.x),
+        maxX: Math.max(prev.x, point.x),
+        minY: Math.min(prev.y, point.y),
+        maxY: Math.max(prev.y, point.y)
+      };
+      sampleSegments.push({ from: prev, to: point, bounds: segmentBounds });
+    });
+    if (!sampleSegments.length) {
+      return { points: filtered, segments: [], bounds: null };
+    }
+    return { points: filtered, segments: sampleSegments, bounds };
+  }
+  function getLineGapSample(line, geometry) {
+    if (!line) {
+      return computeSampledGeometry(geometry);
+    }
+    const key = geometry?.pathData || "";
+    const cached = line._gapSample;
+    if (cached && cached.key === key) {
+      return cached.value;
+    }
+    const value = computeSampledGeometry(geometry);
+    line._gapSample = { key, value };
+    return value;
+  }
+  function ensureLineGapLayer(line) {
+    if (!line) return null;
+    const parent = line.parentNode;
+    if (!parent) return null;
+    let layer = line._gapLayer;
+    if (!layer || layer.parentNode !== parent) {
+      if (layer?.parentNode) {
+        layer.remove();
+      }
+      layer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      layer.classList.add("map-edge-gap-layer");
+      layer.setAttribute("pointer-events", "none");
+      parent.appendChild(layer);
+      line._gapLayer = layer;
+    }
+    return layer;
+  }
+  function removeLineGap(line) {
+    if (!line) return;
+    if (line._gapLayer) {
+      line._gapLayer.remove();
+      line._gapLayer = null;
+    }
+    if (line._gapSample) {
+      line._gapSample = null;
+    }
+  }
+  function updateLineGapVisuals(line) {
+    if (!line?._gapLayer) return;
+    const baseWidth = Number(line.dataset?.baseWidth) || getLineThicknessValue(line.dataset?.thickness);
+    const strokeWidth = Math.max(baseWidth * LINE_GAP_STROKE_MULTIPLIER, baseWidth + 4);
+    const radius = Math.max(baseWidth * 0.75, 3);
+    line._gapLayer.querySelectorAll(".map-edge-gap").forEach((circle) => {
+      circle.setAttribute("stroke-width", strokeWidth);
+      circle.setAttribute("r", radius);
+    });
+  }
+  function updateLineCrossovers(line, geometry, options = {}) {
+    if (!line) return;
+    const visited = options.visited || /* @__PURE__ */ new Set();
+    if (visited.has(line)) return;
+    visited.add(line);
+    if (!geometry) {
+      removeLineGap(line);
+      return;
+    }
+    const sample = getLineGapSample(line, geometry);
+    if (!sample.segments.length) {
+      removeLineGap(line);
+      return;
+    }
+    const intersections = [];
+    const touched = /* @__PURE__ */ new Set();
+    const allEdges = mapState.allEdges;
+    if (allEdges && allEdges.size) {
+      const seen = /* @__PURE__ */ new Set();
+      allEdges.forEach((other) => {
+        if (!other || other === line || visited.has(other)) return;
+        if (edgesShareEndpoint(line, other)) return;
+        if (!other.dataset?.a || !other.dataset?.b) return;
+        const otherGeometry = other._lastGeometry || getLineGeometry(other.dataset.a, other.dataset.b, { line: other });
+        if (!otherGeometry) return;
+        const otherSample = getLineGapSample(other, otherGeometry);
+        if (!otherSample.segments.length) return;
+        if (!boundsOverlap(sample.bounds, otherSample.bounds)) return;
+        const minDistanceSq = LINE_GAP_MIN_DISTANCE * LINE_GAP_MIN_DISTANCE;
+        sample.segments.forEach((segA) => {
+          otherSample.segments.forEach((segB) => {
+            if (!segmentBoundsOverlap(segA.bounds, segB.bounds)) return;
+            if (!segmentsIntersect(segA.from, segA.to, segB.from, segB.to)) return;
+            const point = computeSegmentIntersectionPoint(segA.from, segA.to, segB.from, segB.to);
+            if (!point) return;
+            if (distanceSq(point, segA.from) < minDistanceSq || distanceSq(point, segA.to) < minDistanceSq || distanceSq(point, segB.from) < minDistanceSq || distanceSq(point, segB.to) < minDistanceSq) {
+              return;
+            }
+            const key = `${Math.round(point.x * 100)}|${Math.round(point.y * 100)}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            intersections.push(point);
+            touched.add(other);
+          });
+        });
+      });
+    }
+    if (!intersections.length) {
+      removeLineGap(line);
+    } else {
+      const layer = ensureLineGapLayer(line);
+      if (!layer) return;
+      while (layer.firstChild) {
+        layer.firstChild.remove();
+      }
+      intersections.forEach((point) => {
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.classList.add("map-edge-gap");
+        circle.setAttribute("cx", point.x);
+        circle.setAttribute("cy", point.y);
+        circle.setAttribute("fill", "none");
+        circle.setAttribute("vector-effect", "non-scaling-stroke");
+        layer.appendChild(circle);
+      });
+      updateLineGapVisuals(line);
+    }
+    touched.forEach((other) => {
+      const otherGeometry = other._lastGeometry || getLineGeometry(other.dataset.a, other.dataset.b, { line: other });
+      if (otherGeometry) {
+        updateLineCrossovers(other, otherGeometry, { visited });
+      }
+    });
   }
   function getPointAlongSegments(segments, ratio) {
     if (!segments.length) return null;
@@ -23224,6 +23324,8 @@
         line.setAttribute("d", geometry.pathData);
       }
     }
+    line._lastGeometry = geometry || null;
+    updateLineCrossovers(line, geometry);
     updateLineStrokeWidth(line);
     syncLineHandles(line, geometry);
     LINE_STYLE_CLASSNAMES.forEach((cls) => line.classList.remove(cls));
@@ -23306,6 +23408,7 @@
         line._overlay.setAttribute("stroke-width", overlayWidth);
       }
     }
+    updateLineGapVisuals(line);
   }
   function removeLineHandles(line) {
     if (!line) return;
@@ -23650,41 +23753,24 @@
     colorLabel.appendChild(colorInput);
     menu.appendChild(colorLabel);
     const typeLabel = document.createElement("label");
-    typeLabel.textContent = "Style";
+    typeLabel.textContent = "Line type";
     const typeSel = document.createElement("select");
-    LINE_STYLE_OPTIONS.forEach((option) => {
+    LINE_TYPE_PRESETS.forEach((option) => {
       const opt = document.createElement("option");
       opt.value = option.value;
       opt.textContent = option.label;
       typeSel.appendChild(opt);
     });
-    typeSel.value = initial.style;
+    const initialPresetValue = inferLineTypePreset(initial.style, initial.decoration);
+    typeSel.value = initialPresetValue;
     typeLabel.appendChild(typeSel);
     menu.appendChild(typeLabel);
-    const decorationLabel = document.createElement("label");
-    decorationLabel.textContent = "Decoration";
-    const decorationSel = document.createElement("select");
-    LINE_DECORATION_OPTIONS.forEach((option) => {
-      const opt = document.createElement("option");
-      opt.value = option.value;
-      opt.textContent = option.label;
-      decorationSel.appendChild(opt);
-    });
-    decorationSel.value = initial.decoration;
-    decorationLabel.appendChild(decorationSel);
-    menu.appendChild(decorationLabel);
-    const directionLabel = document.createElement("label");
-    directionLabel.textContent = "Direction";
-    const directionSel = document.createElement("select");
-    LINE_DECORATION_DIRECTION_OPTIONS.forEach((option) => {
-      const opt = document.createElement("option");
-      opt.value = option.value;
-      opt.textContent = option.label;
-      directionSel.appendChild(opt);
-    });
-    directionSel.value = initial.decorationDirection;
-    directionLabel.appendChild(directionSel);
-    menu.appendChild(directionLabel);
+    const flipBtn = document.createElement("button");
+    flipBtn.type = "button";
+    flipBtn.className = "btn secondary";
+    flipBtn.textContent = "Flip direction";
+    menu.appendChild(flipBtn);
+    let currentDirection = initial.decoration === "arrow" || initial.decoration === "inhibit" ? initial.decorationDirection : DEFAULT_DECORATION_DIRECTION;
     const glowField = document.createElement("label");
     glowField.className = "line-menu-toggle";
     const glowInput = document.createElement("input");
@@ -23712,110 +23798,77 @@
     nameInput.value = initial.name;
     nameLabel.appendChild(nameInput);
     menu.appendChild(nameLabel);
-    const applyPreview = () => {
-      const previewPatch = {
+    const buildPatch = () => {
+      const preset = getLineTypePreset(typeSel.value);
+      const styleValue = preset?.style ?? DEFAULT_LINE_STYLE;
+      const decorationValue = preset?.decoration ?? DEFAULT_LINE_DECORATION;
+      const directional = isDirectionalPreset(preset);
+      const directionValue = directional ? normalizeDecorationDirection(currentDirection, decorationValue, styleValue) : DEFAULT_DECORATION_DIRECTION;
+      return {
         color: colorInput.value,
-        style: typeSel.value,
-        decoration: decorationSel.value,
-        decorationDirection: decorationSel.value === "none" || decorationSel.value === "block" ? DEFAULT_DECORATION_DIRECTION : directionSel.value,
-        glow: glowInput.checked,
-        thickness: thickSel.value
-      };
-      applyLineStyle(line, previewPatch);
-    };
-    const autoBtn = document.createElement("button");
-    autoBtn.type = "button";
-    autoBtn.className = "btn secondary";
-    autoBtn.textContent = "Find best path";
-    autoBtn.addEventListener("click", async () => {
-      autoBtn.disabled = true;
-      try {
-        const decorationValue = line.dataset.decoration || appearance.decoration || DEFAULT_LINE_DECORATION;
-        const storedDirection = line.dataset.direction || line.dataset.decorationDirection || appearance.decorationDirection || DEFAULT_DECORATION_DIRECTION;
-        const directionValue = decorationValue === "none" || decorationValue === "block" ? DEFAULT_DECORATION_DIRECTION : storedDirection;
-        const thicknessValue = line.dataset.thickness || link.thickness || DEFAULT_LINE_THICKNESS;
-        const trims = computeDecorationTrim(decorationValue, directionValue, getLineThicknessValue(thicknessValue));
-        const segment = computeTrimmedSegment(aId, bId, trims);
-        if (!segment) return;
-        const autoHandles = computeAutoCurveHandles({
-          line,
-          aId,
-          bId,
-          segment,
-          decoration: decorationValue,
-          decorationDirection: directionValue
-        });
-        const patch = buildCurvePatchFromHandles(autoHandles);
-        await updateLink(aId, bId, patch);
-        applyLineStyle(line, patch);
-        applyLinkPatchToState(aId, bId, patch);
-        if (mapState.activeLineMenu?.menu === menu) {
-          mapState.activeLineMenu.restore = () => {
-            applyLineStyle(line, {
-              color: line.dataset.color || DEFAULT_LINK_COLOR,
-              style: line.dataset.style || DEFAULT_LINE_STYLE,
-              decoration: line.dataset.decoration || DEFAULT_LINE_DECORATION,
-              decorationDirection: line.dataset.direction || line.dataset.decorationDirection || DEFAULT_DECORATION_DIRECTION,
-              glow: line.dataset.glow === "1",
-              thickness: line.dataset.thickness || DEFAULT_LINE_THICKNESS,
-              name: line.dataset.label || ""
-            });
-          };
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        autoBtn.disabled = false;
-      }
-    });
-    menu.appendChild(autoBtn);
-    const swapBtn = document.createElement("button");
-    swapBtn.type = "button";
-    swapBtn.className = "btn secondary";
-    swapBtn.textContent = "Swap direction";
-    swapBtn.addEventListener("click", () => {
-      if (directionSel.disabled) return;
-      if (directionSel.value === "end") {
-        directionSel.value = "start";
-      } else if (directionSel.value === "start") {
-        directionSel.value = "end";
-      }
-      applyPreview();
-    });
-    menu.appendChild(swapBtn);
-    const updateDirectionDisabled = () => {
-      const deco = decorationSel.value;
-      const disable = deco === "none" || deco === "block";
-      directionSel.disabled = disable;
-      swapBtn.disabled = disable;
-      if (disable) {
-        directionSel.value = DEFAULT_DECORATION_DIRECTION;
-      }
-    };
-    decorationSel.addEventListener("change", updateDirectionDisabled);
-    updateDirectionDisabled();
-    const btn = document.createElement("button");
-    btn.className = "btn primary";
-    btn.textContent = "Save";
-    btn.addEventListener("click", async () => {
-      const patch = {
-        color: colorInput.value,
-        style: typeSel.value,
-        decoration: decorationSel.value,
-        decorationDirection: decorationSel.value === "none" || decorationSel.value === "block" ? DEFAULT_DECORATION_DIRECTION : directionSel.value,
+        style: styleValue,
+        decoration: decorationValue,
+        decorationDirection: directionValue,
         glow: glowInput.checked,
         thickness: thickSel.value,
         name: nameInput.value
       };
+    };
+    const applyPreview = () => {
+      applyLineStyle(line, buildPatch());
+    };
+    const updateFlipState = () => {
+      const preset = getLineTypePreset(typeSel.value);
+      const directional = isDirectionalPreset(preset);
+      if (directional) {
+        currentDirection = normalizeDecorationDirection(currentDirection, preset.decoration, preset.style);
+      } else {
+        currentDirection = DEFAULT_DECORATION_DIRECTION;
+      }
+      flipBtn.hidden = !directional;
+      flipBtn.disabled = !directional || currentDirection === "both";
+    };
+    flipBtn.addEventListener("click", () => {
+      const preset = getLineTypePreset(typeSel.value);
+      if (!isDirectionalPreset(preset)) return;
+      if (currentDirection === "both") {
+        currentDirection = preset.direction ?? DEFAULT_DECORATION_DIRECTION;
+      } else {
+        currentDirection = currentDirection === "start" ? "end" : "start";
+      }
+      updateFlipState();
+      applyPreview();
+    });
+    typeSel.addEventListener("change", () => {
+      const preset = getLineTypePreset(typeSel.value);
+      if (isDirectionalPreset(preset)) {
+        if (preset.value !== initialPresetValue) {
+          currentDirection = preset.direction ?? DEFAULT_DECORATION_DIRECTION;
+        } else {
+          currentDirection = normalizeDecorationDirection(currentDirection, preset.decoration, preset.style);
+        }
+      } else {
+        currentDirection = DEFAULT_DECORATION_DIRECTION;
+      }
+      updateFlipState();
+      applyPreview();
+    });
+    const btn = document.createElement("button");
+    btn.className = "btn primary";
+    btn.textContent = "Save";
+    btn.addEventListener("click", async () => {
+      const patch = buildPatch();
       await updateLink(aId, bId, patch);
       applyLineStyle(line, patch);
       closeLineMenu({ commit: true });
     });
     menu.appendChild(btn);
-    [colorInput, typeSel, decorationSel, directionSel, glowInput, thickSel].forEach((input) => {
-      const eventName = input instanceof HTMLInputElement && input.type === "color" ? "input" : "change";
-      input.addEventListener(eventName, applyPreview);
-    });
+    colorInput.addEventListener("input", applyPreview);
+    glowInput.addEventListener("change", applyPreview);
+    thickSel.addEventListener("change", applyPreview);
+    nameInput.addEventListener("input", applyPreview);
+    updateFlipState();
+    applyPreview();
     document.body.appendChild(menu);
     requestAnimationFrame(() => {
       positionLineMenu(menu, evt.pageX, evt.pageY);
@@ -24222,5 +24275,6 @@
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
+  return __toCommonJS(main_exports);
 })();
 //# sourceMappingURL=bundle.js.map
