@@ -1,31 +1,4 @@
-var Sevenn = (() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-    }
-    return to;
-  };
-  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
-  // js/main.js
-  var main_exports = {};
-  __export(main_exports, {
-    render: () => renderApp,
-    renderApp: () => renderApp,
-    resolveListKind: () => resolveListKind,
-    tabs: () => tabs
-  });
-
+(() => {
   // js/storage/preferences.js
   var STORAGE_KEY = "sevenn-ui-preferences";
   var cache = null;
@@ -18012,7 +17985,7 @@ var Sevenn = (() => {
   };
   var PAN_ACCELERATION = 1.8;
   var ZOOM_INTENSITY = 41e-4;
-  var NODE_DRAG_DISTANCE_THRESHOLD = 1.2;
+  var NODE_DRAG_DISTANCE_THRESHOLD = 0;
   var ICONS = {
     sliders: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 7h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M6 12h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M6 17h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><circle cx="16" cy="7" r="2.5" stroke="currentColor" stroke-width="1.6" /><circle cx="11" cy="12" r="2.5" stroke="currentColor" stroke-width="1.6" /><circle cx="19" cy="17" r="2.5" stroke="currentColor" stroke-width="1.6" /></svg>',
     close: '<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>',
@@ -18064,7 +18037,7 @@ var Sevenn = (() => {
     drug: "var(--blue)",
     concept: "var(--green)"
   };
-  var SELECTION_COVERAGE_THRESHOLD = 0.75;
+  var SELECTION_COVERAGE_THRESHOLD = 0.12;
   var mapState = {
     tool: TOOL.NAVIGATE,
     selectionIds: [],
@@ -18105,6 +18078,7 @@ var Sevenn = (() => {
     toolboxDrag: null,
     toolboxEl: null,
     toolboxContainer: null,
+    toolboxBadges: null,
     baseCursor: "grab",
     cursorOverride: null,
     defaultViewSize: null,
@@ -19293,7 +19267,7 @@ var Sevenn = (() => {
       mapState.root.classList.remove("map-area-interacting");
     }
     mapState.root = root;
-    root.innerHTML = "";
+    const fragment = document.createDocumentFragment();
     mapState.nodeDrag = null;
     mapState.areaDrag = null;
     mapState.draggingView = false;
@@ -19318,6 +19292,7 @@ var Sevenn = (() => {
     stopToolboxDrag();
     mapState.toolboxEl = null;
     mapState.toolboxContainer = null;
+    mapState.toolboxBadges = null;
     mapState.cursorOverride = null;
     mapState.hoveredEdge = null;
     mapState.hoveredEdgePointer = { x: 0, y: 0 };
@@ -19373,7 +19348,7 @@ var Sevenn = (() => {
     mapState.minView = 100;
     const wrapper = document.createElement("div");
     wrapper.className = "map-wrapper";
-    root.appendChild(wrapper);
+    fragment.appendChild(wrapper);
     const stage = document.createElement("div");
     stage.className = "map-stage";
     wrapper.appendChild(stage);
@@ -19855,103 +19830,18 @@ var Sevenn = (() => {
     buildToolbox(container, hiddenNodes.length, hiddenLinks.length);
     buildHiddenPanel(container, hiddenNodes, hiddenLinks);
     const drawn = /* @__PURE__ */ new Set();
-    const edgeLayerRef = mapState.edgeLayer || g;
     const nodeLayerRef = mapState.nodeLayer || g;
     visibleItems.forEach((it) => {
-      (it.links || []).forEach((l) => {
-        if (l.hidden) return;
-        if (!positions[l.id]) return;
-        const key = it.id < l.id ? `${it.id}|${l.id}` : `${l.id}|${it.id}`;
+      (it.links || []).forEach((link) => {
+        const targetId = link?.id;
+        if (!targetId) return;
+        if (link.hidden) return;
+        if (!positions[targetId]) return;
+        const key = it.id < targetId ? `${it.id}|${targetId}` : `${targetId}|${it.id}`;
         if (drawn.has(key)) return;
         drawn.add(key);
-        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        path.setAttribute("d", calcPath(it.id, l.id, path, l));
-        path.setAttribute("fill", "none");
-        path.setAttribute("class", "map-edge");
-        path.setAttribute("vector-effect", "non-scaling-stroke");
-        applyLineStyle(path, l);
-        path.dataset.a = it.id;
-        path.dataset.b = l.id;
-        path.dataset.label = l.name || "";
-        registerEdgeElement(path, it.id, l.id);
-        path.addEventListener("pointerdown", (evt) => {
-          if (evt.button !== 0) return;
-          if (mapState.tool !== TOOL.NAVIGATE) return;
-          mapState.suppressNextClick = false;
-          evt.stopPropagation();
-          const pointerId = evt.pointerId;
-          const existingCurve = Number(path.dataset.curve);
-          const initialCurve = Number.isFinite(existingCurve) ? existingCurve : Number.isFinite(Number(l.curve)) ? Number(l.curve) : 0;
-          const existingAnchor = normalizeAnchorValue(
-            Object.prototype.hasOwnProperty.call(path.dataset || {}, "anchor") ? path.dataset.anchor : Object.prototype.hasOwnProperty.call(l || {}, "curveAnchor") ? l.curveAnchor : DEFAULT_CURVE_ANCHOR
-          ) ?? DEFAULT_CURVE_ANCHOR;
-          const pointerMap = clientToMap(evt.clientX, evt.clientY);
-          const geometryForHandle = getLineGeometry(it.id, l.id, {
-            line: path,
-            curve: initialCurve,
-            anchor: existingAnchor
-          });
-          let handle = "mid";
-          let anchorValue = existingAnchor;
-          if (geometryForHandle && pointerMap) {
-            const startPoint = { x: geometryForHandle.startX, y: geometryForHandle.startY };
-            const endPoint = { x: geometryForHandle.endX, y: geometryForHandle.endY };
-            const startDist = Math.hypot(pointerMap.x - startPoint.x, pointerMap.y - startPoint.y);
-            const endDist = Math.hypot(pointerMap.x - endPoint.x, pointerMap.y - endPoint.y);
-            const threshold = Math.max(36, (geometryForHandle.trimmedLength || 0) * 0.12);
-            if (startDist <= threshold) {
-              handle = "start";
-              anchorValue = normalizeAnchorValue(existingAnchor < 0.45 ? existingAnchor : 0.22) ?? 0.22;
-            } else if (endDist <= threshold) {
-              handle = "end";
-              anchorValue = normalizeAnchorValue(existingAnchor > 0.55 ? existingAnchor : 0.78) ?? 0.78;
-            }
-          }
-          mapState.edgeDrag = {
-            pointerId,
-            line: path,
-            aId: it.id,
-            bId: l.id,
-            startCurve: initialCurve,
-            currentCurve: initialCurve,
-            moved: false,
-            captureTarget: evt.currentTarget || path,
-            handle,
-            anchor: anchorValue,
-            startAnchor: anchorValue
-          };
-          if (mapState.edgeDrag.captureTarget?.setPointerCapture) {
-            try {
-              mapState.edgeDrag.captureTarget.setPointerCapture(pointerId);
-            } catch {
-            }
-          }
-        });
-        path.addEventListener("click", (e) => {
-          e.stopPropagation();
-          handleEdgeClick(path, it.id, l.id, e);
-        });
-        path.addEventListener("mouseenter", (evt) => {
-          if (mapState.tool === TOOL.HIDE) {
-            applyCursorOverride("hide");
-          } else if (mapState.tool === TOOL.BREAK) {
-            applyCursorOverride("break");
-          }
-          showEdgeTooltip(path, evt);
-        });
-        path.addEventListener("mousemove", (evt) => {
-          moveEdgeTooltip(path, evt);
-        });
-        path.addEventListener("mouseleave", () => {
-          if (mapState.tool === TOOL.HIDE) {
-            clearCursorOverride("hide");
-          }
-          if (mapState.tool === TOOL.BREAK) {
-            clearCursorOverride("break");
-          }
-          hideEdgeTooltip(path);
-        });
-        edgeLayerRef.appendChild(path);
+        const info = { ...link, id: targetId };
+        applyLinkVisibility(it.id, targetId, info);
       });
     });
     visibleItems.forEach((it) => {
@@ -20011,8 +19901,7 @@ var Sevenn = (() => {
           const dragNodes = [];
           uniqueSelection.forEach((id) => {
             const source = mapState.positions[id] || positions[id] || (id === it.id ? current : null);
-            if (!source)
-              return;
+            if (!source) return;
             dragNodes.push({
               id,
               start: { x: source.x, y: source.y },
@@ -20184,6 +20073,7 @@ var Sevenn = (() => {
     updatePendingHighlight();
     updateViewBox({ forceScale: true, immediate: true });
     refreshCursor();
+    root.replaceChildren(fragment);
   }
   function ensureListeners() {
     if (mapState.listenersAttached || typeof window === "undefined") return;
@@ -20208,23 +20098,23 @@ var Sevenn = (() => {
     const configs = [
       {
         id: "arrow-end",
-        viewBox: "0 0 6 6",
-        refX: 4.6,
-        refY: 3,
-        markerWidth: 4.6,
-        markerHeight: 4.6,
-        path: "M0,0 L4.6,3 L0,6 Z",
+        viewBox: "0 0 12 12",
+        refX: 10.4,
+        refY: 6,
+        markerWidth: 7.6,
+        markerHeight: 7.6,
+        path: "M1 1 L11 6 L1 11 Z",
         units: "strokeWidth",
         scaleMode: "stroke"
       },
       {
         id: "arrow-start",
-        viewBox: "0 0 6 6",
-        refX: 1.4,
-        refY: 3,
-        markerWidth: 4.6,
-        markerHeight: 4.6,
-        path: "M4.6,0 L0,3 L4.6,6 Z",
+        viewBox: "0 0 12 12",
+        refX: 1.6,
+        refY: 6,
+        markerWidth: 7.6,
+        markerHeight: 7.6,
+        path: "M11 1 L1 6 L11 11 Z",
         units: "strokeWidth",
         scaleMode: "stroke"
       }
@@ -20247,7 +20137,7 @@ var Sevenn = (() => {
       marker.setAttribute("refY", String(cfg.refY));
       marker.setAttribute("markerWidth", String(cfg.markerWidth));
       marker.setAttribute("markerHeight", String(cfg.markerHeight));
-      marker.setAttribute("orient", "auto-start-reverse");
+      marker.setAttribute("orient", "auto");
       marker.setAttribute("markerUnits", cfg.units || "userSpaceOnUse");
       marker.setAttribute("class", "map-marker");
       const path = document.createElementNS(svgNS, "path");
@@ -20598,6 +20488,9 @@ var Sevenn = (() => {
       cursorNeedsRefresh = true;
       if (wasDragged) {
         const ids = dragTargets.map((target) => target.id).filter(Boolean);
+        if (!ids.length && drag.id) {
+          ids.push(drag.id);
+        }
         const uniqueIds = Array.from(new Set(ids));
         if (uniqueIds.length) {
           for (const nodeId of uniqueIds) {
@@ -21115,6 +21008,198 @@ var Sevenn = (() => {
       mapState.allEdges.delete(edge);
     }
   }
+  function getLinkInfo(aId, bId) {
+    if (!mapState.itemMap) return null;
+    const key = String(aId);
+    const source = mapState.itemMap[key] || mapState.itemMap[aId];
+    if (!source || !Array.isArray(source.links)) return null;
+    const otherKey = String(bId);
+    return source.links.find((link) => String(link?.id) === otherKey) || null;
+  }
+  function integrateItemUpdates(...items) {
+    if (!items || !items.length) return;
+    items.forEach((item) => {
+      if (!item || !item.id) return;
+      if (!mapState.itemMap) {
+        mapState.itemMap = {};
+      }
+      mapState.itemMap[item.id] = item;
+      if (Array.isArray(mapState.visibleItems)) {
+        const idx = mapState.visibleItems.findIndex((it) => it && it.id === item.id);
+        if (idx >= 0) {
+          mapState.visibleItems[idx] = item;
+        }
+      }
+    });
+  }
+  function getEdgeElement(aId, bId) {
+    ensureEdgeRegistry();
+    const keyA = String(aId);
+    const keyB = String(bId);
+    const set = mapState.edgeRefs?.get(keyA);
+    if (set) {
+      for (const edge of set) {
+        if (!edge?.dataset) continue;
+        const da = String(edge.dataset.a);
+        const db = String(edge.dataset.b);
+        if (da === keyA && db === keyB || da === keyB && db === keyA) {
+          return edge;
+        }
+      }
+    }
+    if (mapState.allEdges) {
+      for (const edge of mapState.allEdges) {
+        if (!edge?.dataset) continue;
+        const da = String(edge.dataset.a);
+        const db = String(edge.dataset.b);
+        if (da === keyA && db === keyB || da === keyB && db === keyA) {
+          return edge;
+        }
+      }
+    }
+    return null;
+  }
+  function attachEdgeInteraction(path, aId, bId) {
+    if (!path || path.dataset.interactive === "1") return;
+    path.dataset.interactive = "1";
+    path.addEventListener("pointerdown", (evt) => {
+      if (evt.button !== 0) return;
+      if (mapState.tool !== TOOL.NAVIGATE) return;
+      mapState.suppressNextClick = false;
+      evt.stopPropagation();
+      const pointerId = evt.pointerId;
+      const existingCurve = Number(path.dataset.curve);
+      const linkData = getLinkInfo(aId, bId) || {};
+      const initialCurve = Number.isFinite(existingCurve) ? existingCurve : Number.isFinite(Number(linkData.curve)) ? Number(linkData.curve) : 0;
+      const existingAnchor = normalizeAnchorValue(
+        Object.prototype.hasOwnProperty.call(path.dataset || {}, "anchor") ? path.dataset.anchor : Object.prototype.hasOwnProperty.call(linkData || {}, "curveAnchor") ? linkData.curveAnchor : DEFAULT_CURVE_ANCHOR
+      ) ?? DEFAULT_CURVE_ANCHOR;
+      const pointerMap = clientToMap(evt.clientX, evt.clientY);
+      const geometryForHandle = getLineGeometry(aId, bId, {
+        line: path,
+        curve: initialCurve,
+        anchor: existingAnchor
+      });
+      let handle = "mid";
+      let anchorValue = existingAnchor;
+      if (geometryForHandle && pointerMap) {
+        const startPoint = { x: geometryForHandle.startX, y: geometryForHandle.startY };
+        const endPoint = { x: geometryForHandle.endX, y: geometryForHandle.endY };
+        const startDist = Math.hypot(pointerMap.x - startPoint.x, pointerMap.y - startPoint.y);
+        const endDist = Math.hypot(pointerMap.x - endPoint.x, pointerMap.y - endPoint.y);
+        const threshold = Math.max(36, (geometryForHandle.trimmedLength || 0) * 0.12);
+        if (startDist <= threshold) {
+          handle = "start";
+          anchorValue = normalizeAnchorValue(existingAnchor < 0.45 ? existingAnchor : 0.22) ?? 0.22;
+        } else if (endDist <= threshold) {
+          handle = "end";
+          anchorValue = normalizeAnchorValue(existingAnchor > 0.55 ? existingAnchor : 0.78) ?? 0.78;
+        }
+      }
+      mapState.edgeDrag = {
+        pointerId,
+        line: path,
+        aId,
+        bId,
+        startCurve: initialCurve,
+        currentCurve: initialCurve,
+        moved: false,
+        captureTarget: evt.currentTarget || path,
+        handle,
+        anchor: anchorValue,
+        startAnchor: anchorValue
+      };
+      if (mapState.edgeDrag.captureTarget?.setPointerCapture) {
+        try {
+          mapState.edgeDrag.captureTarget.setPointerCapture(pointerId);
+        } catch {
+        }
+      }
+    });
+    path.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleEdgeClick(path, aId, bId, e);
+    });
+    path.addEventListener("mouseenter", (evt) => {
+      if (mapState.tool === TOOL.HIDE) {
+        applyCursorOverride("hide");
+      } else if (mapState.tool === TOOL.BREAK) {
+        applyCursorOverride("break");
+      }
+      showEdgeTooltip(path, evt);
+    });
+    path.addEventListener("mouseleave", () => {
+      if (mapState.tool === TOOL.HIDE) {
+        clearCursorOverride("hide");
+      }
+      if (mapState.tool === TOOL.BREAK) {
+        clearCursorOverride("break");
+      }
+      hideEdgeTooltip(path);
+    });
+    path.addEventListener("mousemove", (evt) => moveEdgeTooltip(path, evt));
+  }
+  function ensureEdgeBetween(aId, bId, linkInfo = {}) {
+    if (!mapState.positions?.[aId] || !mapState.positions?.[bId]) {
+      return null;
+    }
+    const info = linkInfo || {};
+    if (info.hidden) {
+      removeEdgeBetween(aId, bId);
+      return null;
+    }
+    let path = getEdgeElement(aId, bId);
+    if (!path) {
+      const container = mapState.edgeLayer || mapState.g || mapState.svg;
+      if (!container) return null;
+      path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("fill", "none");
+      path.setAttribute("class", "map-edge");
+      path.setAttribute("vector-effect", "non-scaling-stroke");
+      path.dataset.a = String(aId);
+      path.dataset.b = String(bId);
+      container.appendChild(path);
+      registerEdgeElement(path, String(aId), String(bId));
+      attachEdgeInteraction(path, String(aId), String(bId));
+    }
+    path.dataset.label = info.name || "";
+    applyLineStyle(path, info);
+    return path;
+  }
+  function removeEdgeBetween(aId, bId) {
+    const edge = getEdgeElement(aId, bId);
+    if (!edge) return;
+    hideEdgeTooltip(edge);
+    removeLineOverlay(edge);
+    unregisterEdgeElement(edge);
+    edge.remove();
+  }
+  function applyLinkVisibility(aId, bId, info = {}) {
+    if (info.hidden) {
+      removeEdgeBetween(aId, bId);
+      return null;
+    }
+    return ensureEdgeBetween(aId, bId, info);
+  }
+  function normalizeLinkEntry(targetId, info = {}) {
+    const entry = {
+      id: targetId,
+      style: normalizeLineStyle(info.style ?? info.linkStyle ?? DEFAULT_LINE_STYLE),
+      thickness: info.thickness || DEFAULT_LINE_THICKNESS,
+      color: info.color || DEFAULT_LINK_COLOR,
+      name: typeof info.name === "string" ? info.name : "",
+      hidden: Boolean(info.hidden)
+    };
+    if (Object.prototype.hasOwnProperty.call(info, "curve")) {
+      const curve = Number(info.curve);
+      if (Number.isFinite(curve)) entry.curve = curve;
+    }
+    if (Object.prototype.hasOwnProperty.call(info, "curveAnchor")) {
+      const anchor = normalizeAnchorValue(info.curveAnchor);
+      if (Number.isFinite(anchor)) entry.curveAnchor = anchor;
+    }
+    return entry;
+  }
   function updatePendingHighlight() {
     mapState.elements.forEach(({ circle, label }, id) => {
       if (mapState.pendingLink === id) {
@@ -21203,16 +21288,71 @@ var Sevenn = (() => {
     const nodeBadge = document.createElement("span");
     nodeBadge.className = "map-tool-badge";
     nodeBadge.setAttribute("title", `${hiddenNodeCount} hidden node${hiddenNodeCount === 1 ? "" : "s"}`);
-    nodeBadge.innerHTML = `<span>\u{1F648}</span><strong>${hiddenNodeCount}</strong>`;
+    const nodeIcon = document.createElement("span");
+    nodeIcon.textContent = "\u{1F648}";
+    const nodeCountEl = document.createElement("strong");
+    nodeCountEl.textContent = hiddenNodeCount;
+    nodeBadge.append(nodeIcon, nodeCountEl);
     badges.appendChild(nodeBadge);
     const linkBadge = document.createElement("span");
     linkBadge.className = "map-tool-badge";
     linkBadge.setAttribute("title", `${hiddenLinkCount} hidden link${hiddenLinkCount === 1 ? "" : "s"}`);
-    linkBadge.innerHTML = `<span>\u{1F578}\uFE0F</span><strong>${hiddenLinkCount}</strong>`;
+    const linkIcon = document.createElement("span");
+    linkIcon.textContent = "\u{1F578}\uFE0F";
+    const linkCountEl = document.createElement("strong");
+    linkCountEl.textContent = hiddenLinkCount;
+    linkBadge.append(linkIcon, linkCountEl);
     badges.appendChild(linkBadge);
     box.appendChild(badges);
     container.appendChild(box);
     ensureToolboxWithinBounds();
+    mapState.toolboxBadges = {
+      nodeBadge,
+      linkBadge,
+      nodeCountEl,
+      linkCountEl
+    };
+  }
+  function computeHiddenNodeCount() {
+    if (!mapState.itemMap) return 0;
+    return Object.values(mapState.itemMap).reduce((total, item) => total + (item?.mapHidden ? 1 : 0), 0);
+  }
+  function computeHiddenLinkCount() {
+    if (!mapState.itemMap) return 0;
+    const seen = /* @__PURE__ */ new Set();
+    let count = 0;
+    Object.values(mapState.itemMap).forEach((item) => {
+      const id = item?.id;
+      if (!id) return;
+      (item.links || []).forEach((link) => {
+        if (!link?.hidden) return;
+        const otherId = link.id;
+        if (!otherId) return;
+        const key = id < otherId ? `${id}|${otherId}` : `${otherId}|${id}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        count += 1;
+      });
+    });
+    return count;
+  }
+  function refreshToolboxBadges() {
+    const badges = mapState.toolboxBadges;
+    if (!badges) return;
+    const hiddenNodeCount = computeHiddenNodeCount();
+    const hiddenLinkCount = computeHiddenLinkCount();
+    if (badges.nodeCountEl) {
+      badges.nodeCountEl.textContent = hiddenNodeCount;
+    }
+    if (badges.linkCountEl) {
+      badges.linkCountEl.textContent = hiddenLinkCount;
+    }
+    if (badges.nodeBadge) {
+      badges.nodeBadge.setAttribute("title", `${hiddenNodeCount} hidden node${hiddenNodeCount === 1 ? "" : "s"}`);
+    }
+    if (badges.linkBadge) {
+      badges.linkBadge.setAttribute("title", `${hiddenLinkCount} hidden link${hiddenLinkCount === 1 ? "" : "s"}`);
+    }
   }
   function buildHiddenPanel(container, hiddenNodes, hiddenLinks) {
     const allowPanel = mapState.tool === TOOL.HIDE;
@@ -21546,8 +21686,15 @@ var Sevenn = (() => {
     if (existing) {
       if (existing.hidden) {
         if (confirm("A hidden link already exists. Unhide it?")) {
-          await setLinkHidden(from.id, to.id, false);
-          await renderMap(mapState.root);
+          const result2 = await setLinkHidden(from.id, to.id, false);
+          if (result2) {
+            integrateItemUpdates(result2.source, result2.target);
+            const forward = result2.forward || getLinkInfo(from.id, to.id);
+            if (forward) {
+              applyLinkVisibility(from.id, to.id, forward);
+            }
+            refreshToolboxBadges();
+          }
         }
       } else {
         alert("These concepts are already linked.");
@@ -21562,7 +21709,7 @@ var Sevenn = (() => {
       return;
     }
     const label = prompt("Optional label for this link:", "") || "";
-    await createLink(from.id, to.id, {
+    const result = await createLink(from.id, to.id, {
       name: label,
       color: DEFAULT_LINK_COLOR,
       style: DEFAULT_LINE_STYLE,
@@ -21571,7 +21718,10 @@ var Sevenn = (() => {
     });
     mapState.pendingLink = null;
     updatePendingHighlight();
-    await renderMap(mapState.root);
+    if (result) {
+      integrateItemUpdates(result.source, result.target);
+      applyLinkVisibility(from.id, to.id, result.forward);
+    }
   }
   function openLinkAssistant(nodeId) {
     const source = mapState.itemMap?.[nodeId];
@@ -21668,11 +21818,18 @@ var Sevenn = (() => {
             unhideBtn.textContent = "Unhide link";
             unhideBtn.addEventListener("click", async () => {
               try {
-                await setLinkHidden(source.id, target.id, false);
-                mapState.pendingLink = null;
-                updatePendingHighlight();
-                await renderMap(mapState.root);
-                await win.close("unhide");
+                const result = await setLinkHidden(source.id, target.id, false);
+                if (result) {
+                  integrateItemUpdates(result.source, result.target);
+                  const forward = result.forward || getLinkInfo(source.id, target.id);
+                  if (forward) {
+                    existingLinks.set(target.id, forward);
+                    applyLinkVisibility(source.id, target.id, forward);
+                  }
+                  updatePendingHighlight();
+                  refreshToolboxBadges();
+                  renderResults();
+                }
               } catch (err) {
                 console.error(err);
               }
@@ -21687,17 +21844,26 @@ var Sevenn = (() => {
           linkBtn.addEventListener("click", async () => {
             try {
               const label = labelInput.value.trim();
-              await createLink(source.id, target.id, {
+              const result = await createLink(source.id, target.id, {
                 name: label,
                 color: DEFAULT_LINK_COLOR,
                 style: DEFAULT_LINE_STYLE,
                 thickness: DEFAULT_LINE_THICKNESS,
                 hidden: false
               });
-              mapState.pendingLink = null;
-              updatePendingHighlight();
-              await renderMap(mapState.root);
-              await win.close("link");
+              if (result) {
+                integrateItemUpdates(result.source, result.target);
+                existingLinks.set(target.id, result.forward);
+                applyLinkVisibility(source.id, target.id, result.forward);
+                updatePendingHighlight();
+                labelInput.value = "";
+                requestAnimationFrame(() => {
+                  searchInput.focus();
+                  searchInput.select();
+                });
+                refreshToolboxBadges();
+                renderResults();
+              }
             } catch (err) {
               console.error(err);
             }
@@ -21726,11 +21892,25 @@ var Sevenn = (() => {
       openLineMenu(evt, path, aId, bId);
     } else if (mapState.tool === TOOL.BREAK) {
       if (confirm("Are you sure you want to delete this link?")) {
-        removeLink(aId, bId).then(() => renderMap(mapState.root));
+        removeLink(aId, bId).then((result) => {
+          if (!result) return;
+          integrateItemUpdates(result.source, result.target);
+          removeEdgeBetween(aId, bId);
+          updatePendingHighlight();
+          refreshToolboxBadges();
+        });
       }
     } else if (mapState.tool === TOOL.HIDE) {
       if (confirm("Hide this link on the map?")) {
-        setLinkHidden(aId, bId, true).then(() => renderMap(mapState.root));
+        setLinkHidden(aId, bId, true).then((result) => {
+          if (!result) return;
+          integrateItemUpdates(result.source, result.target);
+          const forward = result.forward || { id: bId, hidden: true };
+          forward.hidden = true;
+          applyLinkVisibility(aId, bId, forward);
+          updatePendingHighlight();
+          refreshToolboxBadges();
+        });
       }
     }
   }
@@ -21900,7 +22080,7 @@ var Sevenn = (() => {
     return 0;
   }
   function computeStyleTrim(style, baseWidth) {
-    const arrowAllowance = Math.max(12, baseWidth * 2.7);
+    const arrowAllowance = Math.max(18, baseWidth * 3.4);
     const inhibitAllowance = Math.max(10, baseWidth * 2.2);
     let trimA = 0;
     let trimB = 0;
@@ -22219,35 +22399,29 @@ var Sevenn = (() => {
   async function createLink(aId, bId, info) {
     const a = await getItem(aId);
     const b = await getItem(bId);
-    if (!a || !b) return;
-    const linkInfo = {
-      id: bId,
-      style: DEFAULT_LINE_STYLE,
-      thickness: DEFAULT_LINE_THICKNESS,
-      color: DEFAULT_LINK_COLOR,
-      name: "",
-      hidden: false,
-      ...info
-    };
-    const reverseInfo = { ...linkInfo, id: aId };
-    a.links = a.links || [];
-    b.links = b.links || [];
+    if (!a || !b) return null;
+    const linkInfo = normalizeLinkEntry(bId, info);
+    const reverseInfo = normalizeLinkEntry(aId, info);
+    a.links = Array.isArray(a.links) ? a.links.filter((l) => String(l?.id) !== String(bId)) : [];
+    b.links = Array.isArray(b.links) ? b.links.filter((l) => String(l?.id) !== String(aId)) : [];
     a.links.push({ ...linkInfo });
     b.links.push({ ...reverseInfo });
     await upsertItem(a);
     await upsertItem(b);
+    return { source: a, target: b, forward: { ...linkInfo }, reverse: { ...reverseInfo } };
   }
   async function removeLink(aId, bId) {
     const a = await getItem(aId);
     const b = await getItem(bId);
-    if (!a || !b) return;
+    if (!a || !b) return null;
     a.links = (a.links || []).filter((l) => l.id !== bId);
     b.links = (b.links || []).filter((l) => l.id !== aId);
     await upsertItem(a);
     await upsertItem(b);
+    return { source: a, target: b };
   }
   async function setLinkHidden(aId, bId, hidden) {
-    await updateLink(aId, bId, { hidden });
+    return updateLink(aId, bId, { hidden });
   }
   function titleOf4(item) {
     return item?.name || item?.concept || "";
@@ -22324,16 +22498,23 @@ var Sevenn = (() => {
   async function updateLink(aId, bId, patch) {
     const a = await getItem(aId);
     const b = await getItem(bId);
-    if (!a || !b) return;
+    if (!a || !b) return null;
     const apply = (item, otherId) => {
       item.links = item.links || [];
-      const l = item.links.find((x) => x.id === otherId);
-      if (l) Object.assign(l, patch);
+      let link = item.links.find((x) => String(x?.id) === String(otherId));
+      if (link) {
+        Object.assign(link, patch);
+      } else {
+        link = normalizeLinkEntry(otherId, patch);
+        item.links.push(link);
+      }
+      return { ...link };
     };
-    apply(a, bId);
-    apply(b, aId);
+    const forward = apply(a, bId);
+    const reverse = apply(b, aId);
     await upsertItem(a);
     await upsertItem(b);
+    return { source: a, target: b, forward, reverse };
   }
   function applyLinkPatchToState(aId, bId, patch = {}) {
     const apply = (item, otherId) => {
@@ -22679,5 +22860,4 @@ var Sevenn = (() => {
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
-  return __toCommonJS(main_exports);
 })();

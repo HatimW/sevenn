@@ -6098,11 +6098,12 @@ body.map-toolbox-dragging {
 
 .map-selection {
   position: absolute;
-  border: 1px dashed var(--blue);
-  background: rgba(166, 217, 255, 0.12);
+  border: 2px solid var(--blue);
+  background: rgba(59, 130, 246, 0.18);
   pointer-events: none;
   will-change: left, top, width, height;
   box-sizing: border-box;
+  border-radius: 6px;
   z-index: 5;
 }
 
