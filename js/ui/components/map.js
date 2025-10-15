@@ -102,39 +102,46 @@ const ICONS = {
 
 const DEFAULT_LINK_COLOR = '#888888';
 const DEFAULT_LINE_STYLE = 'solid';
+const DEFAULT_LINE_DECORATION = 'none';
+const DEFAULT_DECORATION_DIRECTION = 'end';
+const DEFAULT_LINE_GLOW = false;
 const DEFAULT_LINE_THICKNESS = 'regular';
 const DEFAULT_CURVE_ANCHOR = 0.5;
 
 const LINE_STYLE_OPTIONS = [
   { value: 'solid', label: 'Smooth' },
   { value: 'dashed', label: 'Dashed' },
-  { value: 'dotted', label: 'Dotted' },
-  { value: 'arrow-end', label: 'Arrowhead →' },
-  { value: 'arrow-start', label: 'Arrowhead ←' },
-  { value: 'arrow-both', label: 'Twin arrows ↔' },
-  { value: 'blocked', label: 'Blocked ✕' },
-  { value: 'inhibit', label: 'Inhibit ⊣' },
-  { value: 'glow', label: 'Glow highlight' }
+  { value: 'dotted', label: 'Dotted' }
 ];
 
-const LINE_STYLE_CLASSNAMES = [
-  'map-edge--solid',
-  'map-edge--dashed',
-  'map-edge--dotted',
-  'map-edge--arrow-end',
-  'map-edge--arrow-start',
-  'map-edge--arrow-both',
-  'map-edge--blocked',
-  'map-edge--inhibit',
-  'map-edge--glow'
+const LINE_DECORATION_OPTIONS = [
+  { value: 'none', label: 'None' },
+  { value: 'arrow', label: 'Arrowhead' },
+  { value: 'inhibit', label: 'Inhibitor ⊣' },
+  { value: 'block', label: 'Blocked ✕' }
+];
+
+const LINE_DECORATION_DIRECTION_OPTIONS = [
+  { value: 'end', label: 'A → B' },
+  { value: 'start', label: 'B → A' },
+  { value: 'both', label: 'Both directions' }
+];
+
+const LINE_STYLE_CLASSNAMES = ['map-edge--solid', 'map-edge--dashed', 'map-edge--dotted'];
+const LINE_DECORATION_CLASSNAMES = [
+  'map-edge--decoration-arrow',
+  'map-edge--decoration-inhibit',
+  'map-edge--decoration-block'
 ];
 
 const LINE_STYLE_VALUE_SET = new Set(LINE_STYLE_OPTIONS.map(option => option.value));
+const LINE_DECORATION_VALUE_SET = new Set(LINE_DECORATION_OPTIONS.map(option => option.value));
+const LINE_DIRECTION_VALUE_SET = new Set(LINE_DECORATION_DIRECTION_OPTIONS.map(option => option.value));
 
 const LINE_THICKNESS_VALUES = {
-  thin: 2,
-  regular: 4,
-  bold: 7
+  thin: 1.8,
+  regular: 3,
+  bold: 4.6
 };
 
 const LINE_THICKNESS_OPTIONS = [
@@ -143,18 +150,27 @@ const LINE_THICKNESS_OPTIONS = [
   { value: 'bold', label: 'Bold' }
 ];
 
+const LEGACY_STYLE_MAPPINGS = {
+  'arrow': { style: 'solid', decoration: 'arrow', decorationDirection: 'end' },
+  'arrow-end': { style: 'solid', decoration: 'arrow', decorationDirection: 'end' },
+  'arrow-start': { style: 'solid', decoration: 'arrow', decorationDirection: 'start' },
+  'arrow-both': { style: 'solid', decoration: 'arrow', decorationDirection: 'both' },
+  'blocked': { style: 'solid', decoration: 'block', decorationDirection: 'end' },
+  'inhibit': { style: 'solid', decoration: 'inhibit', decorationDirection: 'end' },
+  'glow': { style: 'solid', glow: true }
+};
+
 const KIND_FALLBACK_COLORS = {
   disease: 'var(--purple)',
   drug: 'var(--blue)',
   concept: 'var(--green)'
 };
 
-const SELECTION_COVERAGE_THRESHOLD = 0.12;
-
 const mapState = {
   tool: TOOL.NAVIGATE,
   selectionIds: [],
   previewSelection: null,
+  selectionPreviewSignature: '',
   pendingLink: null,
   hiddenMenuTab: 'nodes',
   panelVisible: true,
@@ -468,6 +484,7 @@ async function setActiveTab(tabId) {
   mapState.paletteSearch = '';
   mapState.selectionIds = [];
   mapState.previewSelection = null;
+  mapState.selectionPreviewSignature = '';
   mapState.pendingLink = null;
   await persistMapConfig();
   await renderMap(mapState.root);
@@ -1493,6 +1510,7 @@ export async function renderMap(root) {
   mapState.edgeDrag = null;
   mapState.selectionRect = null;
   mapState.previewSelection = null;
+  mapState.selectionPreviewSignature = '';
   mapState.nodeWasDragged = false;
   mapState.justCompletedSelection = false;
   mapState.edgeDragJustCompleted = false;
@@ -2203,6 +2221,7 @@ export async function renderMap(root) {
         const uniqueSelection = Array.from(selectionSet);
         mapState.selectionIds = uniqueSelection;
         mapState.previewSelection = null;
+        mapState.selectionPreviewSignature = '';
         updateSelectionHighlight();
         mapState.lastPointerDownInfo = { id: it.id, shift: e.shiftKey, added: addedToSelection };
 
@@ -2286,6 +2305,7 @@ export async function renderMap(root) {
           }
           mapState.selectionIds = Array.from(set);
           mapState.previewSelection = null;
+          mapState.selectionPreviewSignature = '';
           updateSelectionHighlight();
         }
         mapState.lastPointerDownInfo = null;
@@ -2356,6 +2376,7 @@ export async function renderMap(root) {
           }
           mapState.selectionIds = Array.from(set);
           mapState.previewSelection = null;
+          mapState.selectionPreviewSignature = '';
           updateSelectionHighlight();
         }
         mapState.lastPointerDownInfo = null;
@@ -2569,6 +2590,7 @@ function attachSvgEvents(svg) {
     if (mapState.selectionIds.length || mapState.previewSelection) {
       mapState.selectionIds = [];
       mapState.previewSelection = null;
+      mapState.selectionPreviewSignature = '';
       updateSelectionHighlight();
     }
     setAreaInteracting(false);
@@ -2888,6 +2910,7 @@ async function handlePointerUp(e) {
     if (!wasDragged && (mapState.selectionIds.length || mapState.previewSelection)) {
       mapState.selectionIds = [];
       mapState.previewSelection = null;
+      mapState.selectionPreviewSignature = '';
       updateSelectionHighlight();
     }
   }
@@ -2896,6 +2919,7 @@ async function handlePointerUp(e) {
     const selected = computeSelectionFromRect();
     mapState.selectionIds = selected;
     mapState.previewSelection = null;
+    mapState.selectionPreviewSignature = '';
     mapState.selectionRect = null;
     mapState.selectionBox.classList.add('hidden');
     updateSelectionHighlight();
@@ -3039,75 +3063,26 @@ function getElementRadius(entry, id) {
   return getNodeRadius(id);
 }
 
-function collectNodesInRect(minX, maxX, minY, maxY, { threshold = SELECTION_COVERAGE_THRESHOLD } = {}) {
+function collectNodesInRect(minX, maxX, minY, maxY) {
   const preview = [];
-  const rect = { minX, maxX, minY, maxY };
+  const seen = new Set();
   mapState.elements.forEach((entry, id) => {
     const pos = getElementPosition(entry, id);
     if (!pos) return;
     const radius = getElementRadius(entry, id);
-    if (!Number.isFinite(radius) || radius <= 0) return;
-    const coverage = estimateNodeCoverageWithinRect(pos, radius, rect);
-    if (coverage >= threshold) {
-      preview.push(id);
+    if (!Number.isFinite(radius) || radius < 0) return;
+    const insideBox = pos.x >= minX && pos.x <= maxX && pos.y >= minY && pos.y <= maxY;
+    const intersectsBox = !insideBox
+      ? pos.x + radius >= minX && pos.x - radius <= maxX && pos.y + radius >= minY && pos.y - radius <= maxY
+      : true;
+    if (insideBox || intersectsBox) {
+      if (!seen.has(id)) {
+        preview.push(id);
+        seen.add(id);
+      }
     }
   });
   return preview;
-}
-
-function estimateNodeCoverageWithinRect(center, radius, rect) {
-  const epsilon = 0.0001;
-  const circleMinX = center.x - radius;
-  const circleMaxX = center.x + radius;
-  const circleMinY = center.y - radius;
-  const circleMaxY = center.y + radius;
-
-  if (
-    circleMaxX <= rect.minX + epsilon ||
-    circleMinX >= rect.maxX - epsilon ||
-    circleMaxY <= rect.minY + epsilon ||
-    circleMinY >= rect.maxY - epsilon
-  ) {
-    return 0;
-  }
-
-  if (
-    circleMinX >= rect.minX - epsilon &&
-    circleMaxX <= rect.maxX + epsilon &&
-    circleMinY >= rect.minY - epsilon &&
-    circleMaxY <= rect.maxY + epsilon
-  ) {
-    return 1;
-  }
-
-  const diameter = radius * 2;
-  const gridSize = Math.max(7, Math.min(21, Math.ceil(diameter / 12)));
-  const step = diameter / (gridSize - 1 || 1);
-  const radiusSq = radius * radius;
-  let covered = 0;
-  let total = 0;
-
-  for (let gx = 0; gx < gridSize; gx += 1) {
-    const offsetX = -radius + gx * step;
-    for (let gy = 0; gy < gridSize; gy += 1) {
-      const offsetY = -radius + gy * step;
-      if (offsetX * offsetX + offsetY * offsetY > radiusSq + epsilon) continue;
-      total += 1;
-      const sampleX = center.x + offsetX;
-      const sampleY = center.y + offsetY;
-      if (
-        sampleX >= rect.minX - epsilon &&
-        sampleX <= rect.maxX + epsilon &&
-        sampleY >= rect.minY - epsilon &&
-        sampleY <= rect.maxY + epsilon
-      ) {
-        covered += 1;
-      }
-    }
-  }
-
-  if (!total) return 0;
-  return covered / total;
 }
 
 function updateSelectionBox() {
@@ -3130,8 +3105,13 @@ function updateSelectionBox() {
   const maxX = Math.max(startMap.x, currentMap.x);
   const minY = Math.min(startMap.y, currentMap.y);
   const maxY = Math.max(startMap.y, currentMap.y);
-  mapState.previewSelection = collectNodesInRect(minX, maxX, minY, maxY);
-  updateSelectionHighlight();
+  const preview = collectNodesInRect(minX, maxX, minY, maxY);
+  const signature = preview.length ? preview.slice().sort().join('|') : '';
+  if (signature !== mapState.selectionPreviewSignature) {
+    mapState.previewSelection = preview;
+    mapState.selectionPreviewSignature = signature;
+    updateSelectionHighlight();
+  }
 }
 
 function refreshSelectionRectFromClients({ updateStart = false } = {}) {
@@ -3320,9 +3300,78 @@ function getLineThicknessValue(key) {
 }
 
 function normalizeLineStyle(style) {
-  if (!style) return DEFAULT_LINE_STYLE;
-  if (style === 'arrow') return 'arrow-end';
-  return LINE_STYLE_VALUE_SET.has(style) ? style : DEFAULT_LINE_STYLE;
+  if (LINE_STYLE_VALUE_SET.has(style)) {
+    return style;
+  }
+  if (style && LEGACY_STYLE_MAPPINGS[style]?.style && LINE_STYLE_VALUE_SET.has(LEGACY_STYLE_MAPPINGS[style].style)) {
+    return LEGACY_STYLE_MAPPINGS[style].style;
+  }
+  return DEFAULT_LINE_STYLE;
+}
+
+function normalizeLineDecoration(decoration, styleHint) {
+  if (LINE_DECORATION_VALUE_SET.has(decoration)) {
+    return decoration;
+  }
+  if (styleHint && LEGACY_STYLE_MAPPINGS[styleHint]?.decoration) {
+    const mapped = LEGACY_STYLE_MAPPINGS[styleHint].decoration;
+    if (LINE_DECORATION_VALUE_SET.has(mapped)) {
+      return mapped;
+    }
+  }
+  return DEFAULT_LINE_DECORATION;
+}
+
+function normalizeDecorationDirection(direction, decoration, styleHint) {
+  if (decoration === 'none') {
+    return DEFAULT_DECORATION_DIRECTION;
+  }
+  if (LINE_DIRECTION_VALUE_SET.has(direction)) {
+    return direction;
+  }
+  if (styleHint && LEGACY_STYLE_MAPPINGS[styleHint]?.decorationDirection) {
+    const mapped = LEGACY_STYLE_MAPPINGS[styleHint].decorationDirection;
+    if (LINE_DIRECTION_VALUE_SET.has(mapped)) {
+      return mapped;
+    }
+  }
+  return DEFAULT_DECORATION_DIRECTION;
+}
+
+function normalizeLineGlow(glow, styleHint) {
+  if (typeof glow === 'string') {
+    if (glow === 'true' || glow === '1') return true;
+    if (glow === 'false' || glow === '0') return false;
+  }
+  if (typeof glow === 'number') {
+    return glow !== 0;
+  }
+  if (typeof glow === 'boolean') {
+    return glow;
+  }
+  if (styleHint && LEGACY_STYLE_MAPPINGS[styleHint]?.glow) {
+    return true;
+  }
+  return DEFAULT_LINE_GLOW;
+}
+
+function normalizeLinkAppearance(info = {}) {
+  const styleHint = info.style ?? info.linkStyle;
+  const style = normalizeLineStyle(styleHint);
+  const decoration = normalizeLineDecoration(info.decoration, styleHint);
+  const decorationDirection = normalizeDecorationDirection(
+    info.decorationDirection,
+    decoration,
+    styleHint
+  );
+  const glow = normalizeLineGlow(info.glow, styleHint);
+  return { style, decoration, decorationDirection, glow };
+}
+
+function flipDecorationDirection(direction) {
+  if (direction === 'start') return 'end';
+  if (direction === 'end') return 'start';
+  return direction || DEFAULT_DECORATION_DIRECTION;
 }
 
 function updateNodeGeometry(id, entry = mapState.elements.get(id)) {
@@ -3594,9 +3643,18 @@ function applyLinkVisibility(aId, bId, info = {}) {
 }
 
 function normalizeLinkEntry(targetId, info = {}) {
+  const appearance = normalizeLinkAppearance({
+    style: info.style ?? info.linkStyle ?? DEFAULT_LINE_STYLE,
+    decoration: info.decoration,
+    decorationDirection: info.decorationDirection ?? info.direction,
+    glow: info.glow
+  });
   const entry = {
     id: targetId,
-    style: normalizeLineStyle(info.style ?? info.linkStyle ?? DEFAULT_LINE_STYLE),
+    style: appearance.style,
+    decoration: appearance.decoration,
+    decorationDirection: appearance.decorationDirection,
+    glow: Boolean(appearance.glow),
     thickness: info.thickness || DEFAULT_LINE_THICKNESS,
     color: info.color || DEFAULT_LINK_COLOR,
     name: typeof info.name === 'string' ? info.name : '',
@@ -3687,6 +3745,7 @@ function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
         if (tool.id !== TOOL.AREA) {
           mapState.selectionIds = [];
           mapState.previewSelection = null;
+          mapState.selectionPreviewSignature = '';
         }
         if (tool.id !== TOOL.ADD_LINK) {
           mapState.pendingLink = null;
@@ -4169,6 +4228,9 @@ async function handleAddLinkClick(nodeId) {
     name: label,
     color: DEFAULT_LINK_COLOR,
     style: DEFAULT_LINE_STYLE,
+    decoration: DEFAULT_LINE_DECORATION,
+    decorationDirection: DEFAULT_DECORATION_DIRECTION,
+    glow: DEFAULT_LINE_GLOW,
     thickness: DEFAULT_LINE_THICKNESS,
     hidden: false
   });
@@ -4316,13 +4378,16 @@ function openLinkAssistant(nodeId) {
         linkBtn.addEventListener('click', async () => {
           try {
             const label = labelInput.value.trim();
-            const result = await createLink(source.id, target.id, {
-              name: label,
-              color: DEFAULT_LINK_COLOR,
-              style: DEFAULT_LINE_STYLE,
-              thickness: DEFAULT_LINE_THICKNESS,
-              hidden: false
-            });
+        const result = await createLink(source.id, target.id, {
+          name: label,
+          color: DEFAULT_LINK_COLOR,
+          style: DEFAULT_LINE_STYLE,
+          decoration: DEFAULT_LINE_DECORATION,
+          decorationDirection: DEFAULT_DECORATION_DIRECTION,
+          glow: DEFAULT_LINE_GLOW,
+          thickness: DEFAULT_LINE_THICKNESS,
+          hidden: false
+        });
             if (result) {
               integrateItemUpdates(result.source, result.target);
               existingLinks.set(target.id, result.forward);
@@ -4458,7 +4523,7 @@ function adjustScale() {
   const zoomRatio = w / defaultSize;
   const nodeScale = clamp(Math.pow(zoomRatio, 0.02), 0.85, 1.35);
   const labelScale = clamp(Math.pow(zoomRatio, 0.18), 0.95, 2.6);
-  const lineScale = clamp(Math.pow(zoomRatio, 0.04), 0.92, 1.28);
+  const lineScale = 1;
 
   mapState.lastScaleSize = { w, h: height };
   mapState.currentScales = { nodeScale, labelScale, lineScale, zoomRatio };
@@ -4590,19 +4655,26 @@ function computeCurveOffset(aId, bId, segment, manualCurve) {
   return 0;
 }
 
-function computeStyleTrim(style, baseWidth) {
+function computeDecorationTrim(decoration, direction, baseWidth) {
   const arrowAllowance = Math.max(18, baseWidth * 3.4);
   const inhibitAllowance = Math.max(10, baseWidth * 2.2);
   let trimA = 0;
   let trimB = 0;
-  if (style === 'arrow-start' || style === 'arrow-both') {
-    trimA += arrowAllowance;
+  if (decoration === 'arrow') {
+    if (direction === 'start' || direction === 'both') {
+      trimA += arrowAllowance;
+    }
+    if (direction === 'end' || direction === 'both') {
+      trimB += arrowAllowance;
+    }
   }
-  if (style === 'arrow-end' || style === 'arrow-both') {
-    trimB += arrowAllowance;
-  }
-  if (style === 'inhibit') {
-    trimB += inhibitAllowance;
+  if (decoration === 'inhibit') {
+    if (direction === 'start' || direction === 'both') {
+      trimA += inhibitAllowance;
+    }
+    if (direction === 'end' || direction === 'both') {
+      trimB += inhibitAllowance;
+    }
   }
   return { trimA, trimB };
 }
@@ -4622,10 +4694,18 @@ function computeCurveControlPoint(aId, bId, segment, manualCurve, manualAnchor) 
 
 function getLineGeometry(aId, bId, options = {}) {
   const line = options.line || null;
-  const style = normalizeLineStyle(options.style ?? line?.dataset?.style);
+  const appearanceSource = {
+    style: options.style ?? options.linkStyle ?? line?.dataset?.style,
+    decoration: options.decoration ?? line?.dataset?.decoration,
+    decorationDirection:
+      options.decorationDirection ?? options.direction ?? line?.dataset?.direction ?? line?.dataset?.decorationDirection,
+    glow: options.glow ?? line?.dataset?.glow
+  };
+  const appearance = normalizeLinkAppearance(appearanceSource);
+  const { style, decoration, decorationDirection } = appearance;
   const thicknessKey = options.thickness ?? line?.dataset?.thickness ?? DEFAULT_LINE_THICKNESS;
   const baseWidth = getLineThicknessValue(thicknessKey);
-  const trims = computeStyleTrim(style, baseWidth);
+  const trims = computeDecorationTrim(decoration, decorationDirection, baseWidth);
   const segment = computeTrimmedSegment(aId, bId, trims);
   if (!segment) return null;
   let curveOverride;
@@ -4649,7 +4729,16 @@ function getLineGeometry(aId, bId, options = {}) {
   }
 
   const { cx, cy, anchor } = computeCurveControlPoint(aId, bId, segment, curveOverride, anchorOverride);
-  return { ...segment, cx, cy, style, baseWidth, anchor: anchor ?? DEFAULT_CURVE_ANCHOR };
+  return {
+    ...segment,
+    cx,
+    cy,
+    style,
+    decoration,
+    decorationDirection,
+    baseWidth,
+    anchor: anchor ?? DEFAULT_CURVE_ANCHOR
+  };
 }
 
 function getQuadraticPoint(start, control, end, t) {
@@ -4675,8 +4764,8 @@ function calcPath(aId, bId, line = null, info = {}) {
 }
 
 function applyLineStyle(line, info = {}) {
+  if (!line) return;
   const previousColor = line.dataset.color;
-  const previousStyle = line.dataset.style;
   const previousThickness = line.dataset.thickness;
   const previousLabel = line.dataset.label;
   const hadCurveAttr = Object.prototype.hasOwnProperty.call(line.dataset || {}, 'curve');
@@ -4713,12 +4802,46 @@ function applyLineStyle(line, info = {}) {
   }
 
   const color = info.color ?? previousColor ?? DEFAULT_LINK_COLOR;
-  const style = normalizeLineStyle(info.style ?? previousStyle);
   const thickness = info.thickness ?? previousThickness ?? DEFAULT_LINE_THICKNESS;
   const label = info.name ?? previousLabel ?? '';
 
+  const datasetAppearance = {
+    style: line.dataset.style,
+    decoration: line.dataset.decoration,
+    decorationDirection: line.dataset.direction ?? line.dataset.decorationDirection,
+    glow: line.dataset.glow
+  };
+  const overrideAppearance = {};
+  if (Object.prototype.hasOwnProperty.call(info, 'style')) overrideAppearance.style = info.style;
+  if (Object.prototype.hasOwnProperty.call(info, 'decoration')) overrideAppearance.decoration = info.decoration;
+  if (Object.prototype.hasOwnProperty.call(info, 'decorationDirection')) {
+    overrideAppearance.decorationDirection = info.decorationDirection;
+  } else if (Object.prototype.hasOwnProperty.call(info, 'direction')) {
+    overrideAppearance.decorationDirection = info.direction;
+  }
+  if (Object.prototype.hasOwnProperty.call(info, 'glow')) overrideAppearance.glow = info.glow;
+  const { style, decoration, decorationDirection, glow } = normalizeLinkAppearance({
+    ...datasetAppearance,
+    ...overrideAppearance
+  });
+
   line.dataset.color = color;
   line.dataset.style = style;
+  if (decoration && decoration !== 'none') {
+    line.dataset.decoration = decoration;
+  } else {
+    delete line.dataset.decoration;
+  }
+  if (decorationDirection) {
+    line.dataset.direction = decorationDirection;
+  } else {
+    delete line.dataset.direction;
+  }
+  if (glow) {
+    line.dataset.glow = '1';
+  } else {
+    delete line.dataset.glow;
+  }
   line.dataset.thickness = thickness;
   line.dataset.baseWidth = String(getLineThicknessValue(thickness));
   line.dataset.label = label;
@@ -4727,6 +4850,12 @@ function applyLineStyle(line, info = {}) {
   if (style) {
     line.classList.add(`map-edge--${style}`);
   }
+  LINE_DECORATION_CLASSNAMES.forEach(cls => line.classList.remove(cls));
+  if (decoration && decoration !== 'none') {
+    line.classList.add(`map-edge--decoration-${decoration}`);
+  }
+  line.classList.toggle('map-edge--glow', glow);
+  line.classList.toggle('edge-glow', glow);
 
   line.style.stroke = color;
   line.style.color = color;
@@ -4737,11 +4866,13 @@ function applyLineStyle(line, info = {}) {
   line.removeAttribute('marker-end');
   line.removeAttribute('marker-mid');
   line.removeAttribute('stroke-dasharray');
-  line.classList.remove('edge-glow');
 
   const effectiveAnchor = Number.isFinite(anchor) ? anchor : normalizeAnchorValue(line.dataset.anchor) ?? DEFAULT_CURVE_ANCHOR;
   const geometryInfo = {
     ...info,
+    style,
+    decoration,
+    decorationDirection,
     curve,
     anchor: effectiveAnchor,
     curveAnchor: effectiveAnchor
@@ -4765,17 +4896,13 @@ function applyLineStyle(line, info = {}) {
     line.setAttribute('stroke-linecap', 'round');
   }
 
-  if (style === 'arrow-end') {
-    line.setAttribute('marker-end', 'url(#arrow-end)');
-  } else if (style === 'arrow-start') {
-    line.setAttribute('marker-start', 'url(#arrow-start)');
-  } else if (style === 'arrow-both') {
-    line.setAttribute('marker-start', 'url(#arrow-start)');
-    line.setAttribute('marker-end', 'url(#arrow-end)');
-  }
-
-  if (style === 'glow') {
-    line.classList.add('edge-glow');
+  if (decoration === 'arrow') {
+    if (decorationDirection === 'start' || decorationDirection === 'both') {
+      line.setAttribute('marker-start', 'url(#arrow-start)');
+    }
+    if (decorationDirection === 'end' || decorationDirection === 'both') {
+      line.setAttribute('marker-end', 'url(#arrow-end)');
+    }
   }
 
   const title = line.querySelector('title');
@@ -4835,11 +4962,11 @@ function updateLineStrokeWidth(line) {
 }
 
 function syncLineDecoration(line) {
-  const style = normalizeLineStyle(line?.dataset?.style);
-  if (style === 'blocked') {
+  const decoration = line?.dataset?.decoration || DEFAULT_LINE_DECORATION;
+  if (decoration === 'block') {
     const overlay = ensureLineOverlay(line);
     if (overlay) updateBlockedOverlay(line, overlay);
-  } else if (style === 'inhibit') {
+  } else if (decoration === 'inhibit') {
     const overlay = ensureLineOverlay(line);
     if (overlay) updateInhibitOverlay(line, overlay);
   } else {
@@ -4902,9 +5029,10 @@ function updateBlockedOverlay(line, overlay) {
   overlay.setAttribute('d', pathData);
   const overlayBase = Math.max(geometry.baseWidth * 1.35, 2.8);
   overlay.dataset.baseWidth = String(overlayBase);
-  overlay.dataset.decoration = 'blocked';
-  overlay.setAttribute('stroke', '#f43f5e');
-  overlay.style.stroke = '#f43f5e';
+  overlay.dataset.decoration = 'block';
+  const color = line.dataset.color || line.getAttribute('stroke') || '#f43f5e';
+  overlay.setAttribute('stroke', color);
+  overlay.style.stroke = color;
   overlay.setAttribute('stroke-width', overlayBase * lineScale);
 }
 
@@ -4915,26 +5043,35 @@ function updateInhibitOverlay(line, overlay) {
   const start = { x: geometry.startX, y: geometry.startY };
   const control = { x: geometry.cx, y: geometry.cy };
   const end = { x: geometry.endX, y: geometry.endY };
-  const tangent = getQuadraticTangent(start, control, end, 1);
   const { lineScale = 1 } = getCurrentScales();
   const scaledWidth = geometry.baseWidth * lineScale;
   const stemLength = Math.max(24, scaledWidth * 4.4);
   const barLength = Math.max(22, scaledWidth * 3.2);
   const retreat = Math.max(8, scaledWidth * 1.35);
-  const tip = { x: end.x, y: end.y };
-  const stemStart = { x: tip.x - tangent.x * stemLength, y: tip.y - tangent.y * stemLength };
-  const mid = { x: tip.x - tangent.x * retreat, y: tip.y - tangent.y * retreat };
-  const normal = { x: -tangent.y, y: tangent.x };
-  const halfBar = barLength / 2;
-  const barA = { x: mid.x + normal.x * halfBar, y: mid.y + normal.y * halfBar };
-  const barB = { x: mid.x - normal.x * halfBar, y: mid.y - normal.y * halfBar };
-  overlay.setAttribute(
-    'd',
-    `M${stemStart.x} ${stemStart.y} L${tip.x} ${tip.y} M${barA.x} ${barA.y} L${barB.x} ${barB.y}`
-  );
+  const segments = [];
+  const buildSegment = (tip, tangent, directionSign) => {
+    const stemStart = { x: tip.x - tangent.x * stemLength * directionSign, y: tip.y - tangent.y * stemLength * directionSign };
+    const mid = { x: tip.x - tangent.x * retreat * directionSign, y: tip.y - tangent.y * retreat * directionSign };
+    const normal = { x: -tangent.y, y: tangent.x };
+    const halfBar = barLength / 2;
+    const barA = { x: mid.x + normal.x * halfBar, y: mid.y + normal.y * halfBar };
+    const barB = { x: mid.x - normal.x * halfBar, y: mid.y - normal.y * halfBar };
+    return `M${stemStart.x} ${stemStart.y} L${tip.x} ${tip.y} M${barA.x} ${barA.y} L${barB.x} ${barB.y}`;
+  };
+  const direction = geometry.decorationDirection || line.dataset.direction || DEFAULT_DECORATION_DIRECTION;
+  if (direction === 'start' || direction === 'both') {
+    const tangentStart = getQuadraticTangent(start, control, end, 0);
+    segments.push(buildSegment(start, tangentStart, -1));
+  }
+  if (direction === 'end' || direction === 'both') {
+    const tangentEnd = getQuadraticTangent(start, control, end, 1);
+    segments.push(buildSegment(end, tangentEnd, 1));
+  }
+  overlay.setAttribute('d', segments.join(' '));
   const overlayBase = Math.max(geometry.baseWidth * 0.95, 2.6);
   overlay.dataset.baseWidth = String(overlayBase);
   overlay.dataset.decoration = 'inhibit';
+  overlay.dataset.direction = direction;
   const color = line.dataset.color || line.getAttribute('stroke') || DEFAULT_LINK_COLOR;
   overlay.setAttribute('stroke', color);
   overlay.style.stroke = color;
@@ -4954,6 +5091,9 @@ async function createLink(aId, bId, info) {
   if (!a || !b) return null;
   const linkInfo = normalizeLinkEntry(bId, info);
   const reverseInfo = normalizeLinkEntry(aId, info);
+  if (reverseInfo.decoration && reverseInfo.decoration !== 'none' && reverseInfo.decoration !== 'block') {
+    reverseInfo.decorationDirection = flipDecorationDirection(linkInfo.decorationDirection);
+  }
   a.links = Array.isArray(a.links) ? a.links.filter(l => String(l?.id) !== String(bId)) : [];
   b.links = Array.isArray(b.links) ? b.links.filter(l => String(l?.id) !== String(aId)) : [];
   a.links.push({ ...linkInfo });
@@ -4985,6 +5125,12 @@ function titleOf(item) {
 async function openLineMenu(evt, line, aId, bId) {
   const existing = await getItem(aId);
   const link = existing.links.find(l => l.id === bId) || {};
+  const appearance = normalizeLinkAppearance({
+    style: link.style ?? link.linkStyle ?? DEFAULT_LINE_STYLE,
+    decoration: link.decoration,
+    decorationDirection: link.decorationDirection,
+    glow: link.glow
+  });
   const menu = document.createElement('div');
   menu.className = 'line-menu';
   menu.style.left = evt.pageX + 'px';
@@ -5007,9 +5153,44 @@ async function openLineMenu(evt, line, aId, bId) {
     opt.textContent = option.label;
     typeSel.appendChild(opt);
   });
-  typeSel.value = normalizeLineStyle(link.style || DEFAULT_LINE_STYLE);
+  typeSel.value = appearance.style;
   typeLabel.appendChild(typeSel);
   menu.appendChild(typeLabel);
+
+  const decorationLabel = document.createElement('label');
+  decorationLabel.textContent = 'Decoration';
+  const decorationSel = document.createElement('select');
+  LINE_DECORATION_OPTIONS.forEach(option => {
+    const opt = document.createElement('option');
+    opt.value = option.value;
+    opt.textContent = option.label;
+    decorationSel.appendChild(opt);
+  });
+  decorationSel.value = appearance.decoration;
+  decorationLabel.appendChild(decorationSel);
+  menu.appendChild(decorationLabel);
+
+  const directionLabel = document.createElement('label');
+  directionLabel.textContent = 'Direction';
+  const directionSel = document.createElement('select');
+  LINE_DECORATION_DIRECTION_OPTIONS.forEach(option => {
+    const opt = document.createElement('option');
+    opt.value = option.value;
+    opt.textContent = option.label;
+    directionSel.appendChild(opt);
+  });
+  directionSel.value = appearance.decorationDirection;
+  directionLabel.appendChild(directionSel);
+  menu.appendChild(directionLabel);
+
+  const glowField = document.createElement('label');
+  glowField.className = 'line-menu-toggle';
+  const glowInput = document.createElement('input');
+  glowInput.type = 'checkbox';
+  glowInput.checked = Boolean(appearance.glow);
+  glowField.appendChild(glowInput);
+  glowField.appendChild(document.createTextNode(' Glow highlight'));
+  menu.appendChild(glowField);
 
   const thickLabel = document.createElement('label');
   thickLabel.textContent = 'Thickness';
@@ -5032,6 +5213,17 @@ async function openLineMenu(evt, line, aId, bId) {
   nameLabel.appendChild(nameInput);
   menu.appendChild(nameLabel);
 
+  const updateDirectionDisabled = () => {
+    const deco = decorationSel.value;
+    const disable = deco === 'none' || deco === 'block';
+    directionSel.disabled = disable;
+    if (disable) {
+      directionSel.value = DEFAULT_DECORATION_DIRECTION;
+    }
+  };
+  decorationSel.addEventListener('change', updateDirectionDisabled);
+  updateDirectionDisabled();
+
   const btn = document.createElement('button');
   btn.className = 'btn';
   btn.textContent = 'Save';
@@ -5039,6 +5231,11 @@ async function openLineMenu(evt, line, aId, bId) {
     const patch = {
       color: colorInput.value,
       style: typeSel.value,
+      decoration: decorationSel.value,
+      decorationDirection: decorationSel.value === 'none' || decorationSel.value === 'block'
+        ? DEFAULT_DECORATION_DIRECTION
+        : directionSel.value,
+      glow: glowInput.checked,
       thickness: thickSel.value,
       name: nameInput.value
     };
@@ -5062,30 +5259,67 @@ async function updateLink(aId, bId, patch) {
   const a = await getItem(aId);
   const b = await getItem(bId);
   if (!a || !b) return null;
-  const apply = (item, otherId) => {
+  const existingForward = Array.isArray(a.links)
+    ? a.links.find(x => String(x?.id) === String(bId))
+    : null;
+  const forwardDecoration = Object.prototype.hasOwnProperty.call(patch, 'decoration')
+    ? patch.decoration
+    : existingForward?.decoration ?? DEFAULT_LINE_DECORATION;
+  const forwardDirection = Object.prototype.hasOwnProperty.call(patch, 'decorationDirection')
+    ? patch.decorationDirection
+    : existingForward?.decorationDirection ?? DEFAULT_DECORATION_DIRECTION;
+  const reversePatch = { ...patch };
+  if (Object.prototype.hasOwnProperty.call(patch, 'decoration')) {
+    reversePatch.decoration = forwardDecoration;
+  }
+  if (forwardDecoration && forwardDecoration !== 'none' && forwardDecoration !== 'block') {
+    reversePatch.decorationDirection = flipDecorationDirection(forwardDirection);
+  } else if (Object.prototype.hasOwnProperty.call(patch, 'decorationDirection')) {
+    reversePatch.decorationDirection = DEFAULT_DECORATION_DIRECTION;
+  }
+
+  const apply = (item, otherId, patchValue) => {
     item.links = item.links || [];
     let link = item.links.find(x => String(x?.id) === String(otherId));
     if (link) {
-      Object.assign(link, patch);
+      Object.assign(link, patchValue);
     } else {
-      link = normalizeLinkEntry(otherId, patch);
+      link = normalizeLinkEntry(otherId, patchValue);
       item.links.push(link);
     }
     return { ...link };
   };
-  const forward = apply(a, bId);
-  const reverse = apply(b, aId);
+  const forward = apply(a, bId, patch);
+  const reverse = apply(b, aId, reversePatch);
   await upsertItem(a);
   await upsertItem(b);
   return { source: a, target: b, forward, reverse };
 }
 
 function applyLinkPatchToState(aId, bId, patch = {}) {
-  const apply = (item, otherId) => {
+  const source = mapState.itemMap?.[aId];
+  const forwardLink = source?.links?.find(x => String(x?.id) === String(bId)) || null;
+  const forwardDecoration = Object.prototype.hasOwnProperty.call(patch, 'decoration')
+    ? patch.decoration
+    : forwardLink?.decoration ?? DEFAULT_LINE_DECORATION;
+  const forwardDirection = Object.prototype.hasOwnProperty.call(patch, 'decorationDirection')
+    ? patch.decorationDirection
+    : forwardLink?.decorationDirection ?? DEFAULT_DECORATION_DIRECTION;
+  const reversePatch = { ...patch };
+  if (Object.prototype.hasOwnProperty.call(patch, 'decoration')) {
+    reversePatch.decoration = forwardDecoration;
+  }
+  if (forwardDecoration && forwardDecoration !== 'none' && forwardDecoration !== 'block') {
+    reversePatch.decorationDirection = flipDecorationDirection(forwardDirection);
+  } else if (Object.prototype.hasOwnProperty.call(patch, 'decorationDirection')) {
+    reversePatch.decorationDirection = DEFAULT_DECORATION_DIRECTION;
+  }
+
+  const assign = (item, otherId, patchValue) => {
     if (!item || !Array.isArray(item.links)) return;
-    const link = item.links.find(x => x.id === otherId);
-    if (link) Object.assign(link, patch);
+    const link = item.links.find(x => String(x?.id) === String(otherId));
+    if (link) Object.assign(link, patchValue);
   };
-  apply(mapState.itemMap?.[aId], bId);
-  apply(mapState.itemMap?.[bId], aId);
+  assign(source, bId, patch);
+  assign(mapState.itemMap?.[bId], aId, reversePatch);
 }
