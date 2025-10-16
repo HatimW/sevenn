@@ -5030,8 +5030,11 @@ button.builder-pill.builder-pill-outline {
   pointer-events: auto;
 }
 
+.map-edge-handle--hover,
 .map-edge-handle:hover {
-  transform: scale(1.08);
+  transform: scale(1.16);
+  stroke-width: 2.6px;
+  filter: drop-shadow(0 0 6px rgba(148, 163, 184, 0.5));
 }
 
 .map-edge-handle:active {
