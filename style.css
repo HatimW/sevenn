@@ -5022,7 +5022,8 @@ button.builder-pill.builder-pill-outline {
   pointer-events: none;
   cursor: grab;
   touch-action: none;
-  transition: opacity 160ms ease, transform 160ms ease;
+  transform-origin: center;
+  transition: opacity 160ms ease, transform 160ms ease, stroke-width 120ms ease;
 }
 
 .map-edge-handle.visible {
@@ -5030,8 +5031,10 @@ button.builder-pill.builder-pill-outline {
   pointer-events: auto;
 }
 
-.map-edge-handle:hover {
-  transform: scale(1.08);
+.map-edge-handle--hover {
+  transform: scale(1.18);
+  stroke-width: 2.6px;
+  fill: rgba(15, 23, 42, 0.86);
 }
 
 .map-edge-handle:active {

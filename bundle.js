@@ -21603,6 +21603,7 @@
     await updateLink(aId, bId, patch);
     applyLineStyle(line, patch);
     applyLinkPatchToState(aId, bId, patch);
+    hideLineHandles(line, { force: true });
     mapState.edgeDragJustCompleted = true;
     setTimeout(() => {
       mapState.edgeDragJustCompleted = false;
@@ -21636,12 +21637,21 @@
       showEdgeTooltip(path, evt);
       applyLineHover(path);
     });
-    path.addEventListener("mouseleave", () => {
+    path.addEventListener("mouseleave", (evt) => {
       if (mapState.tool === TOOL.HIDE) {
         clearCursorOverride("hide");
       }
       if (mapState.tool === TOOL.BREAK) {
         clearCursorOverride("break");
+      }
+      const nextTarget = evt?.relatedTarget;
+      if (nextTarget && typeof nextTarget.closest === "function") {
+        if (nextTarget.closest(".map-edge-handle")) {
+          return;
+        }
+        if (nextTarget.closest(".map-edge-decoration")) {
+          return;
+        }
       }
       hideLineHandles(path);
       hideEdgeTooltip(path);
@@ -22521,7 +22531,8 @@
     const zoomRatio = w / defaultSize;
     const nodeScale = clamp2(Math.pow(zoomRatio, 0.02), 0.85, 1.35);
     const labelScale = clamp2(Math.pow(zoomRatio, 0.18), 0.95, 2.6);
-    const lineScale = 1;
+    const normalizedZoom = clamp2(zoomRatio, 0.12, 6);
+    const lineScale = clamp2(Math.pow(normalizedZoom, -0.38), 0.92, 2.65);
     mapState.lastScaleSize = { w, h: height };
     mapState.currentScales = { nodeScale, labelScale, lineScale, zoomRatio };
     updateMarkerSizes();
@@ -23433,7 +23444,7 @@
     const nextElements = [];
     const color = getLineStrokeColor(line);
     const { lineScale = 1 } = getCurrentScales();
-    const baseRadius = Math.max(7, Math.min(16, (geometry?.baseWidth || 3) * lineScale * 1.6 + 4));
+    const baseRadius = Math.max(11, Math.min(24, (geometry?.baseWidth || 3) * lineScale * 1.85 + 6));
     const updateCircle = (circle, handle, index) => {
       const point = handle?.point || handle?.base || {
         x: geometry.startX + (geometry.endX - geometry.startX) * (handle?.position ?? DEFAULT_CURVE_ANCHOR),
@@ -23465,14 +23476,31 @@
           const handleIndex = Number(evt.currentTarget?.dataset?.index) || 0;
           startHandlePress(line, handleIndex, evt);
         });
-        circle.addEventListener("pointerenter", () => {
+        circle.addEventListener("pointerenter", (evt) => {
+          circle.classList.add("map-edge-handle--hover");
           showLineHandles(line);
           applyLineHover(line);
+          evt.stopPropagation();
         });
-        circle.addEventListener("pointerleave", () => {
+        circle.addEventListener("pointerleave", (evt) => {
+          circle.classList.remove("map-edge-handle--hover");
+          const nextTarget = evt?.relatedTarget;
+          if (nextTarget && typeof nextTarget.closest === "function") {
+            if (nextTarget.closest(".map-edge-handle")) {
+              return;
+            }
+            if (nextTarget.closest(".map-edge")) {
+              return;
+            }
+            if (nextTarget.closest(".map-edge-decoration")) {
+              return;
+            }
+          }
           hideLineHandles(line);
           clearLineHover(line);
         });
+        parent.appendChild(circle);
+      } else if (circle.parentNode !== parent) {
         parent.appendChild(circle);
       }
       updateCircle(circle, handle, index);
@@ -23498,6 +23526,9 @@
     line._handleElements.forEach((circle) => {
       circle.classList.toggle("visible", visible);
       circle.style.pointerEvents = visible ? "auto" : "none";
+      if (!visible) {
+        circle.classList.remove("map-edge-handle--hover");
+      }
     });
     line._handleVisible = visible;
   }
