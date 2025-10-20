@@ -18168,7 +18168,8 @@ var Sevenn = (() => {
   var MAX_NODE_RADIUS = 60;
   var MAX_GRAVITY_BOOST2 = 999;
   var NODE_COLLISION_MARGIN = 36;
-  var DEFAULT_REORGANIZE_SPACING = 240;
+  var DEFAULT_REORGANIZE_SPACING = 320;
+  var HANDLE_STICKY_RELEASE_DELAY = 260;
   var LINE_STYLE_OPTIONS = [
     { value: "solid", label: "Smooth" },
     { value: "dashed", label: "Dashed" },
@@ -18655,6 +18656,56 @@ var Sevenn = (() => {
     const workingModel = model || mapState.gravityModel || buildGravityModel(items);
     const { weights, adjacency, neighborWeights, influence, maxWeight } = workingModel;
     const radii = computeRadiiFromModel(workingModel, items);
+    const itemById = new Map(items.map((item) => [item.id, item]));
+    const itemGroupCache = /* @__PURE__ */ new Map();
+    const groupMetrics = /* @__PURE__ */ new Map();
+    let totalRadius = 0;
+    let radiusCount = 0;
+    let maxRadius = MIN_NODE_RADIUS;
+    items.forEach((item) => {
+      const groups = deriveItemGroupKeys(item);
+      itemGroupCache.set(item.id, groups);
+      const radius = radii.get(item.id) || MIN_NODE_RADIUS;
+      if (Number.isFinite(radius)) {
+        totalRadius += radius;
+        radiusCount += 1;
+        if (radius > maxRadius) {
+          maxRadius = radius;
+        }
+      }
+      const primaryGroup = getPrimaryGroupKey(item, groups);
+      if (primaryGroup) {
+        const metric = groupMetrics.get(primaryGroup) || { count: 0, sumRadius: 0, maxRadius: 0 };
+        metric.count += 1;
+        metric.sumRadius += radius;
+        if (radius > metric.maxRadius) {
+          metric.maxRadius = radius;
+        }
+        groupMetrics.set(primaryGroup, metric);
+      }
+    });
+    const avgRadius = radiusCount ? totalRadius / radiusCount : MIN_NODE_RADIUS;
+    const typicalRadius = Math.max(avgRadius, maxRadius * 0.75, MIN_NODE_RADIUS);
+    const nodeLength = Math.max(80, typicalRadius * 2.25);
+    const groupSpacingBase = Math.max(nodeLength * 1.2, maxRadius * 2.6 + 36);
+    const lectureGap = Math.max(nodeLength * 3, maxRadius * 4.2);
+    const weekGap = Math.max(lectureGap * 1.35, nodeLength * 4.5);
+    const blockGap = Math.max(weekGap * 1.45, nodeLength * 6);
+    const groupSpacingCache = /* @__PURE__ */ new Map();
+    function getGroupSpacing(key) {
+      if (groupSpacingCache.has(key)) {
+        return groupSpacingCache.get(key);
+      }
+      const metric = groupMetrics.get(key) || { count: 0, sumRadius: 0, maxRadius: 0 };
+      const avgR = metric.count ? metric.sumRadius / metric.count : typicalRadius;
+      const spacing = Math.max(
+        groupSpacingBase,
+        avgR * 2.4 + 24,
+        (metric.maxRadius || typicalRadius) * 2.8 + 40
+      );
+      groupSpacingCache.set(key, spacing);
+      return spacing;
+    }
     const order = items.map((item) => item.id).sort((a, b) => {
       const aInfluence = influence.get(a) || 0;
       const bInfluence = influence.get(b) || 0;
@@ -18681,12 +18732,13 @@ var Sevenn = (() => {
       return {};
     }
     const limit = Math.max(mapState.sizeLimit || 0, 2e3);
-    const baseSpacing = options.baseSpacing ?? DEFAULT_REORGANIZE_SPACING;
+    const baseSpacing = Math.max(options.baseSpacing ?? DEFAULT_REORGANIZE_SPACING, groupSpacingBase);
     const center = options.center || computeLayoutCenter();
     const placements = /* @__PURE__ */ new Map();
     const anchorUsage = /* @__PURE__ */ new Map();
     const orphanUsage = { layer: 0, index: 0 };
-    const margin = NODE_COLLISION_MARGIN;
+    const groupMembers = /* @__PURE__ */ new Map();
+    const margin = NODE_COLLISION_MARGIN + Math.max(12, typicalRadius * 0.4);
     const clampPosition = (pos, radius) => {
       const minCoord = radius + margin;
       const maxCoord = Math.max(minCoord, limit - radius - margin);
@@ -18744,7 +18796,8 @@ var Sevenn = (() => {
         if (!anchorId) {
           const nodesInLayer = Math.max(6, 6 + orphanUsage.layer * 4);
           const angle = (orphanUsage.index + (orphanUsage.layer % 2 ? 0.5 : 0)) / nodesInLayer * Math.PI * 2;
-          const distance = baseSpacing + orphanUsage.layer * (baseSpacing * 0.7);
+          const baseOrbit = Math.max(baseSpacing, groupSpacingBase * 1.2);
+          const distance = baseOrbit + orphanUsage.layer * (baseSpacing * 0.75);
           position = {
             x: center.x + Math.cos(angle) * distance,
             y: center.y + Math.sin(angle) * distance
@@ -18765,8 +18818,11 @@ var Sevenn = (() => {
           const angle = (idx + (layer % 2 ? 0.5 : 0)) / nodesInLayer * Math.PI * 2;
           const anchorWeight = weights.get(anchorId) || 0;
           const weightRatio = maxWeight ? clamp2(anchorWeight / maxWeight, 0, 1) : 0;
-          const baseDistance = baseSpacing * (0.75 + (1 - weightRatio) * 0.4);
-          const distance = anchorRadius + radius + baseDistance + layer * (baseSpacing * 0.6);
+          const baseDistance = Math.max(
+            groupSpacingBase * 0.9,
+            baseSpacing * (0.75 + (1 - weightRatio) * 0.4)
+          );
+          const distance = anchorRadius + radius + baseDistance + layer * (baseSpacing * 0.65);
           position = {
             x: anchorPos.x + Math.cos(angle) * distance,
             y: anchorPos.y + Math.sin(angle) * distance
@@ -18801,6 +18857,124 @@ var Sevenn = (() => {
         position = resolveCollisions(id, position);
       }
       placements.set(id, position);
+      const item = itemById.get(id);
+      const groups = itemGroupCache.get(id) || [];
+      const primaryGroup = item ? getPrimaryGroupKey(item, groups) : null;
+      if (primaryGroup) {
+        const list = groupMembers.get(primaryGroup) || [];
+        list.push(id);
+        groupMembers.set(primaryGroup, list);
+      }
+    });
+    const groupData = [];
+    groupMembers.forEach((idsInGroup, key) => {
+      const members = idsInGroup.filter((candidateId) => placements.has(candidateId));
+      if (!members.length) {
+        return;
+      }
+      let cx = 0;
+      let cy = 0;
+      const entries = members.map((memberId) => {
+        const pos = placements.get(memberId);
+        const radius = radii.get(memberId) || typicalRadius;
+        cx += pos.x;
+        cy += pos.y;
+        return { id: memberId, radius };
+      });
+      cx /= entries.length;
+      cy /= entries.length;
+      const spacing = getGroupSpacing(key);
+      const sorted = entries.slice().sort((a, b) => (b.radius || 0) - (a.radius || 0));
+      const columns = Math.max(2, Math.ceil(Math.sqrt(sorted.length)));
+      const rows = Math.max(1, Math.ceil(sorted.length / columns));
+      sorted.forEach((member, index) => {
+        const col = index % columns;
+        const row = Math.floor(index / columns);
+        const offsetX = (col - (columns - 1) / 2) * spacing;
+        const offsetY = (row - (rows - 1) / 2) * spacing;
+        const desired = clampPosition({ x: cx + offsetX, y: cy + offsetY }, member.radius);
+        placements.set(member.id, desired);
+      });
+      let minGX = Infinity;
+      let maxGX = -Infinity;
+      let minGY = Infinity;
+      let maxGY = -Infinity;
+      let newCx = 0;
+      let newCy = 0;
+      sorted.forEach((member) => {
+        const pos = placements.get(member.id);
+        if (!pos) return;
+        newCx += pos.x;
+        newCy += pos.y;
+        minGX = Math.min(minGX, pos.x - member.radius);
+        maxGX = Math.max(maxGX, pos.x + member.radius);
+        minGY = Math.min(minGY, pos.y - member.radius);
+        maxGY = Math.max(maxGY, pos.y + member.radius);
+      });
+      newCx /= sorted.length;
+      newCy /= sorted.length;
+      const width = Number.isFinite(maxGX - minGX) ? maxGX - minGX : spacing;
+      const height = Number.isFinite(maxGY - minGY) ? maxGY - minGY : spacing;
+      groupData.push({
+        key,
+        members: sorted.map((member) => member.id),
+        center: { x: newCx, y: newCy },
+        originalCenter: { x: cx, y: cy },
+        radius: Math.max(width, height) / 2 + spacing * 0.35,
+        parsed: parseGroupKey(key)
+      });
+    });
+    for (let iter = 0; iter < 6; iter += 1) {
+      let moved = false;
+      for (let i = 0; i < groupData.length; i += 1) {
+        for (let j = i + 1; j < groupData.length; j += 1) {
+          const a = groupData[i];
+          const b = groupData[j];
+          const dx = b.center.x - a.center.x;
+          const dy = b.center.y - a.center.y;
+          const dist = Math.hypot(dx, dy) || 1e-4;
+          const sameWeek = a.parsed.block === b.parsed.block && a.parsed.week === b.parsed.week;
+          const sameBlock = a.parsed.block === b.parsed.block;
+          let minDist = Math.max(
+            groupSpacingBase * 2,
+            (a.radius || 0) + (b.radius || 0) + groupSpacingBase * 0.5
+          );
+          if (sameWeek) {
+            minDist = Math.max(minDist, lectureGap);
+          } else if (sameBlock) {
+            minDist = Math.max(minDist, weekGap);
+          } else {
+            minDist = Math.max(minDist, blockGap);
+          }
+          if (dist < minDist) {
+            const push = (minDist - dist) / 2;
+            const nx = dx / dist;
+            const ny = dy / dist;
+            a.center.x -= nx * push;
+            a.center.y -= ny * push;
+            b.center.x += nx * push;
+            b.center.y += ny * push;
+            moved = true;
+          }
+        }
+      }
+      if (!moved) {
+        break;
+      }
+    }
+    groupData.forEach((group) => {
+      const offsetX = group.center.x - group.originalCenter.x;
+      const offsetY = group.center.y - group.originalCenter.y;
+      if (Math.abs(offsetX) < 0.01 && Math.abs(offsetY) < 0.01) {
+        return;
+      }
+      group.members.forEach((memberId) => {
+        const pos = placements.get(memberId);
+        if (!pos) return;
+        const radius = radii.get(memberId) || typicalRadius;
+        const shifted = clampPosition({ x: pos.x + offsetX, y: pos.y + offsetY }, radius);
+        placements.set(memberId, shifted);
+      });
     });
     let minX = Infinity;
     let maxX = -Infinity;
@@ -20215,6 +20389,63 @@ var Sevenn = (() => {
     mapState.gravityModel = gravityModel;
     const nodeRadii = computeRadiiFromModel(gravityModel, visibleItems);
     mapState.nodeRadii = nodeRadii;
+    let totalRadius = 0;
+    let radiusCount = 0;
+    let maxRadius = MIN_NODE_RADIUS;
+    visibleItems.forEach((it) => {
+      const radius = nodeRadii.get(it.id) || MIN_NODE_RADIUS;
+      if (!Number.isFinite(radius)) return;
+      totalRadius += radius;
+      radiusCount += 1;
+      if (radius > maxRadius) {
+        maxRadius = radius;
+      }
+    });
+    const avgRadius = radiusCount ? totalRadius / radiusCount : MIN_NODE_RADIUS;
+    const typicalRadius = Math.max(avgRadius, maxRadius * 0.75, MIN_NODE_RADIUS);
+    const nodeLength = Math.max(80, typicalRadius * 2.25);
+    const groupSpacingBase = Math.max(nodeLength * 1.2, maxRadius * 2.6 + 36);
+    const lectureSpacingBase = Math.max(nodeLength * 3, maxRadius * 4.4);
+    const weekSpacingBase = Math.max(lectureSpacingBase * 1.35, nodeLength * 4.6);
+    const blockSpacingBase = Math.max(weekSpacingBase * 1.45, nodeLength * 6.2);
+    const groupMetrics = /* @__PURE__ */ new Map();
+    const groupSpacingCache = /* @__PURE__ */ new Map();
+    function touchGroupMetric(key, radius, bucket) {
+      if (!key) return;
+      const metric = groupMetrics.get(key) || {
+        existingCount: 0,
+        pendingCount: 0,
+        sumRadius: 0,
+        maxRadius: 0
+      };
+      if (bucket === "existing") {
+        metric.existingCount += 1;
+      } else if (bucket === "pending") {
+        metric.pendingCount += 1;
+      }
+      metric.sumRadius += radius;
+      if (radius > metric.maxRadius) {
+        metric.maxRadius = radius;
+      }
+      groupMetrics.set(key, metric);
+    }
+    function getGroupSpacing(key) {
+      if (groupSpacingCache.has(key)) {
+        return groupSpacingCache.get(key);
+      }
+      const metric = groupMetrics.get(key) || {
+        existingCount: 0,
+        pendingCount: 0,
+        sumRadius: 0,
+        maxRadius: 0
+      };
+      const totalCount = (metric.existingCount || 0) + (metric.pendingCount || 0);
+      const maxR = metric.maxRadius || typicalRadius;
+      const avgR = totalCount ? metric.sumRadius / totalCount : typicalRadius;
+      const spacing = Math.max(groupSpacingBase, avgR * 2.4 + 24, maxR * 2.8 + 40);
+      groupSpacingCache.set(key, spacing);
+      return spacing;
+    }
     const center = size / 2;
     const newItems = [];
     const layout = activeTab ? ensureTabLayout(activeTab) : null;
@@ -20247,25 +20478,33 @@ var Sevenn = (() => {
     Object.entries(positions).forEach(([id, pos]) => {
       if (!pos) return;
       const groups = itemGroupCache.get(id) || [];
+      const radius = nodeRadii.get(id) || MIN_NODE_RADIUS;
       groups.forEach((key) => {
         const info = existingGroupInfo.get(key) || {
           minX: pos.x,
           maxX: pos.x,
           minY: pos.y,
           maxY: pos.y,
-          count: 0
+          count: 0,
+          maxRadius: radius,
+          sumRadius: 0
         };
         info.count += 1;
         info.minX = Math.min(info.minX, pos.x);
         info.maxX = Math.max(info.maxX, pos.x);
         info.minY = Math.min(info.minY, pos.y);
         info.maxY = Math.max(info.maxY, pos.y);
+        info.maxRadius = Math.max(info.maxRadius ?? radius, radius);
+        info.sumRadius = (info.sumRadius || 0) + radius;
         existingGroupInfo.set(key, info);
+        touchGroupMetric(key, radius, "existing");
       });
     });
     const pendingCounts = /* @__PURE__ */ new Map();
     newItems.forEach((entry) => {
       pendingCounts.set(entry.primaryGroup, (pendingCounts.get(entry.primaryGroup) || 0) + 1);
+      const radius = nodeRadii.get(entry.item.id) || MIN_NODE_RADIUS;
+      touchGroupMetric(entry.primaryGroup, radius, "pending");
     });
     const clusterOrigins = /* @__PURE__ */ new Map();
     const seenGroups = /* @__PURE__ */ new Set();
@@ -20299,18 +20538,23 @@ var Sevenn = (() => {
       weekAgg.count += 1;
       weekAggregates.set(weekKey, weekAgg);
       const lectureList = lecturesByWeek.get(weekKey) || [];
-      lectureList.push({ x: centerX, y: centerY });
+      lectureList.push({ x: centerX, y: centerY, spacing: lectureSpacingBase });
       lecturesByWeek.set(weekKey, lectureList);
       const lectureKey2 = `${weekKey}::${parsed.lecture || key}`;
       if (!lectureCenters.has(lectureKey2)) {
-        lectureCenters.set(lectureKey2, { x: centerX, y: centerY });
+        lectureCenters.set(lectureKey2, { x: centerX, y: centerY, spacing: getGroupSpacing(key) });
       }
     });
     const blockCenters = /* @__PURE__ */ new Map();
     const blockPositionList = [];
     blockAggregates.forEach((agg, blockKey) => {
       if (!agg.count) return;
-      const point = { x: agg.x / agg.count, y: agg.y / agg.count };
+      const point = {
+        x: agg.x / agg.count,
+        y: agg.y / agg.count,
+        spacing: blockSpacingBase,
+        buffer: blockSpacingBase
+      };
       blockCenters.set(blockKey, point);
       blockPositionList.push(point);
     });
@@ -20318,44 +20562,74 @@ var Sevenn = (() => {
     const weekPositionsByBlock = /* @__PURE__ */ new Map();
     weekAggregates.forEach((agg, weekKey) => {
       if (!agg.count) return;
-      const point = { x: agg.x / agg.count, y: agg.y / agg.count };
+      const point = {
+        x: agg.x / agg.count,
+        y: agg.y / agg.count,
+        spacing: weekSpacingBase,
+        buffer: weekSpacingBase
+      };
       weekCenters.set(weekKey, point);
       const [blockKey] = weekKey.split("::");
       const list = weekPositionsByBlock.get(blockKey) || [];
       list.push(point);
       weekPositionsByBlock.set(blockKey, list);
     });
-    const BLOCK_SPACING = 920;
-    const WEEK_SPACING = 440;
-    const LECTURE_SPACING = 240;
+    const BLOCK_SPACING = blockSpacingBase;
+    const WEEK_SPACING = weekSpacingBase;
+    const LECTURE_SPACING = lectureSpacingBase;
     function ensureBlockCenter(blockKey) {
       if (blockCenters.has(blockKey)) return blockCenters.get(blockKey);
       const base2 = { x: center, y: center };
-      const candidate = pickClusterPosition(blockPositionList, BLOCK_SPACING, base2);
-      blockCenters.set(blockKey, candidate);
-      blockPositionList.push(candidate);
-      return candidate;
+      const candidate = pickClusterPosition(blockPositionList, BLOCK_SPACING, base2, {
+        buffer: BLOCK_SPACING * 0.3
+      });
+      const enriched = {
+        x: candidate.x,
+        y: candidate.y,
+        spacing: BLOCK_SPACING,
+        buffer: BLOCK_SPACING
+      };
+      blockCenters.set(blockKey, enriched);
+      blockPositionList.push(enriched);
+      return enriched;
     }
     function ensureWeekCenter(blockKey, weekId, blockCenter) {
       const weekKey = `${blockKey}::${weekId}`;
       if (weekCenters.has(weekKey)) return weekCenters.get(weekKey);
       const existing = weekPositionsByBlock.get(blockKey) || [];
-      const candidate = pickClusterPosition(existing, WEEK_SPACING, blockCenter);
-      weekCenters.set(weekKey, candidate);
-      existing.push(candidate);
+      const candidate = pickClusterPosition(existing, WEEK_SPACING, blockCenter, {
+        buffer: WEEK_SPACING * 0.25
+      });
+      const enriched = {
+        x: candidate.x,
+        y: candidate.y,
+        spacing: WEEK_SPACING,
+        buffer: WEEK_SPACING
+      };
+      weekCenters.set(weekKey, enriched);
+      existing.push(enriched);
       weekPositionsByBlock.set(blockKey, existing);
-      return candidate;
+      return enriched;
     }
     function ensureLectureCenter(blockKey, weekId, lectureId, weekCenter) {
       const weekKey = `${blockKey}::${weekId}`;
       const lectureKey2 = `${weekKey}::${lectureId}`;
       if (lectureCenters.has(lectureKey2)) return lectureCenters.get(lectureKey2);
       const existing = lecturesByWeek.get(weekKey) || [];
-      const candidate = pickClusterPosition(existing, LECTURE_SPACING, weekCenter);
-      lectureCenters.set(lectureKey2, candidate);
-      existing.push(candidate);
+      const spacing = Math.max(LECTURE_SPACING, getGroupSpacing(lectureKey2));
+      const candidate = pickClusterPosition(existing, spacing, weekCenter, {
+        buffer: spacing * 0.25
+      });
+      const enriched = {
+        x: candidate.x,
+        y: candidate.y,
+        spacing,
+        buffer: spacing
+      };
+      lectureCenters.set(lectureKey2, enriched);
+      existing.push(enriched);
       lecturesByWeek.set(weekKey, existing);
-      return candidate;
+      return enriched;
     }
     newGroupOrder.forEach((key) => {
       const parsed = parseGroupKey(key);
@@ -20365,7 +20639,11 @@ var Sevenn = (() => {
       const blockCenter = ensureBlockCenter(blockKey);
       const weekCenter = ensureWeekCenter(blockKey, weekId, blockCenter);
       const lectureCenter = ensureLectureCenter(blockKey, weekId, lectureId, weekCenter);
-      clusterOrigins.set(key, lectureCenter);
+      clusterOrigins.set(key, {
+        x: lectureCenter.x,
+        y: lectureCenter.y,
+        spacing: Math.max(getGroupSpacing(key), lectureCenter.spacing || 0)
+      });
     });
     const groupPlacement = /* @__PURE__ */ new Map();
     function ensureGroupPlacement(key) {
@@ -20377,25 +20655,31 @@ var Sevenn = (() => {
       const total = (existing?.count || 0) + pending2;
       const columns = Math.max(2, Math.ceil(Math.sqrt(Math.max(total, 1))));
       const rows = Math.max(1, Math.ceil(Math.max(total, 1) / columns));
+      const originSource = clusterOrigins.get(key);
       const origin = existing ? {
         x: (existing.minX + existing.maxX) / 2,
         y: (existing.minY + existing.maxY) / 2
-      } : clusterOrigins.get(key) || { x: center, y: center };
-      let spacing = 150;
+      } : originSource ? { x: originSource.x, y: originSource.y } : { x: center, y: center };
+      let spacing = Math.max(getGroupSpacing(key), originSource?.spacing || 0);
       if (existing?.count > 1) {
         const spread = Math.max(existing.maxX - existing.minX, existing.maxY - existing.minY);
-        spacing = Math.max(130, spread / Math.max(1, existing.count - 1) + 70);
+        const averageRadius = (existing.sumRadius || 0) / Math.max(existing.count, 1);
+        spacing = Math.max(
+          spacing,
+          spread / Math.max(1, existing.count - 1) + Math.max(averageRadius * 1.8, typicalRadius * 1.6)
+        );
       } else if (existing?.count === 1) {
-        spacing = 140;
-      } else if (clusterOrigins.has(key)) {
-        spacing = 160;
+        spacing = Math.max(spacing, (existing.maxRadius || typicalRadius) * 2.6);
+      } else {
+        spacing = Math.max(spacing, groupSpacingBase);
       }
       const info = { origin, columns, rows, spacing, index: existing?.count || 0 };
       groupPlacement.set(key, info);
       return info;
     }
-    function allocateGroupPosition(key) {
+    function allocateGroupPosition(key, entry) {
       const info = ensureGroupPlacement(key);
+      const itemRadius = entry ? nodeRadii.get(entry.item.id) || typicalRadius : typicalRadius;
       const maxAttempts = 400;
       for (let offset = 0; offset < maxAttempts; offset += 1) {
         const idx = info.index + offset;
@@ -20410,7 +20694,9 @@ var Sevenn = (() => {
         for (const existingId in positions) {
           const other = positions[existingId];
           if (!other) continue;
-          if (Math.hypot(other.x - x, other.y - y) < info.spacing * 0.7) {
+          const otherRadius = nodeRadii.get(existingId) || typicalRadius;
+          const minDistance = itemRadius + otherRadius + Math.max(30, info.spacing * 0.35);
+          if (Math.hypot(other.x - x, other.y - y) < minDistance) {
             collision = true;
             break;
           }
@@ -20431,7 +20717,7 @@ var Sevenn = (() => {
     }
     newItems.sort((a, b) => b.degree - a.degree);
     newItems.forEach((entry) => {
-      const pos = allocateGroupPosition(entry.primaryGroup);
+      const pos = allocateGroupPosition(entry.primaryGroup, entry);
       positions[entry.item.id] = pos;
       if (layout) {
         layout[entry.item.id] = { ...pos };
@@ -21338,6 +21624,7 @@ var Sevenn = (() => {
         updateNodeGeometry(id, entry);
         queueEdgeUpdate(id, { immediate: true });
         updateEdgesFor(id);
+        flushQueuedEdgeUpdates({ force: true });
       }
       return;
     }
@@ -21551,10 +21838,13 @@ var Sevenn = (() => {
     mapState.selectionPreviewSignature = "";
     updateSelectionHighlight();
   }
-  function pickClusterPosition(existing = [], spacing = 200, base = { x: 0, y: 0 }) {
+  function pickClusterPosition(existing = [], spacing = 200, base = { x: 0, y: 0 }, options = {}) {
     const baseX = Number.isFinite(base?.x) ? base.x : 0;
     const baseY = Number.isFinite(base?.y) ? base.y : 0;
-    const minDistance = Math.max(spacing * 0.72, spacing - 140);
+    const minDistanceBase = Math.max(spacing * 0.82, spacing - 80);
+    const buffer = Number.isFinite(options?.buffer) ? options.buffer : 0;
+    const maxRadius = Number.isFinite(options?.maxRadius) ? options.maxRadius : 0;
+    const targetDistance = Math.max(minDistanceBase + buffer, spacing * 0.75, maxRadius);
     for (let radius = 0; radius <= 6; radius += 1) {
       for (let dx = -radius; dx <= radius; dx += 1) {
         for (let dy = -radius; dy <= radius; dy += 1) {
@@ -21566,8 +21856,13 @@ var Sevenn = (() => {
           let collision = false;
           for (const pos of existing) {
             if (!pos) continue;
-            const dist = Math.hypot((pos.x ?? 0) - candidate.x, (pos.y ?? 0) - candidate.y);
-            if (dist < minDistance) {
+            const px = Number.isFinite(pos?.x) ? pos.x : 0;
+            const py = Number.isFinite(pos?.y) ? pos.y : 0;
+            const dist = Math.hypot(px - candidate.x, py - candidate.y);
+            const existingSpacing = Number.isFinite(pos?.spacing) ? pos.spacing : spacing;
+            const existingBuffer = Number.isFinite(pos?.buffer) ? pos.buffer : 0;
+            const required = Math.max(targetDistance, (existingSpacing + spacing) * 0.5, existingBuffer);
+            if (dist < required) {
               collision = true;
               break;
             }
@@ -23930,8 +24225,33 @@ var Sevenn = (() => {
       clearTimeout(line._handleHideTimer);
       line._handleHideTimer = null;
     }
+    if (line._handleStickyRelease) {
+      clearTimeout(line._handleStickyRelease);
+      line._handleStickyRelease = null;
+    }
     line._handleVisible = false;
     line._handleSticky = false;
+  }
+  function holdLineHandles(line) {
+    if (!line) return;
+    if (line._handleStickyRelease) {
+      clearTimeout(line._handleStickyRelease);
+      line._handleStickyRelease = null;
+    }
+    setLineHandlesVisible(line, true, { sticky: true });
+  }
+  function scheduleHandleRelease(line) {
+    if (!line) return;
+    if (line._handleStickyRelease) {
+      clearTimeout(line._handleStickyRelease);
+    }
+    line._handleStickyRelease = setTimeout(() => {
+      line._handleStickyRelease = null;
+      line._handleSticky = false;
+      if (!isLineHovered(line)) {
+        hideLineHandles(line, { force: true });
+      }
+    }, HANDLE_STICKY_RELEASE_DELAY);
   }
   function ensureLineHandles(line, geometry) {
     if (!line) return;
@@ -23949,7 +24269,7 @@ var Sevenn = (() => {
     const nextElements = [];
     const color = getLineStrokeColor(line);
     const { lineScale = 1 } = getCurrentScales();
-    const baseRadius = Math.max(10, Math.min(22, (geometry?.baseWidth || 3) * lineScale * 1.8 + 6));
+    const baseRadius = Math.max(12, Math.min(28, (geometry?.baseWidth || 3) * lineScale * 1.8 + 8));
     const updateCircle = (circle, handle, index) => {
       const point = handle?.point || handle?.base || {
         x: geometry.startX + (geometry.endX - geometry.startX) * (handle?.position ?? DEFAULT_CURVE_ANCHOR),
@@ -23995,13 +24315,14 @@ var Sevenn = (() => {
             circle._setHover(true);
           }
           showLineHandles(line);
+          holdLineHandles(line);
           applyLineHover(line);
         });
         circle.addEventListener("pointerleave", () => {
           if (typeof circle._setHover === "function") {
             circle._setHover(false);
           }
-          hideLineHandles(line);
+          scheduleHandleRelease(line);
           clearLineHover(line);
         });
         parent.appendChild(circle);
@@ -24047,6 +24368,10 @@ var Sevenn = (() => {
     const { force = false } = options;
     if (line._handleSticky && !force) {
       return;
+    }
+    if (line._handleStickyRelease) {
+      clearTimeout(line._handleStickyRelease);
+      line._handleStickyRelease = null;
     }
     if (line._handleHideTimer) {
       clearTimeout(line._handleHideTimer);
