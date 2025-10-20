@@ -18170,6 +18170,7 @@ var Sevenn = (() => {
   var NODE_COLLISION_MARGIN = 36;
   var DEFAULT_REORGANIZE_SPACING = 320;
   var HANDLE_STICKY_RELEASE_DELAY = 260;
+  var VIEW_MEMORY_MAX_AGE = 10 * 60 * 1e3;
   var LINE_STYLE_OPTIONS = [
     { value: "solid", label: "Smooth" },
     { value: "dashed", label: "Dashed" },
@@ -18320,7 +18321,11 @@ var Sevenn = (() => {
     pendingEdgeUpdates: /* @__PURE__ */ new Set(),
     nodeUpdateFrame: null,
     edgeUpdateFrame: null,
-    activeLineMenu: null
+    activeLineMenu: null,
+    pendingFocusId: null,
+    restoredViewFromMemory: false,
+    viewMemoryTimer: null,
+    viewMemoryDirty: false
   };
   function normalizeMapTab(tab = {}) {
     const filter = tab.filter && typeof tab.filter === "object" ? tab.filter : {};
@@ -18334,6 +18339,7 @@ var Sevenn = (() => {
         layout[id] = { x, y };
       });
     }
+    const viewState = normalizeViewState(tab.viewState || tab.view || tab.viewBox);
     const normalized2 = {
       id: tab.id || uid(),
       name: tab.name || "Untitled map",
@@ -18346,9 +18352,100 @@ var Sevenn = (() => {
         blockId: filter.blockId || "",
         weeks: getFilterWeeks(filter),
         lectureKeys: getFilterLectureKeys(filter)
-      }
+      },
+      viewState
     };
     return normalized2;
+  }
+  function normalizeViewState(view = {}) {
+    if (!view || typeof view !== "object") {
+      return null;
+    }
+    const x = Number(view.x);
+    const y = Number(view.y);
+    const width = Number(view.w ?? view.width);
+    const height = Number(view.h ?? view.height ?? width);
+    const timestamp = Number(view.timestamp ?? view.time ?? view.updatedAt);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) {
+      return null;
+    }
+    if (width <= 0 || height <= 0) {
+      return null;
+    }
+    return {
+      x,
+      y,
+      w: width,
+      h: height,
+      timestamp: Number.isFinite(timestamp) ? timestamp : 0
+    };
+  }
+  function getRestorableViewState(tab) {
+    if (!tab) return null;
+    const normalized2 = normalizeViewState(tab.viewState);
+    if (!normalized2) {
+      return null;
+    }
+    const lastUpdated = Number(normalized2.timestamp) || 0;
+    if (lastUpdated > 0) {
+      const age = Date.now() - lastUpdated;
+      if (Number.isFinite(age) && age > VIEW_MEMORY_MAX_AGE) {
+        return null;
+      }
+    }
+    return normalized2;
+  }
+  function findNewestVisibleNode(items = []) {
+    if (!Array.isArray(items) || !items.length) {
+      return null;
+    }
+    let newest = null;
+    let newestValue = -Infinity;
+    items.forEach((item) => {
+      if (!item || typeof item !== "object") return;
+      const created = Number(item.createdAt ?? item.updatedAt);
+      if (Number.isFinite(created) && created > newestValue) {
+        newest = item;
+        newestValue = created;
+      }
+    });
+    return newest;
+  }
+  function rememberViewBox() {
+    if (!mapState.viewBox) return;
+    const tab = getActiveTab();
+    if (!tab) return;
+    const snapshot = {
+      x: mapState.viewBox.x,
+      y: mapState.viewBox.y,
+      w: mapState.viewBox.w,
+      h: mapState.viewBox.h,
+      timestamp: Date.now()
+    };
+    tab.viewState = snapshot;
+    mapState.viewMemoryDirty = true;
+    scheduleViewStatePersist();
+  }
+  function scheduleViewStatePersist() {
+    if (mapState.viewMemoryTimer) return;
+    mapState.viewMemoryTimer = setTimeout(() => {
+      mapState.viewMemoryTimer = null;
+      if (!mapState.viewMemoryDirty) return;
+      mapState.viewMemoryDirty = false;
+      persistMapConfig().catch(() => {
+      });
+    }, 300);
+  }
+  async function flushViewStatePersist() {
+    if (mapState.viewMemoryTimer) {
+      clearTimeout(mapState.viewMemoryTimer);
+      mapState.viewMemoryTimer = null;
+    }
+    if (!mapState.viewMemoryDirty) {
+      return;
+    }
+    mapState.viewMemoryDirty = false;
+    await persistMapConfig();
   }
   function parseWeekValue(value) {
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -18619,10 +18716,7 @@ var Sevenn = (() => {
       updateNodeGeometry(id, entry);
       touched.push(id);
     });
-    touched.forEach((id) => queueEdgeUpdate(id, { immediate: true }));
-    if (touched.length) {
-      flushQueuedEdgeUpdates({ force: true });
-    }
+    touched.forEach((id) => updateEdgesFor(id));
     return model;
   }
   function computeLayoutCenter() {
@@ -18654,91 +18748,38 @@ var Sevenn = (() => {
     const items = Array.isArray(mapState.visibleItems) ? mapState.visibleItems.filter((it) => it && it.id) : [];
     if (!items.length) return {};
     const workingModel = model || mapState.gravityModel || buildGravityModel(items);
-    const { weights, adjacency, neighborWeights, influence, maxWeight } = workingModel;
+    const { weights, adjacency, influence } = workingModel;
     const radii = computeRadiiFromModel(workingModel, items);
-    const itemById = new Map(items.map((item) => [item.id, item]));
-    const itemGroupCache = /* @__PURE__ */ new Map();
-    const groupMetrics = /* @__PURE__ */ new Map();
     let totalRadius = 0;
     let radiusCount = 0;
     let maxRadius = MIN_NODE_RADIUS;
     items.forEach((item) => {
-      const groups = deriveItemGroupKeys(item);
-      itemGroupCache.set(item.id, groups);
       const radius = radii.get(item.id) || MIN_NODE_RADIUS;
-      if (Number.isFinite(radius)) {
-        totalRadius += radius;
-        radiusCount += 1;
-        if (radius > maxRadius) {
-          maxRadius = radius;
-        }
-      }
-      const primaryGroup = getPrimaryGroupKey(item, groups);
-      if (primaryGroup) {
-        const metric = groupMetrics.get(primaryGroup) || { count: 0, sumRadius: 0, maxRadius: 0 };
-        metric.count += 1;
-        metric.sumRadius += radius;
-        if (radius > metric.maxRadius) {
-          metric.maxRadius = radius;
-        }
-        groupMetrics.set(primaryGroup, metric);
+      totalRadius += radius;
+      radiusCount += 1;
+      if (radius > maxRadius) {
+        maxRadius = radius;
       }
     });
     const avgRadius = radiusCount ? totalRadius / radiusCount : MIN_NODE_RADIUS;
     const typicalRadius = Math.max(avgRadius, maxRadius * 0.75, MIN_NODE_RADIUS);
-    const nodeLength = Math.max(80, typicalRadius * 2.25);
-    const groupSpacingBase = Math.max(nodeLength * 1.2, maxRadius * 2.6 + 36);
-    const lectureGap = Math.max(nodeLength * 3, maxRadius * 4.2);
-    const weekGap = Math.max(lectureGap * 1.35, nodeLength * 4.5);
-    const blockGap = Math.max(weekGap * 1.45, nodeLength * 6);
-    const groupSpacingCache = /* @__PURE__ */ new Map();
-    function getGroupSpacing(key) {
-      if (groupSpacingCache.has(key)) {
-        return groupSpacingCache.get(key);
-      }
-      const metric = groupMetrics.get(key) || { count: 0, sumRadius: 0, maxRadius: 0 };
-      const avgR = metric.count ? metric.sumRadius / metric.count : typicalRadius;
-      const spacing = Math.max(
-        groupSpacingBase,
-        avgR * 2.4 + 24,
-        (metric.maxRadius || typicalRadius) * 2.8 + 40
-      );
-      groupSpacingCache.set(key, spacing);
-      return spacing;
-    }
     const order = items.map((item) => item.id).sort((a, b) => {
-      const aInfluence = influence.get(a) || 0;
-      const bInfluence = influence.get(b) || 0;
-      if (Math.abs(bInfluence - aInfluence) > 1e-4) {
-        return bInfluence - aInfluence;
-      }
-      const aWeight = weights.get(a) || 0;
-      const bWeight = weights.get(b) || 0;
-      if (Math.abs(bWeight - aWeight) > 1e-4) {
-        return bWeight - aWeight;
-      }
-      const aSig = neighborWeights.get(a) || [];
-      const bSig = neighborWeights.get(b) || [];
-      const len = Math.max(aSig.length, bSig.length);
-      for (let i = 0; i < len; i += 1) {
-        const diff = (bSig[i] || 0) - (aSig[i] || 0);
-        if (Math.abs(diff) > 1e-4) {
-          return diff;
-        }
-      }
+      const diffInfluence = (influence.get(b) || 0) - (influence.get(a) || 0);
+      if (Math.abs(diffInfluence) > 1e-4) return diffInfluence;
+      const diffWeight = (weights.get(b) || 0) - (weights.get(a) || 0);
+      if (Math.abs(diffWeight) > 1e-4) return diffWeight;
       return String(a).localeCompare(String(b));
     });
     if (!order.length) {
       return {};
     }
     const limit = Math.max(mapState.sizeLimit || 0, 2e3);
-    const baseSpacing = Math.max(options.baseSpacing ?? DEFAULT_REORGANIZE_SPACING, groupSpacingBase);
     const center = options.center || computeLayoutCenter();
+    const baseSpacing = Math.max(options.baseSpacing ?? DEFAULT_REORGANIZE_SPACING, typicalRadius * 2.6);
+    const margin = NODE_COLLISION_MARGIN + Math.max(12, typicalRadius * 0.35);
     const placements = /* @__PURE__ */ new Map();
-    const anchorUsage = /* @__PURE__ */ new Map();
-    const orphanUsage = { layer: 0, index: 0 };
-    const groupMembers = /* @__PURE__ */ new Map();
-    const margin = NODE_COLLISION_MARGIN + Math.max(12, typicalRadius * 0.4);
+    const orbitUsage = /* @__PURE__ */ new Map();
+    const orphanGrid = { index: 0, perRow: 4 };
     const clampPosition = (pos, radius) => {
       const minCoord = radius + margin;
       const maxCoord = Math.max(minCoord, limit - radius - margin);
@@ -18750,7 +18791,7 @@ var Sevenn = (() => {
     const resolveCollisions = (id, initial) => {
       let position = { x: initial.x, y: initial.y };
       const radius = radii.get(id) || MIN_NODE_RADIUS;
-      for (let iter = 0; iter < 10; iter += 1) {
+      for (let iter = 0; iter < 6; iter += 1) {
         let adjusted = false;
         placements.forEach((otherPos, otherId) => {
           if (otherId === id) return;
@@ -18760,7 +18801,7 @@ var Sevenn = (() => {
           const dy = position.y - otherPos.y;
           const dist = Math.hypot(dx, dy) || 1e-4;
           if (dist < minDistance) {
-            const push = (minDistance - dist) * 0.55;
+            const push = (minDistance - dist) * 0.5;
             position.x += dx / dist * push;
             position.y += dy / dist * push;
             adjusted = true;
@@ -18771,210 +18812,151 @@ var Sevenn = (() => {
       }
       return position;
     };
-    const pickAnchor = (ids2) => {
-      if (!Array.isArray(ids2) || !ids2.length) return null;
-      const sorted = ids2.filter((id) => placements.has(id)).sort((a, b) => {
-        const diffInfluence = (influence.get(b) || 0) - (influence.get(a) || 0);
-        if (Math.abs(diffInfluence) > 1e-4) return diffInfluence;
-        const diffWeight = (weights.get(b) || 0) - (weights.get(a) || 0);
-        if (Math.abs(diffWeight) > 1e-4) return diffWeight;
-        return String(a).localeCompare(String(b));
-      });
-      return sorted[0] || null;
+    const ensureOrbitState = (id, options2 = {}) => {
+      if (orbitUsage.has(id)) {
+        const existing = orbitUsage.get(id);
+        if (Number.isFinite(options2.baseDistance)) {
+          existing.baseDistance = options2.baseDistance;
+        }
+        if (Number.isFinite(options2.layerSpacing)) {
+          existing.layerSpacing = options2.layerSpacing;
+        }
+        if (Number.isFinite(options2.slotWeight)) {
+          existing.slots = Math.max(6, Math.round(options2.slotWeight * 1.5) + 6);
+        }
+        return existing;
+      }
+      const slotWeight = Number.isFinite(options2.slotWeight) ? options2.slotWeight : weights.get(id) || 0;
+      const baseSlots = Math.max(6, Math.round(slotWeight * 1.5) + 6);
+      const state2 = {
+        layer: 0,
+        index: 0,
+        slots: baseSlots,
+        baseDistance: Number.isFinite(options2.baseDistance) ? options2.baseDistance : baseSpacing * 0.65,
+        layerSpacing: Number.isFinite(options2.layerSpacing) ? options2.layerSpacing : baseSpacing * 0.55
+      };
+      orbitUsage.set(id, state2);
+      return state2;
     };
-    order.forEach((id, index) => {
-      const radius = radii.get(id) || MIN_NODE_RADIUS;
-      let position;
-      if (index === 0) {
-        position = clampPosition({ x: center.x, y: center.y }, radius);
-      } else {
-        const neighbors = (adjacency.get(id) || []).filter((n) => placements.has(n));
-        let anchorId = pickAnchor(neighbors);
-        if (!anchorId) {
-          anchorId = order.find((candidate) => placements.has(candidate)) || null;
-        }
-        if (!anchorId) {
-          const nodesInLayer = Math.max(6, 6 + orphanUsage.layer * 4);
-          const angle = (orphanUsage.index + (orphanUsage.layer % 2 ? 0.5 : 0)) / nodesInLayer * Math.PI * 2;
-          const baseOrbit = Math.max(baseSpacing, groupSpacingBase * 1.2);
-          const distance = baseOrbit + orphanUsage.layer * (baseSpacing * 0.75);
-          position = {
-            x: center.x + Math.cos(angle) * distance,
-            y: center.y + Math.sin(angle) * distance
-          };
-          orphanUsage.index += 1;
-          if (orphanUsage.index >= nodesInLayer) {
-            orphanUsage.layer += 1;
-            orphanUsage.index = 0;
-          }
-        } else {
-          const anchorPos = placements.get(anchorId) || center;
-          const anchorRadius = radii.get(anchorId) || MIN_NODE_RADIUS;
-          const meta = anchorUsage.get(anchorId) || { layer: 0, index: 0, nodesInLayer: 6 };
-          let { layer, index: idx, nodesInLayer } = meta;
-          if (!nodesInLayer) {
-            nodesInLayer = 6;
-          }
-          const angle = (idx + (layer % 2 ? 0.5 : 0)) / nodesInLayer * Math.PI * 2;
-          const anchorWeight = weights.get(anchorId) || 0;
-          const weightRatio = maxWeight ? clamp2(anchorWeight / maxWeight, 0, 1) : 0;
-          const baseDistance = Math.max(
-            groupSpacingBase * 0.9,
-            baseSpacing * (0.75 + (1 - weightRatio) * 0.4)
-          );
-          const distance = anchorRadius + radius + baseDistance + layer * (baseSpacing * 0.65);
-          position = {
-            x: anchorPos.x + Math.cos(angle) * distance,
-            y: anchorPos.y + Math.sin(angle) * distance
-          };
-          const placedNeighbors = neighbors.filter((n) => placements.has(n));
-          if (placedNeighbors.length > 1) {
-            let avgX = 0;
-            let avgY = 0;
-            let totalWeight = 0;
-            placedNeighbors.forEach((n) => {
-              const pos = placements.get(n);
-              if (!pos) return;
-              const w = (weights.get(n) || 0) + 1;
-              avgX += pos.x * w;
-              avgY += pos.y * w;
-              totalWeight += w;
-            });
-            if (totalWeight > 0) {
-              avgX /= totalWeight;
-              avgY /= totalWeight;
-              position.x = position.x * 0.65 + avgX * 0.35;
-              position.y = position.y * 0.65 + avgY * 0.35;
-            }
-          }
-          meta.index = (idx + 1) % nodesInLayer;
-          if (meta.index === 0) {
-            meta.layer = layer + 1;
-            meta.nodesInLayer = Math.max(6, 6 + meta.layer * 4);
-          }
-          anchorUsage.set(anchorId, meta);
-        }
-        position = resolveCollisions(id, position);
+    const nextOrbitPosition = (anchorId, radius) => {
+      const anchorPos = placements.get(anchorId) || center;
+      const anchorRadius = radii.get(anchorId) || MIN_NODE_RADIUS;
+      const state2 = ensureOrbitState(anchorId);
+      const slots = Math.max(6, state2.slots + state2.layer * 2);
+      const angleOffset = state2.layer % 2 ? 0.5 : 0;
+      const angle = (state2.index + angleOffset) / slots * Math.PI * 2;
+      const baseDistance = Math.max(state2.baseDistance, baseSpacing * 0.4);
+      const layerSpacing = Math.max(state2.layerSpacing, baseSpacing * 0.35);
+      const distance = anchorRadius + radius + baseDistance + layerSpacing * state2.layer;
+      state2.index += 1;
+      if (state2.index >= slots) {
+        state2.index = 0;
+        state2.layer += 1;
       }
-      placements.set(id, position);
-      const item = itemById.get(id);
-      const groups = itemGroupCache.get(id) || [];
-      const primaryGroup = item ? getPrimaryGroupKey(item, groups) : null;
-      if (primaryGroup) {
-        const list = groupMembers.get(primaryGroup) || [];
-        list.push(id);
-        groupMembers.set(primaryGroup, list);
+      return {
+        x: anchorPos.x + Math.cos(angle) * distance,
+        y: anchorPos.y + Math.sin(angle) * distance
+      };
+    };
+    const nextOrphanPosition = (radius) => {
+      const perRow = orphanGrid.perRow;
+      const row = Math.floor(orphanGrid.index / perRow);
+      const col = orphanGrid.index % perRow;
+      const spacing = baseSpacing * 0.85;
+      const startX = center.x - (perRow - 1) * spacing * 0.5;
+      const x = startX + col * spacing;
+      const y = center.y + baseSpacing * 1.6 + row * spacing;
+      orphanGrid.index += 1;
+      if (orphanGrid.index % perRow === 0) {
+        orphanGrid.perRow = Math.max(4, Math.round(Math.sqrt(orphanGrid.index + 6)) + 2);
       }
-    });
-    const groupData = [];
-    groupMembers.forEach((idsInGroup, key) => {
-      const members = idsInGroup.filter((candidateId) => placements.has(candidateId));
-      if (!members.length) {
-        return;
-      }
-      let cx = 0;
-      let cy = 0;
-      const entries = members.map((memberId) => {
-        const pos = placements.get(memberId);
-        const radius = radii.get(memberId) || typicalRadius;
-        cx += pos.x;
-        cy += pos.y;
-        return { id: memberId, radius };
-      });
-      cx /= entries.length;
-      cy /= entries.length;
-      const spacing = getGroupSpacing(key);
-      const sorted = entries.slice().sort((a, b) => (b.radius || 0) - (a.radius || 0));
-      const columns = Math.max(2, Math.ceil(Math.sqrt(sorted.length)));
-      const rows = Math.max(1, Math.ceil(sorted.length / columns));
-      sorted.forEach((member, index) => {
-        const col = index % columns;
-        const row = Math.floor(index / columns);
-        const offsetX = (col - (columns - 1) / 2) * spacing;
-        const offsetY = (row - (rows - 1) / 2) * spacing;
-        const desired = clampPosition({ x: cx + offsetX, y: cy + offsetY }, member.radius);
-        placements.set(member.id, desired);
-      });
-      let minGX = Infinity;
-      let maxGX = -Infinity;
-      let minGY = Infinity;
-      let maxGY = -Infinity;
-      let newCx = 0;
-      let newCy = 0;
-      sorted.forEach((member) => {
-        const pos = placements.get(member.id);
-        if (!pos) return;
-        newCx += pos.x;
-        newCy += pos.y;
-        minGX = Math.min(minGX, pos.x - member.radius);
-        maxGX = Math.max(maxGX, pos.x + member.radius);
-        minGY = Math.min(minGY, pos.y - member.radius);
-        maxGY = Math.max(maxGY, pos.y + member.radius);
-      });
-      newCx /= sorted.length;
-      newCy /= sorted.length;
-      const width = Number.isFinite(maxGX - minGX) ? maxGX - minGX : spacing;
-      const height = Number.isFinite(maxGY - minGY) ? maxGY - minGY : spacing;
-      groupData.push({
-        key,
-        members: sorted.map((member) => member.id),
-        center: { x: newCx, y: newCy },
-        originalCenter: { x: cx, y: cy },
-        radius: Math.max(width, height) / 2 + spacing * 0.35,
-        parsed: parseGroupKey(key)
-      });
-    });
-    for (let iter = 0; iter < 6; iter += 1) {
-      let moved = false;
-      for (let i = 0; i < groupData.length; i += 1) {
-        for (let j = i + 1; j < groupData.length; j += 1) {
-          const a = groupData[i];
-          const b = groupData[j];
-          const dx = b.center.x - a.center.x;
-          const dy = b.center.y - a.center.y;
-          const dist = Math.hypot(dx, dy) || 1e-4;
-          const sameWeek = a.parsed.block === b.parsed.block && a.parsed.week === b.parsed.week;
-          const sameBlock = a.parsed.block === b.parsed.block;
-          let minDist = Math.max(
-            groupSpacingBase * 2,
-            (a.radius || 0) + (b.radius || 0) + groupSpacingBase * 0.5
-          );
-          if (sameWeek) {
-            minDist = Math.max(minDist, lectureGap);
-          } else if (sameBlock) {
-            minDist = Math.max(minDist, weekGap);
-          } else {
-            minDist = Math.max(minDist, blockGap);
-          }
-          if (dist < minDist) {
-            const push = (minDist - dist) / 2;
-            const nx = dx / dist;
-            const ny = dy / dist;
-            a.center.x -= nx * push;
-            a.center.y -= ny * push;
-            b.center.x += nx * push;
-            b.center.y += ny * push;
-            moved = true;
-          }
-        }
-      }
-      if (!moved) {
-        break;
-      }
+      return clampPosition({ x, y }, radius);
+    };
+    const connectedOrder = order.filter((id) => (adjacency.get(id) || []).length > 0);
+    const coreCount = Math.max(1, Math.min(6, Math.ceil(Math.sqrt(connectedOrder.length || order.length))));
+    const coreIds = connectedOrder.slice(0, coreCount);
+    if (!coreIds.length) {
+      coreIds.push(order[0]);
     }
-    groupData.forEach((group) => {
-      const offsetX = group.center.x - group.originalCenter.x;
-      const offsetY = group.center.y - group.originalCenter.y;
-      if (Math.abs(offsetX) < 0.01 && Math.abs(offsetY) < 0.01) {
-        return;
-      }
-      group.members.forEach((memberId) => {
-        const pos = placements.get(memberId);
-        if (!pos) return;
-        const radius = radii.get(memberId) || typicalRadius;
-        const shifted = clampPosition({ x: pos.x + offsetX, y: pos.y + offsetY }, radius);
-        placements.set(memberId, shifted);
+    const centralId = coreIds[0];
+    if (centralId && !placements.has(centralId)) {
+      const radius = radii.get(centralId) || MIN_NODE_RADIUS;
+      const position = clampPosition({ x: center.x, y: center.y }, radius);
+      placements.set(centralId, position);
+      ensureOrbitState(centralId, {
+        baseDistance: baseSpacing * 0.8,
+        layerSpacing: baseSpacing * 0.65,
+        slotWeight: weights.get(centralId) || 0
       });
+    }
+    const primaryAnchors = centralId ? coreIds.slice(1) : coreIds;
+    if (centralId && primaryAnchors.length) {
+      const centralPos = placements.get(centralId) || center;
+      const centralRadius = radii.get(centralId) || MIN_NODE_RADIUS;
+      primaryAnchors.forEach((id, index) => {
+        if (placements.has(id)) return;
+        const radius = radii.get(id) || MIN_NODE_RADIUS;
+        const angle = index / primaryAnchors.length * Math.PI * 2;
+        const orbitDistance = centralRadius + radius + baseSpacing * 1.1;
+        const guess = {
+          x: centralPos.x + Math.cos(angle) * orbitDistance,
+          y: centralPos.y + Math.sin(angle) * orbitDistance
+        };
+        const position = resolveCollisions(id, guess);
+        placements.set(id, position);
+        ensureOrbitState(id, {
+          baseDistance: baseSpacing * 0.7,
+          layerSpacing: baseSpacing * 0.55,
+          slotWeight: weights.get(id) || 0
+        });
+      });
+    } else if (!centralId) {
+      primaryAnchors.forEach((id, index) => {
+        if (placements.has(id)) return;
+        const radius = radii.get(id) || MIN_NODE_RADIUS;
+        const angle = index / Math.max(1, primaryAnchors.length) * Math.PI * 2;
+        const orbit = baseSpacing * 0.75 + radius;
+        const guess = {
+          x: center.x + Math.cos(angle) * orbit,
+          y: center.y + Math.sin(angle) * orbit
+        };
+        const position = resolveCollisions(id, guess);
+        placements.set(id, position);
+        ensureOrbitState(id, {
+          baseDistance: baseSpacing * 0.65,
+          layerSpacing: baseSpacing * 0.5,
+          slotWeight: weights.get(id) || 0
+        });
+      });
+    }
+    order.forEach((id) => {
+      if (placements.has(id)) return;
+      const radius = radii.get(id) || MIN_NODE_RADIUS;
+      const neighbors = (adjacency.get(id) || []).filter((n) => placements.has(n));
+      let position = null;
+      if (neighbors.length) {
+        const anchorId = neighbors.slice().sort((a, b) => {
+          const diffInfluence = (influence.get(b) || 0) - (influence.get(a) || 0);
+          if (Math.abs(diffInfluence) > 1e-4) return diffInfluence;
+          const diffWeight = (weights.get(b) || 0) - (weights.get(a) || 0);
+          if (Math.abs(diffWeight) > 1e-4) return diffWeight;
+          return String(a).localeCompare(String(b));
+        })[0];
+        if (anchorId && placements.has(anchorId)) {
+          position = nextOrbitPosition(anchorId, radius);
+        }
+      }
+      if (!position && coreIds.length && placements.has(coreIds[0])) {
+        position = nextOrbitPosition(coreIds[0], radius);
+      }
+      if (!position) {
+        position = nextOrphanPosition(radius);
+      }
+      position = resolveCollisions(id, position);
+      placements.set(id, position);
+      if ((adjacency.get(id) || []).length > 1) {
+        ensureOrbitState(id);
+      }
     });
     let minX = Infinity;
     let maxX = -Infinity;
@@ -18992,12 +18974,12 @@ var Sevenn = (() => {
       const offsetY = center.y - (minY + maxY) / 2;
       placements.forEach((pos, id) => {
         if (!pos) return;
-        const shifted = { x: pos.x + offsetX, y: pos.y + offsetY };
-        placements.set(id, clampPosition(shifted, radii.get(id) || MIN_NODE_RADIUS));
+        const adjusted = { x: pos.x + offsetX, y: pos.y + offsetY };
+        placements.set(id, clampPosition(adjusted, radii.get(id) || MIN_NODE_RADIUS));
       });
     }
     const ids = Array.from(placements.keys());
-    for (let iter = 0; iter < 4; iter += 1) {
+    for (let iter = 0; iter < 3; iter += 1) {
       let changed = false;
       for (let i = 0; i < ids.length; i += 1) {
         for (let j = i + 1; j < ids.length; j += 1) {
@@ -19026,9 +19008,7 @@ var Sevenn = (() => {
           }
         }
       }
-      if (!changed) {
-        break;
-      }
+      if (!changed) break;
     }
     const result = {};
     placements.forEach((pos, id) => {
@@ -19651,6 +19631,9 @@ var Sevenn = (() => {
           if (lec.name) {
             keyParts.push(`name:${lec.name}`);
           }
+          if (Number.isFinite(Number(lec.week))) {
+            keyParts.push(`week:${Number(lec.week)}`);
+          }
           const key = keyParts.join("|");
           const legacyKey = `${weekBlock.blockId}|${lec.id}`;
           const isActive = selectedLectures.has(key) || selectedLectures.has(legacyKey);
@@ -19840,7 +19823,7 @@ var Sevenn = (() => {
       setSearchInputState({ notFound: true });
     }
   }
-  function centerOnNode(id) {
+  function centerOnNode(id, options = {}) {
     if (!mapState.viewBox || !mapState.positions) return false;
     const pos = mapState.positions[id];
     if (!pos) return false;
@@ -19856,72 +19839,83 @@ var Sevenn = (() => {
     if (mapState.updateViewBox) {
       mapState.updateViewBox({ immediate: true });
     }
-    mapState.selectionIds = [id];
-    updateSelectionHighlight();
+    if (options.select !== false) {
+      mapState.selectionIds = [id];
+      updateSelectionHighlight();
+    }
     return true;
+  }
+  function filterHasCriteria(filter = {}) {
+    if (!filter || typeof filter !== "object") {
+      return false;
+    }
+    if (typeof filter.blockId === "string" && filter.blockId.trim()) {
+      return true;
+    }
+    if (getFilterWeeks(filter).length) {
+      return true;
+    }
+    if (getFilterLectureKeys(filter).length) {
+      return true;
+    }
+    return false;
   }
   function matchesFilter(item, filter = {}) {
     if (!filter) return true;
-    const blockId = filter.blockId || "";
-    const weeks = getFilterWeeks(filter);
+    const normalizedBlock = typeof filter.blockId === "string" ? filter.blockId.trim() : "";
+    const weekValues = getFilterWeeks(filter).map((week) => Number(week)).filter(Number.isFinite);
+    const weekSet = new Set(weekValues);
     const lectureKeys = getFilterLectureKeys(filter);
-    if (blockId) {
-      const inBlock = (item.blocks || []).includes(blockId) || (item.lectures || []).some((lec) => lec.blockId === blockId);
+    const lectureFilters = lectureKeys.map((key) => parseLectureFilterKey(key, normalizedBlock));
+    const lectures = Array.isArray(item.lectures) ? item.lectures : [];
+    const blocks = Array.isArray(item.blocks) ? item.blocks : [];
+    if (normalizedBlock) {
+      const inBlock = blocks.includes(normalizedBlock) || lectures.some((lec) => lec?.blockId === normalizedBlock);
       if (!inBlock) return false;
     }
-    if (weeks.length) {
-      const satisfiesWeek = weeks.some((weekNum) => {
-        if (!Number.isFinite(weekNum)) return false;
-        if (blockId) {
-          const inLectures = (item.lectures || []).some((lec) => lec.blockId === blockId && Number(lec.week) === weekNum);
-          const inWeeks = Array.isArray(item.weeks) && item.weeks.includes(weekNum);
-          return inLectures || inWeeks;
-        }
-        const directWeek = Array.isArray(item.weeks) && item.weeks.includes(weekNum);
-        if (directWeek) return true;
-        return (item.lectures || []).some((lec) => Number(lec.week) === weekNum);
-      });
+    if (weekSet.size) {
+      const satisfiesWeek = lectures.some((lec) => {
+        if (!lec) return false;
+        if (normalizedBlock && lec.blockId !== normalizedBlock) return false;
+        const weekNumber = Number(lec.week);
+        return Number.isFinite(weekNumber) && weekSet.has(weekNumber);
+      }) || Array.isArray(item.weeks) && item.weeks.some((week) => weekSet.has(Number(week)));
       if (!satisfiesWeek) return false;
     }
-    if (lectureKeys.length) {
-      const satisfiesLecture = lectureKeys.some((rawKey) => {
-        const parsed = parseLectureFilterKey(rawKey, blockId);
-        const blockMatch = parsed.block || blockId || "";
-        const idMatch = (parsed.id || "").trim().toLowerCase();
-        const nameMatch = (parsed.name || "").trim().toLowerCase();
-        if (!idMatch && !nameMatch && !blockMatch) {
-          return false;
-        }
-        return (item.lectures || []).some((lec) => {
+    if (lectureFilters.length) {
+      const satisfiesLecture = lectureFilters.some((spec) => {
+        const blockMatch = (spec.block || normalizedBlock || "").trim();
+        const idMatch = (spec.id || "").trim().toLowerCase();
+        const nameMatch = (spec.name || "").trim().toLowerCase();
+        const weekMatch = Number.isFinite(Number(spec.week)) ? Number(spec.week) : null;
+        return lectures.some((lec) => {
           if (!lec) return false;
           if (blockMatch && lec.blockId !== blockMatch) return false;
+          if (weekMatch !== null) {
+            const lecWeek = Number(lec.week);
+            if (!Number.isFinite(lecWeek) || lecWeek !== weekMatch) {
+              return false;
+            }
+          }
           const values = /* @__PURE__ */ new Set();
           if (lec.id != null) {
-            const str = String(lec.id).trim();
-            if (str) {
-              values.add(str.toLowerCase());
-              const numeric = Number(str);
-              if (Number.isFinite(numeric)) {
-                values.add(String(numeric));
-              }
+            const idValue = String(lec.id).trim().toLowerCase();
+            if (idValue) {
+              values.add(idValue);
             }
           }
           if (lec.uid != null) {
-            const uidStr = String(lec.uid).trim();
-            if (uidStr) {
-              values.add(uidStr.toLowerCase());
+            const uidValue = String(lec.uid).trim().toLowerCase();
+            if (uidValue) {
+              values.add(uidValue);
             }
           }
           if (lec.name) {
             values.add(lec.name.trim().toLowerCase());
           }
-          if (idMatch && values.has(idMatch)) {
-            return true;
-          }
-          if (nameMatch && values.has(nameMatch)) {
-            return true;
-          }
-          return !idMatch && !nameMatch && (!blockMatch || lec.blockId === blockMatch);
+          if (idMatch && values.has(idMatch)) return true;
+          if (nameMatch && values.has(nameMatch)) return true;
+          return !idMatch && !nameMatch;
         });
       });
       if (!satisfiesLecture) return false;
@@ -19940,6 +19934,7 @@ var Sevenn = (() => {
       base = items.filter((it) => !it.mapHidden && matchesFilter(it, tab.filter));
     }
     const allowed = new Set(base.map((it) => it.id));
+    const filterActive = !tab.manualMode && filterHasCriteria(tab.filter);
     if (tab.includeLinked !== false) {
       const queue = [...allowed];
       while (queue.length) {
@@ -19950,7 +19945,7 @@ var Sevenn = (() => {
           const other = mapState.itemMap?.[link.id];
           if (!other) return;
           if (other.mapHidden && !manualSet.has(other.id)) return;
-          if (!allowed.has(other.id)) {
+          if (!allowed.has(other.id) && (!filterActive || matchesFilter(other, tab.filter))) {
             allowed.add(other.id);
             queue.push(other.id);
           }
@@ -20030,7 +20025,8 @@ var Sevenn = (() => {
     const info = {
       block: fallbackBlock || "",
       id: "",
-      name: ""
+      name: "",
+      week: ""
     };
     if (!rawKey) {
       return info;
@@ -20043,6 +20039,8 @@ var Sevenn = (() => {
         info.id = part.slice(3) || info.id;
       } else if (part.startsWith("name:")) {
         info.name = part.slice(5) || info.name;
+      } else if (part.startsWith("week:")) {
+        info.week = part.slice(5) || info.week;
       } else if (index === 0 && !info.block) {
         info.block = part;
       } else if (!info.id) {
@@ -20061,6 +20059,7 @@ var Sevenn = (() => {
     }
     mapState.root = root;
     closeLineMenu();
+    await flushViewStatePersist();
     const fragment = document.createDocumentFragment();
     mapState.nodeDrag = null;
     mapState.areaDrag = null;
@@ -20286,24 +20285,49 @@ var Sevenn = (() => {
       w: viewport,
       h: viewport
     };
+    const minSize = mapState.minView || defaultView.w;
+    const maxSize = mapState.sizeLimit || defaultView.w;
+    const storedView = getRestorableViewState(activeTab);
     let viewBox;
+    let restoredFromMemory = false;
+    let pendingFocusId = null;
     if (mapState.viewBox) {
       const current = mapState.viewBox;
       const cx = Number.isFinite(current.x) && Number.isFinite(current.w) ? current.x + current.w / 2 : defaultView.x + defaultView.w / 2;
       const cy = Number.isFinite(current.y) && Number.isFinite(current.h) ? current.y + current.h / 2 : defaultView.y + defaultView.h / 2;
-      const minSize = mapState.minView || defaultView.w;
-      const maxSize = mapState.sizeLimit || defaultView.w;
       const desiredSize = Number.isFinite(current.w) ? current.w : defaultView.w;
-      const clamped = Math.min(Math.max(desiredSize, minSize), maxSize);
+      const clamped = clamp2(desiredSize, minSize, maxSize);
       viewBox = {
         x: cx - clamped / 2,
         y: cy - clamped / 2,
         w: clamped,
         h: clamped
       };
+      restoredFromMemory = true;
+    } else if (storedView) {
+      const desiredSize = Number.isFinite(storedView.w) ? storedView.w : defaultView.w;
+      const clamped = clamp2(desiredSize, minSize, maxSize);
+      const limit = Math.max(mapState.sizeLimit || 0, clamped);
+      const maxX = limit - clamped;
+      const maxY = limit - clamped;
+      const sx = Number.isFinite(storedView.x) ? storedView.x : defaultView.x;
+      const sy = Number.isFinite(storedView.y) ? storedView.y : defaultView.y;
+      viewBox = {
+        x: clamp2(sx, 0, maxX),
+        y: clamp2(sy, 0, maxY),
+        w: clamped,
+        h: clamped
+      };
+      restoredFromMemory = true;
     } else {
       viewBox = { ...defaultView };
+      const newest = findNewestVisibleNode(visibleItems);
+      if (newest) {
+        pendingFocusId = newest.id;
+      }
     }
+    mapState.pendingFocusId = pendingFocusId;
+    mapState.restoredViewFromMemory = restoredFromMemory;
     mapState.svg = svg;
     mapState.viewBox = viewBox;
     if (!Number.isFinite(mapState.defaultViewSize)) {
@@ -20315,6 +20339,7 @@ var Sevenn = (() => {
       if (forceScale) {
         mapState.lastScaleSize = { w: viewBox.w, h: viewBox.h };
         adjustScale();
+        rememberViewBox();
         return;
       }
       const prev = mapState.lastScaleSize;
@@ -20323,6 +20348,7 @@ var Sevenn = (() => {
         mapState.lastScaleSize = { w: viewBox.w, h: viewBox.h };
         adjustScale();
       }
+      rememberViewBox();
     };
     const updateViewBox = (options = {}) => {
       const pending2 = {
@@ -20983,6 +21009,13 @@ var Sevenn = (() => {
     });
     updateSelectionHighlight();
     updatePendingHighlight();
+    if (mapState.pendingFocusId && !mapState.restoredViewFromMemory) {
+      const success = centerOnNode(mapState.pendingFocusId, { select: false });
+      if (success) {
+        mapState.restoredViewFromMemory = true;
+      }
+    }
+    mapState.pendingFocusId = null;
     updateViewBox({ forceScale: true, immediate: true });
     refreshCursor();
     root.replaceChildren(fragment);
@@ -21392,9 +21425,7 @@ var Sevenn = (() => {
         const dy = e.clientY - edgePress.startClient.y;
         if (Math.hypot(dx, dy) <= EDGE_CLICK_DISTANCE) {
           const line = edgePress.line;
-          const hoveredNow = edgePress.handleElement && typeof edgePress.handleElement.matches === "function" && edgePress.handleElement.matches(":hover");
-          const allowRemoval = hoveredNow || edgePress.hoveredAtPress;
-          if (allowRemoval && line && confirm("Remove this anchor point?")) {
+          if (line && confirm("Remove this anchor point?")) {
             await removeHandleAt(line, edgePress.handleIndex);
           } else if (line) {
             showLineHandles(line);
@@ -21573,26 +21604,6 @@ var Sevenn = (() => {
       curveAnchor: clampHandlePosition(dominant.position)
     };
   }
-  function queueEdgeUpdate(id, options = {}) {
-    if (!id) return;
-    if (!mapState.pendingEdgeUpdates) {
-      mapState.pendingEdgeUpdates = /* @__PURE__ */ new Set();
-    }
-    mapState.pendingEdgeUpdates.add(String(id));
-    const { immediate = false } = options;
-    const needsImmediateFlush = immediate || typeof window === "undefined" || typeof window.requestAnimationFrame !== "function";
-    if (needsImmediateFlush) {
-      flushQueuedEdgeUpdates({ force: true });
-      return;
-    }
-    if (mapState.edgeUpdateFrame) {
-      return;
-    }
-    mapState.edgeUpdateFrame = window.requestAnimationFrame(() => {
-      mapState.edgeUpdateFrame = null;
-      flushQueuedEdgeUpdates();
-    });
-  }
   function flushQueuedEdgeUpdates({ force = false } = {}) {
     const pending2 = mapState.pendingEdgeUpdates;
     if (!pending2 || !pending2.size) return;
@@ -21622,9 +21633,7 @@ var Sevenn = (() => {
       const entry = mapState.elements.get(id);
       if (entry) {
         updateNodeGeometry(id, entry);
-        queueEdgeUpdate(id, { immediate: true });
         updateEdgesFor(id);
-        flushQueuedEdgeUpdates({ force: true });
       }
       return;
     }
@@ -21660,9 +21669,8 @@ var Sevenn = (() => {
     });
     updates.clear();
     touched.forEach((id) => {
-      queueEdgeUpdate(id, { immediate: true });
+      updateEdgesFor(id);
     });
-    flushQueuedEdgeUpdates({ force: true });
   }
   function getNow() {
     if (typeof performance !== "undefined" && typeof performance.now === "function") {
@@ -22366,7 +22374,9 @@ var Sevenn = (() => {
       holdTimer: null,
       activated: false,
       handleElement: evt.currentTarget || null,
-      hoveredAtPress: Boolean(evt.currentTarget?.classList?.contains("map-edge-handle--hover"))
+      hoveredAtPress: Boolean(
+        evt.currentTarget?.classList?.contains("is-hovered") || evt.currentTarget?.parentNode?.classList?.contains("is-hovered")
+      )
     };
     if (typeof window !== "undefined") {
       press.holdTimer = window.setTimeout(() => {
@@ -24269,68 +24279,98 @@ var Sevenn = (() => {
     const nextElements = [];
     const color = getLineStrokeColor(line);
     const { lineScale = 1 } = getCurrentScales();
-    const baseRadius = Math.max(12, Math.min(28, (geometry?.baseWidth || 3) * lineScale * 1.8 + 8));
-    const updateCircle = (circle, handle, index) => {
+    const baseRadius = clamp2((geometry?.baseWidth || 3) * lineScale * 0.85 + 4, 4, 12);
+    const targetRadius = baseRadius + Math.max(6, baseRadius * 0.9);
+    const updateEntry = (entry, handle, index) => {
       const point = handle?.point || handle?.base || {
         x: geometry.startX + (geometry.endX - geometry.startX) * (handle?.position ?? DEFAULT_CURVE_ANCHOR),
         y: geometry.startY + (geometry.endY - geometry.startY) * (handle?.position ?? DEFAULT_CURVE_ANCHOR)
       };
-      circle.dataset.index = String(index);
-      circle.dataset.position = String(handle?.position ?? DEFAULT_CURVE_ANCHOR);
-      circle.setAttribute("cx", point.x);
-      circle.setAttribute("cy", point.y);
-      circle.setAttribute("r", baseRadius);
-      circle.style.stroke = color;
-      circle.style.color = color;
-      if (!circle._hoverActive) {
-        circle.style.strokeWidth = "2";
-      }
+      entry.dataset.index = String(index);
+      entry.dataset.position = String(handle?.position ?? DEFAULT_CURVE_ANCHOR);
+      entry._target.dataset.index = entry.dataset.index;
+      entry._target.dataset.position = entry.dataset.position;
+      entry._target.setAttribute("cx", point.x);
+      entry._target.setAttribute("cy", point.y);
+      entry._target.setAttribute("r", targetRadius);
+      entry._visual.setAttribute("cx", point.x);
+      entry._visual.setAttribute("cy", point.y);
+      entry._visual.setAttribute("r", baseRadius);
+      entry._visual.style.stroke = color;
+      entry._visual.style.color = color;
+    };
+    const createHandleEntry = () => {
+      const wrapper = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      wrapper.classList.add("map-edge-handle");
+      const target = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      target.classList.add("map-edge-handle__target");
+      target.setAttribute("fill", "transparent");
+      target.setAttribute("stroke", "rgba(34, 197, 94, 0)");
+      target.setAttribute("stroke-width", "10");
+      target.setAttribute("pointer-events", "all");
+      target.style.cursor = "grab";
+      target.style.transition = "stroke 140ms ease, stroke-width 140ms ease";
+      const visual = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      visual.classList.add("map-edge-handle__visual");
+      visual.setAttribute("fill", "rgba(15, 23, 42, 0.85)");
+      visual.setAttribute("stroke-width", "2");
+      visual.setAttribute("pointer-events", "none");
+      visual.style.transition = "transform 140ms ease, fill 140ms ease, filter 140ms ease";
+      wrapper.append(target, visual);
+      wrapper._target = target;
+      wrapper._visual = visual;
+      wrapper._hoverActive = false;
+      wrapper._setHover = (active) => {
+        wrapper._hoverActive = active;
+        wrapper.classList.toggle("is-hovered", active);
+        target.setAttribute("stroke", active ? "rgba(34, 197, 94, 0.6)" : "rgba(34, 197, 94, 0)");
+        target.setAttribute("stroke-width", active ? "12" : "10");
+        visual.setAttribute("fill", active ? "rgba(34, 197, 94, 0.82)" : "rgba(15, 23, 42, 0.85)");
+        visual.style.filter = active ? "drop-shadow(0 0 10px rgba(34, 197, 94, 0.45))" : "";
+        visual.style.transform = active ? "scale(1.18)" : "scale(1)";
+      };
+      target.addEventListener("pointerdown", (evt) => {
+        if (evt.button !== 0) return;
+        if (mapState.tool !== TOOL.NAVIGATE) return;
+        evt.stopPropagation();
+        if (typeof evt.preventDefault === "function") {
+          evt.preventDefault();
+        }
+        const handleIndex = Number(evt.currentTarget?.dataset?.index) || 0;
+        startHandlePress(line, handleIndex, evt);
+      });
+      target.addEventListener("pointerenter", () => {
+        if (typeof wrapper._setHover === "function") {
+          wrapper._setHover(true);
+        }
+        showLineHandles(line);
+        holdLineHandles(line);
+        applyLineHover(line);
+      });
+      target.addEventListener("pointerleave", () => {
+        if (typeof wrapper._setHover === "function") {
+          wrapper._setHover(false);
+        }
+        scheduleHandleRelease(line);
+        clearLineHover(line);
+      });
+      target.addEventListener("pointercancel", () => {
+        if (typeof wrapper._setHover === "function") {
+          wrapper._setHover(false);
+        }
+      });
+      parent.appendChild(wrapper);
+      return wrapper;
     };
     handles.forEach((handle, index) => {
-      let circle = elements.shift();
-      if (!circle) {
-        circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        circle.classList.add("map-edge-handle");
-        circle.style.fill = "rgba(15, 23, 42, 0.92)";
-        circle.style.strokeWidth = "2";
-        circle.style.pointerEvents = "none";
-        circle._hoverActive = false;
-        circle._setHover = (active) => {
-          circle._hoverActive = active;
-          circle.classList.toggle("map-edge-handle--hover", active);
-          circle.style.strokeWidth = active ? "2.6" : "2";
-        };
-        circle.addEventListener("pointerdown", (evt) => {
-          if (evt.button !== 0) return;
-          if (mapState.tool !== TOOL.NAVIGATE) return;
-          evt.stopPropagation();
-          if (typeof evt.preventDefault === "function") {
-            evt.preventDefault();
-          }
-          const handleIndex = Number(evt.currentTarget?.dataset?.index) || 0;
-          startHandlePress(line, handleIndex, evt);
-        });
-        circle.addEventListener("pointerenter", () => {
-          if (typeof circle._setHover === "function") {
-            circle._setHover(true);
-          }
-          showLineHandles(line);
-          holdLineHandles(line);
-          applyLineHover(line);
-        });
-        circle.addEventListener("pointerleave", () => {
-          if (typeof circle._setHover === "function") {
-            circle._setHover(false);
-          }
-          scheduleHandleRelease(line);
-          clearLineHover(line);
-        });
-        parent.appendChild(circle);
+      let entry = elements.shift();
+      if (!entry) {
+        entry = createHandleEntry();
       }
-      updateCircle(circle, handle, index);
-      nextElements.push(circle);
+      updateEntry(entry, handle, index);
+      nextElements.push(entry);
     });
-    elements.forEach((circle) => circle.remove());
+    elements.forEach((entry) => entry.remove());
     line._handleElements = nextElements;
     line._handleGeometry = geometry || null;
   }
@@ -24347,12 +24387,14 @@ var Sevenn = (() => {
       clearTimeout(line._handleHideTimer);
       line._handleHideTimer = null;
     }
-    line._handleElements.forEach((circle) => {
-      if (!visible && typeof circle._setHover === "function") {
-        circle._setHover(false);
+    line._handleElements.forEach((entry) => {
+      if (!visible && typeof entry._setHover === "function") {
+        entry._setHover(false);
       }
-      circle.classList.toggle("visible", visible);
-      circle.style.pointerEvents = visible ? "auto" : "none";
+      entry.classList.toggle("visible", visible);
+      if (entry._target) {
+        entry._target.style.pointerEvents = visible ? "auto" : "none";
+      }
     });
     line._handleVisible = visible;
   }

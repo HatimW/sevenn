@@ -5039,15 +5039,11 @@ button.builder-pill.builder-pill-outline {
   line-height: 1.4;
 }
 
+
 .map-edge-handle {
-  fill: rgba(15, 23, 42, 0.92);
-  stroke: currentColor;
-  stroke-width: 2px;
   opacity: 0;
   pointer-events: none;
-  cursor: grab;
-  touch-action: none;
-  transition: opacity 160ms ease, transform 160ms ease;
+  transition: opacity 160ms ease;
 }
 
 .map-edge-handle.visible {
@@ -5055,15 +5051,25 @@ button.builder-pill.builder-pill-outline {
   pointer-events: auto;
 }
 
-.map-edge-handle--hover,
-.map-edge-handle:hover {
-  transform: scale(1.16);
-  stroke-width: 2.6px;
-  filter: drop-shadow(0 0 6px rgba(148, 163, 184, 0.5));
+.map-edge-handle__target {
+  pointer-events: none;
+  cursor: grab;
+  touch-action: none;
 }
 
-.map-edge-handle:active {
+.map-edge-handle__target:active {
   cursor: grabbing;
+}
+
+.map-edge-handle__visual {
+  fill: rgba(15, 23, 42, 0.85);
+  stroke: currentColor;
+  stroke-width: 2px;
+  pointer-events: none;
+}
+
+.map-edge-handle.is-hovered .map-edge-handle__visual {
+  filter: drop-shadow(0 0 10px rgba(34, 197, 94, 0.45));
 }
 
 
