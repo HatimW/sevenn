@@ -1,31 +1,4 @@
-var Sevenn = (() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-    }
-    return to;
-  };
-  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
-  // js/main.js
-  var main_exports = {};
-  __export(main_exports, {
-    render: () => renderApp,
-    renderApp: () => renderApp,
-    resolveListKind: () => resolveListKind,
-    tabs: () => tabs
-  });
-
+(() => {
   // js/storage/preferences.js
   var STORAGE_KEY = "sevenn-ui-preferences";
   var cache = null;
@@ -18281,6 +18254,9 @@ var Sevenn = (() => {
     lastScaleSize: null,
     viewBoxFrame: null,
     pendingViewBoxOptions: null,
+    viewBootstrapped: false,
+    viewSaveTimer: null,
+    latestViewSnapshot: null,
     svgRect: null,
     svgRectTime: 0,
     justCompletedSelection: false,
@@ -18348,7 +18324,34 @@ var Sevenn = (() => {
         lectureKeys: getFilterLectureKeys(filter)
       }
     };
+    const viewState = normalizeTabViewState(tab.lastView || tab.viewState);
+    const lastViewAt = Number(tab.lastViewAt ?? viewState?.timestamp ?? 0);
+    if (viewState) {
+      normalized2.lastView = { ...viewState };
+    }
+    normalized2.lastViewAt = Number.isFinite(lastViewAt) && lastViewAt > 0 ? lastViewAt : 0;
     return normalized2;
+  }
+  function normalizeTabViewState(view) {
+    if (!view || typeof view !== "object") {
+      return null;
+    }
+    const x = Number(view.x);
+    const y = Number(view.y);
+    const w = Number(view.w ?? view.width);
+    const hRaw = Number(view.h ?? view.height ?? w);
+    const timestamp = Number(view.timestamp ?? view.lastViewedAt ?? view.updatedAt);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || w <= 0) {
+      return null;
+    }
+    const h = Number.isFinite(hRaw) && hRaw > 0 ? hRaw : w;
+    return {
+      x,
+      y,
+      w,
+      h,
+      timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : 0
+    };
   }
   function parseWeekValue(value) {
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -18420,6 +18423,21 @@ var Sevenn = (() => {
     if ("lectureKey" in targetFilter) {
       targetFilter.lectureKey = "";
     }
+  }
+  function filterHasCriteria(filter = {}) {
+    if (!filter || typeof filter !== "object") {
+      return false;
+    }
+    if (filter.blockId) {
+      return true;
+    }
+    if (getFilterWeeks(filter).length) {
+      return true;
+    }
+    if (getFilterLectureKeys(filter).length) {
+      return true;
+    }
+    return false;
   }
   function deriveItemGroupKeys(item) {
     const groups = [];
@@ -18649,6 +18667,99 @@ var Sevenn = (() => {
       x: (minX + maxX) / 2,
       y: (minY + maxY) / 2
     };
+  }
+  function scheduleViewPersist(immediate = false) {
+    if (mapState.viewSaveTimer) {
+      clearTimeout(mapState.viewSaveTimer);
+      mapState.viewSaveTimer = null;
+    }
+    const persist = () => {
+      const promise = persistMapConfig();
+      if (promise && typeof promise.catch === "function") {
+        promise.catch(() => {
+        });
+      }
+    };
+    if (immediate || typeof window === "undefined") {
+      persist();
+      return;
+    }
+    mapState.viewSaveTimer = window.setTimeout(() => {
+      mapState.viewSaveTimer = null;
+      persist();
+    }, 600);
+  }
+  function recordActiveViewSnapshot(options = {}) {
+    const { immediate = false } = options;
+    const tab = getActiveTab();
+    const viewBox = mapState.viewBox;
+    if (!tab || !viewBox) return;
+    const snapshot = {
+      x: Number(viewBox.x) || 0,
+      y: Number(viewBox.y) || 0,
+      w: Number(viewBox.w) || 0,
+      h: Number(viewBox.h) || 0,
+      timestamp: Date.now()
+    };
+    tab.lastView = { ...snapshot };
+    tab.lastViewAt = snapshot.timestamp;
+    mapState.latestViewSnapshot = snapshot;
+    scheduleViewPersist(immediate);
+  }
+  function findNewestItem(items = []) {
+    let candidate = null;
+    let candidateValue = -Infinity;
+    (Array.isArray(items) ? items : []).forEach((item) => {
+      if (!item || !item.id) return;
+      const value = Number(item.updatedAt ?? item.createdAt ?? 0);
+      if (!Number.isFinite(value)) return;
+      if (value > candidateValue) {
+        candidateValue = value;
+        candidate = item;
+      }
+    });
+    return candidate;
+  }
+  function applyInitialViewFocus(items = []) {
+    if (mapState.viewBootstrapped) {
+      return;
+    }
+    const viewBox = mapState.viewBox;
+    if (!viewBox) {
+      mapState.viewBootstrapped = true;
+      return;
+    }
+    const tab = getActiveTab();
+    const stored = normalizeTabViewState(tab?.lastView);
+    const lastViewAt = Number(tab?.lastViewAt ?? stored?.timestamp ?? 0);
+    const now = Date.now();
+    const maxAge = 10 * 60 * 1e3;
+    if (stored && Number.isFinite(stored.x) && Number.isFinite(stored.y) && Number.isFinite(stored.w) && now - lastViewAt <= maxAge) {
+      viewBox.x = stored.x;
+      viewBox.y = stored.y;
+      viewBox.w = stored.w;
+      viewBox.h = stored.h ?? stored.w;
+      constrainViewBox();
+      mapState.viewBootstrapped = true;
+      return;
+    }
+    const newest = findNewestItem(items);
+    if (newest) {
+      const pos = mapState.positions?.[newest.id];
+      if (pos) {
+        const width = viewBox.w;
+        const height = viewBox.h;
+        const limit = mapState.sizeLimit || 0;
+        const maxX = Math.max(0, limit - width);
+        const maxY = Math.max(0, limit - height);
+        viewBox.x = clamp2(pos.x - width / 2, 0, maxX);
+        viewBox.y = clamp2(pos.y - height / 2, 0, maxY);
+        viewBox.w = width;
+        viewBox.h = height;
+        constrainViewBox();
+      }
+    }
+    mapState.viewBootstrapped = true;
   }
   function computeSmartLayout(model, options = {}) {
     const items = Array.isArray(mapState.visibleItems) ? mapState.visibleItems.filter((it) => it && it.id) : [];
@@ -19097,6 +19208,7 @@ var Sevenn = (() => {
     mapState.selectionPreviewSignature = "";
     mapState.pendingLink = null;
     await persistMapConfig();
+    mapState.viewBootstrapped = false;
     await renderMap(mapState.root);
   }
   async function createMapTab() {
@@ -19117,6 +19229,7 @@ var Sevenn = (() => {
     mapState.searchValue = "";
     mapState.searchFeedback = null;
     await persistMapConfig();
+    mapState.viewBootstrapped = false;
     await renderMap(mapState.root);
   }
   async function deleteActiveTab() {
@@ -19135,6 +19248,7 @@ var Sevenn = (() => {
     mapState.searchValue = "";
     mapState.searchFeedback = null;
     await persistMapConfig();
+    mapState.viewBootstrapped = false;
     await renderMap(mapState.root);
   }
   function updateSearchFeedback(message, type = "") {
@@ -19479,218 +19593,7 @@ var Sevenn = (() => {
     linkedToggle.appendChild(linkedSpan);
     toggleRow.appendChild(linkedToggle);
     controls.appendChild(toggleRow);
-    const filterRow = document.createElement("div");
-    filterRow.className = "map-controls-row";
-    const blockWrap = document.createElement("label");
-    blockWrap.className = "map-control map-control-group";
-    const blockLabel = document.createElement("span");
-    blockLabel.className = "map-control-label";
-    blockLabel.textContent = "Block";
-    blockWrap.appendChild(blockLabel);
-    const blockSelect = document.createElement("select");
-    blockSelect.className = "map-select";
-    const blocks = mapState.blocks || [];
-    const blockDefault = document.createElement("option");
-    blockDefault.value = "";
-    blockDefault.textContent = "All blocks";
-    blockSelect.appendChild(blockDefault);
-    blocks.forEach((block) => {
-      const opt = document.createElement("option");
-      opt.value = block.blockId;
-      opt.textContent = block.name || block.blockId;
-      blockSelect.appendChild(opt);
-    });
-    blockSelect.value = activeTab.filter.blockId || "";
-    blockSelect.disabled = Boolean(activeTab.manualMode);
-    blockSelect.addEventListener("change", async () => {
-      activeTab.filter.blockId = blockSelect.value;
-      setFilterWeeks(activeTab.filter, []);
-      setFilterLectureKeys(activeTab.filter, []);
-      await persistMapConfig();
-      await renderMap(mapState.root);
-    });
-    blockWrap.appendChild(blockSelect);
-    filterRow.appendChild(blockWrap);
-    const makeChip = ({ label, active = false, onToggle, disabled = false, title }) => {
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "map-chip" + (active ? " active" : "");
-      chip.textContent = label;
-      chip.setAttribute("aria-pressed", active ? "true" : "false");
-      if (title) {
-        chip.title = title;
-      }
-      if (disabled) {
-        chip.disabled = true;
-        chip.classList.add("disabled");
-      } else if (typeof onToggle === "function") {
-        chip.addEventListener("click", onToggle);
-      }
-      return chip;
-    };
-    const selectedWeeks = new Set(getFilterWeeks(activeTab.filter));
-    const selectedLectures = new Set(getFilterLectureKeys(activeTab.filter));
-    const weekBlock = blocks.find((b) => b.blockId === blockSelect.value);
-    const filtersDisabled = Boolean(activeTab.manualMode);
-    const hasBlock = Boolean(blockSelect.value);
-    const weekWrap = document.createElement("div");
-    weekWrap.className = "map-control map-control-group";
-    const weekLabel = document.createElement("div");
-    weekLabel.className = "map-control-label";
-    weekLabel.textContent = "Weeks";
-    weekWrap.appendChild(weekLabel);
-    const weekList = document.createElement("div");
-    weekList.className = "map-chip-list";
-    weekWrap.appendChild(weekList);
-    const applyWeeks = async (nextWeeks) => {
-      setFilterWeeks(activeTab.filter, nextWeeks);
-      setFilterLectureKeys(activeTab.filter, []);
-      await persistMapConfig();
-      await renderMap(mapState.root);
-    };
-    if (!hasBlock || filtersDisabled) {
-      const message = document.createElement("div");
-      message.className = "map-chip-empty";
-      message.textContent = filtersDisabled ? "Disabled in manual mode." : "Choose a block to filter weeks.";
-      weekList.appendChild(message);
-    } else {
-      const weekNumbers = /* @__PURE__ */ new Set();
-      if (weekBlock) {
-        if (Number(weekBlock.weeks)) {
-          for (let i = 1; i <= Number(weekBlock.weeks); i++) {
-            weekNumbers.add(i);
-          }
-        }
-        (weekBlock.lectures || []).forEach((lec) => {
-          if (Number.isFinite(lec?.week)) {
-            weekNumbers.add(lec.week);
-          }
-        });
-      }
-      const sortedWeeks = Array.from(weekNumbers).sort((a, b) => a - b);
-      weekList.appendChild(
-        makeChip({
-          label: "All weeks",
-          active: selectedWeeks.size === 0,
-          onToggle: () => applyWeeks([])
-        })
-      );
-      if (!sortedWeeks.length) {
-        const empty = document.createElement("div");
-        empty.className = "map-chip-empty";
-        empty.textContent = "No weeks found for this block.";
-        weekList.appendChild(empty);
-      } else {
-        sortedWeeks.forEach((num) => {
-          weekList.appendChild(
-            makeChip({
-              label: `Week ${num}`,
-              active: selectedWeeks.has(num),
-              onToggle: () => {
-                const next = new Set(selectedWeeks);
-                if (next.has(num)) {
-                  next.delete(num);
-                } else {
-                  next.add(num);
-                }
-                applyWeeks(Array.from(next).sort((a, b) => a - b));
-              }
-            })
-          );
-        });
-      }
-    }
-    filterRow.appendChild(weekWrap);
-    const lectureWrap = document.createElement("div");
-    lectureWrap.className = "map-control map-control-group";
-    const lectureLabel = document.createElement("div");
-    lectureLabel.className = "map-control-label";
-    lectureLabel.textContent = "Lectures";
-    lectureWrap.appendChild(lectureLabel);
-    const lectureList = document.createElement("div");
-    lectureList.className = "map-chip-list";
-    lectureWrap.appendChild(lectureList);
-    const applyLectures = async (nextKeys) => {
-      setFilterLectureKeys(activeTab.filter, nextKeys);
-      await persistMapConfig();
-      await renderMap(mapState.root);
-    };
-    if (!hasBlock || filtersDisabled) {
-      const message = document.createElement("div");
-      message.className = "map-chip-empty";
-      message.textContent = filtersDisabled ? "Disabled in manual mode." : "Choose a block first.";
-      lectureList.appendChild(message);
-    } else {
-      const lectures = Array.isArray(weekBlock?.lectures) ? weekBlock.lectures : [];
-      const filteredLectures = lectures.filter((lec) => !selectedWeeks.size || selectedWeeks.has(Number(lec.week))).sort((a, b) => {
-        const weekA = Number(a.week) || 0;
-        const weekB = Number(b.week) || 0;
-        if (weekA !== weekB) return weekA - weekB;
-        const idA = Number(a.id) || 0;
-        const idB = Number(b.id) || 0;
-        return idA - idB;
-      });
-      lectureList.appendChild(
-        makeChip({
-          label: "All lectures",
-          active: selectedLectures.size === 0,
-          onToggle: () => applyLectures([])
-        })
-      );
-      if (!filteredLectures.length) {
-        const empty = document.createElement("div");
-        empty.className = "map-chip-empty";
-        empty.textContent = selectedWeeks.size ? "No lectures match the selected weeks." : "No lectures found for this block.";
-        lectureList.appendChild(empty);
-      } else {
-        filteredLectures.forEach((lec) => {
-          const keyParts = [`block:${weekBlock.blockId}`];
-          if (lec.id != null && lec.id !== "") {
-            keyParts.push(`id:${lec.id}`);
-          }
-          if (lec.name) {
-            keyParts.push(`name:${lec.name}`);
-          }
-          const key = keyParts.join("|");
-          const legacyKey = `${weekBlock.blockId}|${lec.id}`;
-          const isActive = selectedLectures.has(key) || selectedLectures.has(legacyKey);
-          const label = lec.name ? lec.name : `Lecture ${lec.id}`;
-          const weekLabel2 = Number.isFinite(lec.week) ? `Week ${lec.week}` : "";
-          lectureList.appendChild(
-            makeChip({
-              label: weekLabel2 ? `${label} \xB7 ${weekLabel2}` : label,
-              title: weekLabel2 ? `${label} (${weekLabel2})` : label,
-              active: isActive,
-              onToggle: () => {
-                const next = new Set(selectedLectures);
-                next.delete(legacyKey);
-                if (isActive) {
-                  next.delete(key);
-                } else {
-                  next.add(key);
-                }
-                applyLectures(Array.from(next));
-              }
-            })
-          );
-        });
-      }
-    }
-    filterRow.appendChild(lectureWrap);
-    const resetBtn = document.createElement("button");
-    resetBtn.type = "button";
-    resetBtn.className = "btn map-reset-filters";
-    resetBtn.textContent = "Clear filters";
-    resetBtn.disabled = Boolean(activeTab.manualMode);
-    resetBtn.addEventListener("click", async () => {
-      activeTab.filter.blockId = "";
-      setFilterWeeks(activeTab.filter, []);
-      setFilterLectureKeys(activeTab.filter, []);
-      await persistMapConfig();
-      await renderMap(mapState.root);
-    });
-    filterRow.appendChild(resetBtn);
-    controls.appendChild(filterRow);
+    renderFilterControls(controls, activeTab);
     const layoutRow = document.createElement("div");
     layoutRow.className = "map-controls-row map-controls-row--actions";
     const reorganizeBtn = document.createElement("button");
@@ -19932,15 +19835,20 @@ var Sevenn = (() => {
     if (!tab) {
       return items.filter((it) => !it.mapHidden);
     }
-    const manualSet = new Set(Array.isArray(tab.manualIds) ? tab.manualIds : []);
+    const manualIds = Array.isArray(tab.manualIds) ? tab.manualIds : [];
+    const manualSet = new Set(manualIds);
+    const filtersActive = filterHasCriteria(tab.filter);
+    const visibleBase = items.filter((it) => !it.mapHidden);
     let base;
     if (tab.manualMode) {
       base = items.filter((it) => manualSet.has(it.id));
+    } else if (filtersActive) {
+      base = visibleBase.filter((it) => matchesFilter(it, tab.filter) || manualSet.has(it.id));
     } else {
-      base = items.filter((it) => !it.mapHidden && matchesFilter(it, tab.filter));
+      base = visibleBase;
     }
     const allowed = new Set(base.map((it) => it.id));
-    if (tab.includeLinked !== false) {
+    if (tab.includeLinked !== false && !tab.manualMode && !filtersActive) {
       const queue = [...allowed];
       while (queue.length) {
         const id = queue.pop();
@@ -19958,13 +19866,243 @@ var Sevenn = (() => {
       }
     }
     return items.filter((it) => {
-      if (!allowed.has(it.id)) return false;
       if (tab.manualMode) {
-        if (manualSet.has(it.id)) return true;
-        return !it.mapHidden;
+        return manualSet.has(it.id);
       }
-      return !it.mapHidden || manualSet.has(it.id);
+      if (!allowed.has(it.id) && !manualSet.has(it.id)) {
+        return false;
+      }
+      if (manualSet.has(it.id)) {
+        return true;
+      }
+      if (filtersActive) {
+        return matchesFilter(it, tab.filter);
+      }
+      return !it.mapHidden;
     });
+  }
+  function createFilterOption({ label, checked = false, disabled = false, onToggle = null, description = "" }) {
+    const option = document.createElement("label");
+    option.className = "map-filter-option" + (checked ? " active" : "");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = checked;
+    input.disabled = disabled;
+    input.addEventListener("change", async () => {
+      if (typeof onToggle === "function") {
+        await onToggle(input.checked);
+      }
+    });
+    const text = document.createElement("span");
+    text.textContent = label;
+    option.appendChild(input);
+    option.appendChild(text);
+    if (description) {
+      const hint = document.createElement("small");
+      hint.textContent = description;
+      option.appendChild(hint);
+    }
+    return option;
+  }
+  function createFilterMessage(text) {
+    const message = document.createElement("div");
+    message.className = "map-filter-empty";
+    message.textContent = text;
+    return message;
+  }
+  function renderFilterControls(controls, activeTab) {
+    const filterRow = document.createElement("div");
+    filterRow.className = "map-controls-row map-controls-row--filters";
+    controls.appendChild(filterRow);
+    const blocks = mapState.blocks || [];
+    const filtersDisabled = Boolean(activeTab?.manualMode);
+    const blockField = document.createElement("div");
+    blockField.className = "map-control map-filter-field";
+    const blockLabel = document.createElement("span");
+    blockLabel.className = "map-control-label";
+    blockLabel.textContent = "Block";
+    blockField.appendChild(blockLabel);
+    const blockSelect = document.createElement("select");
+    blockSelect.className = "map-select map-filter-select";
+    blockSelect.disabled = filtersDisabled;
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "";
+    defaultOption.textContent = filtersDisabled ? "Unavailable while in manual mode" : "All blocks";
+    blockSelect.appendChild(defaultOption);
+    blocks.forEach((block2) => {
+      const opt = document.createElement("option");
+      opt.value = block2.blockId;
+      opt.textContent = block2.name || block2.blockId;
+      blockSelect.appendChild(opt);
+    });
+    const selectedBlockId = filtersDisabled ? "" : activeTab?.filter?.blockId || "";
+    blockSelect.value = selectedBlockId;
+    blockSelect.addEventListener("change", async () => {
+      activeTab.filter.blockId = blockSelect.value;
+      setFilterWeeks(activeTab.filter, []);
+      setFilterLectureKeys(activeTab.filter, []);
+      await persistMapConfig();
+      await renderMap(mapState.root);
+    });
+    blockField.appendChild(blockSelect);
+    filterRow.appendChild(blockField);
+    const weekField = document.createElement("div");
+    weekField.className = "map-control map-filter-field";
+    const weekLabel = document.createElement("div");
+    weekLabel.className = "map-control-label";
+    weekLabel.textContent = "Weeks";
+    weekField.appendChild(weekLabel);
+    const weekList = document.createElement("div");
+    weekList.className = "map-filter-list";
+    weekField.appendChild(weekList);
+    filterRow.appendChild(weekField);
+    const lectureField = document.createElement("div");
+    lectureField.className = "map-control map-filter-field";
+    const lectureLabel = document.createElement("div");
+    lectureLabel.className = "map-control-label";
+    lectureLabel.textContent = "Lectures";
+    lectureField.appendChild(lectureLabel);
+    const lectureList = document.createElement("div");
+    lectureList.className = "map-filter-list";
+    lectureField.appendChild(lectureList);
+    filterRow.appendChild(lectureField);
+    const resetWrap = document.createElement("div");
+    resetWrap.className = "map-filter-actions";
+    filterRow.appendChild(resetWrap);
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.className = "btn map-reset-filters";
+    resetBtn.textContent = "Clear filters";
+    resetBtn.disabled = filtersDisabled;
+    resetBtn.addEventListener("click", async () => {
+      if (filtersDisabled) return;
+      activeTab.filter.blockId = "";
+      setFilterWeeks(activeTab.filter, []);
+      setFilterLectureKeys(activeTab.filter, []);
+      await persistMapConfig();
+      await renderMap(mapState.root);
+    });
+    resetWrap.appendChild(resetBtn);
+    if (filtersDisabled) {
+      weekList.appendChild(createFilterMessage("Disabled in manual mode."));
+      lectureList.appendChild(createFilterMessage("Disabled in manual mode."));
+      return;
+    }
+    const block = blocks.find((b) => b.blockId === selectedBlockId);
+    const selectedWeeks = new Set(getFilterWeeks(activeTab.filter));
+    const selectedLectures = new Set(getFilterLectureKeys(activeTab.filter));
+    if (!block) {
+      weekList.appendChild(createFilterMessage("Choose a block to filter weeks."));
+      lectureList.appendChild(createFilterMessage("Choose a block to filter lectures."));
+      return;
+    }
+    const weekNumbers = /* @__PURE__ */ new Set();
+    if (Number(block.weeks)) {
+      const total = Number(block.weeks);
+      for (let i = 1; i <= total; i += 1) {
+        weekNumbers.add(i);
+      }
+    }
+    (block.lectures || []).forEach((lecture) => {
+      if (Number.isFinite(lecture?.week)) {
+        weekNumbers.add(Number(lecture.week));
+      }
+    });
+    const sortedWeeks = Array.from(weekNumbers).sort((a, b) => a - b);
+    if (!sortedWeeks.length) {
+      weekList.appendChild(createFilterMessage("No weeks found for this block."));
+    } else {
+      sortedWeeks.forEach((weekNumber) => {
+        const option = createFilterOption({
+          label: `Week ${weekNumber}`,
+          checked: selectedWeeks.has(weekNumber),
+          onToggle: async (checked) => {
+            const next = new Set(selectedWeeks);
+            if (checked) {
+              next.add(weekNumber);
+            } else {
+              next.delete(weekNumber);
+            }
+            setFilterWeeks(activeTab.filter, Array.from(next).sort((a, b) => a - b));
+            setFilterLectureKeys(activeTab.filter, []);
+            await persistMapConfig();
+            await renderMap(mapState.root);
+          }
+        });
+        weekList.appendChild(option);
+      });
+      if (selectedWeeks.size) {
+        const clearWeeks = document.createElement("button");
+        clearWeeks.type = "button";
+        clearWeeks.className = "map-filter-clear";
+        clearWeeks.textContent = "Clear weeks";
+        clearWeeks.addEventListener("click", async () => {
+          setFilterWeeks(activeTab.filter, []);
+          setFilterLectureKeys(activeTab.filter, []);
+          await persistMapConfig();
+          await renderMap(mapState.root);
+        });
+        weekField.appendChild(clearWeeks);
+      }
+    }
+    const lectures = Array.isArray(block?.lectures) ? block.lectures : [];
+    const filteredLectures = lectures.filter((lec) => !selectedWeeks.size || selectedWeeks.has(Number(lec.week))).sort((a, b) => {
+      const weekA = Number(a.week) || 0;
+      const weekB = Number(b.week) || 0;
+      if (weekA !== weekB) return weekA - weekB;
+      const idA = Number(a.id) || 0;
+      const idB = Number(b.id) || 0;
+      return idA - idB;
+    });
+    if (!filteredLectures.length) {
+      lectureList.appendChild(
+        createFilterMessage(selectedWeeks.size ? "No lectures match the selected weeks." : "No lectures found for this block.")
+      );
+    } else {
+      filteredLectures.forEach((lecture) => {
+        const pieces = [`block:${block.blockId}`];
+        if (lecture.id != null && lecture.id !== "") {
+          pieces.push(`id:${lecture.id}`);
+        }
+        if (lecture.name) {
+          pieces.push(`name:${lecture.name}`);
+        }
+        const key = pieces.join("|");
+        const legacyKey = `${block.blockId}|${lecture.id}`;
+        const checked = selectedLectures.has(key) || selectedLectures.has(legacyKey);
+        const label = lecture.name ? lecture.name : `Lecture ${lecture.id}`;
+        const weekLabel2 = Number.isFinite(lecture.week) ? `Week ${lecture.week}` : "";
+        const option = createFilterOption({
+          label: weekLabel2 ? `${label} \xB7 ${weekLabel2}` : label,
+          checked,
+          onToggle: async (nextChecked) => {
+            const next = new Set(selectedLectures);
+            next.delete(legacyKey);
+            if (nextChecked) {
+              next.add(key);
+            } else {
+              next.delete(key);
+            }
+            setFilterLectureKeys(activeTab.filter, Array.from(next));
+            await persistMapConfig();
+            await renderMap(mapState.root);
+          }
+        });
+        lectureList.appendChild(option);
+      });
+      if (selectedLectures.size) {
+        const clearLectures = document.createElement("button");
+        clearLectures.type = "button";
+        clearLectures.className = "map-filter-clear";
+        clearLectures.textContent = "Clear lectures";
+        clearLectures.addEventListener("click", async () => {
+          setFilterLectureKeys(activeTab.filter, []);
+          await persistMapConfig();
+          await renderMap(mapState.root);
+        });
+        lectureField.appendChild(clearLectures);
+      }
+    }
   }
   function openItemPopup(itemId) {
     const item = mapState.itemMap?.[itemId];
@@ -20315,6 +20453,7 @@ var Sevenn = (() => {
       if (forceScale) {
         mapState.lastScaleSize = { w: viewBox.w, h: viewBox.h };
         adjustScale();
+        recordActiveViewSnapshot();
         return;
       }
       const prev = mapState.lastScaleSize;
@@ -20323,6 +20462,7 @@ var Sevenn = (() => {
         mapState.lastScaleSize = { w: viewBox.w, h: viewBox.h };
         adjustScale();
       }
+      recordActiveViewSnapshot();
     };
     const updateViewBox = (options = {}) => {
       const pending2 = {
@@ -20983,7 +21123,9 @@ var Sevenn = (() => {
     });
     updateSelectionHighlight();
     updatePendingHighlight();
+    applyInitialViewFocus(visibleItems);
     updateViewBox({ forceScale: true, immediate: true });
+    recordActiveViewSnapshot({ immediate: true });
     refreshCursor();
     root.replaceChildren(fragment);
   }
@@ -21226,6 +21368,7 @@ var Sevenn = (() => {
     if (!targets.length) return false;
     let applied = false;
     let moved = drag.moved === true;
+    const touchedIds = /* @__PURE__ */ new Set();
     targets.forEach((target) => {
       if (!target) return;
       const { id, offset = { dx: 0, dy: 0 }, start } = target;
@@ -21233,6 +21376,7 @@ var Sevenn = (() => {
       const nx = pointer.x - offset.dx;
       const ny = pointer.y - offset.dy;
       scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+      touchedIds.add(id);
       if (!moved && start) {
         const dx = nx - start.x;
         const dy = ny - start.y;
@@ -21246,6 +21390,9 @@ var Sevenn = (() => {
     drag.moved = moved;
     if (applied && moved && options.markDragged !== false) {
       mapState.nodeWasDragged = true;
+    }
+    if (applied) {
+      touchedIds.forEach(updateEdgesFor);
     }
     if (applied) {
       flushQueuedEdgeUpdates({ force: true });
@@ -24269,7 +24416,10 @@ var Sevenn = (() => {
     const nextElements = [];
     const color = getLineStrokeColor(line);
     const { lineScale = 1 } = getCurrentScales();
-    const baseRadius = Math.max(12, Math.min(28, (geometry?.baseWidth || 3) * lineScale * 1.8 + 8));
+    const baseRadius = Math.max(10, Math.min(26, (geometry?.baseWidth || 3) * lineScale * 1.35 + 6));
+    const visualRadius = Math.max(6, Math.min(16, baseRadius * 0.6));
+    const idleStroke = Math.max(visualRadius * 0.25, 1.6);
+    const hoverStroke = Math.max(visualRadius * 0.35, 2.2);
     const updateCircle = (circle, handle, index) => {
       const point = handle?.point || handle?.base || {
         x: geometry.startX + (geometry.endX - geometry.startX) * (handle?.position ?? DEFAULT_CURVE_ANCHOR),
@@ -24279,28 +24429,32 @@ var Sevenn = (() => {
       circle.dataset.position = String(handle?.position ?? DEFAULT_CURVE_ANCHOR);
       circle.setAttribute("cx", point.x);
       circle.setAttribute("cy", point.y);
-      circle.setAttribute("r", baseRadius);
-      circle.style.stroke = color;
+      circle.setAttribute("r", visualRadius);
+      circle.style.stroke = circle._hoverActive ? "#86efac" : color;
       circle.style.color = color;
-      if (!circle._hoverActive) {
-        circle.style.strokeWidth = "2";
-      }
+      circle.style.strokeWidth = circle._hoverActive ? `${hoverStroke}` : `${idleStroke}`;
+      circle.style.fill = circle._hoverActive ? "rgba(34, 197, 94, 0.9)" : "rgba(15, 23, 42, 0.82)";
+      circle.style.filter = circle._hoverActive ? "drop-shadow(0 0 8px rgba(34, 197, 94, 0.45))" : "none";
     };
     handles.forEach((handle, index) => {
       let circle = elements.shift();
       if (!circle) {
         circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         circle.classList.add("map-edge-handle");
-        circle.style.fill = "rgba(15, 23, 42, 0.92)";
-        circle.style.strokeWidth = "2";
+        circle.style.fill = "rgba(15, 23, 42, 0.82)";
+        circle.style.strokeWidth = `${idleStroke}`;
         circle.style.pointerEvents = "none";
         circle._hoverActive = false;
         circle._setHover = (active) => {
           circle._hoverActive = active;
           circle.classList.toggle("map-edge-handle--hover", active);
-          circle.style.strokeWidth = active ? "2.6" : "2";
+          circle.classList.toggle("map-edge-handle--active", active);
+          circle.style.strokeWidth = active ? `${hoverStroke}` : `${idleStroke}`;
+          circle.style.fill = active ? "rgba(34, 197, 94, 0.9)" : "rgba(15, 23, 42, 0.82)";
+          circle.style.stroke = active ? "#86efac" : color;
+          circle.style.filter = active ? "drop-shadow(0 0 8px rgba(34, 197, 94, 0.45))" : "none";
         };
-        circle.addEventListener("pointerdown", (evt) => {
+        circle.addEventListener("pointerdown", async (evt) => {
           if (evt.button !== 0) return;
           if (mapState.tool !== TOOL.NAVIGATE) return;
           evt.stopPropagation();
@@ -24308,6 +24462,11 @@ var Sevenn = (() => {
             evt.preventDefault();
           }
           const handleIndex = Number(evt.currentTarget?.dataset?.index) || 0;
+          if (evt.altKey || evt.metaKey) {
+            await removeHandleAt(line, handleIndex);
+            hideLineHandles(line, { force: true });
+            return;
+          }
           startHandlePress(line, handleIndex, evt);
         });
         circle.addEventListener("pointerenter", () => {
@@ -25197,5 +25356,5 @@ var Sevenn = (() => {
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
-  return __toCommonJS(main_exports);
 })();
+//# sourceMappingURL=bundle.js.map
