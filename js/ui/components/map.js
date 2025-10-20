@@ -109,6 +109,11 @@ const DEFAULT_LINE_THICKNESS = 'regular';
 const DEFAULT_CURVE_ANCHOR = 0.5;
 const CURVE_HANDLE_COUNT = 1;
 const CURVE_HANDLE_MAX_OFFSET = 3.5;
+const MIN_NODE_RADIUS = 20;
+const MAX_NODE_RADIUS = 60;
+const MAX_GRAVITY_BOOST = 999;
+const NODE_COLLISION_MARGIN = 36;
+const DEFAULT_REORGANIZE_SPACING = 240;
 
 const LINE_STYLE_OPTIONS = [
   { value: 'solid', label: 'Smooth' },
@@ -263,6 +268,7 @@ const mapState = {
   searchSuggestionTimer: null,
   paletteSearch: '',
   nodeRadii: null,
+  gravityModel: null,
   edgeLayer: null,
   nodeLayer: null,
   lineMarkers: new Map(),
@@ -474,6 +480,413 @@ function ensureTabLayout(tab) {
     tab.layout = {};
   }
   return tab.layout;
+}
+
+function normalizeGravityBoost(value) {
+  if (value === null || value === undefined) return 0;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return 0;
+  const clamped = Math.min(MAX_GRAVITY_BOOST, num);
+  return Math.round(clamped * 100) / 100;
+}
+
+function getItemGravityBoost(item) {
+  if (!item || typeof item !== 'object') return 0;
+  return normalizeGravityBoost(item.mapGravityBoost);
+}
+
+function buildGravityModel(items = []) {
+  const list = Array.isArray(items) ? items : [];
+  const idSet = new Set();
+  list.forEach(item => {
+    if (item?.id) {
+      idSet.add(item.id);
+    }
+  });
+  const adjacency = new Map();
+  const weights = new Map();
+  const neighborWeights = new Map();
+  const baseCounts = new Map();
+  let maxWeight = 0;
+  list.forEach(item => {
+    if (!item || !item.id) return;
+    const seen = new Set();
+    const neighbors = [];
+    (item.links || []).forEach(link => {
+      const targetId = link?.id;
+      if (!targetId) return;
+      if (link.hidden) return;
+      if (!idSet.has(targetId)) return;
+      if (seen.has(targetId)) return;
+      seen.add(targetId);
+      neighbors.push(targetId);
+    });
+    adjacency.set(item.id, neighbors);
+    const degree = neighbors.length;
+    const boost = getItemGravityBoost(item);
+    const weight = degree + boost;
+    weights.set(item.id, weight);
+    baseCounts.set(item.id, { degree, boost });
+    if (weight > maxWeight) {
+      maxWeight = weight;
+    }
+  });
+  list.forEach(item => {
+    if (!item?.id) return;
+    const neighbors = adjacency.get(item.id) || [];
+    const sorted = neighbors
+      .map(id => weights.get(id) || 0)
+      .sort((a, b) => b - a);
+    neighborWeights.set(item.id, sorted);
+  });
+  const influence = new Map();
+  list.forEach(item => {
+    if (!item?.id) return;
+    const neighbors = adjacency.get(item.id) || [];
+    const baseWeight = weights.get(item.id) || 0;
+    if (!neighbors.length) {
+      influence.set(item.id, baseWeight);
+      return;
+    }
+    let directSum = 0;
+    neighbors.forEach(id => {
+      directSum += weights.get(id) || 0;
+    });
+    const directAvg = directSum / neighbors.length;
+    let secondSum = 0;
+    neighbors.forEach(id => {
+      const secondNeighbors = adjacency.get(id) || [];
+      if (!secondNeighbors.length) return;
+      let secondWeight = 0;
+      secondNeighbors.forEach(innerId => {
+        secondWeight += weights.get(innerId) || 0;
+      });
+      secondSum += secondWeight / secondNeighbors.length;
+    });
+    const secondAvg = neighbors.length ? secondSum / neighbors.length : 0;
+    const score = baseWeight + directAvg * 0.6 + secondAvg * 0.3;
+    influence.set(item.id, score);
+  });
+  return { weights, adjacency, neighborWeights, influence, maxWeight, baseCounts };
+}
+
+function computeNodeRadiusFromWeight(weight, maxWeight) {
+  const clampedMax = Math.max(Number(maxWeight) || 0, 1);
+  const normalized = clamp((Number(weight) || 0) / clampedMax, 0, 1);
+  return MIN_NODE_RADIUS + (MAX_NODE_RADIUS - MIN_NODE_RADIUS) * normalized;
+}
+
+function computeRadiiFromModel(model, items = mapState.visibleItems || []) {
+  const radii = new Map();
+  if (!model) return radii;
+  const { weights, maxWeight } = model;
+  (Array.isArray(items) ? items : []).forEach(item => {
+    if (!item?.id) return;
+    const radius = computeNodeRadiusFromWeight(weights.get(item.id) || 0, maxWeight);
+    radii.set(item.id, radius);
+  });
+  return radii;
+}
+
+function refreshGravityModel() {
+  const items = Array.isArray(mapState.visibleItems) ? mapState.visibleItems : [];
+  const model = buildGravityModel(items);
+  mapState.gravityModel = model;
+  const nodeRadii = computeRadiiFromModel(model, items);
+  mapState.nodeRadii = nodeRadii;
+  const touched = [];
+  nodeRadii.forEach((radius, id) => {
+    const entry = mapState.elements?.get(id);
+    if (!entry?.circle) return;
+    entry.circle.dataset.radius = radius;
+    updateNodeGeometry(id, entry);
+    touched.push(id);
+  });
+  touched.forEach(id => queueEdgeUpdate(id, { immediate: true }));
+  if (touched.length) {
+    flushQueuedEdgeUpdates({ force: true });
+  }
+  return model;
+}
+
+function computeLayoutCenter() {
+  const positions = mapState.positions || {};
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  Object.values(positions).forEach(pos => {
+    if (!pos) return;
+    const { x, y } = pos;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  });
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
+    const limit = Math.max(mapState.sizeLimit || 0, 2000);
+    const fallback = limit / 2;
+    return { x: fallback, y: fallback };
+  }
+  return {
+    x: (minX + maxX) / 2,
+    y: (minY + maxY) / 2
+  };
+}
+
+function computeSmartLayout(model, options = {}) {
+  const items = Array.isArray(mapState.visibleItems)
+    ? mapState.visibleItems.filter(it => it && it.id)
+    : [];
+  if (!items.length) return {};
+  const workingModel = model || mapState.gravityModel || buildGravityModel(items);
+  const { weights, adjacency, neighborWeights, influence, maxWeight } = workingModel;
+  const radii = computeRadiiFromModel(workingModel, items);
+  const order = items
+    .map(item => item.id)
+    .sort((a, b) => {
+      const aInfluence = influence.get(a) || 0;
+      const bInfluence = influence.get(b) || 0;
+      if (Math.abs(bInfluence - aInfluence) > 0.0001) {
+        return bInfluence - aInfluence;
+      }
+      const aWeight = weights.get(a) || 0;
+      const bWeight = weights.get(b) || 0;
+      if (Math.abs(bWeight - aWeight) > 0.0001) {
+        return bWeight - aWeight;
+      }
+      const aSig = neighborWeights.get(a) || [];
+      const bSig = neighborWeights.get(b) || [];
+      const len = Math.max(aSig.length, bSig.length);
+      for (let i = 0; i < len; i += 1) {
+        const diff = (bSig[i] || 0) - (aSig[i] || 0);
+        if (Math.abs(diff) > 0.0001) {
+          return diff;
+        }
+      }
+      return String(a).localeCompare(String(b));
+    });
+
+  if (!order.length) {
+    return {};
+  }
+
+  const limit = Math.max(mapState.sizeLimit || 0, 2000);
+  const baseSpacing = options.baseSpacing ?? DEFAULT_REORGANIZE_SPACING;
+  const center = options.center || computeLayoutCenter();
+  const placements = new Map();
+  const anchorUsage = new Map();
+  const orphanUsage = { layer: 0, index: 0 };
+  const margin = NODE_COLLISION_MARGIN;
+
+  const clampPosition = (pos, radius) => {
+    const minCoord = radius + margin;
+    const maxCoord = Math.max(minCoord, limit - radius - margin);
+    return {
+      x: clamp(pos.x, minCoord, maxCoord),
+      y: clamp(pos.y, minCoord, maxCoord)
+    };
+  };
+
+  const resolveCollisions = (id, initial) => {
+    let position = { x: initial.x, y: initial.y };
+    const radius = radii.get(id) || MIN_NODE_RADIUS;
+    for (let iter = 0; iter < 10; iter += 1) {
+      let adjusted = false;
+      placements.forEach((otherPos, otherId) => {
+        if (otherId === id) return;
+        const otherRadius = radii.get(otherId) || MIN_NODE_RADIUS;
+        const minDistance = radius + otherRadius + margin;
+        const dx = position.x - otherPos.x;
+        const dy = position.y - otherPos.y;
+        const dist = Math.hypot(dx, dy) || 0.0001;
+        if (dist < minDistance) {
+          const push = (minDistance - dist) * 0.55;
+          position.x += (dx / dist) * push;
+          position.y += (dy / dist) * push;
+          adjusted = true;
+        }
+      });
+      position = clampPosition(position, radius);
+      if (!adjusted) break;
+    }
+    return position;
+  };
+
+  const pickAnchor = ids => {
+    if (!Array.isArray(ids) || !ids.length) return null;
+    const sorted = ids
+      .filter(id => placements.has(id))
+      .sort((a, b) => {
+        const diffInfluence = (influence.get(b) || 0) - (influence.get(a) || 0);
+        if (Math.abs(diffInfluence) > 0.0001) return diffInfluence;
+        const diffWeight = (weights.get(b) || 0) - (weights.get(a) || 0);
+        if (Math.abs(diffWeight) > 0.0001) return diffWeight;
+        return String(a).localeCompare(String(b));
+      });
+    return sorted[0] || null;
+  };
+
+  order.forEach((id, index) => {
+    const radius = radii.get(id) || MIN_NODE_RADIUS;
+    let position;
+    if (index === 0) {
+      position = clampPosition({ x: center.x, y: center.y }, radius);
+    } else {
+      const neighbors = (adjacency.get(id) || []).filter(n => placements.has(n));
+      let anchorId = pickAnchor(neighbors);
+      if (!anchorId) {
+        anchorId = order.find(candidate => placements.has(candidate)) || null;
+      }
+      if (!anchorId) {
+        const nodesInLayer = Math.max(6, 6 + orphanUsage.layer * 4);
+        const angle = ((orphanUsage.index + (orphanUsage.layer % 2 ? 0.5 : 0)) / nodesInLayer) * Math.PI * 2;
+        const distance = baseSpacing + orphanUsage.layer * (baseSpacing * 0.7);
+        position = {
+          x: center.x + Math.cos(angle) * distance,
+          y: center.y + Math.sin(angle) * distance
+        };
+        orphanUsage.index += 1;
+        if (orphanUsage.index >= nodesInLayer) {
+          orphanUsage.layer += 1;
+          orphanUsage.index = 0;
+        }
+      } else {
+        const anchorPos = placements.get(anchorId) || center;
+        const anchorRadius = radii.get(anchorId) || MIN_NODE_RADIUS;
+        const meta = anchorUsage.get(anchorId) || { layer: 0, index: 0, nodesInLayer: 6 };
+        let { layer, index: idx, nodesInLayer } = meta;
+        if (!nodesInLayer) {
+          nodesInLayer = 6;
+        }
+        const angle = ((idx + (layer % 2 ? 0.5 : 0)) / nodesInLayer) * Math.PI * 2;
+        const anchorWeight = weights.get(anchorId) || 0;
+        const weightRatio = maxWeight ? clamp(anchorWeight / maxWeight, 0, 1) : 0;
+        const baseDistance = baseSpacing * (0.75 + (1 - weightRatio) * 0.4);
+        const distance = anchorRadius + radius + baseDistance + layer * (baseSpacing * 0.6);
+        position = {
+          x: anchorPos.x + Math.cos(angle) * distance,
+          y: anchorPos.y + Math.sin(angle) * distance
+        };
+        const placedNeighbors = neighbors.filter(n => placements.has(n));
+        if (placedNeighbors.length > 1) {
+          let avgX = 0;
+          let avgY = 0;
+          let totalWeight = 0;
+          placedNeighbors.forEach(n => {
+            const pos = placements.get(n);
+            if (!pos) return;
+            const w = (weights.get(n) || 0) + 1;
+            avgX += pos.x * w;
+            avgY += pos.y * w;
+            totalWeight += w;
+          });
+          if (totalWeight > 0) {
+            avgX /= totalWeight;
+            avgY /= totalWeight;
+            position.x = position.x * 0.65 + avgX * 0.35;
+            position.y = position.y * 0.65 + avgY * 0.35;
+          }
+        }
+        meta.index = (idx + 1) % nodesInLayer;
+        if (meta.index === 0) {
+          meta.layer = layer + 1;
+          meta.nodesInLayer = Math.max(6, 6 + meta.layer * 4);
+        }
+        anchorUsage.set(anchorId, meta);
+      }
+      position = resolveCollisions(id, position);
+    }
+    placements.set(id, position);
+  });
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  placements.forEach(pos => {
+    if (!pos) return;
+    if (pos.x < minX) minX = pos.x;
+    if (pos.x > maxX) maxX = pos.x;
+    if (pos.y < minY) minY = pos.y;
+    if (pos.y > maxY) maxY = pos.y;
+  });
+  if (Number.isFinite(minX) && Number.isFinite(maxX) && Number.isFinite(minY) && Number.isFinite(maxY)) {
+    const offsetX = center.x - (minX + maxX) / 2;
+    const offsetY = center.y - (minY + maxY) / 2;
+    placements.forEach((pos, id) => {
+      if (!pos) return;
+      const shifted = { x: pos.x + offsetX, y: pos.y + offsetY };
+      placements.set(id, clampPosition(shifted, radii.get(id) || MIN_NODE_RADIUS));
+    });
+  }
+
+  const ids = Array.from(placements.keys());
+  for (let iter = 0; iter < 4; iter += 1) {
+    let changed = false;
+    for (let i = 0; i < ids.length; i += 1) {
+      for (let j = i + 1; j < ids.length; j += 1) {
+        const aId = ids[i];
+        const bId = ids[j];
+        const aPos = placements.get(aId);
+        const bPos = placements.get(bId);
+        if (!aPos || !bPos) continue;
+        const aRadius = radii.get(aId) || MIN_NODE_RADIUS;
+        const bRadius = radii.get(bId) || MIN_NODE_RADIUS;
+        const minDistance = aRadius + bRadius + margin;
+        const dx = bPos.x - aPos.x;
+        const dy = bPos.y - aPos.y;
+        const dist = Math.hypot(dx, dy) || 0.0001;
+        if (dist < minDistance) {
+          const push = (minDistance - dist) / 2;
+          const nx = dx / dist;
+          const ny = dy / dist;
+          aPos.x -= nx * push;
+          aPos.y -= ny * push;
+          bPos.x += nx * push;
+          bPos.y += ny * push;
+          placements.set(aId, clampPosition(aPos, aRadius));
+          placements.set(bId, clampPosition(bPos, bRadius));
+          changed = true;
+        }
+      }
+    }
+    if (!changed) {
+      break;
+    }
+  }
+
+  const result = {};
+  placements.forEach((pos, id) => {
+    if (!pos) return;
+    result[id] = clampPosition(pos, radii.get(id) || MIN_NODE_RADIUS);
+  });
+  return result;
+}
+
+async function smartReorganizeActiveMap() {
+  const items = Array.isArray(mapState.visibleItems) ? mapState.visibleItems : [];
+  if (!items.length) return {};
+  const model = refreshGravityModel() || mapState.gravityModel || buildGravityModel(items);
+  const layout = computeSmartLayout(model);
+  const ids = Object.keys(layout);
+  if (!ids.length) return {};
+  const tab = getActiveTab();
+  ids.forEach(id => {
+    mapState.positions[id] = layout[id];
+    scheduleNodePositionUpdate(id, layout[id], { immediate: true });
+  });
+  if (tab) {
+    const storedLayout = ensureTabLayout(tab);
+    ids.forEach(id => {
+      storedLayout[id] = { ...layout[id] };
+    });
+    tab.layoutSeeded = true;
+    await persistMapConfig();
+  }
+  flushQueuedEdgeUpdates({ force: true });
+  return layout;
 }
 
 async function ensureMapConfig() {
@@ -1169,6 +1582,31 @@ function createMapControlsPanel(activeTab) {
 
   controls.appendChild(filterRow);
 
+  const layoutRow = document.createElement('div');
+  layoutRow.className = 'map-controls-row map-controls-row--actions';
+  const reorganizeBtn = document.createElement('button');
+  reorganizeBtn.type = 'button';
+  reorganizeBtn.className = 'btn secondary map-reorganize-btn';
+  reorganizeBtn.textContent = 'Smart reorganize';
+  reorganizeBtn.addEventListener('click', async () => {
+    if (reorganizeBtn.dataset.state === 'busy') return;
+    const originalText = reorganizeBtn.textContent;
+    reorganizeBtn.dataset.state = 'busy';
+    reorganizeBtn.disabled = true;
+    reorganizeBtn.textContent = 'Organizing…';
+    try {
+      await smartReorganizeActiveMap();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      reorganizeBtn.disabled = false;
+      reorganizeBtn.textContent = originalText;
+      delete reorganizeBtn.dataset.state;
+    }
+  });
+  layoutRow.appendChild(reorganizeBtn);
+  controls.appendChild(layoutRow);
+
   return controls;
 }
 
@@ -1446,7 +1884,8 @@ function openItemPopup(itemId) {
   showPopup(item, {
     onEdit: () => openItemEditor(itemId),
     onColorChange: color => updateItemColor(itemId, color),
-    onLink: () => openLinkAssistant(itemId)
+    onLink: () => openLinkAssistant(itemId),
+    onGravityChange: value => updateItemGravityBoost(itemId, value)
   });
 }
 
@@ -1490,6 +1929,17 @@ async function updateItemColor(itemId, color) {
     }
   }
   refreshNodeColor(itemId);
+}
+
+async function updateItemGravityBoost(itemId, boost) {
+  const item = await getItem(itemId);
+  if (!item) return 0;
+  const normalized = normalizeGravityBoost(boost);
+  item.mapGravityBoost = normalized;
+  await upsertItem(item);
+  integrateItemUpdates(item);
+  refreshGravityModel();
+  return normalized;
 }
 
 function parseLectureFilterKey(rawKey, fallbackBlock = '') {
@@ -1905,10 +2355,10 @@ export async function renderMap(root) {
   mapState.positions = positions;
   mapState.elements = new Map();
 
-  const linkCounts = Object.fromEntries(items.map(it => [it.id, (it.links || []).length]));
-  const maxLinks = Math.max(1, ...Object.values(linkCounts));
-  const minRadius = 20;
-  const maxRadius = 60;
+  const gravityModel = buildGravityModel(visibleItems);
+  mapState.gravityModel = gravityModel;
+  const nodeRadii = computeRadiiFromModel(gravityModel, visibleItems);
+  mapState.nodeRadii = nodeRadii;
 
   const center = size / 2;
   const newItems = [];
@@ -1916,14 +2366,6 @@ export async function renderMap(root) {
   const allowLegacyPositions = Boolean(activeTab && activeTab.layoutSeeded !== true);
   let layoutDirty = false;
   let legacyImported = false;
-
-  const nodeRadii = new Map();
-  visibleItems.forEach(it => {
-    const degree = linkCounts[it.id] || 0;
-    const baseRadius = minRadius + ((maxRadius - minRadius) * degree) / maxLinks;
-    nodeRadii.set(it.id, baseRadius);
-  });
-  mapState.nodeRadii = nodeRadii;
 
   visibleItems.forEach(it => {
     if (layout && layout[it.id]) {
@@ -1950,7 +2392,8 @@ export async function renderMap(root) {
     }
     const groups = itemGroupCache.get(it.id) || deriveItemGroupKeys(it);
     const primaryGroup = getPrimaryGroupKey(it, groups);
-    newItems.push({ item: it, primaryGroup, degree: linkCounts[it.id] || 0 });
+    const weight = gravityModel.weights?.get(it.id) || 0;
+    newItems.push({ item: it, primaryGroup, degree: weight });
   });
 
   const existingGroupInfo = new Map();
@@ -2207,7 +2650,10 @@ export async function renderMap(root) {
     const cachedRadius = mapState.nodeRadii?.get(it.id);
     const baseR = typeof cachedRadius === 'number'
       ? cachedRadius
-      : minRadius + ((maxRadius - minRadius) * (linkCounts[it.id] || 0)) / maxLinks;
+      : computeNodeRadiusFromWeight(
+          gravityModel.weights?.get(it.id) || 0,
+          gravityModel.maxWeight || 1
+        );
     circle.setAttribute('r', baseR);
     circle.dataset.radius = baseR;
     circle.setAttribute('class', 'map-node');
@@ -2718,6 +3164,9 @@ function applyNodeDragFromPointer(pointer, options = {}) {
   drag.moved = moved;
   if (applied && moved && options.markDragged !== false) {
     mapState.nodeWasDragged = true;
+  }
+  if (applied) {
+    flushQueuedEdgeUpdates({ force: true });
   }
   return applied;
 }

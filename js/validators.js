@@ -2,6 +2,8 @@ import { normalizeSrRecord } from './review/sr-data.js';
 
 const randomId = () => (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2));
 
+const MAX_GRAVITY_BOOST = 999;
+
 function escapeHtml(str = '') {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -9,6 +11,14 @@ function escapeHtml(str = '') {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function sanitizeGravityBoost(value) {
+  if (value === null || value === undefined) return 0;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return 0;
+  const clamped = Math.min(MAX_GRAVITY_BOOST, num);
+  return Math.round(clamped * 100) / 100;
 }
 
 function legacyFactsToHtml(facts = []) {
@@ -49,6 +59,7 @@ export function cleanItem(item) {
     lectures: item.lectures || [],
     mapPos: item.mapPos || null,
     mapHidden: !!item.mapHidden,
+    mapGravityBoost: sanitizeGravityBoost(item.mapGravityBoost),
     sr: normalizeSrRecord(item.sr)
   };
 }

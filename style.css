@@ -768,6 +768,31 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(
   margin-bottom: var(--pad-sm);
 }
 
+.popup-gravity {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: var(--pad-sm);
+}
+
+.popup-gravity-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.95rem;
+  color: var(--text-muted);
+}
+
+.popup-gravity-input {
+  max-width: 160px;
+}
+
+.popup-gravity-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: rgba(226, 232, 240, 0.6);
+}
+
 .popup-color-control {
   display: inline-flex;
   align-items: center;
@@ -5646,6 +5671,20 @@ button.builder-pill.builder-pill-outline {
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
+}
+
+.map-controls-row--actions {
+  justify-content: flex-end;
+}
+
+.map-reorganize-btn {
+  min-width: 180px;
+  font-weight: 600;
+}
+
+.map-reorganize-btn[disabled] {
+  opacity: 0.7;
+  cursor: wait;
 }
 
 .map-control {
