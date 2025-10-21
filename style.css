@@ -5052,9 +5052,10 @@ button.builder-pill.builder-pill-outline {
 }
 
 .map-edge-handle__target {
-  pointer-events: none;
+  pointer-events: auto;
   cursor: grab;
   touch-action: none;
+  fill: transparent;
 }
 
 .map-edge-handle__target:active {
