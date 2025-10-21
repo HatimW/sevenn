@@ -5,15 +5,15 @@ const MINUTE_MS = 60 * 1000;
 
 export const DEFAULT_PASS_COLORS = [
   '#38bdf8',
-  '#22d3ee',
+  '#0ea5e9',
   '#34d399',
-  '#4ade80',
-  '#fbbf24',
-  '#fb923c',
+  '#10b981',
+  '#facc15',
+  '#f97316',
   '#f472b6',
   '#a855f7',
-  '#6366f1',
-  '#14b8a6'
+  '#818cf8',
+  '#2dd4bf'
 ];
 
 const clone = deepClone;

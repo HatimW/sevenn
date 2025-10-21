@@ -110,7 +110,7 @@ describe('tab layout', () => {
   });
 
   it('exposes the new navigation order', () => {
-    assert.deepStrictEqual(tabs, ['Block Board','Lists','Lectures','Cards','Study','Exams','Map']);
+    assert.deepStrictEqual(tabs, ['Block Board','Lists','Cards','Study','Exams','Map','Lectures']);
   });
 
   it('renders the lists tab with disease entries by default', async () => {
