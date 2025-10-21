@@ -3341,7 +3341,8 @@ export async function renderMap(root) {
           lastPointer: { x: pointer.x, y: pointer.y },
           nodes: dragNodes,
           moved: false,
-          primaryId: it.id
+          primaryId: it.id,
+          edges: collectEdgesForNodes(dragNodes.map(node => node.id))
         };
         if (mapState.nodeDrag.captureTarget?.setPointerCapture) {
           try {
@@ -3413,8 +3414,10 @@ export async function renderMap(root) {
         mapState.lastPointerDownInfo = null;
       } else if (mapState.tool === TOOL.HIDE) {
         if (confirm(`Remove ${titleOf(it)} from the map?`)) {
+          hideNodeLocally(it.id);
+          refreshToolboxBadges();
+          refreshHiddenPanelUI();
           await setNodeHidden(it.id, true);
-          await renderMap(root);
         }
       } else if (mapState.tool === TOOL.ADD_LINK) {
         await handleAddLinkClick(it.id);
@@ -3481,8 +3484,10 @@ export async function renderMap(root) {
         mapState.lastPointerDownInfo = null;
       } else if (mapState.tool === TOOL.HIDE) {
         if (confirm(`Remove ${titleOf(it)} from the map?`)) {
+          hideNodeLocally(it.id);
+          refreshToolboxBadges();
+          refreshHiddenPanelUI();
           await setNodeHidden(it.id, true);
-          await renderMap(root);
         }
       } else if (mapState.tool === TOOL.ADD_LINK) {
         await handleAddLinkClick(it.id);
@@ -3743,18 +3748,47 @@ function getNodeDragTargets() {
   return [];
 }
 
-function refreshEdgesForIds(ids) {
-  if (!Array.isArray(ids) || !ids.length) {
-    return;
+function collectEdgesForNodes(ids = []) {
+  ensureEdgeRegistry();
+  const collected = new Set();
+  if (!Array.isArray(ids)) {
+    return collected;
   }
-  const seen = new Set();
   ids.forEach(id => {
     if (id == null) return;
     const key = String(id);
-    if (seen.has(key)) return;
-    seen.add(key);
-    updateEdgesFor(id);
+    const set = mapState.edgeRefs?.get(key);
+    if (!set || !set.size) return;
+    set.forEach(edge => {
+      if (!edge) return;
+      collected.add(edge);
+    });
   });
+  return collected;
+}
+
+function refreshEdgeGeometries(edgeCollection) {
+  if (!edgeCollection) return;
+  const stale = [];
+  const run = typeof edgeCollection.forEach === 'function'
+    ? edgeCollection.forEach.bind(edgeCollection)
+    : callback => {
+        for (const entry of edgeCollection) {
+          callback(entry);
+        }
+      };
+  run(edge => {
+    if (!edge || !edge.isConnected || !edge.ownerSVGElement) {
+      stale.push(edge);
+      return;
+    }
+    refreshEdgeGeometry(edge);
+  });
+  if (typeof edgeCollection.delete === 'function' && stale.length) {
+    stale.forEach(edge => {
+      edgeCollection.delete(edge);
+    });
+  }
 }
 
 function applyNodeDragFromPointer(pointer, options = {}) {
@@ -3798,7 +3832,8 @@ function applyNodeDragFromPointer(pointer, options = {}) {
     mapState.nodeWasDragged = true;
   }
   if (applied) {
-    refreshEdgesForIds(touchedIds);
+    const edgeSet = drag.edges && drag.edges.size ? drag.edges : collectEdgesForNodes(touchedIds);
+    refreshEdgeGeometries(edgeSet);
     flushQueuedEdgeUpdates({ force: true });
   }
   return applied;
@@ -3902,7 +3937,7 @@ function handlePointerMove(e) {
       touchedIds.push(id);
     });
     if (touchedIds.length) {
-      refreshEdgesForIds(touchedIds);
+      refreshEdgeGeometries(collectEdgesForNodes(touchedIds));
       flushQueuedEdgeUpdates({ force: true });
     }
     mapState.nodeWasDragged = true;
@@ -5729,6 +5764,80 @@ function gatherHiddenLinks(items, itemMap) {
   return hidden;
 }
 
+function refreshHiddenPanelUI() {
+  const container = mapState.container;
+  if (!container) return;
+  container.querySelectorAll('.map-hidden-panel, .map-hidden-toggle').forEach(el => {
+    el.remove();
+  });
+  const allItems = Object.values(mapState.itemMap || {});
+  const hiddenNodes = allItems.filter(item => item?.mapHidden);
+  const hiddenLinks = gatherHiddenLinks(allItems, mapState.itemMap || {});
+  buildHiddenPanel(container, hiddenNodes, hiddenLinks);
+}
+
+function hideNodeLocally(id) {
+  if (!id) return;
+  const key = String(id);
+  const item = mapState.itemMap?.[id];
+  if (item) {
+    item.mapHidden = true;
+  }
+  if (Array.isArray(mapState.visibleItems)) {
+    mapState.visibleItems = mapState.visibleItems.filter(entry => entry?.id !== id);
+  }
+  if (mapState.nodeRadii?.delete) {
+    mapState.nodeRadii.delete(id);
+  }
+  if (mapState.gravityModel?.weights?.delete) {
+    mapState.gravityModel.weights.delete(id);
+  }
+  if (mapState.positions && Object.prototype.hasOwnProperty.call(mapState.positions, id)) {
+    delete mapState.positions[id];
+  }
+  if (mapState.pendingNodeUpdates?.delete) {
+    mapState.pendingNodeUpdates.delete(id);
+  }
+  if (mapState.pendingEdgeUpdates?.delete) {
+    mapState.pendingEdgeUpdates.delete(key);
+  }
+  mapState.selectionIds = mapState.selectionIds.filter(sel => sel !== id);
+  if (Array.isArray(mapState.previewSelection)) {
+    const filtered = mapState.previewSelection.filter(sel => sel !== id);
+    mapState.previewSelection = filtered.length ? filtered : null;
+    if (!filtered.length) {
+      mapState.selectionPreviewSignature = '';
+    }
+  }
+  if (mapState.pendingLink === id) {
+    mapState.pendingLink = null;
+  }
+  const entry = mapState.elements.get(id);
+  if (entry) {
+    if (entry.circle?.parentNode) {
+      entry.circle.remove();
+    }
+    if (entry.label?.parentNode) {
+      entry.label.remove();
+    }
+    mapState.elements.delete(id);
+  }
+  updateSelectionHighlight();
+  updatePendingHighlight();
+  ensureEdgeRegistry();
+  const edges = mapState.edgeRefs?.get(key);
+  if (edges && edges.size) {
+    const toRemove = Array.from(edges);
+    toRemove.forEach(edge => {
+      const a = edge?.dataset?.a;
+      const b = edge?.dataset?.b;
+      if (a && b) {
+        removeEdgeBetween(a, b);
+      }
+    });
+  }
+}
+
 async function handleAddLinkClick(nodeId) {
   if (!mapState.pendingLink) {
     mapState.pendingLink = nodeId;
@@ -5759,6 +5868,7 @@ async function handleAddLinkClick(nodeId) {
             applyLinkVisibility(from.id, to.id, forward);
           }
           refreshToolboxBadges();
+          refreshHiddenPanelUI();
         }
       }
     } else {
@@ -5912,6 +6022,7 @@ function openLinkAssistant(nodeId) {
                 }
                 updatePendingHighlight();
                 refreshToolboxBadges();
+                refreshHiddenPanelUI();
                 renderResults();
               }
             } catch (err) {
@@ -5973,7 +6084,7 @@ function openLinkAssistant(nodeId) {
   });
 }
 
-function handleEdgeClick(path, aId, bId, evt) {
+async function handleEdgeClick(path, aId, bId, evt) {
   hideEdgeTooltip(path);
   if (mapState.edgeDragJustCompleted) {
     mapState.edgeDragJustCompleted = false;
@@ -5983,25 +6094,24 @@ function handleEdgeClick(path, aId, bId, evt) {
     openLineMenu(evt, path, aId, bId);
   } else if (mapState.tool === TOOL.BREAK) {
     if (confirm('Are you sure you want to delete this link?')) {
-      removeLink(aId, bId).then(result => {
-        if (!result) return;
-        integrateItemUpdates(result.source, result.target);
-        removeEdgeBetween(aId, bId);
-        updatePendingHighlight();
-        refreshToolboxBadges();
-      });
+      const result = await removeLink(aId, bId);
+      if (!result) return;
+      integrateItemUpdates(result.source, result.target);
+      removeEdgeBetween(aId, bId);
+      updatePendingHighlight();
+      refreshToolboxBadges();
     }
   } else if (mapState.tool === TOOL.HIDE) {
     if (confirm('Hide this link on the map?')) {
-      setLinkHidden(aId, bId, true).then(result => {
-        if (!result) return;
-        integrateItemUpdates(result.source, result.target);
-        const forward = result.forward || { id: bId, hidden: true };
-        forward.hidden = true;
-        applyLinkVisibility(aId, bId, forward);
-        updatePendingHighlight();
-        refreshToolboxBadges();
-      });
+      const result = await setLinkHidden(aId, bId, true);
+      if (!result) return;
+      integrateItemUpdates(result.source, result.target);
+      const forward = result.forward || { id: bId, hidden: true };
+      forward.hidden = true;
+      applyLinkVisibility(aId, bId, forward);
+      updatePendingHighlight();
+      refreshToolboxBadges();
+      refreshHiddenPanelUI();
     }
   }
 }
