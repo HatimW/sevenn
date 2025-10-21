@@ -220,7 +220,14 @@ var Sevenn = (() => {
     filters: initialFilters,
     lectures: initialLectures,
     entryLayout: initialEntryLayout,
-    blockBoard: { collapsedBlocks: [], hiddenTimelines: [] },
+    blockBoard: {
+      collapsedBlocks: [],
+      hiddenTimelines: [],
+      autoCollapsed: [],
+      autoHidden: [],
+      manualExpanded: [],
+      manualTimeline: []
+    },
     builder: {
       blocks: [],
       weeks: [],
@@ -299,7 +306,14 @@ var Sevenn = (() => {
   function setBlockBoardState(patch) {
     if (!patch) return;
     if (!state.blockBoard) {
-      state.blockBoard = { collapsedBlocks: [], hiddenTimelines: [], autoCollapsed: [], autoHidden: [] };
+      state.blockBoard = {
+        collapsedBlocks: [],
+        hiddenTimelines: [],
+        autoCollapsed: [],
+        autoHidden: [],
+        manualExpanded: [],
+        manualTimeline: []
+      };
     }
     const current = state.blockBoard;
     if (!Array.isArray(current.hiddenTimelines)) {
@@ -310,6 +324,12 @@ var Sevenn = (() => {
     }
     if (!Array.isArray(current.autoHidden)) {
       current.autoHidden = [];
+    }
+    if (!Array.isArray(current.manualExpanded)) {
+      current.manualExpanded = [];
+    }
+    if (!Array.isArray(current.manualTimeline)) {
+      current.manualTimeline = [];
     }
     if (Array.isArray(patch.collapsedBlocks)) {
       const unique = Array.from(new Set(patch.collapsedBlocks.map((id) => String(id))));
@@ -326,6 +346,14 @@ var Sevenn = (() => {
     if (Array.isArray(patch.autoHidden)) {
       const autoHiddenSet = Array.from(new Set(patch.autoHidden.map((id) => String(id))));
       current.autoHidden = autoHiddenSet;
+    }
+    if (Array.isArray(patch.manualExpanded)) {
+      const manualExpandedSet = Array.from(new Set(patch.manualExpanded.map((id) => String(id))));
+      current.manualExpanded = manualExpandedSet;
+    }
+    if (Array.isArray(patch.manualTimeline)) {
+      const manualTimelineSet = Array.from(new Set(patch.manualTimeline.map((id) => String(id))));
+      current.manualTimeline = manualTimelineSet;
     }
     if (Object.prototype.hasOwnProperty.call(patch, "showDensity")) {
       const show = Boolean(patch.showDensity);
@@ -14828,20 +14856,16 @@ var Sevenn = (() => {
     hour: "numeric",
     minute: "2-digit"
   });
-  function isBlockActiveOnDate(block, now = Date.now()) {
-    const today = startOfDay2(now);
-    const start = parseBlockDate2(block?.startDate);
-    const end = parseBlockDate2(block?.endDate);
-    const hasStart = start instanceof Date && !Number.isNaN(start.getTime());
-    const hasEnd = end instanceof Date && !Number.isNaN(end.getTime());
-    if (hasStart && hasEnd) return start.getTime() <= today && today <= end.getTime();
-    if (hasStart) return start.getTime() <= today;
-    if (hasEnd) return today <= end.getTime();
-    return true;
-  }
   function ensureBoardState() {
     if (!state.blockBoard) {
-      state.blockBoard = { collapsedBlocks: [], hiddenTimelines: [], autoCollapsed: [], autoHidden: [] };
+      state.blockBoard = {
+        collapsedBlocks: [],
+        hiddenTimelines: [],
+        autoCollapsed: [],
+        autoHidden: [],
+        manualExpanded: [],
+        manualTimeline: []
+      };
     }
     if (!Array.isArray(state.blockBoard.collapsedBlocks)) {
       state.blockBoard.collapsedBlocks = [];
@@ -14857,6 +14881,12 @@ var Sevenn = (() => {
     }
     if (!Array.isArray(state.blockBoard.autoHidden)) {
       state.blockBoard.autoHidden = [];
+    }
+    if (!Array.isArray(state.blockBoard.manualExpanded)) {
+      state.blockBoard.manualExpanded = [];
+    }
+    if (!Array.isArray(state.blockBoard.manualTimeline)) {
+      state.blockBoard.manualTimeline = [];
     }
     return state.blockBoard;
   }
@@ -14912,6 +14942,41 @@ var Sevenn = (() => {
     }
     const unit = SHIFT_OFFSET_UNITS.find((option) => option.id === normalizeShiftUnit(unitId)) || SHIFT_OFFSET_UNITS[2];
     return Math.max(0, Math.round(numeric * unit.minutes));
+  }
+  function resolveLatestBlockId(blocks = []) {
+    if (!Array.isArray(blocks) || !blocks.length) return null;
+    let latestId = null;
+    let latestScore = -Infinity;
+    let fallbackId = null;
+    const total = blocks.length;
+    blocks.forEach((block, index) => {
+      if (!block || block.blockId == null) return;
+      const blockId = String(block.blockId);
+      if (!fallbackId) fallbackId = blockId;
+      const orderScore = Number(block?.order);
+      const createdScore = Number(block?.createdAt);
+      const start = parseBlockDate2(block?.startDate);
+      const end = parseBlockDate2(block?.endDate);
+      const startScore = start instanceof Date ? start.getTime() : null;
+      const endScore = end instanceof Date ? end.getTime() : null;
+      let score;
+      if (Number.isFinite(orderScore)) {
+        score = orderScore;
+      } else if (Number.isFinite(createdScore)) {
+        score = createdScore;
+      } else if (Number.isFinite(startScore)) {
+        score = startScore;
+      } else if (Number.isFinite(endScore)) {
+        score = endScore;
+      } else {
+        score = total - index;
+      }
+      if (latestId == null || score > latestScore) {
+        latestId = blockId;
+        latestScore = score;
+      }
+    });
+    return latestId ?? fallbackId;
   }
   function buildScopeOptions(mode) {
     if (mode === "pull") {
@@ -15460,7 +15525,7 @@ var Sevenn = (() => {
       const targetDay = dayValue ? Number(dayValue) : null;
       const newDue = targetDay != null ? targetDay + (payload?.due != null ? payload.due % DAY_MS2 : 9 * 60 * 60 * 1e3) : null;
       await updateLectureSchedule(lecture, (lec) => applyPassDueUpdate(lec, passOrder, newDue));
-      await refresh();
+      await refresh({ full: true });
     });
   }
   function renderBlockBoardBlock(container, block, blockLectures, days, refresh, gridScrollState = /* @__PURE__ */ new Map()) {
@@ -15506,37 +15571,63 @@ var Sevenn = (() => {
     const collapseBtn = document.createElement("button");
     collapseBtn.type = "button";
     collapseBtn.className = "btn secondary";
-    const isCollapsed = boardState.collapsedBlocks.includes(String(block?.blockId));
+    const blockKey = String(block?.blockId ?? "");
+    const isCollapsed = blockKey ? boardState.collapsedBlocks.includes(blockKey) : false;
     collapseBtn.textContent = isCollapsed ? "Expand" : "Minimize";
     collapseBtn.addEventListener("click", () => {
+      if (!blockKey) return;
       const current = ensureBoardState();
-      const nextCollapsed = new Set(current.collapsedBlocks.map(String));
-      if (nextCollapsed.has(String(block.blockId))) {
-        nextCollapsed.delete(String(block.blockId));
+      const nextCollapsed = new Set((current.collapsedBlocks || []).map(String));
+      const manualExpanded = new Set((current.manualExpanded || []).map(String));
+      const autoCollapsed = new Set((current.autoCollapsed || []).map(String));
+      if (nextCollapsed.has(blockKey)) {
+        nextCollapsed.delete(blockKey);
+        manualExpanded.add(blockKey);
+        autoCollapsed.delete(blockKey);
       } else {
-        nextCollapsed.add(String(block.blockId));
+        nextCollapsed.add(blockKey);
+        manualExpanded.delete(blockKey);
+        autoCollapsed.delete(blockKey);
       }
-      setBlockBoardState({ collapsedBlocks: Array.from(nextCollapsed) });
+      setBlockBoardState({
+        collapsedBlocks: Array.from(nextCollapsed),
+        manualExpanded: Array.from(manualExpanded),
+        autoCollapsed: Array.from(autoCollapsed)
+      });
       refresh();
     });
     controls.appendChild(collapseBtn);
     const hiddenTimelineSet = new Set((boardState.hiddenTimelines || []).map((id) => String(id)));
-    const blockKey = String(block?.blockId ?? "");
     const timelineHidden = hiddenTimelineSet.has("__all__") || hiddenTimelineSet.has(blockKey);
     const timelineBtn = document.createElement("button");
     timelineBtn.type = "button";
     timelineBtn.className = "btn secondary";
     timelineBtn.textContent = timelineHidden ? "Show timeline" : "Hide timeline";
     timelineBtn.addEventListener("click", () => {
+      if (!blockKey) return;
       const current = ensureBoardState();
       const nextHidden = new Set((current.hiddenTimelines || []).map((id) => String(id)));
+      const manualTimeline = new Set((current.manualTimeline || []).map(String));
+      const autoHidden = new Set((current.autoHidden || []).map(String));
+      const hideAll = nextHidden.has("__all__");
       nextHidden.delete("__all__");
       if (timelineHidden) {
         nextHidden.delete(blockKey);
+        manualTimeline.add(blockKey);
+        autoHidden.delete(blockKey);
       } else {
         nextHidden.add(blockKey);
+        manualTimeline.delete(blockKey);
+        autoHidden.delete(blockKey);
       }
-      setBlockBoardState({ hiddenTimelines: Array.from(nextHidden) });
+      if (hideAll) {
+        nextHidden.add("__all__");
+      }
+      setBlockBoardState({
+        hiddenTimelines: Array.from(nextHidden),
+        manualTimeline: Array.from(manualTimeline),
+        autoHidden: Array.from(autoHidden)
+      });
       refresh();
     });
     controls.appendChild(timelineBtn);
@@ -15691,72 +15782,148 @@ var Sevenn = (() => {
     const { blocks } = catalog;
     setPassColorPalette(settings?.plannerDefaults?.passColors);
     if (Array.isArray(blocks) && blocks.length) {
+      const validBlockIds = /* @__PURE__ */ new Set();
+      blocks.forEach((block) => {
+        if (!block || block.blockId == null) return;
+        validBlockIds.add(String(block.blockId));
+      });
       const normalizedCollapsed = new Set((boardState.collapsedBlocks || []).map((id) => String(id)));
-      const normalizedHidden = new Set((boardState.hiddenTimelines || []).map((id) => String(id)));
-      normalizedHidden.delete("__all__");
+      const hideAllTimelines = Array.isArray(boardState.hiddenTimelines) ? boardState.hiddenTimelines.includes("__all__") : false;
+      const normalizedHidden = new Set(
+        (boardState.hiddenTimelines || []).map((id) => String(id)).filter((id) => id !== "__all__")
+      );
+      const manualExpanded = new Set((boardState.manualExpanded || []).map((id) => String(id)));
+      const manualTimeline = new Set((boardState.manualTimeline || []).map((id) => String(id)));
       const autoCollapsed = new Set((boardState.autoCollapsed || []).map((id) => String(id)));
       const autoHidden = new Set((boardState.autoHidden || []).map((id) => String(id)));
-      const today = Date.now();
-      let collapsedChanged = false;
-      let hiddenChanged = false;
+      let manualExpandedChanged = false;
+      let manualTimelineChanged = false;
       let autoCollapsedChanged = false;
       let autoHiddenChanged = false;
+      manualExpanded.forEach((id) => {
+        if (!validBlockIds.has(id)) {
+          manualExpanded.delete(id);
+          manualExpandedChanged = true;
+        }
+      });
+      manualTimeline.forEach((id) => {
+        if (!validBlockIds.has(id)) {
+          manualTimeline.delete(id);
+          manualTimelineChanged = true;
+        }
+      });
+      autoCollapsed.forEach((id) => {
+        if (!validBlockIds.has(id)) {
+          autoCollapsed.delete(id);
+          autoCollapsedChanged = true;
+        }
+      });
+      autoHidden.forEach((id) => {
+        if (!validBlockIds.has(id)) {
+          autoHidden.delete(id);
+          autoHiddenChanged = true;
+        }
+      });
+      const latestBlockId = resolveLatestBlockId(blocks);
+      let collapsedChanged = false;
+      let hiddenChanged = false;
       blocks.forEach((block) => {
         if (!block || block.blockId == null) return;
         const blockId = String(block.blockId);
-        const active = isBlockActiveOnDate(block, today);
-        if (active) {
-          if (autoCollapsed.has(blockId) && normalizedCollapsed.has(blockId)) {
+        const isLatest = latestBlockId != null && blockId === latestBlockId;
+        const keepOpen = isLatest || manualExpanded.has(blockId);
+        if (keepOpen) {
+          if (normalizedCollapsed.has(blockId) && autoCollapsed.has(blockId)) {
             normalizedCollapsed.delete(blockId);
             collapsedChanged = true;
           }
           if (autoCollapsed.delete(blockId)) {
             autoCollapsedChanged = true;
           }
-          if (autoHidden.has(blockId) && normalizedHidden.has(blockId)) {
-            normalizedHidden.delete(blockId);
-            hiddenChanged = true;
-          }
-          if (autoHidden.delete(blockId)) {
-            autoHiddenChanged = true;
-          }
-        } else {
-          if (!normalizedCollapsed.has(blockId)) {
-            normalizedCollapsed.add(blockId);
-            collapsedChanged = true;
-          }
+        } else if (!normalizedCollapsed.has(blockId)) {
+          normalizedCollapsed.add(blockId);
+          collapsedChanged = true;
           if (!autoCollapsed.has(blockId)) {
             autoCollapsed.add(blockId);
             autoCollapsedChanged = true;
           }
-          if (!normalizedHidden.has(blockId)) {
-            normalizedHidden.add(blockId);
-            hiddenChanged = true;
-          }
-          if (!autoHidden.has(blockId)) {
-            autoHidden.add(blockId);
-            autoHiddenChanged = true;
+        }
+        if (!hideAllTimelines) {
+          const manualShow = manualTimeline.has(blockId);
+          const shouldAutoHide = !keepOpen && !manualShow;
+          if (shouldAutoHide) {
+            if (!normalizedHidden.has(blockId)) {
+              normalizedHidden.add(blockId);
+              hiddenChanged = true;
+            }
+            if (!autoHidden.has(blockId)) {
+              autoHidden.add(blockId);
+              autoHiddenChanged = true;
+            }
+          } else {
+            const wasAutoHidden = autoHidden.has(blockId);
+            if (wasAutoHidden && normalizedHidden.has(blockId) && (manualShow || keepOpen)) {
+              normalizedHidden.delete(blockId);
+              hiddenChanged = true;
+            }
+            if (wasAutoHidden) {
+              autoHidden.delete(blockId);
+              autoHiddenChanged = true;
+            }
           }
         }
       });
-      if (collapsedChanged || hiddenChanged || autoCollapsedChanged || autoHiddenChanged) {
-        const collapsedArr = Array.from(normalizedCollapsed);
-        const hiddenArr = Array.from(normalizedHidden);
-        const autoCollapsedArr = Array.from(autoCollapsed);
-        const autoHiddenArr = Array.from(autoHidden);
-        setBlockBoardState({
-          collapsedBlocks: collapsedArr,
-          hiddenTimelines: hiddenArr,
-          autoCollapsed: autoCollapsedArr,
-          autoHidden: autoHiddenArr
-        });
-        boardState.collapsedBlocks = collapsedArr;
-        boardState.hiddenTimelines = hiddenArr;
-        boardState.autoCollapsed = autoCollapsedArr;
-        boardState.autoHidden = autoHiddenArr;
+      const collapsedArr = Array.from(normalizedCollapsed);
+      const hiddenArr = hideAllTimelines ? ["__all__"] : Array.from(normalizedHidden);
+      const manualExpandedArr = Array.from(manualExpanded);
+      const manualTimelineArr = Array.from(manualTimeline);
+      const autoCollapsedArr = Array.from(autoCollapsed);
+      const autoHiddenArr = Array.from(autoHidden);
+      const arraysEqual3 = (a = [], b = []) => {
+        if (!Array.isArray(a) || !Array.isArray(b)) return false;
+        if (a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i += 1) {
+          if (a[i] !== b[i]) return false;
+        }
+        return true;
+      };
+      const patch = {};
+      if (!arraysEqual3(boardState.collapsedBlocks || [], collapsedArr)) {
+        patch.collapsedBlocks = collapsedArr;
+      }
+      if (!arraysEqual3(boardState.hiddenTimelines || [], hiddenArr)) {
+        patch.hiddenTimelines = hiddenArr;
+      }
+      if (manualExpandedChanged || !arraysEqual3(boardState.manualExpanded || [], manualExpandedArr)) {
+        patch.manualExpanded = manualExpandedArr;
+      }
+      if (manualTimelineChanged || !arraysEqual3(boardState.manualTimeline || [], manualTimelineArr)) {
+        patch.manualTimeline = manualTimelineArr;
+      }
+      if (autoCollapsedChanged || !arraysEqual3(boardState.autoCollapsed || [], autoCollapsedArr)) {
+        patch.autoCollapsed = autoCollapsedArr;
+      }
+      if (autoHiddenChanged || !arraysEqual3(boardState.autoHidden || [], autoHiddenArr)) {
+        patch.autoHidden = autoHiddenArr;
+      }
+      if (Object.keys(patch).length) {
+        setBlockBoardState(patch);
+        if (patch.collapsedBlocks) boardState.collapsedBlocks = patch.collapsedBlocks;
+        if (patch.hiddenTimelines) boardState.hiddenTimelines = patch.hiddenTimelines;
+        if (patch.manualExpanded) boardState.manualExpanded = patch.manualExpanded;
+        if (patch.manualTimeline) boardState.manualTimeline = patch.manualTimeline;
+        if (patch.autoCollapsed) boardState.autoCollapsed = patch.autoCollapsed;
+        if (patch.autoHidden) boardState.autoHidden = patch.autoHidden;
       }
     }
     const fallbackDays = collectDefaultBoardDays();
+    const refreshBoard = async (options = {}) => {
+      if (options && options.full && typeof refresh === "function") {
+        await refresh();
+      } else {
+        await renderBlockBoard(container, refresh);
+      }
+    };
     const queues = groupLectureQueues(lectures);
     const urgentHost = document.createElement("div");
     renderUrgentQueues(urgentHost, queues, {
@@ -15767,7 +15934,7 @@ var Sevenn = (() => {
         const passIndex = Array.isArray(lecture.passes) ? lecture.passes.findIndex((pass) => pass?.order === passOrder) : -1;
         if (passIndex < 0) return;
         await updateLectureSchedule(lecture, (lec) => markPassCompleted(lec, passIndex));
-        await renderBlockBoard(container, refresh);
+        await refreshBoard({ full: true });
       },
       onShift: async (entry, mode) => {
         if (!entry?.lecture) return;
@@ -15785,7 +15952,7 @@ var Sevenn = (() => {
         const delta = mode === "push" ? result.minutes : -result.minutes;
         try {
           await updateLectureSchedule(lecture, (lec) => shiftPassesForScope(lec, passOrder, delta, result.scope));
-          await renderBlockBoard(container, refresh);
+          await refreshBoard({ full: true });
         } catch (err) {
           console.error("Failed to shift pass timing", err);
         }
@@ -15802,9 +15969,6 @@ var Sevenn = (() => {
     });
     const blockList = document.createElement("div");
     blockList.className = "block-board-list";
-    const refreshBoard = async () => {
-      await renderBlockBoard(container, refresh);
-    };
     const lecturesByBlock = /* @__PURE__ */ new Map();
     lectures.forEach((lecture) => {
       const key = String(lecture?.blockId ?? "");
@@ -25788,3 +25952,4 @@ var Sevenn = (() => {
   }
   return __toCommonJS(main_exports);
 })();
+//# sourceMappingURL=bundle.js.map
