@@ -93,12 +93,112 @@ export function createFloatingWindow({ title, width = 520, onClose, onBeforeClos
   closeBtn.textContent = '×';
   actions.appendChild(closeBtn);
 
+  function appendActionButton({
+    text = '',
+    icon,
+    title: actionTitle = '',
+    ariaLabel = '',
+    className = '',
+    onClick,
+    position = 'before-close'
+  } = {}) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = ['floating-action', className].filter(Boolean).join(' ');
+    if (icon) {
+      btn.innerHTML = icon;
+    } else {
+      btn.textContent = text;
+    }
+    if (actionTitle) btn.title = actionTitle;
+    if (ariaLabel || actionTitle) {
+      btn.setAttribute('aria-label', ariaLabel || actionTitle);
+    }
+    if (typeof onClick === 'function') {
+      btn.addEventListener('click', onClick);
+    }
+    if (position === 'start') {
+      actions.insertBefore(btn, actions.firstChild || null);
+    } else if (position === 'end') {
+      actions.appendChild(btn);
+    } else if (position === 'after-minimize') {
+      if (minimizeBtn.nextSibling) {
+        actions.insertBefore(btn, minimizeBtn.nextSibling);
+      } else {
+        actions.appendChild(btn);
+      }
+    } else if (position === 'before-close' && closeBtn.parentElement === actions) {
+      actions.insertBefore(btn, closeBtn);
+    } else {
+      actions.appendChild(btn);
+    }
+    return btn;
+  }
+
   header.appendChild(actions);
   win.appendChild(header);
 
   const body = document.createElement('div');
   body.className = 'floating-body';
   win.appendChild(body);
+
+  const resizeHandle = document.createElement('div');
+  resizeHandle.className = 'floating-resize-handle';
+  win.appendChild(resizeHandle);
+
+  const MIN_WIDTH = 320;
+  const MIN_HEIGHT = 260;
+  let resizeState = null;
+
+  resizeHandle.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    bringToFront(win);
+    resizeState = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startWidth: win.offsetWidth,
+      startHeight: win.offsetHeight,
+      useGlobalEvents: typeof resizeHandle.setPointerCapture !== 'function'
+    };
+    if (!resizeState.useGlobalEvents && typeof resizeHandle.setPointerCapture === 'function') {
+      resizeHandle.setPointerCapture(event.pointerId);
+    }
+    if (resizeState.useGlobalEvents) {
+      window.addEventListener('pointermove', handlePointerMove);
+      window.addEventListener('pointerup', stopResize);
+      window.addEventListener('pointercancel', stopResize);
+    }
+    event.preventDefault();
+  });
+
+  const handlePointerMove = event => {
+    if (!resizeState || event.pointerId !== resizeState.pointerId) return;
+    const deltaX = event.clientX - resizeState.startX;
+    const deltaY = event.clientY - resizeState.startY;
+    const nextWidth = Math.max(MIN_WIDTH, resizeState.startWidth + deltaX);
+    const nextHeight = Math.max(MIN_HEIGHT, resizeState.startHeight + deltaY);
+    win.style.width = `${nextWidth}px`;
+    win.style.height = `${nextHeight}px`;
+  };
+
+  const stopResize = event => {
+    if (!resizeState || event.pointerId !== resizeState.pointerId) return;
+    const state = resizeState;
+    resizeState = null;
+    if (!state.useGlobalEvents && typeof resizeHandle.releasePointerCapture === 'function') {
+      resizeHandle.releasePointerCapture(event.pointerId);
+    }
+    if (state.useGlobalEvents) {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+    }
+  };
+
+  resizeHandle.addEventListener('pointermove', handlePointerMove);
+  resizeHandle.addEventListener('pointerup', stopResize);
+  resizeHandle.addEventListener('pointercancel', stopResize);
 
   let minimized = false;
   let dockButton = null;
@@ -188,6 +288,8 @@ export function createFloatingWindow({ title, width = 520, onClose, onBeforeClos
   return {
     element: win,
     body,
+    header,
+    actions,
     setContent(node){
       body.innerHTML = '';
       if (node) body.appendChild(node);
@@ -204,6 +306,7 @@ export function createFloatingWindow({ title, width = 520, onClose, onBeforeClos
     },
     focus(){
       bringToFront(win);
-    }
+    },
+    addAction: appendActionButton
   };
 }
