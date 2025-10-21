@@ -23,9 +23,17 @@
   --indigo: #6366f1;
   --cyan: #22d3ee;
   --map-gap: rgba(11, 17, 32, 0.96);
+  --map-grid: rgba(148, 163, 184, 0.12);
+  --map-grid-strong: rgba(148, 163, 184, 0.16);
+  --map-aurora: rgba(56, 189, 248, 0.24);
+  --map-aurora-secondary: rgba(129, 140, 248, 0.18);
+  --map-panel-glow: rgba(15, 118, 110, 0.18);
+  --edge-muted: rgba(148, 163, 184, 0.42);
   --surface-1: rgba(12, 18, 32, 0.75);
   --surface-2: rgba(14, 21, 35, 0.82);
   --surface-3: rgba(148, 163, 184, 0.24);
+  --edge-default: rgba(147, 197, 253, 0.75);
+  --edge-highlight: rgba(56, 189, 248, 0.65);
   --radius: 14px;
   --radius-lg: 20px;
   --radius-sm: 8px;
@@ -4922,15 +4930,17 @@ button.builder-pill.builder-pill-outline {
   cursor: grab;
   touch-action: none;
   user-select: none;
-  background-color: #0b1120;
+  background-color: #07111f;
   background-image:
-    radial-gradient(circle at 25% 20%, rgba(59, 130, 246, 0.18), transparent 55%),
-    radial-gradient(circle at 72% 68%, rgba(16, 185, 129, 0.12), transparent 62%),
-    repeating-linear-gradient(0deg, rgba(148, 163, 184, 0.14) 0, rgba(148, 163, 184, 0.14) 1px, transparent 1px, transparent 44px),
-    repeating-linear-gradient(90deg, rgba(148, 163, 184, 0.1) 0, rgba(148, 163, 184, 0.1) 1px, transparent 1px, transparent 44px),
-    linear-gradient(160deg, #0b1120 0%, #111827 46%, #020617 100%);
-  border-top: 1px solid rgba(148, 163, 184, 0.18);
-  transition: background-color 220ms ease, box-shadow 220ms ease;
+    radial-gradient(circle at 18% 22%, var(--map-aurora), transparent 58%),
+    radial-gradient(circle at 80% 76%, var(--map-aurora-secondary), transparent 64%),
+    linear-gradient(165deg, rgba(9, 14, 24, 0.98) 0%, rgba(12, 22, 38, 0.94) 48%, rgba(2, 6, 18, 0.99) 100%),
+    repeating-linear-gradient(0deg, var(--map-grid-strong) 0, var(--map-grid-strong) 1px, transparent 1px, transparent 48px),
+    repeating-linear-gradient(90deg, var(--map-grid) 0, var(--map-grid) 1px, transparent 1px, transparent 48px);
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08), 0 40px 120px rgba(2, 6, 23, 0.55);
+  filter: saturate(1.05);
+  transition: background-color 220ms ease, box-shadow 220ms ease, filter 220ms ease;
 }
 .map-layer--edges,
 .map-layer--nodes {
@@ -4951,8 +4961,8 @@ button.builder-pill.builder-pill-outline {
   filter: drop-shadow(0 14px 28px rgba(37, 99, 235, 0.45));
   stroke: #ffffff;
 }
-.map-edge { 
-  stroke: var(--gray);
+.map-edge {
+  stroke: color-mix(in srgb, var(--edge-default) 85%, rgba(255, 255, 255, 0.12) 15%);
   stroke-width: 2.8;
   cursor: inherit;
   vector-effect: non-scaling-stroke;
@@ -4961,21 +4971,22 @@ button.builder-pill.builder-pill-outline {
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
+  mix-blend-mode: screen;
   transition: stroke 160ms ease, stroke-width 160ms ease, opacity 160ms ease, filter 160ms ease;
 }
 
 .map-edge--hover {
   opacity: 1;
-  filter: drop-shadow(0 0 16px rgba(56, 189, 248, 0.4)) brightness(1.08);
+  filter: drop-shadow(0 0 18px var(--edge-highlight)) drop-shadow(0 0 24px rgba(56, 189, 248, 0.32)) brightness(1.12);
 }
 
 .map-edge--solid {
-  opacity: 0.92;
+  opacity: 0.94;
 }
 
 .map-edge--dashed,
 .map-edge--dotted {
-  opacity: 0.85;
+  opacity: 0.86;
 }
 
 .map-edge--decoration-arrow,
@@ -4988,7 +4999,8 @@ button.builder-pill.builder-pill-outline {
   opacity: 0.92;
 }
 .map-edge.edge-glow {
-  filter: drop-shadow(0 0 12px currentColor) drop-shadow(0 0 20px rgba(255, 255, 255, 0.3));
+  filter: drop-shadow(0 0 12px currentColor) drop-shadow(0 0 20px rgba(255, 255, 255, 0.3))
+    drop-shadow(0 0 32px rgba(125, 211, 252, 0.35));
 }
 
 .map-edge-decoration {
@@ -5025,11 +5037,12 @@ button.builder-pill.builder-pill-outline {
 
 .map-edge-tooltip {
   position: absolute;
-  background: rgba(15, 23, 42, 0.92);
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.95), var(--map-panel-glow));
   color: var(--text);
   padding: 6px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  backdrop-filter: blur(12px);
   font-size: 13px;
   pointer-events: none;
   white-space: normal;
@@ -5062,15 +5075,26 @@ button.builder-pill.builder-pill-outline {
   cursor: grabbing;
 }
 
+.map-edge-handle__target:focus-visible {
+  outline: none;
+  stroke: rgba(34, 197, 94, 0.75);
+  stroke-width: 14;
+}
+
+.map-edge-handle__target:focus-visible + .map-edge-handle__visual {
+  filter: drop-shadow(0 0 14px rgba(34, 197, 94, 0.55));
+  transform: scale(1.22);
+}
+
 .map-edge-handle__visual {
-  fill: rgba(15, 23, 42, 0.85);
-  stroke: currentColor;
-  stroke-width: 2px;
+  fill: rgba(15, 23, 42, 0.82);
+  stroke: var(--edge-default);
+  stroke-width: 2.4px;
   pointer-events: none;
 }
 
 .map-edge-handle.is-hovered .map-edge-handle__visual {
-  filter: drop-shadow(0 0 10px rgba(34, 197, 94, 0.45));
+  filter: drop-shadow(0 0 10px var(--edge-highlight));
 }
 
 
@@ -6035,6 +6059,57 @@ button.builder-pill.builder-pill-outline {
   position: relative;
   width: 100%;
   height: 100%;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: linear-gradient(160deg, rgba(8, 13, 23, 0.96) 0%, rgba(4, 9, 18, 0.94) 44%, rgba(1, 3, 12, 0.98) 100%);
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08), inset 0 0 0 1px rgba(15, 23, 42, 0.32);
+}
+
+.map-container::before,
+.map-container::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.85;
+  mix-blend-mode: screen;
+}
+
+.map-container::before {
+  background: radial-gradient(58% 58% at 28% 22%, var(--map-aurora), transparent 65%);
+}
+
+.map-container::after {
+  background: radial-gradient(52% 52% at 70% 72%, var(--map-aurora-secondary), transparent 68%);
+}
+
+.map-container--filtered::before {
+  opacity: 0.95;
+  background: radial-gradient(56% 56% at 22% 18%, rgba(56, 189, 248, 0.32), transparent 70%);
+}
+
+.map-container--filtered::after {
+  opacity: 0.92;
+  background: radial-gradient(60% 60% at 72% 78%, rgba(165, 180, 252, 0.28), transparent 70%);
+}
+
+.map-container--filtered .map-svg {
+  filter: saturate(1.18) brightness(1.05);
+  background-image:
+    radial-gradient(circle at 18% 22%, rgba(56, 189, 248, 0.32), transparent 60%),
+    radial-gradient(circle at 78% 76%, rgba(165, 180, 252, 0.28), transparent 66%),
+    linear-gradient(165deg, rgba(10, 20, 34, 0.98) 0%, rgba(12, 28, 46, 0.95) 48%, rgba(2, 6, 14, 0.99) 100%),
+    repeating-linear-gradient(0deg, var(--map-grid-strong) 0, var(--map-grid-strong) 1px, transparent 1px, transparent 42px),
+    repeating-linear-gradient(90deg, var(--map-grid) 0, var(--map-grid) 1px, transparent 1px, transparent 42px);
+}
+
+.map-container--filtered .map-edge {
+  stroke: color-mix(in srgb, var(--edge-default) 75%, #e0f2fe 25%);
+}
+
+.map-container--filtered .map-node {
+  opacity: 0.98;
+  filter: drop-shadow(0 18px 36px rgba(59, 130, 246, 0.35));
 }
 
 .map-area-interacting {
