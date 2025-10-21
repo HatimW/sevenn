@@ -113,7 +113,7 @@ const MIN_NODE_RADIUS = 20;
 const MAX_NODE_RADIUS = 60;
 const MAX_GRAVITY_BOOST = 999;
 const NODE_COLLISION_MARGIN = 36;
-const DEFAULT_REORGANIZE_SPACING = 320;
+const DEFAULT_REORGANIZE_SPACING = 220;
 const HANDLE_STICKY_RELEASE_DELAY = 260;
 const VIEW_MEMORY_MAX_AGE = 10 * 60 * 1000;
 
@@ -770,7 +770,11 @@ function computeSmartLayout(model, options = {}) {
     y: Number.isFinite(requestedCenter?.y) ? clamp(requestedCenter.y, typicalRadius, sizeLimit - typicalRadius) : fallbackCenter
   };
 
-  const baseSpacing = Math.max(options.baseSpacing ?? DEFAULT_REORGANIZE_SPACING * 1.2, typicalRadius * 4.4);
+  const baseSpacing = Math.max(
+    options.baseSpacing ?? DEFAULT_REORGANIZE_SPACING,
+    typicalRadius * 3.4,
+    maxRadius * 2.6
+  );
   const margin = NODE_COLLISION_MARGIN + Math.max(24, typicalRadius * 0.5);
 
   const groupNodes = new Map();
@@ -830,10 +834,10 @@ function computeSmartLayout(model, options = {}) {
   });
 
   const groupSpacingCache = new Map();
-  const groupSpacingBase = Math.max(baseSpacing, typicalRadius * 4.6, maxRadius * 3.2 + 80);
-  const lectureSpacingBase = Math.max(groupSpacingBase * 1.35, typicalRadius * 5.5);
-  const weekSpacingBase = Math.max(lectureSpacingBase * 1.28, typicalRadius * 6.4);
-  const blockSpacingBase = Math.max(weekSpacingBase * 1.3, typicalRadius * 7.2);
+  const groupSpacingBase = Math.max(baseSpacing * 0.95, typicalRadius * 3.6, maxRadius * 2.5 + 56);
+  const lectureSpacingBase = Math.max(groupSpacingBase * 1.22, typicalRadius * 4.6);
+  const weekSpacingBase = Math.max(lectureSpacingBase * 1.18, typicalRadius * 5.3);
+  const blockSpacingBase = Math.max(weekSpacingBase * 1.22, typicalRadius * 6.0);
 
   function getGroupSpacing(key) {
     if (groupSpacingCache.has(key)) return groupSpacingCache.get(key);
@@ -920,8 +924,8 @@ function computeSmartLayout(model, options = {}) {
       layer: 0,
       index: 0,
       slots: baseSlots,
-      baseDistance: Number.isFinite(options.baseDistance) ? options.baseDistance : baseSpacing * 0.7,
-      layerSpacing: Number.isFinite(options.layerSpacing) ? options.layerSpacing : baseSpacing * 0.55
+      baseDistance: Number.isFinite(options.baseDistance) ? options.baseDistance : baseSpacing * 0.55,
+      layerSpacing: Number.isFinite(options.layerSpacing) ? options.layerSpacing : baseSpacing * 0.42
     };
     orbitUsage.set(id, state);
     return state;
@@ -932,10 +936,10 @@ function computeSmartLayout(model, options = {}) {
     const anchorRadius = radii.get(anchorId) || typicalRadius;
     const baseDistance = Number.isFinite(opts.baseDistance)
       ? opts.baseDistance
-      : Math.max((opts.groupSpacing || baseSpacing) * 0.5, baseSpacing * 0.65);
+      : Math.max((opts.groupSpacing || baseSpacing) * 0.42, baseSpacing * 0.5);
     const layerSpacing = Number.isFinite(opts.layerSpacing)
       ? opts.layerSpacing
-      : Math.max((opts.groupSpacing || baseSpacing) * 0.4, baseSpacing * 0.45);
+      : Math.max((opts.groupSpacing || baseSpacing) * 0.34, baseSpacing * 0.38);
     const state = ensureOrbitState(anchorId, {
       baseDistance,
       layerSpacing,
@@ -959,7 +963,7 @@ function computeSmartLayout(model, options = {}) {
   const ensureGroupOrbit = key => {
     if (groupOrbit.has(key)) return groupOrbit.get(key);
     const metric = groupMetrics.get(key);
-    const spacing = Math.max(getGroupSpacing(key) * 0.6, baseSpacing * 0.65);
+    const spacing = Math.max(getGroupSpacing(key) * 0.5, baseSpacing * 0.55);
     const slots = Math.max(8, Math.round((metric?.totalWeight || 0) * 1.2) + 8);
     const state = { layer: 0, index: 0, baseSpacing: spacing, slots };
     groupOrbit.set(key, state);
@@ -972,7 +976,7 @@ function computeSmartLayout(model, options = {}) {
     const slots = Math.max(state.slots + state.layer * 4, 8);
     const angleOffset = state.layer % 2 ? 0.5 : 0;
     const angle = ((state.index + angleOffset) / slots) * Math.PI * 2;
-    const distance = origin.spacing * 0.6 + state.baseSpacing * state.layer + radius + typicalRadius * 0.8;
+    const distance = origin.spacing * 0.52 + state.baseSpacing * state.layer + radius + typicalRadius * 0.65;
     state.index += 1;
     if (state.index >= slots) {
       state.index = 0;
@@ -996,7 +1000,7 @@ function computeSmartLayout(model, options = {}) {
     const agg = blockAggregates.get(blockKey) || { weight: 0, count: 0 };
     const spacing = Math.max(
       blockSpacingBase,
-      baseSpacing + Math.sqrt(Math.max(agg.weight, 0)) * typicalRadius * 0.6 + agg.count * typicalRadius * 0.25
+      baseSpacing + Math.sqrt(Math.max(agg.weight, 0)) * typicalRadius * 0.45 + agg.count * typicalRadius * 0.18
     );
     const candidate = pickClusterPosition(blockPositionList, spacing, center, {
       buffer: spacing * 0.35
@@ -1015,8 +1019,8 @@ function computeSmartLayout(model, options = {}) {
     const existing = weekPositionsByBlock.get(blockKey) || [];
     const spacing = Math.max(
       weekSpacingBase,
-      blockCenter.spacing * 0.72,
-      baseSpacing + Math.sqrt(Math.max(agg.weight, 0)) * typicalRadius * 0.45 + agg.count * typicalRadius * 0.2
+      blockCenter.spacing * 0.64,
+      baseSpacing + Math.sqrt(Math.max(agg.weight, 0)) * typicalRadius * 0.34 + agg.count * typicalRadius * 0.16
     );
     const candidate = pickClusterPosition(existing, spacing, blockCenter, {
       buffer: spacing * 0.3,
@@ -1035,10 +1039,10 @@ function computeSmartLayout(model, options = {}) {
     const lectureKey = `${weekKey}::${lectureId}`;
     if (lectureCenters.has(lectureKey)) return lectureCenters.get(lectureKey);
     const existing = lecturesByWeek.get(weekKey) || [];
-    const spacing = Math.max(lectureSpacingBase, weekCenter.spacing * 0.7, getGroupSpacing(groupKey));
+    const spacing = Math.max(lectureSpacingBase, weekCenter.spacing * 0.62, getGroupSpacing(groupKey));
     const candidate = pickClusterPosition(existing, spacing, weekCenter, {
-      buffer: spacing * 0.28,
-      maxRadius: weekCenter.spacing * 0.75
+      buffer: spacing * 0.24,
+      maxRadius: weekCenter.spacing * 0.7
     });
     const point = clampClusterPoint(candidate);
     const info = { x: point.x, y: point.y, spacing, buffer: spacing * 0.7 };
@@ -1134,8 +1138,8 @@ function computeSmartLayout(model, options = {}) {
     const primaryPos = clampPosition({ x: origin.x, y: origin.y }, primaryRadius);
     placements.set(primaryId, primaryPos);
     ensureOrbitState(primaryId, {
-      baseDistance: origin.spacing * 0.55,
-      layerSpacing: origin.spacing * 0.45,
+      baseDistance: origin.spacing * 0.48,
+      layerSpacing: origin.spacing * 0.36,
       slotWeight: weights.get(primaryId) || 0
     });
 
@@ -2860,11 +2864,11 @@ export async function renderMap(root) {
   });
   const avgRadius = radiusCount ? totalRadius / radiusCount : MIN_NODE_RADIUS;
   const typicalRadius = Math.max(avgRadius, maxRadius * 0.75, MIN_NODE_RADIUS);
-  const nodeLength = Math.max(80, typicalRadius * 2.25);
-  const groupSpacingBase = Math.max(nodeLength * 1.2, maxRadius * 2.6 + 36);
-  const lectureSpacingBase = Math.max(nodeLength * 3, maxRadius * 4.4);
-  const weekSpacingBase = Math.max(lectureSpacingBase * 1.35, nodeLength * 4.6);
-  const blockSpacingBase = Math.max(weekSpacingBase * 1.45, nodeLength * 6.2);
+  const nodeLength = Math.max(70, typicalRadius * 2.0);
+  const groupSpacingBase = Math.max(nodeLength * 1.05, maxRadius * 2.2 + 30);
+  const lectureSpacingBase = Math.max(nodeLength * 2.5, maxRadius * 3.6);
+  const weekSpacingBase = Math.max(lectureSpacingBase * 1.18, nodeLength * 3.8);
+  const blockSpacingBase = Math.max(weekSpacingBase * 1.22, nodeLength * 5.0);
 
   const groupMetrics = new Map();
   const groupSpacingCache = new Map();
@@ -2900,7 +2904,7 @@ export async function renderMap(root) {
     const totalCount = (metric.existingCount || 0) + (metric.pendingCount || 0);
     const maxR = metric.maxRadius || typicalRadius;
     const avgR = totalCount ? metric.sumRadius / totalCount : typicalRadius;
-    const spacing = Math.max(groupSpacingBase, avgR * 2.4 + 24, maxR * 2.8 + 40);
+    const spacing = Math.max(groupSpacingBase, avgR * 2.0 + 20, maxR * 2.4 + 32);
     groupSpacingCache.set(key, spacing);
     return spacing;
   }
@@ -4178,9 +4182,15 @@ function scheduleNodePositionUpdate(id, pos, options = {}) {
       mapState.pendingNodeUpdates.delete(id);
     }
     const entry = mapState.elements.get(id);
+    let hadRegisteredEdges = false;
     if (entry) {
       updateNodeGeometry(id, entry);
+      const registered = mapState.edgeRefs?.get(String(id));
+      hadRegisteredEdges = Boolean(registered && registered.size);
       updateEdgesFor(id);
+    }
+    if (!hadRegisteredEdges) {
+      queueEdgeUpdate(id, { immediate: true });
     }
     return;
   }
@@ -4188,6 +4198,7 @@ function scheduleNodePositionUpdate(id, pos, options = {}) {
     mapState.pendingNodeUpdates = new Map();
   }
   mapState.pendingNodeUpdates.set(id, pos);
+  queueEdgeUpdate(id);
   if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
     flushNodePositionUpdates();
     return;
@@ -5187,10 +5198,18 @@ function updateEdgesFor(id) {
   ensureEdgeRegistry();
   if (!mapState.edgeRefs) return;
   const key = String(id);
-  const edges = mapState.edgeRefs.get(key);
-  if (!edges || !edges.size) return;
+  let edges = mapState.edgeRefs.get(key);
+  let list = edges && edges.size ? Array.from(edges) : [];
+  if (!list.length && mapState.allEdges && mapState.allEdges.size) {
+    list = Array.from(mapState.allEdges).filter(edge => {
+      const da = edge?.dataset?.a;
+      const db = edge?.dataset?.b;
+      return da === key || db === key;
+    });
+  }
+  if (!list.length) return;
   const stale = [];
-  edges.forEach(edge => {
+  list.forEach(edge => {
     if (!edge || !edge.isConnected || !edge.ownerSVGElement) {
       stale.push(edge);
       return;
@@ -6022,9 +6041,10 @@ function adjustScale() {
   const height = Number.isFinite(h) && h > 0 ? h : w;
   const defaultSize = Number.isFinite(mapState.defaultViewSize) ? mapState.defaultViewSize : w;
   const zoomRatio = w / defaultSize;
-  const nodeScale = clamp(Math.pow(zoomRatio, 0.02), 0.85, 1.35);
-  const labelScale = clamp(Math.pow(zoomRatio, 0.18), 0.95, 2.6);
-  const lineScale = clamp(Math.pow(zoomRatio, -0.24), 0.85, 1.85);
+  const normalized = clamp(zoomRatio, 0.35, 4.5);
+  const nodeScale = clamp(Math.pow(normalized, 0.28), 0.78, 1.6);
+  const labelScale = clamp(Math.pow(normalized, 0.34), 0.92, 2.85);
+  const lineScale = clamp(Math.pow(normalized, -0.4), 0.55, 2.1);
 
   mapState.lastScaleSize = { w, h: height };
   mapState.currentScales = { nodeScale, labelScale, lineScale, zoomRatio };
