@@ -213,7 +213,6 @@ const mapState = {
   areaDrag: null,
   menuDrag: null,
   edgeDrag: null,
-  suspendedEdges: null,
   selectionRect: null,
   nodeWasDragged: false,
   lastPointerDownInfo: null,
@@ -2451,7 +2450,6 @@ export async function renderMap(root) {
   mapState.draggingView = false;
   mapState.menuDrag = null;
   mapState.edgeDrag = null;
-  mapState.suspendedEdges = null;
   if (mapState.pendingEdgeUpdates) {
     mapState.pendingEdgeUpdates.clear();
   }
@@ -3335,7 +3333,6 @@ export async function renderMap(root) {
           return;
         }
 
-        const edgeGroup = createEdgeDragGroup(uniqueSelection);
         mapState.nodeDrag = {
           pointerId: e.pointerId,
           captureTarget: e.currentTarget || circle,
@@ -3344,8 +3341,7 @@ export async function renderMap(root) {
           lastPointer: { x: pointer.x, y: pointer.y },
           nodes: dragNodes,
           moved: false,
-          primaryId: it.id,
-          edgeGroup
+          primaryId: it.id
         };
         if (mapState.nodeDrag.captureTarget?.setPointerCapture) {
           try {
@@ -3356,7 +3352,6 @@ export async function renderMap(root) {
         setAreaInteracting(true);
       } else {
         const selectionIds = [...mapState.selectionIds];
-        const edgeGroup = createEdgeDragGroup(selectionIds);
         mapState.areaDrag = {
           ids: selectionIds,
           start: { x, y },
@@ -3367,8 +3362,7 @@ export async function renderMap(root) {
           moved: false,
           pointerId: e.pointerId,
           captureTarget: e.currentTarget || circle,
-          client: { x: e.clientX, y: e.clientY },
-          edgeGroup
+          client: { x: e.clientX, y: e.clientY }
         };
         if (mapState.areaDrag.captureTarget?.setPointerCapture) {
           try {
@@ -3734,182 +3728,6 @@ function attachSvgEvents(svg) {
   }, { passive: false });
 }
 
-function createEdgeDragGroup(nodeIds) {
-  if (!Array.isArray(nodeIds) || nodeIds.length < 2) {
-    return null;
-  }
-  ensureEdgeRegistry();
-  if (!mapState.edgeRefs || !mapState.edgeRefs.size) {
-    return null;
-  }
-  const idSet = new Set(nodeIds.map(id => String(id)));
-  if (idSet.size < 2) {
-    return null;
-  }
-  const edges = new Map();
-  idSet.forEach(id => {
-    const refs = mapState.edgeRefs?.get(id);
-    if (!refs) return;
-    refs.forEach(edge => {
-      if (!edge?.dataset) return;
-      const a = String(edge.dataset.a);
-      const b = String(edge.dataset.b);
-      if (!idSet.has(a) || !idSet.has(b)) return;
-      if (edges.has(edge)) return;
-      edges.set(edge, {
-        line: edge,
-        baseTransform: edge.getAttribute('transform') || '',
-        overlayTransform: edge._overlay?.getAttribute?.('transform') || '',
-        gapTransform: edge._gapLayer?.getAttribute?.('transform') || '',
-        handleTransforms: Array.isArray(edge._handleElements)
-          ? edge._handleElements.map(handle => handle.getAttribute('transform') || '')
-          : null,
-        lastDx: 0,
-        lastDy: 0
-      });
-    });
-  });
-  if (!edges.size) {
-    return null;
-  }
-  if (!mapState.suspendedEdges) {
-    mapState.suspendedEdges = new Set();
-  }
-  edges.forEach(entry => {
-    mapState.suspendedEdges.add(entry.line);
-  });
-  return { edges, ids: idSet, lastDx: 0, lastDy: 0 };
-}
-
-function normalizeDragDelta(value) {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-  const rounded = Math.round(value * 1000) / 1000;
-  return Math.abs(rounded) < 0.0005 ? 0 : rounded;
-}
-
-function buildTranslatedTransform(base, dx, dy) {
-  const baseValue = (base || '').trim();
-  const hasBase = Boolean(baseValue);
-  const hasOffset = Math.abs(dx) > 0.0001 || Math.abs(dy) > 0.0001;
-  if (!hasBase && !hasOffset) {
-    return '';
-  }
-  const translation = hasOffset ? `translate(${dx} ${dy})` : '';
-  if (hasBase && translation) {
-    return `${baseValue} ${translation}`;
-  }
-  return hasBase ? baseValue : translation;
-}
-
-function applyElementTransform(element, base, dx, dy) {
-  if (!element || typeof element.setAttribute !== 'function') return;
-  const transform = buildTranslatedTransform(base, dx, dy);
-  if (transform) {
-    element.setAttribute('transform', transform);
-  } else {
-    element.removeAttribute('transform');
-  }
-}
-
-function applyEdgeDragGroup(group, dx, dy) {
-  if (!group || !group.edges?.size) return;
-  const nextDx = normalizeDragDelta(dx);
-  const nextDy = normalizeDragDelta(dy);
-  if (group.lastDx === nextDx && group.lastDy === nextDy) {
-    return;
-  }
-  group.lastDx = nextDx;
-  group.lastDy = nextDy;
-  group.edges.forEach(entry => {
-    const line = entry?.line;
-    if (!line || !line.isConnected) return;
-    applyElementTransform(line, entry.baseTransform || '', nextDx, nextDy);
-    const overlay = line._overlay;
-    if (overlay) {
-      if (typeof entry.overlayTransform !== 'string') {
-        entry.overlayTransform = overlay.getAttribute('transform') || '';
-      }
-      applyElementTransform(overlay, entry.overlayTransform || '', nextDx, nextDy);
-    }
-    const gapLayer = line._gapLayer;
-    if (gapLayer && typeof gapLayer.getAttribute === 'function') {
-      if (typeof entry.gapTransform !== 'string') {
-        entry.gapTransform = gapLayer.getAttribute('transform') || '';
-      }
-      applyElementTransform(gapLayer, entry.gapTransform || '', nextDx, nextDy);
-    }
-    const handles = Array.isArray(line._handleElements) ? line._handleElements : [];
-    if (handles.length) {
-      if (!Array.isArray(entry.handleTransforms) || entry.handleTransforms.length !== handles.length) {
-        entry.handleTransforms = handles.map(handle => handle.getAttribute('transform') || '');
-      }
-      handles.forEach((handle, idx) => {
-        applyElementTransform(handle, entry.handleTransforms[idx] || '', nextDx, nextDy);
-      });
-    }
-  });
-}
-
-function restoreElementTransform(element, base) {
-  if (!element || typeof element.setAttribute !== 'function') return;
-  const value = (base || '').trim();
-  if (value) {
-    element.setAttribute('transform', value);
-  } else {
-    element.removeAttribute('transform');
-  }
-}
-
-function clearEdgeDragGroup(group) {
-  if (!group || !group.edges?.size) return;
-  group.edges.forEach(entry => {
-    const line = entry?.line;
-    if (!line) return;
-    restoreElementTransform(line, entry.baseTransform || '');
-    entry.lastDx = 0;
-    entry.lastDy = 0;
-    const overlay = line._overlay;
-    if (overlay) {
-      const base = typeof entry.overlayTransform === 'string'
-        ? entry.overlayTransform
-        : overlay.getAttribute('transform') || '';
-      restoreElementTransform(overlay, base);
-      entry.overlayTransform = base;
-    }
-    const gapLayer = line._gapLayer;
-    if (gapLayer && typeof gapLayer.getAttribute === 'function') {
-      const base = typeof entry.gapTransform === 'string'
-        ? entry.gapTransform
-        : gapLayer.getAttribute('transform') || '';
-      restoreElementTransform(gapLayer, base);
-      entry.gapTransform = base;
-    }
-    const handles = Array.isArray(line._handleElements) ? line._handleElements : [];
-    if (handles.length) {
-      if (!Array.isArray(entry.handleTransforms) || entry.handleTransforms.length !== handles.length) {
-        entry.handleTransforms = handles.map(handle => handle.getAttribute('transform') || '');
-      }
-      handles.forEach((handle, idx) => {
-        restoreElementTransform(handle, entry.handleTransforms[idx] || '');
-      });
-    }
-  });
-  group.lastDx = 0;
-  group.lastDy = 0;
-  if (mapState.suspendedEdges) {
-    group.edges.forEach(entry => {
-      if (entry?.line) {
-        mapState.suspendedEdges.delete(entry.line);
-      }
-    });
-    if (!mapState.suspendedEdges.size) {
-      mapState.suspendedEdges = null;
-    }
-  }
-}
-
 function getNodeDragTargets() {
   const drag = mapState.nodeDrag;
   if (!drag) return [];
@@ -3960,11 +3778,6 @@ function applyNodeDragFromPointer(pointer, options = {}) {
   });
   drag.lastPointer = { x: pointer.x, y: pointer.y };
   drag.moved = moved;
-  if (startPointer && drag.edgeGroup) {
-    const dx = pointer.x - startPointer.x;
-    const dy = pointer.y - startPointer.y;
-    applyEdgeDragGroup(drag.edgeGroup, dx, dy);
-  }
   if (applied && moved && options.markDragged !== false) {
     mapState.nodeWasDragged = true;
   }
@@ -4064,9 +3877,6 @@ function handlePointerMove(e) {
     const dx = x - mapState.areaDrag.start.x;
     const dy = y - mapState.areaDrag.start.y;
     mapState.areaDrag.moved = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
-    if (mapState.areaDrag.edgeGroup) {
-      applyEdgeDragGroup(mapState.areaDrag.edgeGroup, dx, dy);
-    }
     mapState.areaDrag.origin.forEach(({ id, pos }) => {
       const nx = pos.x + dx;
       const ny = pos.y + dy;
@@ -4211,14 +4021,7 @@ async function handlePointerUp(e) {
       mapState.lastPointerDownInfo = null;
     }
     mapState.nodeDrag = null;
-    if (drag.edgeGroup) {
-      clearEdgeDragGroup(drag.edgeGroup);
-      if (drag.edgeGroup.ids && drag.edgeGroup.ids.size) {
-        drag.edgeGroup.ids.forEach(id => {
-          queueEdgeUpdate(id, { immediate: true });
-        });
-      }
-    }
+    flushQueuedEdgeUpdates({ force: true });
     cursorNeedsRefresh = true;
     if (wasDragged) {
       const ids = dragTargets.map(target => target.id).filter(Boolean);
@@ -4250,14 +4053,7 @@ async function handlePointerUp(e) {
       } catch {}
     }
     mapState.areaDrag = null;
-    if (currentDrag.edgeGroup) {
-      clearEdgeDragGroup(currentDrag.edgeGroup);
-      if (currentDrag.edgeGroup.ids && currentDrag.edgeGroup.ids.size) {
-        currentDrag.edgeGroup.ids.forEach(id => {
-          queueEdgeUpdate(id, { immediate: true });
-        });
-      }
-    }
+    flushQueuedEdgeUpdates({ force: true });
     cursorNeedsRefresh = true;
     if (moved) {
       for (const id of ids) {
@@ -4776,9 +4572,6 @@ function applyAutoPan(vector) {
     const dx = pointer.x - mapState.areaDrag.start.x;
     const dy = pointer.y - mapState.areaDrag.start.y;
     mapState.areaDrag.moved = mapState.areaDrag.moved || Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
-    if (mapState.areaDrag.edgeGroup) {
-      applyEdgeDragGroup(mapState.areaDrag.edgeGroup, dx, dy);
-    }
     mapState.areaDrag.origin.forEach(({ id, pos }) => {
       const nx = pos.x + dx;
       const ny = pos.y + dy;
@@ -4989,12 +4782,6 @@ function unregisterEdgeElement(edge) {
   }
   if (mapState.allEdges) {
     mapState.allEdges.delete(edge);
-  }
-  if (mapState.suspendedEdges) {
-    mapState.suspendedEdges.delete(edge);
-    if (!mapState.suspendedEdges.size) {
-      mapState.suspendedEdges = null;
-    }
   }
 }
 
@@ -5427,25 +5214,15 @@ function updateEdgesFor(id) {
   }
   if (!list.length) return;
   const stale = [];
-  const suspended = mapState.suspendedEdges;
   list.forEach(edge => {
     if (!edge || !edge.isConnected || !edge.ownerSVGElement) {
       stale.push(edge);
-      return;
-    }
-    if (suspended && suspended.has(edge)) {
       return;
     }
     refreshEdgeGeometry(edge);
   });
   if (stale.length) {
     stale.forEach(edge => {
-      if (suspended) {
-        suspended.delete(edge);
-        if (!suspended.size) {
-          mapState.suspendedEdges = null;
-        }
-      }
       unregisterEdgeElement(edge);
     });
   }
