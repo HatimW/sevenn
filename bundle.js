@@ -1,4 +1,31 @@
-(() => {
+var Sevenn = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // js/main.js
+  var main_exports = {};
+  __export(main_exports, {
+    render: () => renderApp,
+    renderApp: () => renderApp,
+    resolveListKind: () => resolveListKind,
+    tabs: () => tabs
+  });
+
   // js/storage/preferences.js
   var STORAGE_KEY = "sevenn-ui-preferences";
   var cache = null;
@@ -21078,8 +21105,7 @@
             lastPointer: { x: pointer.x, y: pointer.y },
             nodes: dragNodes,
             moved: false,
-            primaryId: it.id,
-            edges: collectEdgesForNodes(dragNodes.map((node) => node.id))
+            primaryId: it.id
           };
           if (mapState.nodeDrag.captureTarget?.setPointerCapture) {
             try {
@@ -21151,10 +21177,8 @@
           mapState.lastPointerDownInfo = null;
         } else if (mapState.tool === TOOL.HIDE) {
           if (confirm(`Remove ${titleOf4(it)} from the map?`)) {
-            hideNodeLocally(it.id);
-            refreshToolboxBadges();
-            refreshHiddenPanelUI();
             await setNodeHidden(it.id, true);
+            await renderMap(root);
           }
         } else if (mapState.tool === TOOL.ADD_LINK) {
           await handleAddLinkClick(it.id);
@@ -21217,10 +21241,8 @@
           mapState.lastPointerDownInfo = null;
         } else if (mapState.tool === TOOL.HIDE) {
           if (confirm(`Remove ${titleOf4(it)} from the map?`)) {
-            hideNodeLocally(it.id);
-            refreshToolboxBadges();
-            refreshHiddenPanelUI();
             await setNodeHidden(it.id, true);
+            await renderMap(root);
           }
         } else if (mapState.tool === TOOL.ADD_LINK) {
           await handleAddLinkClick(it.id);
@@ -21470,44 +21492,18 @@
     }
     return [];
   }
-  function collectEdgesForNodes(ids = []) {
-    ensureEdgeRegistry();
-    const collected = /* @__PURE__ */ new Set();
-    if (!Array.isArray(ids)) {
-      return collected;
+  function refreshEdgesForIds(ids) {
+    if (!Array.isArray(ids) || !ids.length) {
+      return;
     }
+    const seen = /* @__PURE__ */ new Set();
     ids.forEach((id) => {
       if (id == null) return;
       const key = String(id);
-      const set = mapState.edgeRefs?.get(key);
-      if (!set || !set.size) return;
-      set.forEach((edge) => {
-        if (!edge) return;
-        collected.add(edge);
-      });
+      if (seen.has(key)) return;
+      seen.add(key);
+      updateEdgesFor(id);
     });
-    return collected;
-  }
-  function refreshEdgeGeometries(edgeCollection) {
-    if (!edgeCollection) return;
-    const stale = [];
-    const run = typeof edgeCollection.forEach === "function" ? edgeCollection.forEach.bind(edgeCollection) : (callback) => {
-      for (const entry of edgeCollection) {
-        callback(entry);
-      }
-    };
-    run((edge) => {
-      if (!edge || !edge.isConnected || !edge.ownerSVGElement) {
-        stale.push(edge);
-        return;
-      }
-      refreshEdgeGeometry(edge);
-    });
-    if (typeof edgeCollection.delete === "function" && stale.length) {
-      stale.forEach((edge) => {
-        edgeCollection.delete(edge);
-      });
-    }
   }
   function applyNodeDragFromPointer(pointer, options = {}) {
     if (!pointer) return false;
@@ -21546,8 +21542,7 @@
       mapState.nodeWasDragged = true;
     }
     if (applied) {
-      const edgeSet = drag.edges && drag.edges.size ? drag.edges : collectEdgesForNodes(touchedIds);
-      refreshEdgeGeometries(edgeSet);
+      refreshEdgesForIds(touchedIds);
       flushQueuedEdgeUpdates({ force: true });
     }
     return applied;
@@ -21641,7 +21636,7 @@
         touchedIds.push(id);
       });
       if (touchedIds.length) {
-        refreshEdgeGeometries(collectEdgesForNodes(touchedIds));
+        refreshEdgesForIds(touchedIds);
         flushQueuedEdgeUpdates({ force: true });
       }
       mapState.nodeWasDragged = true;
@@ -23333,78 +23328,6 @@
     });
     return hidden;
   }
-  function refreshHiddenPanelUI() {
-    const container = mapState.container;
-    if (!container) return;
-    container.querySelectorAll(".map-hidden-panel, .map-hidden-toggle").forEach((el) => {
-      el.remove();
-    });
-    const allItems = Object.values(mapState.itemMap || {});
-    const hiddenNodes = allItems.filter((item) => item?.mapHidden);
-    const hiddenLinks = gatherHiddenLinks(allItems, mapState.itemMap || {});
-    buildHiddenPanel(container, hiddenNodes, hiddenLinks);
-  }
-  function hideNodeLocally(id) {
-    if (!id) return;
-    const key = String(id);
-    const item = mapState.itemMap?.[id];
-    if (item) {
-      item.mapHidden = true;
-    }
-    if (Array.isArray(mapState.visibleItems)) {
-      mapState.visibleItems = mapState.visibleItems.filter((entry2) => entry2?.id !== id);
-    }
-    if (mapState.nodeRadii?.delete) {
-      mapState.nodeRadii.delete(id);
-    }
-    if (mapState.gravityModel?.weights?.delete) {
-      mapState.gravityModel.weights.delete(id);
-    }
-    if (mapState.positions && Object.prototype.hasOwnProperty.call(mapState.positions, id)) {
-      delete mapState.positions[id];
-    }
-    if (mapState.pendingNodeUpdates?.delete) {
-      mapState.pendingNodeUpdates.delete(id);
-    }
-    if (mapState.pendingEdgeUpdates?.delete) {
-      mapState.pendingEdgeUpdates.delete(key);
-    }
-    mapState.selectionIds = mapState.selectionIds.filter((sel) => sel !== id);
-    if (Array.isArray(mapState.previewSelection)) {
-      const filtered = mapState.previewSelection.filter((sel) => sel !== id);
-      mapState.previewSelection = filtered.length ? filtered : null;
-      if (!filtered.length) {
-        mapState.selectionPreviewSignature = "";
-      }
-    }
-    if (mapState.pendingLink === id) {
-      mapState.pendingLink = null;
-    }
-    const entry = mapState.elements.get(id);
-    if (entry) {
-      if (entry.circle?.parentNode) {
-        entry.circle.remove();
-      }
-      if (entry.label?.parentNode) {
-        entry.label.remove();
-      }
-      mapState.elements.delete(id);
-    }
-    updateSelectionHighlight();
-    updatePendingHighlight();
-    ensureEdgeRegistry();
-    const edges = mapState.edgeRefs?.get(key);
-    if (edges && edges.size) {
-      const toRemove = Array.from(edges);
-      toRemove.forEach((edge) => {
-        const a = edge?.dataset?.a;
-        const b = edge?.dataset?.b;
-        if (a && b) {
-          removeEdgeBetween(a, b);
-        }
-      });
-    }
-  }
   async function handleAddLinkClick(nodeId) {
     if (!mapState.pendingLink) {
       mapState.pendingLink = nodeId;
@@ -23435,7 +23358,6 @@
               applyLinkVisibility(from.id, to.id, forward);
             }
             refreshToolboxBadges();
-            refreshHiddenPanelUI();
           }
         }
       } else {
@@ -23573,7 +23495,6 @@
                   }
                   updatePendingHighlight();
                   refreshToolboxBadges();
-                  refreshHiddenPanelUI();
                   renderResults();
                 }
               } catch (err) {
@@ -23631,7 +23552,7 @@
       searchInput.select();
     });
   }
-  async function handleEdgeClick(path, aId, bId, evt) {
+  function handleEdgeClick(path, aId, bId, evt) {
     hideEdgeTooltip(path);
     if (mapState.edgeDragJustCompleted) {
       mapState.edgeDragJustCompleted = false;
@@ -23641,24 +23562,25 @@
       openLineMenu(evt, path, aId, bId);
     } else if (mapState.tool === TOOL.BREAK) {
       if (confirm("Are you sure you want to delete this link?")) {
-        const result = await removeLink(aId, bId);
-        if (!result) return;
-        integrateItemUpdates(result.source, result.target);
-        removeEdgeBetween(aId, bId);
-        updatePendingHighlight();
-        refreshToolboxBadges();
+        removeLink(aId, bId).then((result) => {
+          if (!result) return;
+          integrateItemUpdates(result.source, result.target);
+          removeEdgeBetween(aId, bId);
+          updatePendingHighlight();
+          refreshToolboxBadges();
+        });
       }
     } else if (mapState.tool === TOOL.HIDE) {
       if (confirm("Hide this link on the map?")) {
-        const result = await setLinkHidden(aId, bId, true);
-        if (!result) return;
-        integrateItemUpdates(result.source, result.target);
-        const forward = result.forward || { id: bId, hidden: true };
-        forward.hidden = true;
-        applyLinkVisibility(aId, bId, forward);
-        updatePendingHighlight();
-        refreshToolboxBadges();
-        refreshHiddenPanelUI();
+        setLinkHidden(aId, bId, true).then((result) => {
+          if (!result) return;
+          integrateItemUpdates(result.source, result.target);
+          const forward = result.forward || { id: bId, hidden: true };
+          forward.hidden = true;
+          applyLinkVisibility(aId, bId, forward);
+          updatePendingHighlight();
+          refreshToolboxBadges();
+        });
       }
     }
   }
@@ -25634,5 +25556,5 @@
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
+  return __toCommonJS(main_exports);
 })();
-//# sourceMappingURL=bundle.js.map
