@@ -4958,6 +4958,8 @@ button.builder-pill.builder-pill-outline {
   vector-effect: non-scaling-stroke;
   shape-rendering: geometricPrecision;
   pointer-events: stroke;
+  transform-box: fill-box;
+  transform-origin: center;
 
   fill: none;
   stroke-linecap: round;

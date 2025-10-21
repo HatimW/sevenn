@@ -179,6 +179,7 @@ const LINE_GAP_STROKE_MULTIPLIER = 2.4;
 const EDGE_DRAG_HOLD_DELAY = 160;
 const EDGE_DRAG_MOVE_THRESHOLD = 3.5;
 const EDGE_CLICK_DISTANCE = 12;
+const EDGE_ANIMATION_DURATION = 120;
 
 const LEGACY_STYLE_MAPPINGS = {
   'arrow': { style: 'solid', decoration: 'arrow', decorationDirection: 'end' },
@@ -238,6 +239,9 @@ const mapState = {
   toolboxContainer: null,
   toolboxBadges: null,
   baseCursor: 'grab',
+  prefersReducedMotion: null,
+  motionMedia: null,
+  pendingEdgeAnimations: new Map(),
   cursorOverride: null,
   defaultViewSize: null,
   lastScaleSize: null,
@@ -2453,6 +2457,9 @@ export async function renderMap(root) {
   if (mapState.pendingEdgeUpdates) {
     mapState.pendingEdgeUpdates.clear();
   }
+  if (mapState.pendingEdgeAnimations) {
+    mapState.pendingEdgeAnimations.clear();
+  }
   mapState.edgeUpdateFrame = null;
   mapState.selectionRect = null;
   mapState.previewSelection = null;
@@ -3413,8 +3420,13 @@ export async function renderMap(root) {
         mapState.lastPointerDownInfo = null;
       } else if (mapState.tool === TOOL.HIDE) {
         if (confirm(`Remove ${titleOf(it)} from the map?`)) {
-          await setNodeHidden(it.id, true);
-          await renderMap(root);
+          applyLocalNodeHidden(it.id, true);
+          refreshToolboxBadges();
+          setNodeHidden(it.id, true)
+            .then(() => renderMap(root))
+            .catch(err => {
+              console.error(err);
+            });
         }
       } else if (mapState.tool === TOOL.ADD_LINK) {
         await handleAddLinkClick(it.id);
@@ -3481,8 +3493,13 @@ export async function renderMap(root) {
         mapState.lastPointerDownInfo = null;
       } else if (mapState.tool === TOOL.HIDE) {
         if (confirm(`Remove ${titleOf(it)} from the map?`)) {
-          await setNodeHidden(it.id, true);
-          await renderMap(root);
+          applyLocalNodeHidden(it.id, true);
+          refreshToolboxBadges();
+          setNodeHidden(it.id, true)
+            .then(() => renderMap(root))
+            .catch(err => {
+              console.error(err);
+            });
         }
       } else if (mapState.tool === TOOL.ADD_LINK) {
         await handleAddLinkClick(it.id);
@@ -3743,7 +3760,7 @@ function getNodeDragTargets() {
   return [];
 }
 
-function refreshEdgesForIds(ids) {
+function refreshEdgesForIds(ids, options = {}) {
   if (!Array.isArray(ids) || !ids.length) {
     return;
   }
@@ -3753,7 +3770,7 @@ function refreshEdgesForIds(ids) {
     const key = String(id);
     if (seen.has(key)) return;
     seen.add(key);
-    updateEdgesFor(id);
+    updateEdgesFor(id, options);
   });
 }
 
@@ -3774,15 +3791,13 @@ function applyNodeDragFromPointer(pointer, options = {}) {
   let applied = false;
   let moved = drag.moved === true;
   const startPointer = drag.startPointer || null;
-  const touchedIds = [];
   targets.forEach(target => {
     if (!target) return;
     const { id, offset = { dx: 0, dy: 0 }, start } = target;
     if (!id) return;
     const nx = pointer.x - offset.dx;
     const ny = pointer.y - offset.dy;
-    scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
-    touchedIds.push(id);
+    scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true, animate: true });
     if (!moved && start) {
       const dx = nx - start.x;
       const dy = ny - start.y;
@@ -3796,10 +3811,6 @@ function applyNodeDragFromPointer(pointer, options = {}) {
   drag.moved = moved;
   if (applied && moved && options.markDragged !== false) {
     mapState.nodeWasDragged = true;
-  }
-  if (applied) {
-    refreshEdgesForIds(touchedIds);
-    flushQueuedEdgeUpdates({ force: true });
   }
   return applied;
 }
@@ -3894,17 +3905,11 @@ function handlePointerMove(e) {
     const dx = x - mapState.areaDrag.start.x;
     const dy = y - mapState.areaDrag.start.y;
     mapState.areaDrag.moved = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
-    const touchedIds = [];
     mapState.areaDrag.origin.forEach(({ id, pos }) => {
       const nx = pos.x + dx;
       const ny = pos.y + dy;
-      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
-      touchedIds.push(id);
+      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true, animate: true });
     });
-    if (touchedIds.length) {
-      refreshEdgesForIds(touchedIds);
-      flushQueuedEdgeUpdates({ force: true });
-    }
     mapState.nodeWasDragged = true;
     return;
   }
@@ -4165,7 +4170,13 @@ function queueEdgeUpdate(id, options = {}) {
     mapState.pendingEdgeUpdates = new Set();
   }
   mapState.pendingEdgeUpdates.add(String(id));
-  const { immediate = false } = options;
+  const { immediate = false, animate = false } = options;
+  if (animate) {
+    if (!mapState.pendingEdgeAnimations) {
+      mapState.pendingEdgeAnimations = new Map();
+    }
+    mapState.pendingEdgeAnimations.set(String(id), true);
+  }
   const needsImmediateFlush = immediate
     || typeof window === 'undefined'
     || typeof window.requestAnimationFrame !== 'function';
@@ -4196,14 +4207,20 @@ function flushQueuedEdgeUpdates({ force = false } = {}) {
   const ids = Array.from(pending);
   pending.clear();
   mapState.edgeUpdateFrame = null;
+  const animateMap = mapState.pendingEdgeAnimations;
   ids.forEach(id => {
-    updateEdgesFor(id);
+    const key = String(id);
+    const shouldAnimate = Boolean(animateMap?.get(key));
+    if (animateMap) {
+      animateMap.delete(key);
+    }
+    updateEdgesFor(key, { animate: shouldAnimate });
   });
 }
 
 function scheduleNodePositionUpdate(id, pos, options = {}) {
   if (!id || !pos) return;
-  const { immediate = false } = options;
+  const { immediate = false, animate = false } = options;
   mapState.positions[id] = pos;
   if (immediate) {
     if (mapState.pendingNodeUpdates && typeof mapState.pendingNodeUpdates.delete === 'function') {
@@ -4215,18 +4232,20 @@ function scheduleNodePositionUpdate(id, pos, options = {}) {
       updateNodeGeometry(id, entry);
       const registered = mapState.edgeRefs?.get(String(id));
       hadRegisteredEdges = Boolean(registered && registered.size);
-      updateEdgesFor(id);
+      updateEdgesFor(id, { animate });
     }
     if (!hadRegisteredEdges) {
-      queueEdgeUpdate(id, { immediate: true });
+      queueEdgeUpdate(id, { immediate: true, animate });
     }
     return;
   }
   if (!mapState.pendingNodeUpdates) {
     mapState.pendingNodeUpdates = new Map();
   }
-  mapState.pendingNodeUpdates.set(id, pos);
-  queueEdgeUpdate(id);
+  const existing = mapState.pendingNodeUpdates.get(id);
+  const nextAnimate = animate || Boolean(existing?.animate);
+  mapState.pendingNodeUpdates.set(id, { pos, animate: nextAnimate });
+  queueEdgeUpdate(id, { animate: nextAnimate });
   if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
     flushNodePositionUpdates();
     return;
@@ -4248,15 +4267,18 @@ function flushNodePositionUpdates({ cancelFrame = false } = {}) {
   const updates = mapState.pendingNodeUpdates;
   if (!updates || !updates.size) return;
   const touched = [];
-  updates.forEach((_, id) => {
+  updates.forEach((value, id) => {
+    const info = value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'pos')
+      ? value
+      : { pos: value };
     const entry = mapState.elements.get(id);
     if (!entry) return;
     updateNodeGeometry(id, entry);
-    touched.push(id);
+    touched.push({ id, animate: Boolean(info.animate) });
   });
   updates.clear();
-  touched.forEach(id => {
-    updateEdgesFor(id);
+  touched.forEach(({ id, animate }) => {
+    updateEdgesFor(id, { animate });
   });
 }
 
@@ -4598,7 +4620,7 @@ function applyAutoPan(vector) {
     mapState.areaDrag.origin.forEach(({ id, pos }) => {
       const nx = pos.x + dx;
       const ny = pos.y + dy;
-      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+      scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true, animate: true });
     });
     mapState.nodeWasDragged = true;
   }
@@ -5141,6 +5163,7 @@ function removeEdgeBetween(aId, bId) {
   removeLineOverlay(edge);
   removeLineHandles(edge);
   removeLineGap(edge);
+  removeEdgeAnimation(edge);
   unregisterEdgeElement(edge);
   edge.remove();
 }
@@ -5206,23 +5229,110 @@ function updatePendingHighlight() {
   });
 }
 
-function refreshEdgeGeometry(line) {
+function edgeAnimationAllowed() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return false;
+  }
+  if (mapState.prefersReducedMotion == null && typeof window.matchMedia === 'function') {
+    try {
+      const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+      mapState.prefersReducedMotion = query.matches;
+      if (!mapState.motionMedia) {
+        const listener = event => {
+          mapState.prefersReducedMotion = event.matches;
+        };
+        if (typeof query.addEventListener === 'function') {
+          query.addEventListener('change', listener);
+        } else if (typeof query.addListener === 'function') {
+          query.addListener(listener);
+        }
+        mapState.motionMedia = { query, listener };
+      }
+    } catch {
+      mapState.prefersReducedMotion = false;
+    }
+  }
+  return !mapState.prefersReducedMotion;
+}
+
+function removeEdgeAnimation(line) {
+  const animation = line?._pathAnimation;
+  if (!animation) return;
+  if (animation._timer && typeof window !== 'undefined') {
+    window.clearTimeout(animation._timer);
+  }
+  try {
+    animation.remove();
+  } catch {}
+  if (line) {
+    line._pathAnimation = null;
+  }
+}
+
+function animatePathTransition(line, from, to, options = {}) {
+  if (!line || !from || !to || from === to) return;
+  if (!edgeAnimationAllowed()) return;
+  if (typeof document === 'undefined') return;
+  const duration = Math.max(16, Number(options.duration) || EDGE_ANIMATION_DURATION);
+  const animateEl = document.createElementNS('http://www.w3.org/2000/svg', 'animate');
+  animateEl.setAttribute('attributeName', 'd');
+  animateEl.setAttribute('from', from);
+  animateEl.setAttribute('to', to);
+  animateEl.setAttribute('dur', `${duration}ms`);
+  animateEl.setAttribute('fill', 'freeze');
+  animateEl.setAttribute('repeatCount', '1');
+  animateEl.setAttribute('calcMode', 'linear');
+  const cleanup = () => {
+    if (typeof window !== 'undefined' && animateEl._timer) {
+      window.clearTimeout(animateEl._timer);
+    }
+    if (animateEl.parentNode === line) {
+      animateEl.remove();
+    }
+    if (line._pathAnimation === animateEl) {
+      line._pathAnimation = null;
+    }
+  };
+  animateEl.addEventListener('endEvent', cleanup);
+  animateEl.addEventListener('repeatEvent', cleanup);
+  removeEdgeAnimation(line);
+  line._pathAnimation = animateEl;
+  line.appendChild(animateEl);
+  if (typeof window !== 'undefined') {
+    animateEl._timer = window.setTimeout(cleanup, duration + 40);
+  }
+  if (typeof animateEl.beginElement === 'function') {
+    try {
+      animateEl.beginElement();
+    } catch {}
+  }
+}
+
+function refreshEdgeGeometry(line, options = {}) {
   if (!line) return;
   const aId = line.dataset?.a;
   const bId = line.dataset?.b;
   if (!aId || !bId) return;
-  const geometry = getLineGeometry(aId, bId, { line });
+  const geometry = options.geometry || getLineGeometry(aId, bId, { line });
   if (geometry?.pathData) {
+    const previousPath = line.getAttribute('d') || '';
     line.setAttribute('d', geometry.pathData);
+    if (options.animate && previousPath && previousPath !== geometry.pathData) {
+      animatePathTransition(line, previousPath, geometry.pathData, options);
+    } else {
+      removeEdgeAnimation(line);
+    }
+    line._geometry = geometry;
     syncLineHandles(line, geometry);
     updateLineStrokeWidth(line);
   } else {
+    removeEdgeAnimation(line);
     removeLineHandles(line);
   }
-  syncLineDecoration(line);
+  syncLineDecoration(line, geometry);
 }
 
-function updateEdgesFor(id) {
+function updateEdgesFor(id, options = {}) {
   ensureEdgeRegistry();
   if (!mapState.edgeRefs) return;
   const key = String(id);
@@ -5242,7 +5352,7 @@ function updateEdgesFor(id) {
       stale.push(edge);
       return;
     }
-    refreshEdgeGeometry(edge);
+    refreshEdgeGeometry(edge, options);
   });
   if (stale.length) {
     stale.forEach(edge => {
@@ -5484,9 +5594,27 @@ function buildHiddenPanel(container, hiddenNodes, hiddenLinks) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.textContent = 'Unhide';
-        btn.addEventListener('click', async () => {
-          await setLinkHidden(link.a.id, link.b.id, false);
-          await renderMap(mapState.root);
+        btn.addEventListener('click', () => {
+          applyLocalLinkHidden(link.a.id, link.b.id, false);
+          const forward = getLinkInfo(link.a.id, link.b.id);
+          if (forward) {
+            forward.hidden = false;
+            applyLinkVisibility(link.a.id, link.b.id, forward);
+          }
+          item.remove();
+          refreshToolboxBadges();
+          setLinkHidden(link.a.id, link.b.id, false)
+            .then(result => {
+              if (result) {
+                integrateItemUpdates(result.source, result.target);
+              } else {
+                return renderMap(mapState.root);
+              }
+              return null;
+            })
+            .catch(err => {
+              console.error(err);
+            });
         });
         item.appendChild(btn);
         list.appendChild(item);
@@ -5751,15 +5879,25 @@ async function handleAddLinkClick(nodeId) {
   if (existing) {
     if (existing.hidden) {
       if (confirm('A hidden link already exists. Unhide it?')) {
-        const result = await setLinkHidden(from.id, to.id, false);
-        if (result) {
-          integrateItemUpdates(result.source, result.target);
-          const forward = result.forward || getLinkInfo(from.id, to.id);
-          if (forward) {
-            applyLinkVisibility(from.id, to.id, forward);
-          }
-          refreshToolboxBadges();
+        applyLocalLinkHidden(from.id, to.id, false);
+        const forward = getLinkInfo(from.id, to.id);
+        if (forward) {
+          forward.hidden = false;
+          applyLinkVisibility(from.id, to.id, forward);
         }
+        refreshToolboxBadges();
+        setLinkHidden(from.id, to.id, false)
+          .then(result => {
+            if (result) {
+              integrateItemUpdates(result.source, result.target);
+            } else {
+              return renderMap(mapState.root);
+            }
+            return null;
+          })
+          .catch(err => {
+            console.error(err);
+          });
       }
     } else {
       alert('These concepts are already linked.');
@@ -5774,7 +5912,7 @@ async function handleAddLinkClick(nodeId) {
     return;
   }
   const label = prompt('Optional label for this link:', '') || '';
-  const result = await createLink(from.id, to.id, {
+  const linkOptions = {
     name: label,
     color: DEFAULT_LINK_COLOR,
     style: DEFAULT_LINE_STYLE,
@@ -5783,12 +5921,24 @@ async function handleAddLinkClick(nodeId) {
     glow: DEFAULT_LINE_GLOW,
     thickness: DEFAULT_LINE_THICKNESS,
     hidden: false
-  });
+  };
+  const optimistic = applyLocalLinkAddition(from.id, to.id, linkOptions);
+  const forwardInfo = optimistic?.forward
+    ? { ...optimistic.forward, hidden: false }
+    : { ...normalizeLinkEntry(to.id, linkOptions), hidden: false };
+  applyLinkVisibility(from.id, to.id, forwardInfo);
   mapState.pendingLink = null;
   updatePendingHighlight();
-  if (result) {
-    integrateItemUpdates(result.source, result.target);
-    applyLinkVisibility(from.id, to.id, result.forward);
+  try {
+    const result = await createLink(from.id, to.id, linkOptions);
+    if (result) {
+      integrateItemUpdates(result.source, result.target);
+    } else {
+      await renderMap(mapState.root);
+    }
+  } catch (err) {
+    console.error(err);
+    await renderMap(mapState.root);
   }
 }
 
@@ -5900,23 +6050,29 @@ function openLinkAssistant(nodeId) {
           unhideBtn.type = 'button';
           unhideBtn.className = 'btn secondary';
           unhideBtn.textContent = 'Unhide link';
-          unhideBtn.addEventListener('click', async () => {
-            try {
-              const result = await setLinkHidden(source.id, target.id, false);
-              if (result) {
-                integrateItemUpdates(result.source, result.target);
-                const forward = result.forward || getLinkInfo(source.id, target.id);
-                if (forward) {
-                  existingLinks.set(target.id, forward);
-                  applyLinkVisibility(source.id, target.id, forward);
-                }
-                updatePendingHighlight();
-                refreshToolboxBadges();
-                renderResults();
-              }
-            } catch (err) {
-              console.error(err);
+          unhideBtn.addEventListener('click', () => {
+            applyLocalLinkHidden(source.id, target.id, false);
+            const forward = getLinkInfo(source.id, target.id);
+            if (forward) {
+              forward.hidden = false;
+              existingLinks.set(target.id, forward);
+              applyLinkVisibility(source.id, target.id, forward);
             }
+            updatePendingHighlight();
+            refreshToolboxBadges();
+            renderResults();
+            setLinkHidden(source.id, target.id, false)
+              .then(result => {
+                if (result) {
+                  integrateItemUpdates(result.source, result.target);
+                } else {
+                  return renderMap(mapState.root);
+                }
+                return null;
+              })
+              .catch(err => {
+                console.error(err);
+              });
           });
           actions.appendChild(unhideBtn);
         }
@@ -5983,25 +6139,41 @@ function handleEdgeClick(path, aId, bId, evt) {
     openLineMenu(evt, path, aId, bId);
   } else if (mapState.tool === TOOL.BREAK) {
     if (confirm('Are you sure you want to delete this link?')) {
-      removeLink(aId, bId).then(result => {
-        if (!result) return;
-        integrateItemUpdates(result.source, result.target);
-        removeEdgeBetween(aId, bId);
-        updatePendingHighlight();
-        refreshToolboxBadges();
-      });
+      applyLocalLinkRemoval(aId, bId);
+      removeEdgeBetween(aId, bId);
+      updatePendingHighlight();
+      refreshToolboxBadges();
+      removeLink(aId, bId)
+        .then(result => {
+          if (result) {
+            integrateItemUpdates(result.source, result.target);
+          } else {
+            return renderMap(mapState.root);
+          }
+          return null;
+        })
+        .catch(err => {
+          console.error(err);
+        });
     }
   } else if (mapState.tool === TOOL.HIDE) {
     if (confirm('Hide this link on the map?')) {
-      setLinkHidden(aId, bId, true).then(result => {
-        if (!result) return;
-        integrateItemUpdates(result.source, result.target);
-        const forward = result.forward || { id: bId, hidden: true };
-        forward.hidden = true;
-        applyLinkVisibility(aId, bId, forward);
-        updatePendingHighlight();
-        refreshToolboxBadges();
-      });
+      applyLocalLinkHidden(aId, bId, true);
+      applyLinkVisibility(aId, bId, { hidden: true });
+      updatePendingHighlight();
+      refreshToolboxBadges();
+      setLinkHidden(aId, bId, true)
+        .then(result => {
+          if (result) {
+            integrateItemUpdates(result.source, result.target);
+          } else {
+            return renderMap(mapState.root);
+          }
+          return null;
+        })
+        .catch(err => {
+          console.error(err);
+        });
     }
   }
 }
@@ -6095,14 +6267,17 @@ function adjustScale() {
       if (line.dataset.a && line.dataset.b) {
         const geometry = getLineGeometry(line.dataset.a, line.dataset.b, { line });
         if (geometry?.pathData) {
-          line.setAttribute('d', geometry.pathData);
-          syncLineHandles(line, geometry);
+          refreshEdgeGeometry(line, { geometry, animate: false });
         } else {
+          removeEdgeAnimation(line);
           removeLineHandles(line);
+          syncLineDecoration(line, geometry);
+          updateLineStrokeWidth(line);
         }
+      } else {
+        updateLineStrokeWidth(line);
+        syncLineDecoration(line);
       }
-      updateLineStrokeWidth(line);
-      syncLineDecoration(line);
     });
     if (stale.length) {
       stale.forEach(unregisterEdgeElement);
@@ -6113,14 +6288,17 @@ function adjustScale() {
       if (line.dataset.a && line.dataset.b) {
         const geometry = getLineGeometry(line.dataset.a, line.dataset.b, { line });
         if (geometry?.pathData) {
-          line.setAttribute('d', geometry.pathData);
-          syncLineHandles(line, geometry);
+          refreshEdgeGeometry(line, { geometry, animate: false });
         } else {
+          removeEdgeAnimation(line);
           removeLineHandles(line);
+          syncLineDecoration(line, geometry);
+          updateLineStrokeWidth(line);
         }
+      } else {
+        updateLineStrokeWidth(line);
+        syncLineDecoration(line);
       }
-      updateLineStrokeWidth(line);
-      syncLineDecoration(line);
     });
   }
 }
@@ -7177,7 +7355,7 @@ function applyLineStyle(line, info = {}) {
     }
   }
 
-  syncLineDecoration(line);
+  syncLineDecoration(line, geometry);
 }
 
 function clamp(value, min, max) {
@@ -7472,14 +7650,14 @@ function syncLineHandles(line, geometry = null) {
   }
 }
 
-function syncLineDecoration(line) {
+function syncLineDecoration(line, geometry = null) {
   const decoration = line?.dataset?.decoration || DEFAULT_LINE_DECORATION;
   if (decoration === 'block') {
     const overlay = ensureLineOverlay(line);
-    if (overlay) updateBlockedOverlay(line, overlay);
+    if (overlay) updateBlockedOverlay(line, overlay, geometry);
   } else if (decoration === 'inhibit') {
     const overlay = ensureLineOverlay(line);
-    if (overlay) updateInhibitOverlay(line, overlay);
+    if (overlay) updateInhibitOverlay(line, overlay, geometry);
   } else {
     removeLineOverlay(line);
   }
@@ -7522,9 +7700,9 @@ function normalizeVector(x, y) {
   return { x: x / len, y: y / len };
 }
 
-function updateBlockedOverlay(line, overlay) {
+function updateBlockedOverlay(line, overlay, geometryOverride = null) {
   if (!line || !overlay) return;
-  const geometry = getLineGeometry(line.dataset.a, line.dataset.b, { line });
+  const geometry = geometryOverride || getLineGeometry(line.dataset.a, line.dataset.b, { line });
   if (!geometry) return;
   const mid = geometry.midPoint || {
     x: (geometry.startX + geometry.endX) / 2,
@@ -7552,9 +7730,98 @@ function updateBlockedOverlay(line, overlay) {
   overlay.setAttribute('stroke-width', overlayBase * lineScale);
 }
 
-function updateInhibitOverlay(line, overlay) {
+function ensureItemLinks(item) {
+  if (!item) return [];
+  if (!Array.isArray(item.links)) {
+    item.links = [];
+  }
+  return item.links;
+}
+
+function applyLocalLinkAddition(aId, bId, info = {}) {
+  const source = mapState.itemMap?.[aId];
+  const target = mapState.itemMap?.[bId];
+  if (!source || !target) return null;
+  const forward = normalizeLinkEntry(bId, info);
+  const reverse = normalizeLinkEntry(aId, info);
+  if (reverse.decoration && reverse.decoration !== 'none' && reverse.decoration !== 'block') {
+    reverse.decorationDirection = flipDecorationDirection(forward.decorationDirection);
+  }
+  source.links = ensureItemLinks(source).filter(link => String(link?.id) !== String(bId));
+  target.links = ensureItemLinks(target).filter(link => String(link?.id) !== String(aId));
+  source.links.push({ ...forward });
+  target.links.push({ ...reverse });
+  return { forward: { ...forward }, reverse: { ...reverse }, source, target };
+}
+
+function applyLocalLinkHidden(aId, bId, hidden) {
+  const source = mapState.itemMap?.[aId];
+  const target = mapState.itemMap?.[bId];
+  if (source) {
+    ensureItemLinks(source).forEach(link => {
+      if (String(link?.id) === String(bId)) {
+        link.hidden = hidden;
+      }
+    });
+  }
+  if (target) {
+    ensureItemLinks(target).forEach(link => {
+      if (String(link?.id) === String(aId)) {
+        link.hidden = hidden;
+      }
+    });
+  }
+}
+
+function applyLocalLinkRemoval(aId, bId) {
+  const source = mapState.itemMap?.[aId];
+  const target = mapState.itemMap?.[bId];
+  if (source) {
+    source.links = ensureItemLinks(source).filter(link => String(link?.id) !== String(bId));
+  }
+  if (target) {
+    target.links = ensureItemLinks(target).filter(link => String(link?.id) !== String(aId));
+  }
+}
+
+function applyLocalNodeHidden(id, hidden) {
+  const item = mapState.itemMap?.[id];
+  if (item) {
+    item.mapHidden = hidden;
+  }
+  if (!hidden) {
+    return;
+  }
+  if (mapState.selectionIds?.length) {
+    mapState.selectionIds = mapState.selectionIds.filter(selected => selected !== id);
+    updateSelectionHighlight();
+  }
+  if (mapState.positions && Object.prototype.hasOwnProperty.call(mapState.positions, id)) {
+    delete mapState.positions[id];
+  }
+  const entry = mapState.elements.get(id);
+  if (entry) {
+    entry.circle?.remove();
+    entry.label?.remove();
+    mapState.elements.delete(id);
+  }
+  if (mapState.edgeRefs) {
+    const edges = mapState.edgeRefs.get(String(id));
+    if (edges && edges.size) {
+      Array.from(edges).forEach(edge => {
+        const other = edge?.dataset?.a === String(id) ? edge?.dataset?.b : edge?.dataset?.a;
+        if (other) {
+          applyLinkVisibility(id, other, { hidden: true });
+        }
+      });
+    }
+  }
+  updatePendingHighlight();
+}
+
+function updateInhibitOverlay(line, overlay, geometryOverride = null) {
   if (!line || !overlay) return;
-  const geometry = getLineGeometry(line.dataset.a, line.dataset.b, { line });
+  const geometry = geometryOverride || getLineGeometry(line.dataset.a, line.dataset.b, { line });
   if (!geometry) return;
   const start = { x: geometry.startX, y: geometry.startY };
   const end = { x: geometry.endX, y: geometry.endY };
