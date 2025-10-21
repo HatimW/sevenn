@@ -4951,11 +4951,12 @@ button.builder-pill.builder-pill-outline {
   filter: drop-shadow(0 14px 28px rgba(37, 99, 235, 0.45));
   stroke: #ffffff;
 }
-.map-edge { 
+.map-edge {
   stroke: var(--gray);
   stroke-width: 2.8;
   cursor: inherit;
   vector-effect: non-scaling-stroke;
+  shape-rendering: geometricPrecision;
   pointer-events: stroke;
 
   fill: none;
