@@ -18219,7 +18219,7 @@ var Sevenn = (() => {
   var LINE_GAP_STROKE_MULTIPLIER = 2.4;
   var EDGE_DRAG_HOLD_DELAY = 160;
   var EDGE_DRAG_MOVE_THRESHOLD = 3.5;
-  var EDGE_CLICK_DISTANCE = 9;
+  var EDGE_CLICK_DISTANCE = 12;
   var LEGACY_STYLE_MAPPINGS = {
     "arrow": { style: "solid", decoration: "arrow", decorationDirection: "end" },
     "arrow-end": { style: "solid", decoration: "arrow", decorationDirection: "end" },
@@ -18753,6 +18753,7 @@ var Sevenn = (() => {
     let totalRadius = 0;
     let radiusCount = 0;
     let maxRadius = MIN_NODE_RADIUS;
+    const weightValues = [];
     items.forEach((item) => {
       const radius = radii.get(item.id) || MIN_NODE_RADIUS;
       totalRadius += radius;
@@ -18760,42 +18761,121 @@ var Sevenn = (() => {
       if (radius > maxRadius) {
         maxRadius = radius;
       }
+      weightValues.push(weights.get(item.id) || 0);
     });
     const avgRadius = radiusCount ? totalRadius / radiusCount : MIN_NODE_RADIUS;
     const typicalRadius = Math.max(avgRadius, maxRadius * 0.75, MIN_NODE_RADIUS);
-    const order = items.map((item) => item.id).sort((a, b) => {
-      const diffInfluence = (influence.get(b) || 0) - (influence.get(a) || 0);
-      if (Math.abs(diffInfluence) > 1e-4) return diffInfluence;
-      const diffWeight = (weights.get(b) || 0) - (weights.get(a) || 0);
-      if (Math.abs(diffWeight) > 1e-4) return diffWeight;
-      return String(a).localeCompare(String(b));
+    const sizeLimit = Math.max(mapState.sizeLimit || 0, 2600);
+    const requestedCenter = options.center || computeLayoutCenter();
+    const fallbackCenter = sizeLimit > 0 ? sizeLimit / 2 : typicalRadius * 20;
+    const center = {
+      x: Number.isFinite(requestedCenter?.x) ? clamp2(requestedCenter.x, typicalRadius, sizeLimit - typicalRadius) : fallbackCenter,
+      y: Number.isFinite(requestedCenter?.y) ? clamp2(requestedCenter.y, typicalRadius, sizeLimit - typicalRadius) : fallbackCenter
+    };
+    const baseSpacing = Math.max(options.baseSpacing ?? DEFAULT_REORGANIZE_SPACING * 1.2, typicalRadius * 4.4);
+    const margin = NODE_COLLISION_MARGIN + Math.max(24, typicalRadius * 0.5);
+    const groupNodes = /* @__PURE__ */ new Map();
+    const primaryGroupById = /* @__PURE__ */ new Map();
+    items.forEach((item) => {
+      if (!item?.id) return;
+      const keys = deriveItemGroupKeys(item);
+      const primary = getPrimaryGroupKey(item, keys);
+      primaryGroupById.set(item.id, primary);
+      const list = groupNodes.get(primary) || [];
+      list.push(item.id);
+      groupNodes.set(primary, list);
     });
-    if (!order.length) {
+    if (!groupNodes.size) {
       return {};
     }
-    const limit = Math.max(mapState.sizeLimit || 0, 2e3);
-    const center = options.center || computeLayoutCenter();
-    const baseSpacing = Math.max(options.baseSpacing ?? DEFAULT_REORGANIZE_SPACING, typicalRadius * 2.6);
-    const margin = NODE_COLLISION_MARGIN + Math.max(12, typicalRadius * 0.35);
-    const placements = /* @__PURE__ */ new Map();
-    const orbitUsage = /* @__PURE__ */ new Map();
-    const orphanGrid = { index: 0, perRow: 4 };
+    const groupMetrics = /* @__PURE__ */ new Map();
+    groupNodes.forEach((ids2, key) => {
+      let sumRadius = 0;
+      let maxGroupRadius = 0;
+      let totalWeight = 0;
+      let totalInfluence = 0;
+      ids2.forEach((id) => {
+        const radius = radii.get(id) || typicalRadius;
+        sumRadius += radius;
+        if (radius > maxGroupRadius) {
+          maxGroupRadius = radius;
+        }
+        totalWeight += weights.get(id) || 0;
+        totalInfluence += influence.get(id) || 0;
+      });
+      groupMetrics.set(key, {
+        count: ids2.length,
+        sumRadius,
+        maxRadius: maxGroupRadius || typicalRadius,
+        totalWeight,
+        totalInfluence
+      });
+    });
+    const blockAggregates = /* @__PURE__ */ new Map();
+    const weekAggregates = /* @__PURE__ */ new Map();
+    groupMetrics.forEach((metric, key) => {
+      const parsed = parseGroupKey(key);
+      const blockKey = parsed.block || "__";
+      const weekId = parsed.week || "__";
+      const blockEntry = blockAggregates.get(blockKey) || { weight: 0, count: 0 };
+      blockEntry.weight += metric.totalInfluence + metric.totalWeight;
+      blockEntry.count += metric.count;
+      blockAggregates.set(blockKey, blockEntry);
+      const weekKey = `${blockKey}::${weekId}`;
+      const weekEntry = weekAggregates.get(weekKey) || { weight: 0, count: 0 };
+      weekEntry.weight += metric.totalInfluence + metric.totalWeight;
+      weekEntry.count += metric.count;
+      weekAggregates.set(weekKey, weekEntry);
+    });
+    const groupSpacingCache = /* @__PURE__ */ new Map();
+    const groupSpacingBase = Math.max(baseSpacing, typicalRadius * 4.6, maxRadius * 3.2 + 80);
+    const lectureSpacingBase = Math.max(groupSpacingBase * 1.35, typicalRadius * 5.5);
+    const weekSpacingBase = Math.max(lectureSpacingBase * 1.28, typicalRadius * 6.4);
+    const blockSpacingBase = Math.max(weekSpacingBase * 1.3, typicalRadius * 7.2);
+    function getGroupSpacing(key) {
+      if (groupSpacingCache.has(key)) return groupSpacingCache.get(key);
+      const metric = groupMetrics.get(key) || {
+        count: 0,
+        sumRadius: 0,
+        maxRadius: typicalRadius,
+        totalWeight: 0,
+        totalInfluence: 0
+      };
+      const avgRadius2 = metric.count ? metric.sumRadius / metric.count : typicalRadius;
+      const influenceBoost = Math.sqrt(Math.max(metric.totalInfluence, metric.totalWeight, 0)) * typicalRadius * 0.35;
+      const spacing = Math.max(
+        groupSpacingBase,
+        avgRadius2 * 3 + 60,
+        metric.maxRadius * 3.4 + 80,
+        baseSpacing + influenceBoost
+      );
+      groupSpacingCache.set(key, spacing);
+      return spacing;
+    }
+    const clampClusterPoint = (pos) => ({
+      x: clamp2(pos.x, margin, sizeLimit - margin),
+      y: clamp2(pos.y, margin, sizeLimit - margin)
+    });
     const clampPosition = (pos, radius) => {
-      const minCoord = radius + margin;
-      const maxCoord = Math.max(minCoord, limit - radius - margin);
+      const r = Math.max(radius || MIN_NODE_RADIUS, MIN_NODE_RADIUS);
+      const minCoord = r + margin;
+      const maxCoord = Math.max(minCoord, sizeLimit - r - margin);
       return {
         x: clamp2(pos.x, minCoord, maxCoord),
         y: clamp2(pos.y, minCoord, maxCoord)
       };
     };
-    const resolveCollisions = (id, initial) => {
+    const placements = /* @__PURE__ */ new Map();
+    const orbitUsage = /* @__PURE__ */ new Map();
+    const groupOrbit = /* @__PURE__ */ new Map();
+    const resolveCollisions = (id, initial, radiusOverride = null) => {
+      const radius = radiusOverride ?? radii.get(id) ?? typicalRadius;
       let position = { x: initial.x, y: initial.y };
-      const radius = radii.get(id) || MIN_NODE_RADIUS;
-      for (let iter = 0; iter < 6; iter += 1) {
+      for (let iter = 0; iter < 8; iter += 1) {
         let adjusted = false;
         placements.forEach((otherPos, otherId) => {
           if (otherId === id) return;
-          const otherRadius = radii.get(otherId) || MIN_NODE_RADIUS;
+          const otherRadius = radii.get(otherId) || typicalRadius;
           const minDistance = radius + otherRadius + margin;
           const dx = position.x - otherPos.x;
           const dy = position.y - otherPos.y;
@@ -18832,22 +18912,26 @@ var Sevenn = (() => {
         layer: 0,
         index: 0,
         slots: baseSlots,
-        baseDistance: Number.isFinite(options2.baseDistance) ? options2.baseDistance : baseSpacing * 0.65,
+        baseDistance: Number.isFinite(options2.baseDistance) ? options2.baseDistance : baseSpacing * 0.7,
         layerSpacing: Number.isFinite(options2.layerSpacing) ? options2.layerSpacing : baseSpacing * 0.55
       };
       orbitUsage.set(id, state2);
       return state2;
     };
-    const nextOrbitPosition = (anchorId, radius) => {
+    const nextOrbitPosition = (anchorId, radius, opts = {}) => {
       const anchorPos = placements.get(anchorId) || center;
-      const anchorRadius = radii.get(anchorId) || MIN_NODE_RADIUS;
-      const state2 = ensureOrbitState(anchorId);
-      const slots = Math.max(6, state2.slots + state2.layer * 2);
+      const anchorRadius = radii.get(anchorId) || typicalRadius;
+      const baseDistance = Number.isFinite(opts.baseDistance) ? opts.baseDistance : Math.max((opts.groupSpacing || baseSpacing) * 0.5, baseSpacing * 0.65);
+      const layerSpacing = Number.isFinite(opts.layerSpacing) ? opts.layerSpacing : Math.max((opts.groupSpacing || baseSpacing) * 0.4, baseSpacing * 0.45);
+      const state2 = ensureOrbitState(anchorId, {
+        baseDistance,
+        layerSpacing,
+        slotWeight: opts.slotWeight
+      });
+      const slots = Math.max(6, state2.slots + state2.layer * 3);
       const angleOffset = state2.layer % 2 ? 0.5 : 0;
       const angle = (state2.index + angleOffset) / slots * Math.PI * 2;
-      const baseDistance = Math.max(state2.baseDistance, baseSpacing * 0.4);
-      const layerSpacing = Math.max(state2.layerSpacing, baseSpacing * 0.35);
-      const distance = anchorRadius + radius + baseDistance + layerSpacing * state2.layer;
+      const distance = anchorRadius + radius + state2.baseDistance + state2.layer * state2.layerSpacing;
       state2.index += 1;
       if (state2.index >= slots) {
         state2.index = 0;
@@ -18858,128 +18942,223 @@ var Sevenn = (() => {
         y: anchorPos.y + Math.sin(angle) * distance
       };
     };
-    const nextOrphanPosition = (radius) => {
-      const perRow = orphanGrid.perRow;
-      const row = Math.floor(orphanGrid.index / perRow);
-      const col = orphanGrid.index % perRow;
-      const spacing = baseSpacing * 0.85;
-      const startX = center.x - (perRow - 1) * spacing * 0.5;
-      const x = startX + col * spacing;
-      const y = center.y + baseSpacing * 1.6 + row * spacing;
-      orphanGrid.index += 1;
-      if (orphanGrid.index % perRow === 0) {
-        orphanGrid.perRow = Math.max(4, Math.round(Math.sqrt(orphanGrid.index + 6)) + 2);
-      }
-      return clampPosition({ x, y }, radius);
+    const ensureGroupOrbit = (key) => {
+      if (groupOrbit.has(key)) return groupOrbit.get(key);
+      const metric = groupMetrics.get(key);
+      const spacing = Math.max(getGroupSpacing(key) * 0.6, baseSpacing * 0.65);
+      const slots = Math.max(8, Math.round((metric?.totalWeight || 0) * 1.2) + 8);
+      const state2 = { layer: 0, index: 0, baseSpacing: spacing, slots };
+      groupOrbit.set(key, state2);
+      return state2;
     };
-    const connectedOrder = order.filter((id) => (adjacency.get(id) || []).length > 0);
-    const coreCount = Math.max(1, Math.min(6, Math.ceil(Math.sqrt(connectedOrder.length || order.length))));
-    const coreIds = connectedOrder.slice(0, coreCount);
-    if (!coreIds.length) {
-      coreIds.push(order[0]);
-    }
-    const centralId = coreIds[0];
-    if (centralId && !placements.has(centralId)) {
-      const radius = radii.get(centralId) || MIN_NODE_RADIUS;
-      const position = clampPosition({ x: center.x, y: center.y }, radius);
-      placements.set(centralId, position);
-      ensureOrbitState(centralId, {
-        baseDistance: baseSpacing * 0.8,
-        layerSpacing: baseSpacing * 0.65,
-        slotWeight: weights.get(centralId) || 0
+    const nextGroupPosition = (key, radius) => {
+      const origin = clusterOrigins.get(key) || { x: center.x, y: center.y, spacing: getGroupSpacing(key) };
+      const state2 = ensureGroupOrbit(key);
+      const slots = Math.max(state2.slots + state2.layer * 4, 8);
+      const angleOffset = state2.layer % 2 ? 0.5 : 0;
+      const angle = (state2.index + angleOffset) / slots * Math.PI * 2;
+      const distance = origin.spacing * 0.6 + state2.baseSpacing * state2.layer + radius + typicalRadius * 0.8;
+      state2.index += 1;
+      if (state2.index >= slots) {
+        state2.index = 0;
+        state2.layer += 1;
+      }
+      return {
+        x: origin.x + Math.cos(angle) * distance,
+        y: origin.y + Math.sin(angle) * distance
+      };
+    };
+    const blockCenters = /* @__PURE__ */ new Map();
+    const blockPositionList = [];
+    const weekCenters = /* @__PURE__ */ new Map();
+    const weekPositionsByBlock = /* @__PURE__ */ new Map();
+    const lectureCenters = /* @__PURE__ */ new Map();
+    const lecturesByWeek = /* @__PURE__ */ new Map();
+    function ensureBlockCenter(blockKey) {
+      if (blockCenters.has(blockKey)) return blockCenters.get(blockKey);
+      const agg = blockAggregates.get(blockKey) || { weight: 0, count: 0 };
+      const spacing = Math.max(
+        blockSpacingBase,
+        baseSpacing + Math.sqrt(Math.max(agg.weight, 0)) * typicalRadius * 0.6 + agg.count * typicalRadius * 0.25
+      );
+      const candidate = pickClusterPosition(blockPositionList, spacing, center, {
+        buffer: spacing * 0.35
       });
+      const point = clampClusterPoint(candidate);
+      const info = { x: point.x, y: point.y, spacing, buffer: spacing * 0.85 };
+      blockCenters.set(blockKey, info);
+      blockPositionList.push(info);
+      return info;
     }
-    const primaryAnchors = centralId ? coreIds.slice(1) : coreIds;
-    if (centralId && primaryAnchors.length) {
-      const centralPos = placements.get(centralId) || center;
-      const centralRadius = radii.get(centralId) || MIN_NODE_RADIUS;
-      primaryAnchors.forEach((id, index) => {
-        if (placements.has(id)) return;
-        const radius = radii.get(id) || MIN_NODE_RADIUS;
-        const angle = index / primaryAnchors.length * Math.PI * 2;
-        const orbitDistance = centralRadius + radius + baseSpacing * 1.1;
-        const guess = {
-          x: centralPos.x + Math.cos(angle) * orbitDistance,
-          y: centralPos.y + Math.sin(angle) * orbitDistance
-        };
-        const position = resolveCollisions(id, guess);
+    function ensureWeekCenter(blockKey, weekId, blockCenter) {
+      const weekKey = `${blockKey}::${weekId}`;
+      if (weekCenters.has(weekKey)) return weekCenters.get(weekKey);
+      const agg = weekAggregates.get(weekKey) || { weight: 0, count: 0 };
+      const existing = weekPositionsByBlock.get(blockKey) || [];
+      const spacing = Math.max(
+        weekSpacingBase,
+        blockCenter.spacing * 0.72,
+        baseSpacing + Math.sqrt(Math.max(agg.weight, 0)) * typicalRadius * 0.45 + agg.count * typicalRadius * 0.2
+      );
+      const candidate = pickClusterPosition(existing, spacing, blockCenter, {
+        buffer: spacing * 0.3,
+        maxRadius: blockCenter.spacing * 0.85
+      });
+      const point = clampClusterPoint(candidate);
+      const info = { x: point.x, y: point.y, spacing, buffer: spacing * 0.75 };
+      weekCenters.set(weekKey, info);
+      existing.push(info);
+      weekPositionsByBlock.set(blockKey, existing);
+      return info;
+    }
+    function ensureLectureCenter(blockKey, weekId, lectureId, weekCenter, groupKey) {
+      const weekKey = `${blockKey}::${weekId}`;
+      const lectureKey2 = `${weekKey}::${lectureId}`;
+      if (lectureCenters.has(lectureKey2)) return lectureCenters.get(lectureKey2);
+      const existing = lecturesByWeek.get(weekKey) || [];
+      const spacing = Math.max(lectureSpacingBase, weekCenter.spacing * 0.7, getGroupSpacing(groupKey));
+      const candidate = pickClusterPosition(existing, spacing, weekCenter, {
+        buffer: spacing * 0.28,
+        maxRadius: weekCenter.spacing * 0.75
+      });
+      const point = clampClusterPoint(candidate);
+      const info = { x: point.x, y: point.y, spacing, buffer: spacing * 0.7 };
+      lectureCenters.set(lectureKey2, info);
+      existing.push(info);
+      lecturesByWeek.set(weekKey, existing);
+      return info;
+    }
+    const blockOrder = /* @__PURE__ */ new Map();
+    Array.from(blockAggregates.entries()).sort((a, b) => {
+      const scoreA = a[1].weight + a[1].count * 0.6;
+      const scoreB = b[1].weight + b[1].count * 0.6;
+      if (Math.abs(scoreA - scoreB) > 1e-4) return scoreB - scoreA;
+      return String(a[0]).localeCompare(String(b[0]));
+    }).forEach((entry, index) => {
+      blockOrder.set(entry[0], index);
+    });
+    const weekOrder = /* @__PURE__ */ new Map();
+    Array.from(weekAggregates.entries()).sort((a, b) => {
+      const scoreA = a[1].weight + a[1].count * 0.5;
+      const scoreB = b[1].weight + b[1].count * 0.5;
+      if (Math.abs(scoreA - scoreB) > 1e-4) return scoreB - scoreA;
+      return String(a[0]).localeCompare(String(b[0]));
+    }).forEach((entry, index) => {
+      weekOrder.set(entry[0], index);
+    });
+    const groupOrder = Array.from(groupNodes.keys()).sort((a, b) => {
+      const parsedA = parseGroupKey(a);
+      const parsedB = parseGroupKey(b);
+      const blockIdxA = blockOrder.get(parsedA.block || "__") ?? Number.MAX_SAFE_INTEGER;
+      const blockIdxB = blockOrder.get(parsedB.block || "__") ?? Number.MAX_SAFE_INTEGER;
+      if (blockIdxA !== blockIdxB) return blockIdxA - blockIdxB;
+      const weekKeyA = `${parsedA.block || "__"}::${parsedA.week || "__"}`;
+      const weekKeyB = `${parsedB.block || "__"}::${parsedB.week || "__"}`;
+      const weekIdxA = weekOrder.get(weekKeyA) ?? Number.MAX_SAFE_INTEGER;
+      const weekIdxB = weekOrder.get(weekKeyB) ?? Number.MAX_SAFE_INTEGER;
+      if (weekIdxA !== weekIdxB) return weekIdxA - weekIdxB;
+      const metricA = groupMetrics.get(a) || { totalInfluence: 0, totalWeight: 0, count: 0 };
+      const metricB = groupMetrics.get(b) || { totalInfluence: 0, totalWeight: 0, count: 0 };
+      const scoreA = metricA.totalInfluence + metricA.totalWeight;
+      const scoreB = metricB.totalInfluence + metricB.totalWeight;
+      if (Math.abs(scoreA - scoreB) > 1e-4) return scoreB - scoreA;
+      if (metricA.count !== metricB.count) return metricB.count - metricA.count;
+      return String(a).localeCompare(String(b));
+    });
+    const clusterOrigins = /* @__PURE__ */ new Map();
+    groupOrder.forEach((key) => {
+      const parsed = parseGroupKey(key);
+      const blockKey = parsed.block || "__";
+      const weekId = parsed.week || "__";
+      const lectureId = parsed.lecture || key;
+      const blockCenter = ensureBlockCenter(blockKey);
+      const weekCenter = ensureWeekCenter(blockKey, weekId, blockCenter);
+      const lectureCenter = ensureLectureCenter(blockKey, weekId, lectureId, weekCenter, key);
+      clusterOrigins.set(key, {
+        x: lectureCenter.x,
+        y: lectureCenter.y,
+        spacing: Math.max(lectureCenter.spacing, getGroupSpacing(key))
+      });
+    });
+    const heavyThreshold = (() => {
+      if (!weightValues.length) return 0;
+      const sorted = weightValues.slice().sort((a, b) => a - b);
+      const index = Math.max(0, Math.floor(sorted.length * 0.75) - 1);
+      return sorted[index];
+    })();
+    groupOrder.forEach((groupKey) => {
+      const ids2 = groupNodes.get(groupKey) || [];
+      if (!ids2.length) return;
+      const nodes = ids2.slice().sort((a, b) => {
+        const diffInfluence = (influence.get(b) || 0) - (influence.get(a) || 0);
+        if (Math.abs(diffInfluence) > 1e-4) return diffInfluence;
+        const diffWeight = (weights.get(b) || 0) - (weights.get(a) || 0);
+        if (Math.abs(diffWeight) > 1e-4) return diffWeight;
+        return String(a).localeCompare(String(b));
+      });
+      const origin = clusterOrigins.get(groupKey) || { x: center.x, y: center.y, spacing: getGroupSpacing(groupKey) };
+      const primaryId = nodes[0];
+      const primaryRadius = radii.get(primaryId) || typicalRadius;
+      const primaryPos = clampPosition({ x: origin.x, y: origin.y }, primaryRadius);
+      placements.set(primaryId, primaryPos);
+      ensureOrbitState(primaryId, {
+        baseDistance: origin.spacing * 0.55,
+        layerSpacing: origin.spacing * 0.45,
+        slotWeight: weights.get(primaryId) || 0
+      });
+      for (let index = 1; index < nodes.length; index += 1) {
+        const id = nodes[index];
+        const radius = radii.get(id) || typicalRadius;
+        const neighbors = adjacency.get(id) || [];
+        const placedNeighbors = neighbors.filter((n) => placements.has(n));
+        let guess = null;
+        if (placedNeighbors.length >= 2) {
+          let sumX = 0;
+          let sumY = 0;
+          let totalWeight = 0;
+          const neighborGroups = /* @__PURE__ */ new Set();
+          placedNeighbors.forEach((neighborId) => {
+            const pos = placements.get(neighborId);
+            if (!pos) return;
+            const weight = Math.max(0.2, weights.get(neighborId) || 0);
+            sumX += pos.x * weight;
+            sumY += pos.y * weight;
+            totalWeight += weight;
+            neighborGroups.add(primaryGroupById.get(neighborId));
+          });
+          if (totalWeight > 0) {
+            guess = { x: sumX / totalWeight, y: sumY / totalWeight };
+            if (neighborGroups.size > 1) {
+              guess.x = (guess.x + origin.x) / 2;
+              guess.y = (guess.y + origin.y) / 2;
+            }
+          }
+        }
+        if (!guess && placedNeighbors.length === 1) {
+          const anchorId = placedNeighbors[0];
+          const anchorGroup = primaryGroupById.get(anchorId);
+          const anchorSpacing = clusterOrigins.get(anchorGroup || "")?.spacing || getGroupSpacing(anchorGroup || groupKey);
+          guess = nextOrbitPosition(anchorId, radius, {
+            groupSpacing: Math.max(anchorSpacing, origin.spacing),
+            slotWeight: weights.get(anchorId) || 0
+          });
+        }
+        if (!guess) {
+          guess = nextGroupPosition(groupKey, radius);
+        }
+        const position = resolveCollisions(id, guess, radius);
         placements.set(id, position);
-        ensureOrbitState(id, {
-          baseDistance: baseSpacing * 0.7,
-          layerSpacing: baseSpacing * 0.55,
-          slotWeight: weights.get(id) || 0
-        });
-      });
-    } else if (!centralId) {
-      primaryAnchors.forEach((id, index) => {
-        if (placements.has(id)) return;
-        const radius = radii.get(id) || MIN_NODE_RADIUS;
-        const angle = index / Math.max(1, primaryAnchors.length) * Math.PI * 2;
-        const orbit = baseSpacing * 0.75 + radius;
-        const guess = {
-          x: center.x + Math.cos(angle) * orbit,
-          y: center.y + Math.sin(angle) * orbit
-        };
-        const position = resolveCollisions(id, guess);
-        placements.set(id, position);
-        ensureOrbitState(id, {
-          baseDistance: baseSpacing * 0.65,
-          layerSpacing: baseSpacing * 0.5,
-          slotWeight: weights.get(id) || 0
-        });
-      });
-    }
-    order.forEach((id) => {
-      if (placements.has(id)) return;
-      const radius = radii.get(id) || MIN_NODE_RADIUS;
-      const neighbors = (adjacency.get(id) || []).filter((n) => placements.has(n));
-      let position = null;
-      if (neighbors.length) {
-        const anchorId = neighbors.slice().sort((a, b) => {
-          const diffInfluence = (influence.get(b) || 0) - (influence.get(a) || 0);
-          if (Math.abs(diffInfluence) > 1e-4) return diffInfluence;
-          const diffWeight = (weights.get(b) || 0) - (weights.get(a) || 0);
-          if (Math.abs(diffWeight) > 1e-4) return diffWeight;
-          return String(a).localeCompare(String(b));
-        })[0];
-        if (anchorId && placements.has(anchorId)) {
-          position = nextOrbitPosition(anchorId, radius);
+        if ((adjacency.get(id) || []).length > 1) {
+          ensureOrbitState(id, {
+            baseDistance: origin.spacing * 0.5,
+            layerSpacing: origin.spacing * 0.4,
+            slotWeight: weights.get(id) || 0
+          });
         }
       }
-      if (!position && coreIds.length && placements.has(coreIds[0])) {
-        position = nextOrbitPosition(coreIds[0], radius);
-      }
-      if (!position) {
-        position = nextOrphanPosition(radius);
-      }
-      position = resolveCollisions(id, position);
-      placements.set(id, position);
-      if ((adjacency.get(id) || []).length > 1) {
-        ensureOrbitState(id);
-      }
     });
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-    placements.forEach((pos) => {
-      if (!pos) return;
-      if (pos.x < minX) minX = pos.x;
-      if (pos.x > maxX) maxX = pos.x;
-      if (pos.y < minY) minY = pos.y;
-      if (pos.y > maxY) maxY = pos.y;
-    });
-    if (Number.isFinite(minX) && Number.isFinite(maxX) && Number.isFinite(minY) && Number.isFinite(maxY)) {
-      const offsetX = center.x - (minX + maxX) / 2;
-      const offsetY = center.y - (minY + maxY) / 2;
-      placements.forEach((pos, id) => {
-        if (!pos) return;
-        const adjusted = { x: pos.x + offsetX, y: pos.y + offsetY };
-        placements.set(id, clampPosition(adjusted, radii.get(id) || MIN_NODE_RADIUS));
-      });
-    }
     const ids = Array.from(placements.keys());
-    for (let iter = 0; iter < 3; iter += 1) {
+    for (let iter = 0; iter < 5; iter += 1) {
       let changed = false;
       for (let i = 0; i < ids.length; i += 1) {
         for (let j = i + 1; j < ids.length; j += 1) {
@@ -18988,9 +19167,19 @@ var Sevenn = (() => {
           const aPos = placements.get(aId);
           const bPos = placements.get(bId);
           if (!aPos || !bPos) continue;
-          const aRadius = radii.get(aId) || MIN_NODE_RADIUS;
-          const bRadius = radii.get(bId) || MIN_NODE_RADIUS;
-          const minDistance = aRadius + bRadius + margin;
+          const aRadius = radii.get(aId) || typicalRadius;
+          const bRadius = radii.get(bId) || typicalRadius;
+          let minDistance = aRadius + bRadius + margin;
+          const aWeight = weights.get(aId) || 0;
+          const bWeight = weights.get(bId) || 0;
+          const aGroup = primaryGroupById.get(aId);
+          const bGroup = primaryGroupById.get(bId);
+          if (aWeight >= heavyThreshold || bWeight >= heavyThreshold) {
+            minDistance += baseSpacing * 0.35;
+          }
+          if (aGroup && bGroup && aGroup !== bGroup) {
+            minDistance += baseSpacing * 0.25;
+          }
           const dx = bPos.x - aPos.x;
           const dy = bPos.y - aPos.y;
           const dist = Math.hypot(dx, dy) || 1e-4;
@@ -19010,12 +19199,63 @@ var Sevenn = (() => {
       }
       if (!changed) break;
     }
-    const result = {};
+    for (let iter = 0; iter < 2; iter += 1) {
+      const updates = [];
+      ids.forEach((id) => {
+        const weight = weights.get(id) || 0;
+        if (weight >= heavyThreshold) return;
+        const neighbors = adjacency.get(id) || [];
+        if (neighbors.length < 2) return;
+        const current = placements.get(id);
+        if (!current) return;
+        let sumX = 0;
+        let sumY = 0;
+        let totalWeight = 0;
+        neighbors.forEach((neighborId) => {
+          const pos = placements.get(neighborId);
+          if (!pos) return;
+          const weightValue = Math.max(0.25, weights.get(neighborId) || 0);
+          sumX += pos.x * weightValue;
+          sumY += pos.y * weightValue;
+          totalWeight += weightValue;
+        });
+        if (!totalWeight) return;
+        const target = {
+          x: current.x + (sumX / totalWeight - current.x) * 0.32,
+          y: current.y + (sumY / totalWeight - current.y) * 0.32
+        };
+        updates.push([id, resolveCollisions(id, target)]);
+      });
+      updates.forEach(([id, pos]) => {
+        placements.set(id, pos);
+      });
+    }
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    placements.forEach((pos) => {
+      if (!pos) return;
+      if (pos.x < minX) minX = pos.x;
+      if (pos.x > maxX) maxX = pos.x;
+      if (pos.y < minY) minY = pos.y;
+      if (pos.y > maxY) maxY = pos.y;
+    });
+    if (Number.isFinite(minX) && Number.isFinite(maxX) && Number.isFinite(minY) && Number.isFinite(maxY)) {
+      const offsetX = center.x - (minX + maxX) / 2;
+      const offsetY = center.y - (minY + maxY) / 2;
+      placements.forEach((pos, id) => {
+        if (!pos) return;
+        const adjusted = { x: pos.x + offsetX, y: pos.y + offsetY };
+        placements.set(id, clampPosition(adjusted, radii.get(id) || typicalRadius));
+      });
+    }
+    const layout = {};
     placements.forEach((pos, id) => {
       if (!pos) return;
-      result[id] = clampPosition(pos, radii.get(id) || MIN_NODE_RADIUS);
+      layout[id] = { x: pos.x, y: pos.y };
     });
-    return result;
+    return layout;
   }
   async function smartReorganizeActiveMap() {
     const items = Array.isArray(mapState.visibleItems) ? mapState.visibleItems : [];
@@ -22550,6 +22790,21 @@ var Sevenn = (() => {
       }
     });
   }
+  function refreshEdgeGeometry(line) {
+    if (!line) return;
+    const aId = line.dataset?.a;
+    const bId = line.dataset?.b;
+    if (!aId || !bId) return;
+    const geometry = getLineGeometry(aId, bId, { line });
+    if (geometry?.pathData) {
+      line.setAttribute("d", geometry.pathData);
+      syncLineHandles(line, geometry);
+      updateLineStrokeWidth(line);
+    } else {
+      removeLineHandles(line);
+    }
+    syncLineDecoration(line);
+  }
   function updateEdgesFor(id) {
     ensureEdgeRegistry();
     if (!mapState.edgeRefs) return;
@@ -22562,14 +22817,7 @@ var Sevenn = (() => {
         stale.push(edge);
         return;
       }
-      const geometry = getLineGeometry(edge.dataset.a, edge.dataset.b, { line: edge });
-      if (geometry?.pathData) {
-        edge.setAttribute("d", geometry.pathData);
-        syncLineHandles(edge, geometry);
-      } else {
-        removeLineHandles(edge);
-      }
-      syncLineDecoration(edge);
+      refreshEdgeGeometry(edge);
     });
     if (stale.length) {
       stale.forEach(unregisterEdgeElement);
@@ -24279,8 +24527,8 @@ var Sevenn = (() => {
     const nextElements = [];
     const color = getLineStrokeColor(line);
     const { lineScale = 1 } = getCurrentScales();
-    const baseRadius = clamp2((geometry?.baseWidth || 3) * lineScale * 0.85 + 4, 4, 12);
-    const targetRadius = baseRadius + Math.max(6, baseRadius * 0.9);
+    const baseRadius = clamp2((geometry?.baseWidth || 3) * lineScale * 1.15 + 6, 6, 16);
+    const targetRadius = baseRadius + Math.max(6, baseRadius * 0.8);
     const updateEntry = (entry, handle, index) => {
       const point = handle?.point || handle?.base || {
         x: geometry.startX + (geometry.endX - geometry.startX) * (handle?.position ?? DEFAULT_CURVE_ANCHOR),
@@ -25241,3 +25489,4 @@ var Sevenn = (() => {
   }
   return __toCommonJS(main_exports);
 })();
+//# sourceMappingURL=bundle.js.map
