@@ -1,4 +1,31 @@
-(() => {
+var Sevenn = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // js/main.js
+  var main_exports = {};
+  __export(main_exports, {
+    render: () => renderApp,
+    renderApp: () => renderApp,
+    resolveListKind: () => resolveListKind,
+    tabs: () => tabs
+  });
+
   // js/storage/preferences.js
   var STORAGE_KEY = "sevenn-ui-preferences";
   var cache = null;
@@ -18224,6 +18251,7 @@
     areaDrag: null,
     menuDrag: null,
     edgeDrag: null,
+    suspendedEdges: null,
     selectionRect: null,
     nodeWasDragged: false,
     lastPointerDownInfo: null,
@@ -20283,6 +20311,7 @@
     mapState.draggingView = false;
     mapState.menuDrag = null;
     mapState.edgeDrag = null;
+    mapState.suspendedEdges = null;
     if (mapState.pendingEdgeUpdates) {
       mapState.pendingEdgeUpdates.clear();
     }
@@ -21070,6 +21099,7 @@
             refreshCursor({ keepOverride: true });
             return;
           }
+          const edgeGroup = createEdgeDragGroup(uniqueSelection);
           mapState.nodeDrag = {
             pointerId: e.pointerId,
             captureTarget: e.currentTarget || circle,
@@ -21078,7 +21108,8 @@
             lastPointer: { x: pointer.x, y: pointer.y },
             nodes: dragNodes,
             moved: false,
-            primaryId: it.id
+            primaryId: it.id,
+            edgeGroup
           };
           if (mapState.nodeDrag.captureTarget?.setPointerCapture) {
             try {
@@ -21089,17 +21120,20 @@
           mapState.nodeWasDragged = false;
           setAreaInteracting(true);
         } else {
+          const selectionIds = [...mapState.selectionIds];
+          const edgeGroup = createEdgeDragGroup(selectionIds);
           mapState.areaDrag = {
-            ids: [...mapState.selectionIds],
+            ids: selectionIds,
             start: { x, y },
-            origin: mapState.selectionIds.map((id) => {
+            origin: selectionIds.map((id) => {
               const source = mapState.positions[id] || positions[id] || { x: 0, y: 0 };
               return { id, pos: { ...source } };
             }),
             moved: false,
             pointerId: e.pointerId,
             captureTarget: e.currentTarget || circle,
-            client: { x: e.clientX, y: e.clientY }
+            client: { x: e.clientX, y: e.clientY },
+            edgeGroup
           };
           if (mapState.areaDrag.captureTarget?.setPointerCapture) {
             try {
@@ -21450,6 +21484,169 @@
       mapState.updateViewBox();
     }, { passive: false });
   }
+  function createEdgeDragGroup(nodeIds) {
+    if (!Array.isArray(nodeIds) || nodeIds.length < 2) {
+      return null;
+    }
+    ensureEdgeRegistry();
+    if (!mapState.edgeRefs || !mapState.edgeRefs.size) {
+      return null;
+    }
+    const idSet = new Set(nodeIds.map((id) => String(id)));
+    if (idSet.size < 2) {
+      return null;
+    }
+    const edges = /* @__PURE__ */ new Map();
+    idSet.forEach((id) => {
+      const refs = mapState.edgeRefs?.get(id);
+      if (!refs) return;
+      refs.forEach((edge) => {
+        if (!edge?.dataset) return;
+        const a = String(edge.dataset.a);
+        const b = String(edge.dataset.b);
+        if (!idSet.has(a) || !idSet.has(b)) return;
+        if (edges.has(edge)) return;
+        edges.set(edge, {
+          line: edge,
+          baseTransform: edge.getAttribute("transform") || "",
+          overlayTransform: edge._overlay?.getAttribute?.("transform") || "",
+          gapTransform: edge._gapLayer?.getAttribute?.("transform") || "",
+          handleTransforms: Array.isArray(edge._handleElements) ? edge._handleElements.map((handle) => handle.getAttribute("transform") || "") : null,
+          lastDx: 0,
+          lastDy: 0
+        });
+      });
+    });
+    if (!edges.size) {
+      return null;
+    }
+    if (!mapState.suspendedEdges) {
+      mapState.suspendedEdges = /* @__PURE__ */ new Set();
+    }
+    edges.forEach((entry) => {
+      mapState.suspendedEdges.add(entry.line);
+    });
+    return { edges, ids: idSet, lastDx: 0, lastDy: 0 };
+  }
+  function normalizeDragDelta(value) {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+    const rounded = Math.round(value * 1e3) / 1e3;
+    return Math.abs(rounded) < 5e-4 ? 0 : rounded;
+  }
+  function buildTranslatedTransform(base, dx, dy) {
+    const baseValue = (base || "").trim();
+    const hasBase = Boolean(baseValue);
+    const hasOffset = Math.abs(dx) > 1e-4 || Math.abs(dy) > 1e-4;
+    if (!hasBase && !hasOffset) {
+      return "";
+    }
+    const translation = hasOffset ? `translate(${dx} ${dy})` : "";
+    if (hasBase && translation) {
+      return `${baseValue} ${translation}`;
+    }
+    return hasBase ? baseValue : translation;
+  }
+  function applyElementTransform(element, base, dx, dy) {
+    if (!element || typeof element.setAttribute !== "function") return;
+    const transform = buildTranslatedTransform(base, dx, dy);
+    if (transform) {
+      element.setAttribute("transform", transform);
+    } else {
+      element.removeAttribute("transform");
+    }
+  }
+  function applyEdgeDragGroup(group, dx, dy) {
+    if (!group || !group.edges?.size) return;
+    const nextDx = normalizeDragDelta(dx);
+    const nextDy = normalizeDragDelta(dy);
+    if (group.lastDx === nextDx && group.lastDy === nextDy) {
+      return;
+    }
+    group.lastDx = nextDx;
+    group.lastDy = nextDy;
+    group.edges.forEach((entry) => {
+      const line = entry?.line;
+      if (!line || !line.isConnected) return;
+      applyElementTransform(line, entry.baseTransform || "", nextDx, nextDy);
+      const overlay = line._overlay;
+      if (overlay) {
+        if (typeof entry.overlayTransform !== "string") {
+          entry.overlayTransform = overlay.getAttribute("transform") || "";
+        }
+        applyElementTransform(overlay, entry.overlayTransform || "", nextDx, nextDy);
+      }
+      const gapLayer = line._gapLayer;
+      if (gapLayer && typeof gapLayer.getAttribute === "function") {
+        if (typeof entry.gapTransform !== "string") {
+          entry.gapTransform = gapLayer.getAttribute("transform") || "";
+        }
+        applyElementTransform(gapLayer, entry.gapTransform || "", nextDx, nextDy);
+      }
+      const handles = Array.isArray(line._handleElements) ? line._handleElements : [];
+      if (handles.length) {
+        if (!Array.isArray(entry.handleTransforms) || entry.handleTransforms.length !== handles.length) {
+          entry.handleTransforms = handles.map((handle) => handle.getAttribute("transform") || "");
+        }
+        handles.forEach((handle, idx) => {
+          applyElementTransform(handle, entry.handleTransforms[idx] || "", nextDx, nextDy);
+        });
+      }
+    });
+  }
+  function restoreElementTransform(element, base) {
+    if (!element || typeof element.setAttribute !== "function") return;
+    const value = (base || "").trim();
+    if (value) {
+      element.setAttribute("transform", value);
+    } else {
+      element.removeAttribute("transform");
+    }
+  }
+  function clearEdgeDragGroup(group) {
+    if (!group || !group.edges?.size) return;
+    group.edges.forEach((entry) => {
+      const line = entry?.line;
+      if (!line) return;
+      restoreElementTransform(line, entry.baseTransform || "");
+      entry.lastDx = 0;
+      entry.lastDy = 0;
+      const overlay = line._overlay;
+      if (overlay) {
+        const base = typeof entry.overlayTransform === "string" ? entry.overlayTransform : overlay.getAttribute("transform") || "";
+        restoreElementTransform(overlay, base);
+        entry.overlayTransform = base;
+      }
+      const gapLayer = line._gapLayer;
+      if (gapLayer && typeof gapLayer.getAttribute === "function") {
+        const base = typeof entry.gapTransform === "string" ? entry.gapTransform : gapLayer.getAttribute("transform") || "";
+        restoreElementTransform(gapLayer, base);
+        entry.gapTransform = base;
+      }
+      const handles = Array.isArray(line._handleElements) ? line._handleElements : [];
+      if (handles.length) {
+        if (!Array.isArray(entry.handleTransforms) || entry.handleTransforms.length !== handles.length) {
+          entry.handleTransforms = handles.map((handle) => handle.getAttribute("transform") || "");
+        }
+        handles.forEach((handle, idx) => {
+          restoreElementTransform(handle, entry.handleTransforms[idx] || "");
+        });
+      }
+    });
+    group.lastDx = 0;
+    group.lastDy = 0;
+    if (mapState.suspendedEdges) {
+      group.edges.forEach((entry) => {
+        if (entry?.line) {
+          mapState.suspendedEdges.delete(entry.line);
+        }
+      });
+      if (!mapState.suspendedEdges.size) {
+        mapState.suspendedEdges = null;
+      }
+    }
+  }
   function getNodeDragTargets() {
     const drag = mapState.nodeDrag;
     if (!drag) return [];
@@ -21476,6 +21673,7 @@
     if (!targets.length) return false;
     let applied = false;
     let moved = drag.moved === true;
+    const startPointer = drag.startPointer || null;
     targets.forEach((target) => {
       if (!target) return;
       const { id, offset = { dx: 0, dy: 0 }, start } = target;
@@ -21494,6 +21692,11 @@
     });
     drag.lastPointer = { x: pointer.x, y: pointer.y };
     drag.moved = moved;
+    if (startPointer && drag.edgeGroup) {
+      const dx = pointer.x - startPointer.x;
+      const dy = pointer.y - startPointer.y;
+      applyEdgeDragGroup(drag.edgeGroup, dx, dy);
+    }
     if (applied && moved && options.markDragged !== false) {
       mapState.nodeWasDragged = true;
     }
@@ -21583,6 +21786,9 @@
       const dx = x - mapState.areaDrag.start.x;
       const dy = y - mapState.areaDrag.start.y;
       mapState.areaDrag.moved = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
+      if (mapState.areaDrag.edgeGroup) {
+        applyEdgeDragGroup(mapState.areaDrag.edgeGroup, dx, dy);
+      }
       mapState.areaDrag.origin.forEach(({ id, pos }) => {
         const nx = pos.x + dx;
         const ny = pos.y + dy;
@@ -21716,6 +21922,14 @@
         mapState.lastPointerDownInfo = null;
       }
       mapState.nodeDrag = null;
+      if (drag.edgeGroup) {
+        clearEdgeDragGroup(drag.edgeGroup);
+        if (drag.edgeGroup.ids && drag.edgeGroup.ids.size) {
+          drag.edgeGroup.ids.forEach((id) => {
+            queueEdgeUpdate(id, { immediate: true });
+          });
+        }
+      }
       cursorNeedsRefresh = true;
       if (wasDragged) {
         const ids = dragTargets.map((target) => target.id).filter(Boolean);
@@ -21737,15 +21951,24 @@
       setAreaInteracting(false);
     }
     if (mapState.areaDrag && mapState.areaDrag.pointerId === e.pointerId) {
-      const moved = mapState.areaDrag.moved;
-      const ids = mapState.areaDrag.ids;
-      if (mapState.areaDrag.captureTarget?.releasePointerCapture) {
+      const currentDrag = mapState.areaDrag;
+      const moved = currentDrag.moved;
+      const ids = currentDrag.ids;
+      if (currentDrag.captureTarget?.releasePointerCapture) {
         try {
-          mapState.areaDrag.captureTarget.releasePointerCapture(e.pointerId);
+          currentDrag.captureTarget.releasePointerCapture(e.pointerId);
         } catch {
         }
       }
       mapState.areaDrag = null;
+      if (currentDrag.edgeGroup) {
+        clearEdgeDragGroup(currentDrag.edgeGroup);
+        if (currentDrag.edgeGroup.ids && currentDrag.edgeGroup.ids.size) {
+          currentDrag.edgeGroup.ids.forEach((id) => {
+            queueEdgeUpdate(id, { immediate: true });
+          });
+        }
+      }
       cursorNeedsRefresh = true;
       if (moved) {
         for (const id of ids) {
@@ -22224,6 +22447,9 @@
       const dx = pointer.x - mapState.areaDrag.start.x;
       const dy = pointer.y - mapState.areaDrag.start.y;
       mapState.areaDrag.moved = mapState.areaDrag.moved || Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
+      if (mapState.areaDrag.edgeGroup) {
+        applyEdgeDragGroup(mapState.areaDrag.edgeGroup, dx, dy);
+      }
       mapState.areaDrag.origin.forEach(({ id, pos }) => {
         const nx = pos.x + dx;
         const ny = pos.y + dy;
@@ -22416,6 +22642,12 @@
     }
     if (mapState.allEdges) {
       mapState.allEdges.delete(edge);
+    }
+    if (mapState.suspendedEdges) {
+      mapState.suspendedEdges.delete(edge);
+      if (!mapState.suspendedEdges.size) {
+        mapState.suspendedEdges = null;
+      }
     }
   }
   function getLinkInfo(aId, bId) {
@@ -22824,15 +23056,27 @@
     }
     if (!list.length) return;
     const stale = [];
+    const suspended = mapState.suspendedEdges;
     list.forEach((edge) => {
       if (!edge || !edge.isConnected || !edge.ownerSVGElement) {
         stale.push(edge);
         return;
       }
+      if (suspended && suspended.has(edge)) {
+        return;
+      }
       refreshEdgeGeometry(edge);
     });
     if (stale.length) {
-      stale.forEach(unregisterEdgeElement);
+      stale.forEach((edge) => {
+        if (suspended) {
+          suspended.delete(edge);
+          if (!suspended.size) {
+            mapState.suspendedEdges = null;
+          }
+        }
+        unregisterEdgeElement(edge);
+      });
     }
   }
   function buildToolbox(container, hiddenNodeCount, hiddenLinkCount) {
@@ -25500,5 +25744,5 @@
   if (typeof window !== "undefined" && !globalThis.__SEVENN_TEST__) {
     bootstrap();
   }
+  return __toCommonJS(main_exports);
 })();
-//# sourceMappingURL=bundle.js.map
