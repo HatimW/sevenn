@@ -139,7 +139,14 @@ export const state = {
   filters: initialFilters,
   lectures: initialLectures,
   entryLayout: initialEntryLayout,
-  blockBoard: { collapsedBlocks: [], hiddenTimelines: [] },
+  blockBoard: {
+    collapsedBlocks: [],
+    hiddenTimelines: [],
+    autoCollapsed: [],
+    autoHidden: [],
+    manualExpanded: [],
+    manualTimeline: []
+  },
   builder: {
     blocks:[],
     weeks:[],
@@ -213,7 +220,14 @@ export function setBuilder(patch){ Object.assign(state.builder, patch); }
 export function setBlockBoardState(patch) {
   if (!patch) return;
   if (!state.blockBoard) {
-    state.blockBoard = { collapsedBlocks: [], hiddenTimelines: [], autoCollapsed: [], autoHidden: [] };
+    state.blockBoard = {
+      collapsedBlocks: [],
+      hiddenTimelines: [],
+      autoCollapsed: [],
+      autoHidden: [],
+      manualExpanded: [],
+      manualTimeline: []
+    };
   }
   const current = state.blockBoard;
   if (!Array.isArray(current.hiddenTimelines)) {
@@ -224,6 +238,12 @@ export function setBlockBoardState(patch) {
   }
   if (!Array.isArray(current.autoHidden)) {
     current.autoHidden = [];
+  }
+  if (!Array.isArray(current.manualExpanded)) {
+    current.manualExpanded = [];
+  }
+  if (!Array.isArray(current.manualTimeline)) {
+    current.manualTimeline = [];
   }
   if (Array.isArray(patch.collapsedBlocks)) {
     const unique = Array.from(new Set(patch.collapsedBlocks.map(id => String(id))));
@@ -240,6 +260,14 @@ export function setBlockBoardState(patch) {
   if (Array.isArray(patch.autoHidden)) {
     const autoHiddenSet = Array.from(new Set(patch.autoHidden.map(id => String(id))));
     current.autoHidden = autoHiddenSet;
+  }
+  if (Array.isArray(patch.manualExpanded)) {
+    const manualExpandedSet = Array.from(new Set(patch.manualExpanded.map(id => String(id))));
+    current.manualExpanded = manualExpandedSet;
+  }
+  if (Array.isArray(patch.manualTimeline)) {
+    const manualTimelineSet = Array.from(new Set(patch.manualTimeline.map(id => String(id))));
+    current.manualTimeline = manualTimelineSet;
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'showDensity')) {
     const show = Boolean(patch.showDensity);
