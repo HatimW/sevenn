@@ -3743,6 +3743,20 @@ function getNodeDragTargets() {
   return [];
 }
 
+function refreshEdgesForIds(ids) {
+  if (!Array.isArray(ids) || !ids.length) {
+    return;
+  }
+  const seen = new Set();
+  ids.forEach(id => {
+    if (id == null) return;
+    const key = String(id);
+    if (seen.has(key)) return;
+    seen.add(key);
+    updateEdgesFor(id);
+  });
+}
+
 function applyNodeDragFromPointer(pointer, options = {}) {
   if (!pointer) return false;
   const drag = mapState.nodeDrag;
@@ -3760,6 +3774,7 @@ function applyNodeDragFromPointer(pointer, options = {}) {
   let applied = false;
   let moved = drag.moved === true;
   const startPointer = drag.startPointer || null;
+  const touchedIds = [];
   targets.forEach(target => {
     if (!target) return;
     const { id, offset = { dx: 0, dy: 0 }, start } = target;
@@ -3767,6 +3782,7 @@ function applyNodeDragFromPointer(pointer, options = {}) {
     const nx = pointer.x - offset.dx;
     const ny = pointer.y - offset.dy;
     scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+    touchedIds.push(id);
     if (!moved && start) {
       const dx = nx - start.x;
       const dy = ny - start.y;
@@ -3782,6 +3798,7 @@ function applyNodeDragFromPointer(pointer, options = {}) {
     mapState.nodeWasDragged = true;
   }
   if (applied) {
+    refreshEdgesForIds(touchedIds);
     flushQueuedEdgeUpdates({ force: true });
   }
   return applied;
@@ -3877,11 +3894,17 @@ function handlePointerMove(e) {
     const dx = x - mapState.areaDrag.start.x;
     const dy = y - mapState.areaDrag.start.y;
     mapState.areaDrag.moved = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
+    const touchedIds = [];
     mapState.areaDrag.origin.forEach(({ id, pos }) => {
       const nx = pos.x + dx;
       const ny = pos.y + dy;
       scheduleNodePositionUpdate(id, { x: nx, y: ny }, { immediate: true });
+      touchedIds.push(id);
     });
+    if (touchedIds.length) {
+      refreshEdgesForIds(touchedIds);
+      flushQueuedEdgeUpdates({ force: true });
+    }
     mapState.nodeWasDragged = true;
     return;
   }
