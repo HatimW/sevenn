@@ -41,18 +41,34 @@ function buildNormalizedLecture(blockId, input, existing, now) {
     : Array.isArray(existing?.tags)
       ? existing.tags
       : undefined;
-  const passes = Array.isArray(input?.passes)
-    ? input.passes
-    : Array.isArray(existing?.passes)
+  const explicitPasses = Array.isArray(input?.passes);
+  const passPlanChanged = Boolean(input?.passPlan);
+  const plannerDefaultsChanged = Boolean(input?.plannerDefaults);
+  const startProvided = input?.startAt !== undefined;
+  const passContextChanged = passPlanChanged || plannerDefaultsChanged || startProvided;
+  const shouldPreserveScheduleState = !explicitPasses && !passContextChanged;
+  let passes;
+  if (explicitPasses) {
+    passes = input.passes;
+  } else if (passContextChanged && Array.isArray(existing?.passes)) {
+    passes = existing.passes.map(pass => {
+      if (!pass || typeof pass !== 'object') return pass;
+      const next = { ...pass };
+      delete next.due;
+      return next;
+    });
+  } else {
+    passes = Array.isArray(existing?.passes)
       ? existing.passes
       : undefined;
-  const passPlan = input?.passPlan
+  }
+  const passPlan = passPlanChanged
     ? { ...(existing?.passPlan || {}), ...input.passPlan }
     : existing?.passPlan;
   const status = input?.status
     ? { ...(existing?.status || {}), ...input.status }
     : existing?.status;
-  const plannerDefaults = input?.plannerDefaults
+  const plannerDefaults = plannerDefaultsChanged
     ? { ...(existing?.plannerDefaults || {}), ...input.plannerDefaults }
     : existing?.plannerDefaults;
   const nextDueAt = input?.nextDueAt !== undefined
@@ -76,14 +92,16 @@ function buildNormalizedLecture(blockId, input, existing, now) {
   const normalized = normalizeLectureRecord(blockId, composite, now);
   if (existing?.createdAt != null) normalized.createdAt = existing.createdAt;
   if (existing && !input?.passPlan && existing.passPlan) normalized.passPlan = clone(existing.passPlan);
-  if (existing && !input?.status && existing.status) normalized.status = clone(existing.status);
-  if (existing && !Array.isArray(input?.passes) && Array.isArray(existing.passes)) {
+  if (existing && shouldPreserveScheduleState && !input?.status && existing.status) {
+    normalized.status = clone(existing.status);
+  }
+  if (existing && shouldPreserveScheduleState && Array.isArray(existing.passes)) {
     normalized.passes = clone(existing.passes);
   }
   if (existing && !Array.isArray(input?.tags) && Array.isArray(existing.tags)) {
     normalized.tags = clone(existing.tags);
   }
-  if (existing && input?.nextDueAt === undefined && existing.nextDueAt !== undefined) {
+  if (existing && shouldPreserveScheduleState && input?.nextDueAt === undefined && existing.nextDueAt !== undefined) {
     normalized.nextDueAt = existing.nextDueAt ?? null;
   }
   return normalized;

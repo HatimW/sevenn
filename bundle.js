@@ -679,15 +679,15 @@ var Sevenn = (() => {
   var MINUTE_MS = 60 * 1e3;
   var DEFAULT_PASS_COLORS = [
     "#38bdf8",
-    "#22d3ee",
+    "#0ea5e9",
     "#34d399",
-    "#4ade80",
-    "#fbbf24",
-    "#fb923c",
+    "#10b981",
+    "#facc15",
+    "#f97316",
     "#f472b6",
     "#a855f7",
-    "#6366f1",
-    "#14b8a6"
+    "#818cf8",
+    "#2dd4bf"
   ];
   var clone = deepClone;
   function toNumber(value, fallback = 0) {
@@ -1511,10 +1511,28 @@ var Sevenn = (() => {
     const lectureId = input?.id ?? existing?.id;
     if (blockId == null || lectureId == null) return null;
     const tags = Array.isArray(input?.tags) ? input.tags : Array.isArray(existing?.tags) ? existing.tags : void 0;
-    const passes = Array.isArray(input?.passes) ? input.passes : Array.isArray(existing?.passes) ? existing.passes : void 0;
-    const passPlan = input?.passPlan ? { ...existing?.passPlan || {}, ...input.passPlan } : existing?.passPlan;
+    const explicitPasses = Array.isArray(input?.passes);
+    const passPlanChanged = Boolean(input?.passPlan);
+    const plannerDefaultsChanged = Boolean(input?.plannerDefaults);
+    const startProvided = input?.startAt !== void 0;
+    const passContextChanged = passPlanChanged || plannerDefaultsChanged || startProvided;
+    const shouldPreserveScheduleState = !explicitPasses && !passContextChanged;
+    let passes;
+    if (explicitPasses) {
+      passes = input.passes;
+    } else if (passContextChanged && Array.isArray(existing?.passes)) {
+      passes = existing.passes.map((pass) => {
+        if (!pass || typeof pass !== "object") return pass;
+        const next = { ...pass };
+        delete next.due;
+        return next;
+      });
+    } else {
+      passes = Array.isArray(existing?.passes) ? existing.passes : void 0;
+    }
+    const passPlan = passPlanChanged ? { ...existing?.passPlan || {}, ...input.passPlan } : existing?.passPlan;
     const status = input?.status ? { ...existing?.status || {}, ...input.status } : existing?.status;
-    const plannerDefaults = input?.plannerDefaults ? { ...existing?.plannerDefaults || {}, ...input.plannerDefaults } : existing?.plannerDefaults;
+    const plannerDefaults = plannerDefaultsChanged ? { ...existing?.plannerDefaults || {}, ...input.plannerDefaults } : existing?.plannerDefaults;
     const nextDueAt = input?.nextDueAt !== void 0 ? input.nextDueAt : existing?.nextDueAt;
     const composite = {
       ...existing || {},
@@ -1532,14 +1550,16 @@ var Sevenn = (() => {
     const normalized2 = normalizeLectureRecord(blockId, composite, now);
     if (existing?.createdAt != null) normalized2.createdAt = existing.createdAt;
     if (existing && !input?.passPlan && existing.passPlan) normalized2.passPlan = clone3(existing.passPlan);
-    if (existing && !input?.status && existing.status) normalized2.status = clone3(existing.status);
-    if (existing && !Array.isArray(input?.passes) && Array.isArray(existing.passes)) {
+    if (existing && shouldPreserveScheduleState && !input?.status && existing.status) {
+      normalized2.status = clone3(existing.status);
+    }
+    if (existing && shouldPreserveScheduleState && Array.isArray(existing.passes)) {
       normalized2.passes = clone3(existing.passes);
     }
     if (existing && !Array.isArray(input?.tags) && Array.isArray(existing.tags)) {
       normalized2.tags = clone3(existing.tags);
     }
-    if (existing && input?.nextDueAt === void 0 && existing.nextDueAt !== void 0) {
+    if (existing && shouldPreserveScheduleState && input?.nextDueAt === void 0 && existing.nextDueAt !== void 0) {
       normalized2.nextDueAt = existing.nextDueAt ?? null;
     }
     return normalized2;
@@ -25814,7 +25834,7 @@ var Sevenn = (() => {
     renderMap: renderMap2,
     createEntryAddControl: createEntryAddControl2
   }) {
-    const tabs2 = ["Block Board", "Lists", "Lectures", "Cards", "Study", "Exams", "Map"];
+    const tabs2 = ["Block Board", "Lists", "Cards", "Study", "Exams", "Map", "Lectures"];
     const listTabConfig = [
       { label: "Diseases", kind: "disease" },
       { label: "Drugs", kind: "drug" },

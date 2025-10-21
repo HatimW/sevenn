@@ -19,7 +19,7 @@ export function createAppShell({
   renderMap,
   createEntryAddControl
 }) {
-  const tabs = ["Block Board","Lists","Lectures","Cards","Study","Exams","Map"];
+  const tabs = ["Block Board","Lists","Cards","Study","Exams","Map","Lectures"];
 
   const listTabConfig = [
     { label: 'Diseases', kind: 'disease' },
