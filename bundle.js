@@ -4056,11 +4056,104 @@ var Sevenn = (() => {
     closeBtn.title = "Close";
     closeBtn.textContent = "\xD7";
     actions.appendChild(closeBtn);
+    function appendActionButton({
+      text = "",
+      icon,
+      title: actionTitle = "",
+      ariaLabel = "",
+      className = "",
+      onClick,
+      position = "before-close"
+    } = {}) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = ["floating-action", className].filter(Boolean).join(" ");
+      if (icon) {
+        btn.innerHTML = icon;
+      } else {
+        btn.textContent = text;
+      }
+      if (actionTitle) btn.title = actionTitle;
+      if (ariaLabel || actionTitle) {
+        btn.setAttribute("aria-label", ariaLabel || actionTitle);
+      }
+      if (typeof onClick === "function") {
+        btn.addEventListener("click", onClick);
+      }
+      if (position === "start") {
+        actions.insertBefore(btn, actions.firstChild || null);
+      } else if (position === "end") {
+        actions.appendChild(btn);
+      } else if (position === "after-minimize") {
+        if (minimizeBtn.nextSibling) {
+          actions.insertBefore(btn, minimizeBtn.nextSibling);
+        } else {
+          actions.appendChild(btn);
+        }
+      } else if (position === "before-close" && closeBtn.parentElement === actions) {
+        actions.insertBefore(btn, closeBtn);
+      } else {
+        actions.appendChild(btn);
+      }
+      return btn;
+    }
     header.appendChild(actions);
     win.appendChild(header);
     const body = document.createElement("div");
     body.className = "floating-body";
     win.appendChild(body);
+    const resizeHandle = document.createElement("div");
+    resizeHandle.className = "floating-resize-handle";
+    win.appendChild(resizeHandle);
+    const MIN_WIDTH = 320;
+    const MIN_HEIGHT = 260;
+    let resizeState = null;
+    resizeHandle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      bringToFront(win);
+      resizeState = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        startWidth: win.offsetWidth,
+        startHeight: win.offsetHeight,
+        useGlobalEvents: typeof resizeHandle.setPointerCapture !== "function"
+      };
+      if (!resizeState.useGlobalEvents && typeof resizeHandle.setPointerCapture === "function") {
+        resizeHandle.setPointerCapture(event.pointerId);
+      }
+      if (resizeState.useGlobalEvents) {
+        window.addEventListener("pointermove", handlePointerMove2);
+        window.addEventListener("pointerup", stopResize);
+        window.addEventListener("pointercancel", stopResize);
+      }
+      event.preventDefault();
+    });
+    const handlePointerMove2 = (event) => {
+      if (!resizeState || event.pointerId !== resizeState.pointerId) return;
+      const deltaX = event.clientX - resizeState.startX;
+      const deltaY = event.clientY - resizeState.startY;
+      const nextWidth = Math.max(MIN_WIDTH, resizeState.startWidth + deltaX);
+      const nextHeight = Math.max(MIN_HEIGHT, resizeState.startHeight + deltaY);
+      win.style.width = `${nextWidth}px`;
+      win.style.height = `${nextHeight}px`;
+    };
+    const stopResize = (event) => {
+      if (!resizeState || event.pointerId !== resizeState.pointerId) return;
+      const state2 = resizeState;
+      resizeState = null;
+      if (!state2.useGlobalEvents && typeof resizeHandle.releasePointerCapture === "function") {
+        resizeHandle.releasePointerCapture(event.pointerId);
+      }
+      if (state2.useGlobalEvents) {
+        window.removeEventListener("pointermove", handlePointerMove2);
+        window.removeEventListener("pointerup", stopResize);
+        window.removeEventListener("pointercancel", stopResize);
+      }
+    };
+    resizeHandle.addEventListener("pointermove", handlePointerMove2);
+    resizeHandle.addEventListener("pointerup", stopResize);
+    resizeHandle.addEventListener("pointercancel", stopResize);
     let minimized = false;
     let dockButton = null;
     function handleMinimize() {
@@ -4137,6 +4230,8 @@ var Sevenn = (() => {
     return {
       element: win,
       body,
+      header,
+      actions,
       setContent(node) {
         body.innerHTML = "";
         if (node) body.appendChild(node);
@@ -4153,7 +4248,8 @@ var Sevenn = (() => {
       },
       focus() {
         bringToFront(win);
-      }
+      },
+      addAction: appendActionButton
     };
   }
 
@@ -4758,6 +4854,13 @@ var Sevenn = (() => {
     upgradeClozeSyntax(template.content);
     return template.innerHTML;
   }
+  function sanitizeToPlainText(html = "") {
+    if (!html) return "";
+    const template = document.createElement("template");
+    template.innerHTML = sanitizeHtml(html);
+    const text = template.content.textContent || "";
+    return text.replace(/\u00a0/g, " ");
+  }
   function normalizeInput(value = "") {
     if (value == null) return "";
     const str = String(value);
@@ -4928,15 +5031,10 @@ var Sevenn = (() => {
         return;
       }
       const html = event.clipboardData.getData("text/html");
-      if (html) {
-        const sanitized = sanitizeHtml(html);
-        if (sanitized.trim()) {
-          event.preventDefault();
-          insertHtml(sanitized);
-          return;
-        }
+      let text = event.clipboardData.getData("text/plain");
+      if (!text && html) {
+        text = sanitizeToPlainText(html);
       }
-      const text = event.clipboardData.getData("text/plain");
       event.preventDefault();
       insertPlainText(text || "");
     });
@@ -6045,8 +6143,8 @@ var Sevenn = (() => {
   var fieldMap = {
     disease: [
       ["etiology", "Etiology"],
-      ["pathophys", "Pathophys"],
-      ["clinical", "Clinical"],
+      ["pathophys", "Pathophysiology"],
+      ["clinical", "Clinical Presentation"],
       ["diagnosis", "Diagnosis"],
       ["treatment", "Treatment"],
       ["complications", "Complications"],
@@ -6106,11 +6204,15 @@ var Sevenn = (() => {
     const form = document.createElement("form");
     form.className = "editor-form";
     const nameLabel = document.createElement("label");
-    nameLabel.textContent = kind === "concept" ? "Concept" : "Name";
     nameLabel.className = "editor-field";
+    const nameTitle = document.createElement("span");
+    nameTitle.className = "editor-field-label";
+    nameTitle.textContent = kind === "concept" ? "Concept" : "Name";
+    nameLabel.appendChild(nameTitle);
     const nameInput = document.createElement("input");
     nameInput.className = "input";
     nameInput.value = existing ? existing.name || existing.concept || "" : "";
+    nameInput.placeholder = kind === "concept" ? "Enter concept title" : "Enter name";
     nameLabel.appendChild(nameInput);
     form.appendChild(nameLabel);
     const cancelAutoSave = () => {
@@ -6677,6 +6779,8 @@ var Sevenn = (() => {
     actionBar.className = "editor-actions";
     status = document.createElement("span");
     status.className = "editor-status";
+    let saveBtn;
+    let headerSaveBtn;
     async function persist(options = {}) {
       const opts = typeof options === "boolean" ? { closeAfter: options } : options;
       const { closeAfter = false, silent = false } = opts;
@@ -6767,21 +6871,33 @@ var Sevenn = (() => {
       }
       return true;
     }
-    const saveBtn = document.createElement("button");
+    function handleSaveRequest() {
+      if (headerSaveBtn) headerSaveBtn.disabled = true;
+      if (saveBtn) saveBtn.disabled = true;
+      persist({ closeAfter: true }).catch(() => {
+      }).finally(() => {
+        if (headerSaveBtn) headerSaveBtn.disabled = false;
+        if (saveBtn) saveBtn.disabled = false;
+      });
+    }
+    headerSaveBtn = win.addAction({
+      text: "\u2713",
+      ariaLabel: "Save entry",
+      title: "Save and close",
+      className: "floating-action--confirm",
+      onClick: handleSaveRequest
+    });
+    saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.className = "btn";
-    saveBtn.textContent = "Save";
-    saveBtn.addEventListener("click", () => {
-      persist({ closeAfter: true }).catch(() => {
-      });
-    });
+    saveBtn.textContent = "Save & Close";
+    saveBtn.addEventListener("click", handleSaveRequest);
     actionBar.appendChild(saveBtn);
     actionBar.appendChild(status);
     form.appendChild(actionBar);
     form.addEventListener("submit", (e) => {
       e.preventDefault();
-      persist({ closeAfter: true }).catch(() => {
-      });
+      handleSaveRequest();
     });
     win.setContent(form);
     const updateTitle = () => {

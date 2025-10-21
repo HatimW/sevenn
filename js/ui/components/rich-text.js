@@ -212,6 +212,14 @@ export function sanitizeHtml(html = ''){
   return template.innerHTML;
 }
 
+function sanitizeToPlainText(html = '') {
+  if (!html) return '';
+  const template = document.createElement('template');
+  template.innerHTML = sanitizeHtml(html);
+  const text = template.content.textContent || '';
+  return text.replace(/\u00a0/g, ' ');
+}
+
 function normalizeInput(value = ''){
   if (value == null) return '';
   const str = String(value);
@@ -403,15 +411,10 @@ export function createRichTextEditor({ value = '', onChange, ariaLabel, ariaLabe
       return;
     }
     const html = event.clipboardData.getData('text/html');
-    if (html) {
-      const sanitized = sanitizeHtml(html);
-      if (sanitized.trim()) {
-        event.preventDefault();
-        insertHtml(sanitized);
-        return;
-      }
+    let text = event.clipboardData.getData('text/plain');
+    if (!text && html) {
+      text = sanitizeToPlainText(html);
     }
-    const text = event.clipboardData.getData('text/plain');
     event.preventDefault();
     insertPlainText(text || '');
   });

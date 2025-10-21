@@ -8,8 +8,8 @@ import { confirmModal } from './confirm.js';
 const fieldMap = {
   disease: [
     ['etiology', 'Etiology'],
-    ['pathophys', 'Pathophys'],
-    ['clinical', 'Clinical'],
+    ['pathophys', 'Pathophysiology'],
+    ['clinical', 'Clinical Presentation'],
     ['diagnosis', 'Diagnosis'],
     ['treatment', 'Treatment'],
     ['complications', 'Complications'],
@@ -80,11 +80,15 @@ export async function openEditor(kind, onSave, existing = null) {
   form.className = 'editor-form';
 
   const nameLabel = document.createElement('label');
-  nameLabel.textContent = kind === 'concept' ? 'Concept' : 'Name';
   nameLabel.className = 'editor-field';
+  const nameTitle = document.createElement('span');
+  nameTitle.className = 'editor-field-label';
+  nameTitle.textContent = kind === 'concept' ? 'Concept' : 'Name';
+  nameLabel.appendChild(nameTitle);
   const nameInput = document.createElement('input');
   nameInput.className = 'input';
   nameInput.value = existing ? (existing.name || existing.concept || '') : '';
+  nameInput.placeholder = kind === 'concept' ? 'Enter concept title' : 'Enter name';
   nameLabel.appendChild(nameInput);
   form.appendChild(nameLabel);
 
@@ -711,6 +715,9 @@ export async function openEditor(kind, onSave, existing = null) {
   status = document.createElement('span');
   status.className = 'editor-status';
 
+  let saveBtn;
+  let headerSaveBtn;
+
   async function persist(options = {}) {
     const opts = typeof options === 'boolean' ? { closeAfter: options } : options;
     const { closeAfter = false, silent = false } = opts;
@@ -803,13 +810,30 @@ export async function openEditor(kind, onSave, existing = null) {
     return true;
   }
 
-  const saveBtn = document.createElement('button');
+  function handleSaveRequest() {
+    if (headerSaveBtn) headerSaveBtn.disabled = true;
+    if (saveBtn) saveBtn.disabled = true;
+    persist({ closeAfter: true })
+      .catch(() => {})
+      .finally(() => {
+        if (headerSaveBtn) headerSaveBtn.disabled = false;
+        if (saveBtn) saveBtn.disabled = false;
+      });
+  }
+
+  headerSaveBtn = win.addAction({
+    text: '✓',
+    ariaLabel: 'Save entry',
+    title: 'Save and close',
+    className: 'floating-action--confirm',
+    onClick: handleSaveRequest
+  });
+
+  saveBtn = document.createElement('button');
   saveBtn.type = 'button';
   saveBtn.className = 'btn';
-  saveBtn.textContent = 'Save';
-  saveBtn.addEventListener('click', () => {
-    persist({ closeAfter: true }).catch(() => {});
-  });
+  saveBtn.textContent = 'Save & Close';
+  saveBtn.addEventListener('click', handleSaveRequest);
 
   actionBar.appendChild(saveBtn);
   actionBar.appendChild(status);
@@ -817,7 +841,7 @@ export async function openEditor(kind, onSave, existing = null) {
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    persist({ closeAfter: true }).catch(() => {});
+    handleSaveRequest();
   });
 
   win.setContent(form);
