@@ -1025,17 +1025,6 @@ export async function renderExams(root, render) {
 
   layoutControls.appendChild(pills);
 
-  const detailsToggle = document.createElement('button');
-  detailsToggle.type = 'button';
-  detailsToggle.className = 'btn secondary exam-details-toggle';
-  detailsToggle.textContent = detailsVisible ? 'Hide Details' : 'Show Details';
-  detailsToggle.setAttribute('aria-pressed', detailsVisible ? 'true' : 'false');
-  detailsToggle.addEventListener('click', () => {
-    setExamLayout({ detailsVisible: !detailsVisible });
-    render();
-  });
-  layoutControls.appendChild(detailsToggle);
-
   controls.appendChild(layoutControls);
   controls.appendChild(status);
 
@@ -1094,19 +1083,18 @@ export async function renderExams(root, render) {
 
 function buildExamCard(exam, render, savedSession, statusEl, layout) {
   const layoutMode = layout?.mode === 'row' ? 'row' : 'grid';
-  const showDetails = layout?.detailsVisible !== false;
-  const forceExpanded = showDetails && layoutMode === 'row';
+  const defaultExpanded = layout?.detailsVisible !== false;
+  const forceExpanded = layoutMode === 'row';
   const expandedState = state.examAttemptExpanded[exam.id];
-  const isExpanded = forceExpanded ? true : (expandedState != null ? expandedState : false);
+  const isExpanded = forceExpanded ? true : (expandedState != null ? expandedState : defaultExpanded);
   const last = latestResult(exam);
   const best = bestResult(exam);
 
   const card = document.createElement('article');
   card.className = 'card exam-card';
-  if (showDetails && isExpanded) {
+  if (isExpanded) {
     card.classList.add('expanded');
-  }
-  if (!showDetails) {
+  } else {
     card.classList.add('exam-card--compact');
   }
   if (layoutMode === 'row') {
@@ -1120,14 +1108,14 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
   const summaryButton = document.createElement('button');
   summaryButton.type = 'button';
   summaryButton.className = 'exam-card-summary';
-  if (showDetails && !forceExpanded) {
+  if (!forceExpanded) {
     summaryButton.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
     summaryButton.addEventListener('click', () => {
       setExamAttemptExpanded(exam.id, !isExpanded);
       render();
     });
   } else {
-    summaryButton.setAttribute('aria-expanded', forceExpanded ? 'true' : 'false');
+    summaryButton.setAttribute('aria-expanded', 'true');
     summaryButton.setAttribute('aria-disabled', 'true');
     summaryButton.disabled = true;
     summaryButton.classList.add('exam-card-summary--static');
@@ -1159,7 +1147,7 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
   glance.className = 'exam-card-glance';
   summaryButton.appendChild(glance);
 
-  if (showDetails) {
+  if (isExpanded) {
     const attemptsChip = document.createElement('span');
     attemptsChip.className = 'exam-chip';
     attemptsChip.textContent = `${exam.results.length} attempt${exam.results.length === 1 ? '' : 's'}`;
@@ -1176,31 +1164,37 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     badge.title = formatScore(last);
     glance.appendChild(badge);
   }
-  if (last && showDetails) {
+  if (last && isExpanded) {
     const lastChip = document.createElement('span');
     lastChip.className = 'exam-chip exam-chip--ghost';
     const date = new Date(last.when);
     lastChip.textContent = `Last • ${date.toLocaleDateString()}`;
     glance.appendChild(lastChip);
   }
-  if (savedSession && showDetails) {
+  if (savedSession && isExpanded) {
     const progressChip = document.createElement('span');
     progressChip.className = 'exam-chip exam-chip--progress';
     progressChip.textContent = 'In progress';
     glance.appendChild(progressChip);
   }
 
-  const chevron = document.createElement('span');
-  chevron.className = 'exam-card-toggle-icon';
-  chevron.setAttribute('aria-hidden', 'true');
-  if (!showDetails || forceExpanded) {
-    chevron.setAttribute('hidden', 'true');
-  }
-  summaryButton.appendChild(chevron);
-
   const quickAction = document.createElement('div');
   quickAction.className = 'exam-card-quick-action';
   header.appendChild(quickAction);
+
+  if (!forceExpanded) {
+    const toggleDetails = document.createElement('button');
+    toggleDetails.type = 'button';
+    toggleDetails.className = 'btn secondary exam-card-details-toggle';
+    toggleDetails.textContent = isExpanded ? 'Hide details' : 'Show details';
+    toggleDetails.setAttribute('aria-pressed', isExpanded ? 'true' : 'false');
+    toggleDetails.addEventListener('click', event => {
+      event.stopPropagation();
+      setExamAttemptExpanded(exam.id, !isExpanded);
+      render();
+    });
+    quickAction.appendChild(toggleDetails);
+  }
 
   const quickBtn = document.createElement('button');
   quickBtn.className = 'btn exam-card-primary';
@@ -1228,187 +1222,185 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     });
   }
 
-  if (showDetails) {
-    const details = document.createElement('div');
-    details.className = 'exam-card-details';
-    if (!isExpanded) {
-      details.setAttribute('hidden', 'true');
-    }
-    card.appendChild(details);
+  const details = document.createElement('div');
+  details.className = 'exam-card-details';
+  if (!isExpanded) {
+    details.setAttribute('hidden', 'true');
+  }
+  card.appendChild(details);
 
-    const stats = document.createElement('div');
-    stats.className = 'exam-card-stats';
-    stats.appendChild(createStat('Attempts', String(exam.results.length)));
-    stats.appendChild(createStat('Best Score', best ? formatScore(best) : '—'));
-    stats.appendChild(createStat('Last Score', last ? formatScore(last) : '—'));
-    details.appendChild(stats);
+  const stats = document.createElement('div');
+  stats.className = 'exam-card-stats';
+  stats.appendChild(createStat('Attempts', String(exam.results.length)));
+  stats.appendChild(createStat('Best Score', best ? formatScore(best) : '—'));
+  stats.appendChild(createStat('Last Score', last ? formatScore(last) : '—'));
+  details.appendChild(stats);
 
-    if (savedSession) {
-      const banner = document.createElement('div');
-      banner.className = 'exam-saved-banner';
-      const updated = savedSession.updatedAt ? new Date(savedSession.updatedAt).toLocaleString() : null;
-      banner.textContent = updated ? `Saved attempt • ${updated}` : 'Saved attempt available';
-      details.appendChild(banner);
-    }
+  if (savedSession) {
+    const banner = document.createElement('div');
+    banner.className = 'exam-saved-banner';
+    const updated = savedSession.updatedAt ? new Date(savedSession.updatedAt).toLocaleString() : null;
+    banner.textContent = updated ? `Saved attempt • ${updated}` : 'Saved attempt available';
+    details.appendChild(banner);
+  }
 
-    const actions = document.createElement('div');
-    actions.className = 'exam-card-actions';
-    details.appendChild(actions);
+  const actions = document.createElement('div');
+  actions.className = 'exam-card-actions';
+  details.appendChild(actions);
 
-    if (savedSession) {
-      const startFresh = document.createElement('button');
-      startFresh.className = 'btn secondary';
-      startFresh.textContent = 'Start Fresh';
-      startFresh.disabled = exam.questions.length === 0;
-      startFresh.addEventListener('click', async () => {
-        const confirm = await confirmModal('Start a new attempt and discard saved progress?');
-        if (!confirm) return;
-        await deleteExamSessionProgress(exam.id);
-        setExamSession(createTakingSession(exam));
-        render();
-      });
-      actions.appendChild(startFresh);
-    }
-
-    if (last) {
-      const reviewBtn = document.createElement('button');
-      reviewBtn.className = 'btn secondary';
-      reviewBtn.textContent = 'Review Last Attempt';
-      reviewBtn.addEventListener('click', () => {
-        setExamSession({ mode: 'review', exam: clone(exam), result: clone(last), idx: 0 });
-        render();
-      });
-      actions.appendChild(reviewBtn);
-    }
-
-    const editBtn = document.createElement('button');
-    editBtn.className = 'btn secondary';
-    editBtn.textContent = 'Edit Exam';
-    editBtn.addEventListener('click', () => openExamEditor(exam, render));
-    actions.appendChild(editBtn);
-
-    const exportWrap = document.createElement('div');
-    exportWrap.className = 'exam-export';
-    actions.appendChild(exportWrap);
-
-    const exportBtn = document.createElement('button');
-    exportBtn.type = 'button';
-    exportBtn.className = 'btn secondary exam-export-toggle';
-    exportBtn.textContent = 'Export';
-    exportBtn.setAttribute('aria-haspopup', 'true');
-    exportBtn.setAttribute('aria-expanded', 'false');
-    exportWrap.appendChild(exportBtn);
-
-    const exportMenu = document.createElement('div');
-    exportMenu.className = 'exam-export-menu';
-    exportMenu.setAttribute('role', 'menu');
-    exportMenu.hidden = true;
-
-    const exportJson = document.createElement('button');
-    exportJson.type = 'button';
-    exportJson.className = 'exam-export-option';
-    exportJson.setAttribute('role', 'menuitem');
-    exportJson.textContent = 'JSON (.json)';
-    exportJson.addEventListener('click', () => {
-      const ok = triggerExamDownload(exam);
-      if (!ok && statusEl) {
-        statusEl.textContent = 'Unable to export exam.';
-      } else if (ok && statusEl) {
-        statusEl.textContent = 'Exam exported as JSON.';
-      }
-      hideMenu();
-    });
-    exportMenu.appendChild(exportJson);
-
-    const exportCsv = document.createElement('button');
-    exportCsv.type = 'button';
-    exportCsv.className = 'exam-export-option';
-    exportCsv.setAttribute('role', 'menuitem');
-    exportCsv.textContent = 'CSV (.csv)';
-    exportCsv.addEventListener('click', () => {
-      try {
-        downloadExamCsv(exam);
-        if (statusEl) statusEl.textContent = 'Exam exported as CSV.';
-      } catch (err) {
-        console.warn('Failed to export exam CSV', err);
-        if (statusEl) statusEl.textContent = 'Unable to export exam CSV.';
-      }
-      hideMenu();
-    });
-    exportMenu.appendChild(exportCsv);
-
-    exportWrap.appendChild(exportMenu);
-
-    let menuOpen = false;
-    const handleOutside = event => {
-      if (!menuOpen) return;
-      if (exportWrap.contains(event.target)) return;
-      hideMenu();
-    };
-
-    function hideMenu() {
-      if (!menuOpen) return;
-      menuOpen = false;
-      exportMenu.hidden = true;
-      exportMenu.classList.remove('open');
-      exportBtn.setAttribute('aria-expanded', 'false');
-      document.removeEventListener('click', handleOutside, true);
-    }
-
-    function showMenu() {
-      if (menuOpen) return;
-      menuOpen = true;
-      exportMenu.hidden = false;
-      exportMenu.classList.add('open');
-      exportBtn.setAttribute('aria-expanded', 'true');
-      document.addEventListener('click', handleOutside, true);
-    }
-
-    exportBtn.addEventListener('click', event => {
-      event.stopPropagation();
-      if (menuOpen) {
-        hideMenu();
-      } else {
-        showMenu();
-      }
-    });
-
-    const delBtn = document.createElement('button');
-    delBtn.className = 'btn danger';
-    delBtn.textContent = 'Delete';
-    delBtn.addEventListener('click', async () => {
-      const ok = await confirmModal(`Delete "${exam.examTitle}"? This will remove all attempts.`);
-      if (!ok) return;
-      await deleteExamSessionProgress(exam.id).catch(() => {});
-      await deleteExam(exam.id);
+  if (savedSession) {
+    const startFresh = document.createElement('button');
+    startFresh.className = 'btn secondary';
+    startFresh.textContent = 'Start Fresh';
+    startFresh.disabled = exam.questions.length === 0;
+    startFresh.addEventListener('click', async () => {
+      const confirm = await confirmModal('Start a new attempt and discard saved progress?');
+      if (!confirm) return;
+      await deleteExamSessionProgress(exam.id);
+      setExamSession(createTakingSession(exam));
       render();
     });
-    actions.appendChild(delBtn);
-
-    const attemptsWrap = document.createElement('div');
-    attemptsWrap.className = 'exam-attempts';
-    const attemptsTitle = document.createElement('h3');
-    attemptsTitle.textContent = 'Attempts';
-    attemptsWrap.appendChild(attemptsTitle);
-
-    if (!exam.results.length) {
-      const none = document.createElement('p');
-      none.className = 'exam-attempt-empty';
-      none.textContent = 'No attempts yet.';
-      attemptsWrap.appendChild(none);
-    } else {
-      const list = document.createElement('div');
-      list.className = 'exam-attempt-list';
-      [...exam.results]
-        .sort((a, b) => b.when - a.when)
-        .forEach(result => {
-          list.appendChild(buildAttemptRow(exam, result, render));
-        });
-      attemptsWrap.appendChild(list);
-    }
-
-    details.appendChild(attemptsWrap);
+    actions.appendChild(startFresh);
   }
+
+  if (last) {
+    const reviewBtn = document.createElement('button');
+    reviewBtn.className = 'btn secondary';
+    reviewBtn.textContent = 'Review Last Attempt';
+    reviewBtn.addEventListener('click', () => {
+      setExamSession({ mode: 'review', exam: clone(exam), result: clone(last), idx: 0 });
+      render();
+    });
+    actions.appendChild(reviewBtn);
+  }
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'btn secondary';
+  editBtn.textContent = 'Edit Exam';
+  editBtn.addEventListener('click', () => openExamEditor(exam, render));
+  actions.appendChild(editBtn);
+
+  const exportWrap = document.createElement('div');
+  exportWrap.className = 'exam-export';
+  actions.appendChild(exportWrap);
+
+  const exportBtn = document.createElement('button');
+  exportBtn.type = 'button';
+  exportBtn.className = 'btn secondary exam-export-toggle';
+  exportBtn.textContent = 'Export';
+  exportBtn.setAttribute('aria-haspopup', 'true');
+  exportBtn.setAttribute('aria-expanded', 'false');
+  exportWrap.appendChild(exportBtn);
+
+  const exportMenu = document.createElement('div');
+  exportMenu.className = 'exam-export-menu';
+  exportMenu.setAttribute('role', 'menu');
+  exportMenu.hidden = true;
+
+  const exportJson = document.createElement('button');
+  exportJson.type = 'button';
+  exportJson.className = 'exam-export-option';
+  exportJson.setAttribute('role', 'menuitem');
+  exportJson.textContent = 'JSON (.json)';
+  exportJson.addEventListener('click', () => {
+    const ok = triggerExamDownload(exam);
+    if (!ok && statusEl) {
+      statusEl.textContent = 'Unable to export exam.';
+    } else if (ok && statusEl) {
+      statusEl.textContent = 'Exam exported as JSON.';
+    }
+    hideMenu();
+  });
+  exportMenu.appendChild(exportJson);
+
+  const exportCsv = document.createElement('button');
+  exportCsv.type = 'button';
+  exportCsv.className = 'exam-export-option';
+  exportCsv.setAttribute('role', 'menuitem');
+  exportCsv.textContent = 'CSV (.csv)';
+  exportCsv.addEventListener('click', () => {
+    try {
+      downloadExamCsv(exam);
+      if (statusEl) statusEl.textContent = 'Exam exported as CSV.';
+    } catch (err) {
+      console.warn('Failed to export exam CSV', err);
+      if (statusEl) statusEl.textContent = 'Unable to export exam CSV.';
+    }
+    hideMenu();
+  });
+  exportMenu.appendChild(exportCsv);
+
+  exportWrap.appendChild(exportMenu);
+
+  let menuOpen = false;
+  const handleOutside = event => {
+    if (!menuOpen) return;
+    if (exportWrap.contains(event.target)) return;
+    hideMenu();
+  };
+
+  function hideMenu() {
+    if (!menuOpen) return;
+    menuOpen = false;
+    exportMenu.hidden = true;
+    exportMenu.classList.remove('open');
+    exportBtn.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', handleOutside, true);
+  }
+
+  function showMenu() {
+    if (menuOpen) return;
+    menuOpen = true;
+    exportMenu.hidden = false;
+    exportMenu.classList.add('open');
+    exportBtn.setAttribute('aria-expanded', 'true');
+    document.addEventListener('click', handleOutside, true);
+  }
+
+  exportBtn.addEventListener('click', event => {
+    event.stopPropagation();
+    if (menuOpen) {
+      hideMenu();
+    } else {
+      showMenu();
+    }
+  });
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'btn danger';
+  delBtn.textContent = 'Delete';
+  delBtn.addEventListener('click', async () => {
+    const ok = await confirmModal(`Delete "${exam.examTitle}"? This will remove all attempts.`);
+    if (!ok) return;
+    await deleteExamSessionProgress(exam.id).catch(() => {});
+    await deleteExam(exam.id);
+    render();
+  });
+  actions.appendChild(delBtn);
+
+  const attemptsWrap = document.createElement('div');
+  attemptsWrap.className = 'exam-attempts';
+  const attemptsTitle = document.createElement('h3');
+  attemptsTitle.textContent = 'Attempts';
+  attemptsWrap.appendChild(attemptsTitle);
+
+  if (!exam.results.length) {
+    const none = document.createElement('p');
+    none.className = 'exam-attempt-empty';
+    none.textContent = 'No attempts yet.';
+    attemptsWrap.appendChild(none);
+  } else {
+    const list = document.createElement('div');
+    list.className = 'exam-attempt-list';
+    [...exam.results]
+      .sort((a, b) => b.when - a.when)
+      .forEach(result => {
+        list.appendChild(buildAttemptRow(exam, result, render));
+      });
+    attemptsWrap.appendChild(list);
+  }
+
+  details.appendChild(attemptsWrap);
 
   return card;
 }
@@ -1568,7 +1560,14 @@ function renderPalette(sidebar, sess, render) {
     btn.type = 'button';
     btn.textContent = String(idx + 1);
     btn.className = 'palette-button';
-    setToggleState(btn, sess.idx === idx);
+    const isCurrent = sess.idx === idx;
+    btn.classList.toggle('is-current', isCurrent);
+    btn.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
+    if (isCurrent) {
+      btn.setAttribute('aria-current', 'true');
+    } else {
+      btn.removeAttribute('aria-current');
+    }
     const answer = answers[idx];
     const answered = answer != null && question.options.some(opt => opt.id === answer);
 
