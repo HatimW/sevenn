@@ -987,43 +987,25 @@ export async function renderExams(root, render) {
   const layoutControls = document.createElement('div');
   layoutControls.className = 'exam-layout-controls';
 
-  const pills = document.createElement('div');
-  pills.className = 'exam-layout-pills';
-  pills.setAttribute('role', 'group');
-  pills.setAttribute('aria-label', 'Exam layout view');
-
-  const applyPillState = (btn, active) => {
-    btn.classList.toggle('is-active', active);
-    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-  };
-
-  const columnsBtn = document.createElement('button');
-  columnsBtn.type = 'button';
-  columnsBtn.className = 'exam-layout-pill';
-  columnsBtn.textContent = 'Columns';
-  applyPillState(columnsBtn, viewMode === 'grid');
-  columnsBtn.addEventListener('click', () => {
-    if (state.examLayout?.mode !== 'grid') {
-      setExamLayout({ mode: 'grid' });
-      render();
-    }
+  const layoutToggle = document.createElement('button');
+  layoutToggle.type = 'button';
+  layoutToggle.className = 'exam-layout-toggle';
+  layoutToggle.setAttribute('aria-pressed', viewMode === 'row' ? 'true' : 'false');
+  layoutToggle.setAttribute('aria-label', viewMode === 'row' ? 'Switch to column view' : 'Switch to row view');
+  const toggleIcon = document.createElement('span');
+  toggleIcon.className = 'exam-layout-toggle-icon';
+  layoutToggle.appendChild(toggleIcon);
+  const toggleText = document.createElement('span');
+  toggleText.className = 'sr-only';
+  toggleText.textContent = viewMode === 'row' ? 'Show exams in columns' : 'Show exams in rows';
+  layoutToggle.appendChild(toggleText);
+  layoutToggle.addEventListener('click', () => {
+    const nextMode = viewMode === 'row' ? 'grid' : 'row';
+    setExamLayout({ mode: nextMode });
+    render();
   });
-  pills.appendChild(columnsBtn);
 
-  const rowsBtn = document.createElement('button');
-  rowsBtn.type = 'button';
-  rowsBtn.className = 'exam-layout-pill';
-  rowsBtn.textContent = 'Rows';
-  applyPillState(rowsBtn, viewMode === 'row');
-  rowsBtn.addEventListener('click', () => {
-    if (state.examLayout?.mode !== 'row') {
-      setExamLayout({ mode: 'row' });
-      render();
-    }
-  });
-  pills.appendChild(rowsBtn);
-
-  layoutControls.appendChild(pills);
+  layoutControls.appendChild(layoutToggle);
 
   controls.appendChild(layoutControls);
   controls.appendChild(status);
@@ -1084,21 +1066,18 @@ export async function renderExams(root, render) {
 function buildExamCard(exam, render, savedSession, statusEl, layout) {
   const layoutMode = layout?.mode === 'row' ? 'row' : 'grid';
   const defaultExpanded = layout?.detailsVisible !== false;
-  const forceExpanded = layoutMode === 'row';
   const expandedState = state.examAttemptExpanded[exam.id];
-  const isExpanded = forceExpanded ? true : (expandedState != null ? expandedState : defaultExpanded);
+  const isExpanded = expandedState != null ? expandedState : defaultExpanded;
   const last = latestResult(exam);
   const best = bestResult(exam);
 
   const card = document.createElement('article');
   card.className = 'card exam-card';
-  if (isExpanded) {
-    card.classList.add('expanded');
-  } else {
-    card.classList.add('exam-card--compact');
-  }
   if (layoutMode === 'row') {
     card.classList.add('exam-card--row');
+  }
+  if (isExpanded) {
+    card.classList.add('exam-card--expanded');
   }
 
   const header = document.createElement('div');
@@ -1108,23 +1087,20 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
   const summaryButton = document.createElement('button');
   summaryButton.type = 'button';
   summaryButton.className = 'exam-card-summary';
-  if (!forceExpanded) {
-    summaryButton.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
-    summaryButton.addEventListener('click', () => {
-      setExamAttemptExpanded(exam.id, !isExpanded);
-      render();
-    });
-  } else {
-    summaryButton.setAttribute('aria-expanded', 'true');
-    summaryButton.setAttribute('aria-disabled', 'true');
-    summaryButton.disabled = true;
-    summaryButton.classList.add('exam-card-summary--static');
-  }
+  summaryButton.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+  summaryButton.addEventListener('click', () => {
+    setExamAttemptExpanded(exam.id, !isExpanded);
+    render();
+  });
   header.appendChild(summaryButton);
+
+  const summaryContent = document.createElement('div');
+  summaryContent.className = 'exam-card-summary-content';
+  summaryButton.appendChild(summaryContent);
 
   const titleGroup = document.createElement('div');
   titleGroup.className = 'exam-card-title-group';
-  summaryButton.appendChild(titleGroup);
+  summaryContent.appendChild(titleGroup);
 
   const title = document.createElement('h2');
   title.className = 'exam-card-title';
@@ -1144,61 +1120,51 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
   titleGroup.appendChild(meta);
 
   const glance = document.createElement('div');
-  glance.className = 'exam-card-glance';
-  summaryButton.appendChild(glance);
+  glance.className = 'exam-card-pills';
+  summaryContent.appendChild(glance);
 
-  if (isExpanded) {
+  if (exam.results.length) {
     const attemptsChip = document.createElement('span');
-    attemptsChip.className = 'exam-chip';
+    attemptsChip.className = 'exam-card-chip';
     attemptsChip.textContent = `${exam.results.length} attempt${exam.results.length === 1 ? '' : 's'}`;
+    attemptsChip.title = `${exam.results.length} recorded attempt${exam.results.length === 1 ? '' : 's'}`;
     glance.appendChild(attemptsChip);
   }
 
   if (best) {
-    const badge = createScoreBadge(best, 'Best');
-    badge.title = formatScore(best);
+    const badge = createScoreBadge(best);
+    badge.classList.add('exam-score-badge--pill');
+    badge.dataset.badge = 'best';
+    badge.title = `Best attempt • ${formatScore(best)}`;
+    badge.setAttribute('aria-label', `Best attempt ${formatScore(best)}`);
     glance.appendChild(badge);
   }
   if (last && (!best || last.id !== best.id)) {
-    const badge = createScoreBadge(last, 'Last');
-    badge.title = formatScore(last);
+    const badge = createScoreBadge(last);
+    badge.classList.add('exam-score-badge--pill');
+    badge.dataset.badge = 'last';
+    badge.title = `Last attempt • ${formatScore(last)}`;
+    badge.setAttribute('aria-label', `Last attempt ${formatScore(last)}`);
     glance.appendChild(badge);
   }
-  if (last && isExpanded) {
-    const lastChip = document.createElement('span');
-    lastChip.className = 'exam-chip exam-chip--ghost';
-    const date = new Date(last.when);
-    lastChip.textContent = `Last • ${date.toLocaleDateString()}`;
-    glance.appendChild(lastChip);
-  }
-  if (savedSession && isExpanded) {
+  if (savedSession) {
     const progressChip = document.createElement('span');
-    progressChip.className = 'exam-chip exam-chip--progress';
+    progressChip.className = 'exam-card-chip exam-card-chip--progress';
     progressChip.textContent = 'In progress';
     glance.appendChild(progressChip);
   }
 
-  const quickAction = document.createElement('div');
-  quickAction.className = 'exam-card-quick-action';
-  header.appendChild(quickAction);
+  const caret = document.createElement('span');
+  caret.className = 'exam-card-caret';
+  summaryButton.appendChild(caret);
 
-  if (!forceExpanded) {
-    const toggleDetails = document.createElement('button');
-    toggleDetails.type = 'button';
-    toggleDetails.className = 'btn secondary exam-card-details-toggle';
-    toggleDetails.textContent = isExpanded ? 'Hide details' : 'Show details';
-    toggleDetails.setAttribute('aria-pressed', isExpanded ? 'true' : 'false');
-    toggleDetails.addEventListener('click', event => {
-      event.stopPropagation();
-      setExamAttemptExpanded(exam.id, !isExpanded);
-      render();
-    });
-    quickAction.appendChild(toggleDetails);
-  }
+  const quickAction = document.createElement('div');
+  quickAction.className = 'exam-card-cta';
+  header.appendChild(quickAction);
 
   const quickBtn = document.createElement('button');
   quickBtn.className = 'btn exam-card-primary';
-  quickBtn.disabled = exam.questions.length === 0;
+  quickBtn.disabled = !savedSession && !last && exam.questions.length === 0;
   quickAction.appendChild(quickBtn);
 
   if (savedSession) {
@@ -1214,6 +1180,12 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
       setExamSession(session);
       render();
     });
+  } else if (last) {
+    quickBtn.textContent = 'Review';
+    quickBtn.addEventListener('click', () => {
+      setExamSession({ mode: 'review', exam: clone(exam), result: clone(last), idx: 0 });
+      render();
+    });
   } else {
     quickBtn.textContent = 'Start';
     quickBtn.addEventListener('click', () => {
@@ -1222,19 +1194,138 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     });
   }
 
+  const menuWrap = document.createElement('div');
+  menuWrap.className = 'exam-card-menu';
+  quickAction.appendChild(menuWrap);
+
+  const menuToggle = document.createElement('button');
+  menuToggle.type = 'button';
+  menuToggle.className = 'exam-card-menu-toggle';
+  menuToggle.setAttribute('aria-haspopup', 'true');
+  menuToggle.setAttribute('aria-expanded', 'false');
+  const menuIcon = document.createElement('span');
+  menuIcon.className = 'exam-card-menu-icon';
+  menuToggle.appendChild(menuIcon);
+  const menuLabel = document.createElement('span');
+  menuLabel.className = 'sr-only';
+  menuLabel.textContent = 'More options';
+  menuToggle.appendChild(menuLabel);
+  menuWrap.appendChild(menuToggle);
+
+  const menuPanel = document.createElement('div');
+  menuPanel.className = 'exam-card-menu-panel';
+  menuPanel.hidden = true;
+  menuWrap.appendChild(menuPanel);
+
+  let menuOpen = false;
+  const handleOutside = event => {
+    if (!menuOpen) return;
+    if (menuWrap.contains(event.target)) return;
+    closeMenu();
+  };
+
+  function openMenu() {
+    if (menuOpen) return;
+    menuOpen = true;
+    menuPanel.hidden = false;
+    menuWrap.classList.add('exam-card-menu--open');
+    menuToggle.setAttribute('aria-expanded', 'true');
+    document.addEventListener('click', handleOutside, true);
+  }
+
+  function closeMenu() {
+    if (!menuOpen) return;
+    menuOpen = false;
+    menuPanel.hidden = true;
+    menuWrap.classList.remove('exam-card-menu--open');
+    menuToggle.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', handleOutside, true);
+  }
+
+  menuToggle.addEventListener('click', event => {
+    event.stopPropagation();
+    if (menuOpen) {
+      closeMenu();
+    } else {
+      openMenu();
+    }
+  });
+
+  const addMenuAction = (label, handler, options = {}) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'exam-card-menu-item';
+    if (options.variant === 'danger') {
+      item.classList.add('is-danger');
+    }
+    if (options.disabled) {
+      item.disabled = true;
+    }
+    item.textContent = label;
+    item.addEventListener('click', async () => {
+      if (item.disabled) return;
+      const result = await handler();
+      if (result === false) return;
+      closeMenu();
+    });
+    menuPanel.appendChild(item);
+  };
+
+  addMenuAction('Restart Exam', async () => {
+    if (exam.questions.length === 0) return false;
+    if (savedSession) {
+      const confirm = await confirmModal('Start a new attempt and discard saved progress?');
+      if (!confirm) return false;
+      await deleteExamSessionProgress(exam.id).catch(() => {});
+    }
+    setExamSession(createTakingSession(exam));
+    render();
+  }, { disabled: exam.questions.length === 0 });
+
+  if (last) {
+    addMenuAction('Review Last Attempt', () => {
+      setExamSession({ mode: 'review', exam: clone(exam), result: clone(last), idx: 0 });
+      render();
+    });
+  }
+
+  addMenuAction('Edit Exam', () => {
+    openExamEditor(exam, render);
+  });
+
+  addMenuAction('Export JSON', () => {
+    const ok = triggerExamDownload(exam);
+    if (!ok && statusEl) {
+      statusEl.textContent = 'Unable to export exam.';
+    } else if (ok && statusEl) {
+      statusEl.textContent = 'Exam exported as JSON.';
+    }
+  });
+
+  addMenuAction('Export CSV', () => {
+    try {
+      downloadExamCsv(exam);
+      if (statusEl) statusEl.textContent = 'Exam exported as CSV.';
+    } catch (err) {
+      console.warn('Failed to export exam CSV', err);
+      if (statusEl) statusEl.textContent = 'Unable to export exam CSV.';
+    }
+  });
+
+  addMenuAction('Delete Exam', async () => {
+    const ok = await confirmModal(`Delete "${exam.examTitle}"? This will remove all attempts.`);
+    if (!ok) return false;
+    await deleteExamSessionProgress(exam.id).catch(() => {});
+    await deleteExam(exam.id);
+    render();
+  }, { variant: 'danger' });
+
   const details = document.createElement('div');
   details.className = 'exam-card-details';
   if (!isExpanded) {
     details.setAttribute('hidden', 'true');
   }
   card.appendChild(details);
-
-  const stats = document.createElement('div');
-  stats.className = 'exam-card-stats';
-  stats.appendChild(createStat('Attempts', String(exam.results.length)));
-  stats.appendChild(createStat('Best Score', best ? formatScore(best) : '—'));
-  stats.appendChild(createStat('Last Score', last ? formatScore(last) : '—'));
-  details.appendChild(stats);
 
   if (savedSession) {
     const banner = document.createElement('div');
@@ -1244,145 +1335,18 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     details.appendChild(banner);
   }
 
-  const actions = document.createElement('div');
-  actions.className = 'exam-card-actions';
-  details.appendChild(actions);
-
-  if (savedSession) {
-    const startFresh = document.createElement('button');
-    startFresh.className = 'btn secondary';
-    startFresh.textContent = 'Start Fresh';
-    startFresh.disabled = exam.questions.length === 0;
-    startFresh.addEventListener('click', async () => {
-      const confirm = await confirmModal('Start a new attempt and discard saved progress?');
-      if (!confirm) return;
-      await deleteExamSessionProgress(exam.id);
-      setExamSession(createTakingSession(exam));
-      render();
-    });
-    actions.appendChild(startFresh);
-  }
-
-  if (last) {
-    const reviewBtn = document.createElement('button');
-    reviewBtn.className = 'btn secondary';
-    reviewBtn.textContent = 'Review Last Attempt';
-    reviewBtn.addEventListener('click', () => {
-      setExamSession({ mode: 'review', exam: clone(exam), result: clone(last), idx: 0 });
-      render();
-    });
-    actions.appendChild(reviewBtn);
-  }
-
-  const editBtn = document.createElement('button');
-  editBtn.className = 'btn secondary';
-  editBtn.textContent = 'Edit Exam';
-  editBtn.addEventListener('click', () => openExamEditor(exam, render));
-  actions.appendChild(editBtn);
-
-  const exportWrap = document.createElement('div');
-  exportWrap.className = 'exam-export';
-  actions.appendChild(exportWrap);
-
-  const exportBtn = document.createElement('button');
-  exportBtn.type = 'button';
-  exportBtn.className = 'btn secondary exam-export-toggle';
-  exportBtn.textContent = 'Export';
-  exportBtn.setAttribute('aria-haspopup', 'true');
-  exportBtn.setAttribute('aria-expanded', 'false');
-  exportWrap.appendChild(exportBtn);
-
-  const exportMenu = document.createElement('div');
-  exportMenu.className = 'exam-export-menu';
-  exportMenu.setAttribute('role', 'menu');
-  exportMenu.hidden = true;
-
-  const exportJson = document.createElement('button');
-  exportJson.type = 'button';
-  exportJson.className = 'exam-export-option';
-  exportJson.setAttribute('role', 'menuitem');
-  exportJson.textContent = 'JSON (.json)';
-  exportJson.addEventListener('click', () => {
-    const ok = triggerExamDownload(exam);
-    if (!ok && statusEl) {
-      statusEl.textContent = 'Unable to export exam.';
-    } else if (ok && statusEl) {
-      statusEl.textContent = 'Exam exported as JSON.';
-    }
-    hideMenu();
-  });
-  exportMenu.appendChild(exportJson);
-
-  const exportCsv = document.createElement('button');
-  exportCsv.type = 'button';
-  exportCsv.className = 'exam-export-option';
-  exportCsv.setAttribute('role', 'menuitem');
-  exportCsv.textContent = 'CSV (.csv)';
-  exportCsv.addEventListener('click', () => {
-    try {
-      downloadExamCsv(exam);
-      if (statusEl) statusEl.textContent = 'Exam exported as CSV.';
-    } catch (err) {
-      console.warn('Failed to export exam CSV', err);
-      if (statusEl) statusEl.textContent = 'Unable to export exam CSV.';
-    }
-    hideMenu();
-  });
-  exportMenu.appendChild(exportCsv);
-
-  exportWrap.appendChild(exportMenu);
-
-  let menuOpen = false;
-  const handleOutside = event => {
-    if (!menuOpen) return;
-    if (exportWrap.contains(event.target)) return;
-    hideMenu();
-  };
-
-  function hideMenu() {
-    if (!menuOpen) return;
-    menuOpen = false;
-    exportMenu.hidden = true;
-    exportMenu.classList.remove('open');
-    exportBtn.setAttribute('aria-expanded', 'false');
-    document.removeEventListener('click', handleOutside, true);
-  }
-
-  function showMenu() {
-    if (menuOpen) return;
-    menuOpen = true;
-    exportMenu.hidden = false;
-    exportMenu.classList.add('open');
-    exportBtn.setAttribute('aria-expanded', 'true');
-    document.addEventListener('click', handleOutside, true);
-  }
-
-  exportBtn.addEventListener('click', event => {
-    event.stopPropagation();
-    if (menuOpen) {
-      hideMenu();
-    } else {
-      showMenu();
-    }
-  });
-
-  const delBtn = document.createElement('button');
-  delBtn.className = 'btn danger';
-  delBtn.textContent = 'Delete';
-  delBtn.addEventListener('click', async () => {
-    const ok = await confirmModal(`Delete "${exam.examTitle}"? This will remove all attempts.`);
-    if (!ok) return;
-    await deleteExamSessionProgress(exam.id).catch(() => {});
-    await deleteExam(exam.id);
-    render();
-  });
-  actions.appendChild(delBtn);
-
   const attemptsWrap = document.createElement('div');
   attemptsWrap.className = 'exam-attempts';
+  const attemptsHeader = document.createElement('div');
+  attemptsHeader.className = 'exam-attempts-header';
   const attemptsTitle = document.createElement('h3');
   attemptsTitle.textContent = 'Attempts';
-  attemptsWrap.appendChild(attemptsTitle);
+  attemptsHeader.appendChild(attemptsTitle);
+  const attemptsCount = document.createElement('span');
+  attemptsCount.className = 'exam-attempt-count';
+  attemptsCount.textContent = String(exam.results.length);
+  attemptsHeader.appendChild(attemptsCount);
+  attemptsWrap.appendChild(attemptsHeader);
 
   if (!exam.results.length) {
     const none = document.createElement('p');
@@ -1409,17 +1373,23 @@ function buildAttemptRow(exam, result, render) {
   const row = document.createElement('div');
   row.className = 'exam-attempt-row';
 
-  const info = document.createElement('div');
-  info.className = 'exam-attempt-info';
+  const main = document.createElement('div');
+  main.className = 'exam-attempt-main';
+  row.appendChild(main);
+
   const badge = createScoreBadge(result);
-  badge.classList.add('exam-attempt-score');
+  badge.classList.add('exam-score-badge--pill', 'exam-attempt-score');
   badge.title = formatScore(result);
-  info.appendChild(badge);
+  main.appendChild(badge);
+
+  const details = document.createElement('div');
+  details.className = 'exam-attempt-details';
+  main.appendChild(details);
 
   const date = document.createElement('div');
   date.className = 'exam-attempt-date';
   date.textContent = new Date(result.when).toLocaleString();
-  info.appendChild(date);
+  details.appendChild(date);
 
   const meta = document.createElement('div');
   meta.className = 'exam-attempt-meta';
@@ -1427,16 +1397,14 @@ function buildAttemptRow(exam, result, render) {
   const flaggedText = `${result.flagged.length} flagged`;
   const durationText = result.durationMs ? formatDuration(result.durationMs) : '—';
   meta.textContent = `${answeredText} • ${flaggedText} • ${durationText}`;
-  info.appendChild(meta);
-
-  row.appendChild(info);
+  details.appendChild(meta);
 
   const actions = document.createElement('div');
   actions.className = 'exam-attempt-actions';
   row.appendChild(actions);
 
   const review = document.createElement('button');
-  review.className = 'btn secondary';
+  review.className = 'btn secondary exam-attempt-review';
   review.textContent = 'Review';
   review.addEventListener('click', () => {
     setExamSession({ mode: 'review', exam: clone(exam), result: clone(result), idx: 0 });
@@ -1532,18 +1500,35 @@ function answerClass(question, selectedId, optionId) {
   return isCorrect ? 'correct-answer' : '';
 }
 
-function renderPalette(sidebar, sess, render) {
-  const palette = document.createElement('div');
-  palette.className = 'exam-palette';
+function renderQuestionMap(sidebar, sess, render) {
+  const map = document.createElement('section');
+  map.className = 'question-map';
+
+  const header = document.createElement('div');
+  header.className = 'question-map__header';
   const title = document.createElement('h3');
   title.textContent = 'Question Map';
-  palette.appendChild(title);
+  header.appendChild(title);
 
-  const grid = document.createElement('div');
-  grid.className = 'exam-palette-grid';
-
+  const questionCount = sess.exam.questions.length;
   const isReview = sess.mode === 'review';
   const answers = isReview ? sess.result?.answers || {} : sess.answers || {};
+  const answeredCount = sess.exam.questions.reduce((count, question, idx) => {
+    const answer = answers[idx];
+    if (answer == null) return count;
+    const matched = question.options.some(opt => opt.id === answer);
+    return matched ? count + 1 : count;
+  }, 0);
+  const countBadge = document.createElement('span');
+  countBadge.className = 'question-map__count';
+  countBadge.textContent = `${answeredCount}/${questionCount} answered`;
+  header.appendChild(countBadge);
+  map.appendChild(header);
+
+  const grid = document.createElement('div');
+  grid.className = 'question-map__grid';
+  map.appendChild(grid);
+
   const statsList = isReview
     ? (Array.isArray(sess.result?.questionStats) ? sess.result.questionStats : [])
     : (Array.isArray(sess.questionStats) ? sess.questionStats : []);
@@ -1551,26 +1536,27 @@ function renderPalette(sidebar, sess, render) {
   if (isReview && sess.result) {
     sess.result.changeSummary = summary;
   }
+
   const flaggedSet = new Set(sess.mode === 'review'
     ? (sess.result.flagged || [])
     : Object.entries(sess.flagged || {}).filter(([_, v]) => v).map(([idx]) => Number(idx)));
 
   sess.exam.questions.forEach((question, idx) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = String(idx + 1);
-    btn.className = 'palette-button';
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'question-map__item';
+    item.textContent = String(idx + 1);
     const isCurrent = sess.idx === idx;
-    btn.classList.toggle('is-current', isCurrent);
-    btn.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
+    item.classList.toggle('is-current', isCurrent);
+    item.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
     if (isCurrent) {
-      btn.setAttribute('aria-current', 'true');
+      item.setAttribute('aria-current', 'true');
     } else {
-      btn.removeAttribute('aria-current');
+      item.removeAttribute('aria-current');
     }
+
     const answer = answers[idx];
     const answered = answer != null && question.options.some(opt => opt.id === answer);
-
     const tooltipParts = [];
     let status = 'unanswered';
     const wasChecked = !isReview && Boolean(sess.checked?.[idx]);
@@ -1587,21 +1573,20 @@ function renderPalette(sidebar, sess, render) {
 
       const stat = statsList[idx];
       const changeDetails = analyzeAnswerChange(stat, question, answer);
-      delete btn.dataset.changeDirection;
+      delete item.dataset.changeDirection;
       if (changeDetails.changed) {
-        let changeTitle = 'Changed answer';
         if (changeDetails.direction === 'right-to-wrong') {
-          changeTitle = 'Changed from correct to incorrect';
-          btn.dataset.changeDirection = 'right-to-wrong';
+          item.dataset.changeDirection = 'right-to-wrong';
+          tooltipParts.push('Changed from correct to incorrect');
         } else if (changeDetails.direction === 'wrong-to-right') {
-          changeTitle = 'Changed from incorrect to correct';
-          btn.dataset.changeDirection = 'wrong-to-right';
+          item.dataset.changeDirection = 'wrong-to-right';
+          tooltipParts.push('Changed from incorrect to correct');
         } else {
-          btn.dataset.changeDirection = 'changed';
+          item.dataset.changeDirection = 'changed';
+          tooltipParts.push('Changed answer');
         }
-        tooltipParts.push(changeTitle);
       } else if (changeDetails.switched) {
-        btn.dataset.changeDirection = 'returned';
+        item.dataset.changeDirection = 'returned';
         tooltipParts.push('Changed answers but returned to start');
       }
     } else {
@@ -1617,59 +1602,56 @@ function renderPalette(sidebar, sess, render) {
       }
     }
 
-    if (status === 'correct') {
-      btn.classList.add('correct', 'answered');
-    } else if (status === 'incorrect') {
-      btn.classList.add('incorrect', 'answered');
+    item.dataset.status = status;
+    if (status === 'correct' || status === 'incorrect') {
+      item.classList.add('is-graded');
     } else if (status === 'answered') {
-      btn.classList.add('answered');
-    } else if (status === 'review-unanswered') {
-      btn.classList.add('unanswered', 'review-unanswered');
+      item.classList.add('is-answered');
     } else {
-      btn.classList.add('unanswered');
+      item.classList.add('is-unanswered');
     }
-
-    btn.dataset.status = status;
-    btn.dataset.mode = sess.mode || '';
+    if (status === 'review-unanswered') {
+      item.classList.add('is-review-unanswered');
+    }
 
     if (flaggedSet.has(idx)) {
-      btn.classList.add('flagged');
-      btn.dataset.flagged = 'true';
+      item.dataset.flagged = 'true';
     } else {
-      btn.dataset.flagged = 'false';
+      item.dataset.flagged = 'false';
     }
+
     if (tooltipParts.length) {
-      btn.title = tooltipParts.join(' · ');
+      item.title = tooltipParts.join(' · ');
     }
-    btn.addEventListener('click', () => {
+
+    item.addEventListener('click', () => {
       navigateToQuestion(sess, idx, render);
     });
-    grid.appendChild(btn);
+
+    grid.appendChild(item);
   });
 
-  palette.appendChild(grid);
   if (summary) {
     const meta = document.createElement('div');
-    meta.className = 'exam-palette-summary';
+    meta.className = 'question-map__summary';
+    const summaryTitle = document.createElement('div');
+    summaryTitle.className = 'question-map__summary-title';
+    summaryTitle.textContent = 'Answer changes';
+    meta.appendChild(summaryTitle);
 
-    const metaTitle = document.createElement('div');
-    metaTitle.className = 'exam-palette-summary-title';
-    metaTitle.textContent = 'Answer changes';
-    meta.appendChild(metaTitle);
-
-    const metaStats = document.createElement('div');
-    metaStats.className = 'exam-palette-summary-stats';
-    metaStats.innerHTML = `
+    const summaryStats = document.createElement('div');
+    summaryStats.className = 'question-map__summary-stats';
+    summaryStats.innerHTML = `
       <span><strong>${summary.switched}</strong> switched</span>
       <span><strong>${summary.returnedToOriginal}</strong> returned</span>
       <span><strong>${summary.rightToWrong}</strong> right → wrong</span>
       <span><strong>${summary.wrongToRight}</strong> wrong → right</span>
     `;
-    meta.appendChild(metaStats);
-
-    palette.appendChild(meta);
+    meta.appendChild(summaryStats);
+    map.appendChild(meta);
   }
-  sidebar.appendChild(palette);
+
+  sidebar.appendChild(map);
   return summary;
 }
 
@@ -1974,7 +1956,7 @@ export function renderExamRunner(root, render) {
     }
   }
 
-  const paletteSummary = renderPalette(sidebar, sess, render);
+  const paletteSummary = renderQuestionMap(sidebar, sess, render);
   renderSidebarMeta(sidebar, sess, paletteSummary);
 
   const nav = document.createElement('div');
@@ -2395,7 +2377,7 @@ function openExamEditor(existing, render) {
   addQuestion.addEventListener('click', () => {
     exam.questions.push(createBlankQuestion());
     markDirty();
-    renderQuestions();
+    scheduleRenderQuestions();
   });
   questionsHeader.append(qTitle, addQuestion);
   form.appendChild(questionsHeader);
@@ -2414,6 +2396,8 @@ function openExamEditor(existing, render) {
       return;
     }
 
+    const fragment = document.createDocumentFragment();
+
     exam.questions.forEach((question, idx) => {
       const card = document.createElement('div');
       card.className = 'exam-question-editor';
@@ -2431,7 +2415,7 @@ function openExamEditor(existing, render) {
       remove.addEventListener('click', () => {
         exam.questions.splice(idx, 1);
         markDirty();
-        renderQuestions();
+        scheduleRenderQuestions();
       });
       header.appendChild(remove);
       card.appendChild(header);
@@ -2613,11 +2597,28 @@ function openExamEditor(existing, render) {
       card.appendChild(optionsWrap);
       card.appendChild(addOption);
 
-      questionSection.appendChild(card);
+      fragment.appendChild(card);
     });
+
+    questionSection.appendChild(fragment);
   }
 
-  renderQuestions();
+  const scheduleRenderQuestions = (() => {
+    let scheduled = false;
+    const schedule = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
+      ? window.requestAnimationFrame.bind(window)
+      : (cb) => setTimeout(cb, 0);
+    return () => {
+      if (scheduled) return;
+      scheduled = true;
+      schedule(() => {
+        scheduled = false;
+        renderQuestions();
+      });
+    };
+  })();
+
+  scheduleRenderQuestions();
 
   const actions = document.createElement('div');
   actions.className = 'exam-editor-actions';
