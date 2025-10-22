@@ -1584,7 +1584,10 @@ function renderQuestionMap(sidebar, sess, render) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'question-map__item';
-    item.textContent = String(idx + 1);
+    const number = document.createElement('span');
+    number.className = 'question-map__number';
+    number.textContent = String(idx + 1);
+    item.appendChild(number);
     const isCurrent = sess.idx === idx;
     item.classList.toggle('is-current', isCurrent);
     item.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
@@ -1653,15 +1656,24 @@ function renderQuestionMap(sidebar, sess, render) {
       item.classList.add('is-review-unanswered');
     }
 
-    if (flaggedSet.has(idx)) {
-      item.dataset.flagged = 'true';
-    } else {
-      item.dataset.flagged = 'false';
+    const isFlagged = flaggedSet.has(idx);
+    item.dataset.flagged = isFlagged ? 'true' : 'false';
+    item.classList.toggle('is-flagged', isFlagged);
+    if (isFlagged) {
+      const flagIcon = document.createElement('span');
+      flagIcon.className = 'question-map__flag';
+      flagIcon.setAttribute('aria-hidden', 'true');
+      flagIcon.textContent = '🚩';
+      item.appendChild(flagIcon);
+      tooltipParts.push('Flagged');
     }
 
-    if (tooltipParts.length) {
-      item.title = tooltipParts.join(' · ');
+    const tooltipText = tooltipParts.join(' · ');
+    if (tooltipText) {
+      item.title = tooltipText;
     }
+    const ariaDescription = tooltipParts.length ? ` — ${tooltipParts.join(', ')}` : '';
+    item.setAttribute('aria-label', `Question ${idx + 1}${ariaDescription}`);
 
     item.addEventListener('click', () => {
       navigateToQuestion(sess, idx, render);
