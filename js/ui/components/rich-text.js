@@ -220,6 +220,10 @@ function sanitizeToPlainText(html = '') {
   return text.replace(/\u00a0/g, ' ');
 }
 
+export function htmlToPlainText(html = '') {
+  return sanitizeToPlainText(html);
+}
+
 function normalizeInput(value = ''){
   if (value == null) return '';
   const str = String(value);
@@ -241,7 +245,7 @@ const FONT_OPTIONS = [
   { value: '"Comic Neue", "Comic Sans MS", cursive', label: 'Handwriting' }
 ];
 
-function isEmptyHtml(html = ''){
+export function isEmptyHtml(html = ''){
   if (!html) return true;
   const template = document.createElement('template');
   template.innerHTML = html;
