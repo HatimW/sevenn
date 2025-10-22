@@ -4881,6 +4881,9 @@ var Sevenn = (() => {
     const text = template.content.textContent || "";
     return text.replace(/\u00a0/g, " ");
   }
+  function htmlToPlainText(html = "") {
+    return sanitizeToPlainText(html);
+  }
   function normalizeInput(value = "") {
     if (value == null) return "";
     const str = String(value);
@@ -16212,10 +16215,108 @@ var Sevenn = (() => {
 
   // js/ui/components/exams.js
   var DEFAULT_SECONDS = 60;
+  var CSV_MAX_OPTIONS = 8;
+  var CSV_HEADERS = (() => {
+    const base = ["type", "examTitle", "timerMode", "secondsPerQuestion", "stem"];
+    for (let i = 1; i <= CSV_MAX_OPTIONS; i += 1) {
+      base.push(`option${i}`);
+      base.push(`option${i}Correct`);
+    }
+    base.push("explanation", "tags", "media");
+    return base;
+  })();
+  var CSV_ROW_META = "meta";
+  var CSV_ROW_QUESTION = "question";
+  var CSV_EXPLANATION_INDEX = CSV_HEADERS.indexOf("explanation");
+  var CSV_TAGS_INDEX = CSV_HEADERS.indexOf("tags");
+  var CSV_MEDIA_INDEX = CSV_HEADERS.indexOf("media");
+  function csvOptionIndex(optionNumber) {
+    return 5 + (optionNumber - 1) * 2;
+  }
+  function csvOptionCorrectIndex(optionNumber) {
+    return csvOptionIndex(optionNumber) + 1;
+  }
   var timerHandles = /* @__PURE__ */ new WeakMap();
   var keyHandler = null;
   var keyHandlerSession = null;
   var lastExamStatusMessage = "";
+  function sanitizeRichText(value) {
+    const raw = value == null ? "" : String(value);
+    if (!raw) return "";
+    const looksHtml = /<([a-z][^>]*>)/i.test(raw);
+    const normalized2 = looksHtml ? raw : raw.replace(/\r?\n/g, "<br>");
+    const sanitized = sanitizeHtml(normalized2);
+    return isEmptyHtml(sanitized) ? "" : sanitized;
+  }
+  function ensureArrayTags(tags) {
+    if (!Array.isArray(tags)) {
+      if (tags == null) return [];
+      if (typeof tags === "string") {
+        return tags.split(/[|,]/).map((tag) => tag.trim()).filter(Boolean);
+      }
+      return [];
+    }
+    return tags.map((tag) => String(tag).trim()).filter(Boolean);
+  }
+  function parseTagString(tags) {
+    if (!tags) return [];
+    return String(tags).split(/[|,]/).map((tag) => tag.trim()).filter(Boolean);
+  }
+  function parseBooleanFlag(value) {
+    if (value == null) return false;
+    const str = String(value).trim().toLowerCase();
+    return ["true", "1", "yes", "y", "correct"].includes(str);
+  }
+  function csvEscape(value) {
+    const str = value == null ? "" : String(value);
+    if (!str) return "";
+    if (/["]/.test(str) || /[\n\r,]/.test(str)) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  }
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+  function scorePercentage(result) {
+    if (!result || !Number.isFinite(result.correct) || !Number.isFinite(result.total) || result.total <= 0) {
+      return null;
+    }
+    return Math.round(result.correct / result.total * 100);
+  }
+  function scoreBadgeClass(pct) {
+    if (!Number.isFinite(pct)) return "neutral";
+    if (pct >= 85) return "good";
+    if (pct >= 70) return "warn";
+    return "bad";
+  }
+  function createScoreBadge(result, label) {
+    const pct = scorePercentage(result);
+    const badge = document.createElement("span");
+    badge.className = ["exam-score-badge", `exam-score-badge--${scoreBadgeClass(pct)}`].join(" ");
+    if (label) {
+      const labelEl = document.createElement("span");
+      labelEl.className = "exam-score-badge-label";
+      labelEl.textContent = label;
+      badge.appendChild(labelEl);
+    }
+    const value = document.createElement("span");
+    value.className = "exam-score-badge-value";
+    if (pct == null) {
+      value.textContent = "\u2014";
+    } else {
+      value.textContent = `${pct}%`;
+    }
+    badge.appendChild(value);
+    return badge;
+  }
   function setTimerElement(sess, element) {
     if (!sess) return;
     sess.__timerElement = element || null;
@@ -16614,6 +16715,169 @@ var Sevenn = (() => {
       return false;
     }
   }
+  function examToCsv(exam) {
+    const rows = [];
+    rows.push(CSV_HEADERS);
+    const metaRow = new Array(CSV_HEADERS.length).fill("");
+    metaRow[0] = CSV_ROW_META;
+    metaRow[1] = exam.examTitle || "";
+    metaRow[2] = exam.timerMode === "timed" ? "timed" : "untimed";
+    metaRow[3] = Number.isFinite(exam.secondsPerQuestion) ? String(exam.secondsPerQuestion) : String(DEFAULT_SECONDS);
+    rows.push(metaRow);
+    (exam.questions || []).forEach((question) => {
+      const row = new Array(CSV_HEADERS.length).fill("");
+      row[0] = CSV_ROW_QUESTION;
+      row[4] = question.stem || "";
+      const options = Array.isArray(question.options) ? question.options : [];
+      options.slice(0, CSV_MAX_OPTIONS).forEach((opt, idx) => {
+        const optionCol = csvOptionIndex(idx + 1);
+        const correctCol = csvOptionCorrectIndex(idx + 1);
+        row[optionCol] = opt.text || "";
+        row[correctCol] = opt.id === question.answer ? "TRUE" : "";
+      });
+      if (CSV_EXPLANATION_INDEX >= 0) row[CSV_EXPLANATION_INDEX] = question.explanation || "";
+      if (CSV_TAGS_INDEX >= 0) row[CSV_TAGS_INDEX] = Array.isArray(question.tags) ? question.tags.join(" | ") : "";
+      if (CSV_MEDIA_INDEX >= 0) row[CSV_MEDIA_INDEX] = question.media || "";
+      rows.push(row);
+    });
+    return rows.map((row) => row.map(csvEscape).join(",")).join("\r\n");
+  }
+  function downloadExamCsv(exam) {
+    const csv = examToCsv(exam);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    downloadBlob(blob, `${slugify2(exam.examTitle || "exam")}.csv`);
+  }
+  function downloadExamCsvTemplate() {
+    const sampleQuestion = createBlankQuestion();
+    sampleQuestion.stem = sanitizeRichText("What is the capital of France?");
+    sampleQuestion.options = [
+      { id: uid(), text: sanitizeRichText("Paris") },
+      { id: uid(), text: sanitizeRichText("London") },
+      { id: uid(), text: sanitizeRichText("Rome") }
+    ];
+    sampleQuestion.answer = sampleQuestion.options[0]?.id || "";
+    sampleQuestion.explanation = sanitizeRichText("Paris is the capital and most populous city of France.");
+    sampleQuestion.tags = ["geography"];
+    const { exam } = ensureExamShape({
+      examTitle: "Example Exam",
+      timerMode: "untimed",
+      secondsPerQuestion: DEFAULT_SECONDS,
+      questions: [sampleQuestion],
+      results: []
+    });
+    const csv = examToCsv(exam);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    downloadBlob(blob, "exam-template.csv");
+  }
+  function parseCsv(text) {
+    const rows = [];
+    let current = "";
+    let row = [];
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i += 1) {
+      const char = text[i];
+      if (inQuotes) {
+        if (char === '"') {
+          if (text[i + 1] === '"') {
+            current += '"';
+            i += 1;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          current += char;
+        }
+      } else if (char === '"') {
+        inQuotes = true;
+      } else if (char === ",") {
+        row.push(current);
+        current = "";
+      } else if (char === "\r") {
+        row.push(current);
+        rows.push(row);
+        row = [];
+        current = "";
+        if (text[i + 1] === "\n") i += 1;
+      } else if (char === "\n") {
+        row.push(current);
+        rows.push(row);
+        row = [];
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+    row.push(current);
+    if (row.length > 1 || row[0].trim()) {
+      rows.push(row);
+    }
+    return rows.filter((r) => !(r.length === 1 && r[0].trim() === ""));
+  }
+  function examFromCsv(text) {
+    const rows = parseCsv(text);
+    if (!rows.length) {
+      throw new Error("Empty CSV");
+    }
+    const header = rows[0].map((col) => col.trim());
+    const indexMap = /* @__PURE__ */ new Map();
+    header.forEach((name, idx) => {
+      if (!name) return;
+      indexMap.set(name, idx);
+    });
+    const getCell = (row, key) => {
+      const idx = indexMap.has(key) ? indexMap.get(key) : -1;
+      if (idx == null || idx < 0) return "";
+      return row[idx] ?? "";
+    };
+    const base = {
+      examTitle: "Imported Exam",
+      timerMode: "untimed",
+      secondsPerQuestion: DEFAULT_SECONDS,
+      questions: [],
+      results: []
+    };
+    rows.slice(1).forEach((row) => {
+      const type = String(getCell(row, "type") || "").trim().toLowerCase();
+      if (!type) return;
+      if (type === CSV_ROW_META) {
+        const title = String(getCell(row, "examTitle") || "").trim();
+        if (title) base.examTitle = title;
+        const mode = String(getCell(row, "timerMode") || "").trim().toLowerCase();
+        if (mode === "timed" || mode === "untimed") base.timerMode = mode;
+        const seconds = Number(getCell(row, "secondsPerQuestion"));
+        if (Number.isFinite(seconds) && seconds > 0) base.secondsPerQuestion = seconds;
+        return;
+      }
+      if (type !== CSV_ROW_QUESTION) return;
+      const question = createBlankQuestion();
+      question.stem = sanitizeRichText(getCell(row, "stem"));
+      question.explanation = sanitizeRichText(getCell(row, "explanation"));
+      question.tags = parseTagString(getCell(row, "tags"));
+      question.media = String(getCell(row, "media") || "").trim();
+      question.options = [];
+      question.answer = "";
+      for (let i = 1; i <= CSV_MAX_OPTIONS; i += 1) {
+        const optionHtml = sanitizeRichText(getCell(row, `option${i}`));
+        if (!optionHtml) continue;
+        const option = { id: uid(), text: optionHtml };
+        question.options.push(option);
+        if (!question.answer && parseBooleanFlag(getCell(row, `option${i}Correct`))) {
+          question.answer = option.id;
+        }
+      }
+      if (question.options.length < 2) {
+        return;
+      }
+      if (!question.answer) {
+        question.answer = question.options[0].id;
+      }
+      base.questions.push(question);
+    });
+    if (!base.questions.length) {
+      throw new Error("No questions found in CSV");
+    }
+    return ensureExamShape(base).exam;
+  }
   function ensureExamShape(exam) {
     const next = clone5(exam) || {};
     let changed = false;
@@ -16643,7 +16907,9 @@ var Sevenn = (() => {
         question.id = uid();
         changed = true;
       }
-      question.stem = question.stem ? String(question.stem) : "";
+      const originalStem = question.stem;
+      question.stem = sanitizeRichText(question.stem);
+      if (originalStem !== question.stem) changed = true;
       if (!Array.isArray(question.options)) {
         question.options = [];
         changed = true;
@@ -16654,23 +16920,25 @@ var Sevenn = (() => {
           option.id = uid();
           changed = true;
         }
-        option.text = option.text ? String(option.text) : "";
+        const originalText = option.text;
+        option.text = sanitizeRichText(option.text);
+        if (originalText !== option.text) changed = true;
         return option;
       });
       if (!question.answer || !question.options.some((opt) => opt.id === question.answer)) {
         question.answer = question.options[0]?.id || "";
         changed = true;
       }
-      if (question.explanation == null) {
-        question.explanation = "";
+      const originalExplanation = question.explanation;
+      question.explanation = sanitizeRichText(question.explanation);
+      if (originalExplanation !== question.explanation) changed = true;
+      const normalizedTags = ensureArrayTags(question.tags);
+      if (question.tags?.length !== normalizedTags.length || question.tags?.some((t, idx) => t !== normalizedTags[idx])) {
+        question.tags = normalizedTags;
         changed = true;
+      } else {
+        question.tags = normalizedTags;
       }
-      if (!Array.isArray(question.tags)) {
-        if (question.tags == null) question.tags = [];
-        else question.tags = Array.isArray(question.tags) ? question.tags : [String(question.tags)];
-        changed = true;
-      }
-      question.tags = question.tags.map((t) => String(t)).filter(Boolean);
       if (question.media == null) {
         question.media = "";
         changed = true;
@@ -16796,20 +17064,30 @@ var Sevenn = (() => {
     status.className = "exam-status";
     const fileInput = document.createElement("input");
     fileInput.type = "file";
-    fileInput.accept = "application/json";
+    fileInput.accept = ".json,.csv,application/json,text/csv";
     fileInput.style.display = "none";
     fileInput.addEventListener("change", async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
       try {
-        const text = await file.text();
-        const parsed = JSON.parse(text);
-        const { exam } = ensureExamShape(parsed);
-        await upsertExam({ ...exam, updatedAt: Date.now() });
-        render();
+        const name = (file.name || "").toLowerCase();
+        if (name.endsWith(".csv") || (file.type || "").includes("csv")) {
+          const text = await file.text();
+          const imported = examFromCsv(text);
+          await upsertExam({ ...imported, updatedAt: Date.now() });
+          lastExamStatusMessage = `Imported "${imported.examTitle}" from CSV.`;
+          render();
+        } else {
+          const text = await file.text();
+          const parsed = JSON.parse(text);
+          const { exam } = ensureExamShape(parsed);
+          await upsertExam({ ...exam, updatedAt: Date.now() });
+          lastExamStatusMessage = `Imported "${exam.examTitle}" from JSON.`;
+          render();
+        }
       } catch (err) {
         console.warn("Failed to import exam", err);
-        status.textContent = "Unable to import exam \u2014 invalid JSON structure.";
+        status.textContent = "Unable to import exam \u2014 check the file format.";
       } finally {
         fileInput.value = "";
       }
@@ -16817,9 +17095,23 @@ var Sevenn = (() => {
     const importBtn = document.createElement("button");
     importBtn.type = "button";
     importBtn.className = "btn secondary";
-    importBtn.textContent = "Import Exam";
+    importBtn.textContent = "Import JSON/CSV";
     importBtn.addEventListener("click", () => fileInput.click());
     actions.appendChild(importBtn);
+    const templateBtn = document.createElement("button");
+    templateBtn.type = "button";
+    templateBtn.className = "btn secondary";
+    templateBtn.textContent = "CSV Template";
+    templateBtn.addEventListener("click", () => {
+      try {
+        downloadExamCsvTemplate();
+        status.textContent = "CSV template downloaded.";
+      } catch (err) {
+        console.warn("Failed to create CSV template", err);
+        status.textContent = "Unable to download template.";
+      }
+    });
+    actions.appendChild(templateBtn);
     const newBtn = document.createElement("button");
     newBtn.type = "button";
     newBtn.className = "btn";
@@ -16857,7 +17149,7 @@ var Sevenn = (() => {
     if (!exams.length) {
       const empty = document.createElement("div");
       empty.className = "exam-empty";
-      empty.innerHTML = "<p>No exams yet. Import a JSON exam or create one from scratch.</p>";
+      empty.innerHTML = "<p>No exams yet. Import a JSON or CSV exam, download the template, or create one from scratch.</p>";
       root.appendChild(empty);
       return;
     }
@@ -16869,55 +17161,85 @@ var Sevenn = (() => {
     root.appendChild(grid);
   }
   function buildExamCard(exam, render, savedSession, statusEl) {
+    const expandedState = state.examAttemptExpanded[exam.id];
+    const isExpanded = expandedState != null ? expandedState : false;
+    const last = latestResult(exam);
+    const best = bestResult(exam);
     const card = document.createElement("article");
     card.className = "card exam-card";
+    card.classList.toggle("expanded", isExpanded);
+    const header = document.createElement("div");
+    header.className = "exam-card-header";
+    card.appendChild(header);
+    const summaryButton = document.createElement("button");
+    summaryButton.type = "button";
+    summaryButton.className = "exam-card-summary";
+    summaryButton.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+    summaryButton.addEventListener("click", () => {
+      setExamAttemptExpanded(exam.id, !isExpanded);
+      render();
+    });
+    header.appendChild(summaryButton);
+    const titleGroup = document.createElement("div");
+    titleGroup.className = "exam-card-title-group";
+    summaryButton.appendChild(titleGroup);
     const title = document.createElement("h2");
     title.className = "exam-card-title";
     title.textContent = exam.examTitle;
-    card.appendChild(title);
+    titleGroup.appendChild(title);
     const meta = document.createElement("div");
     meta.className = "exam-card-meta";
     const questionCount = document.createElement("span");
     questionCount.textContent = `${exam.questions.length} question${exam.questions.length === 1 ? "" : "s"}`;
     meta.appendChild(questionCount);
-    if (exam.timerMode === "timed") {
-      const timed = document.createElement("span");
-      timed.textContent = `Timed \u2022 ${exam.secondsPerQuestion}s/question`;
-      meta.appendChild(timed);
-    } else {
-      const timed = document.createElement("span");
-      timed.textContent = "Untimed";
-      meta.appendChild(timed);
+    const timerInfo = document.createElement("span");
+    timerInfo.textContent = exam.timerMode === "timed" ? `Timed \u2022 ${exam.secondsPerQuestion}s/question` : "Untimed";
+    meta.appendChild(timerInfo);
+    titleGroup.appendChild(meta);
+    const glance = document.createElement("div");
+    glance.className = "exam-card-glance";
+    summaryButton.appendChild(glance);
+    const attemptsChip = document.createElement("span");
+    attemptsChip.className = "exam-chip";
+    attemptsChip.textContent = `${exam.results.length} attempt${exam.results.length === 1 ? "" : "s"}`;
+    glance.appendChild(attemptsChip);
+    if (best) {
+      const badge = createScoreBadge(best, "Best");
+      badge.title = formatScore(best);
+      glance.appendChild(badge);
     }
-    card.appendChild(meta);
-    const stats = document.createElement("div");
-    stats.className = "exam-card-stats";
-    stats.appendChild(createStat("Attempts", String(exam.results.length)));
-    const last = latestResult(exam);
+    if (last && (!best || last.id !== best.id)) {
+      const badge = createScoreBadge(last, "Last");
+      badge.title = formatScore(last);
+      glance.appendChild(badge);
+    }
     if (last) {
-      stats.appendChild(createStat("Last Score", formatScore(last)));
-      const best = bestResult(exam);
-      if (best) stats.appendChild(createStat("Best Score", formatScore(best)));
-    } else {
-      stats.appendChild(createStat("Last Score", "\u2014"));
-      stats.appendChild(createStat("Best Score", "\u2014"));
+      const lastChip = document.createElement("span");
+      lastChip.className = "exam-chip exam-chip--ghost";
+      const date = new Date(last.when);
+      lastChip.textContent = `Last \u2022 ${date.toLocaleDateString()}`;
+      glance.appendChild(lastChip);
     }
-    card.appendChild(stats);
     if (savedSession) {
-      const banner = document.createElement("div");
-      banner.className = "exam-saved-banner";
-      const updated = savedSession.updatedAt ? new Date(savedSession.updatedAt).toLocaleString() : null;
-      banner.textContent = updated ? `Saved attempt \u2022 ${updated}` : "Saved attempt available";
-      card.appendChild(banner);
+      const progressChip = document.createElement("span");
+      progressChip.className = "exam-chip exam-chip--progress";
+      progressChip.textContent = "In progress";
+      glance.appendChild(progressChip);
     }
-    const actions = document.createElement("div");
-    actions.className = "exam-card-actions";
+    const chevron = document.createElement("span");
+    chevron.className = "exam-card-toggle-icon";
+    chevron.setAttribute("aria-hidden", "true");
+    summaryButton.appendChild(chevron);
+    const quickAction = document.createElement("div");
+    quickAction.className = "exam-card-quick-action";
+    header.appendChild(quickAction);
+    const quickBtn = document.createElement("button");
+    quickBtn.className = "btn exam-card-primary";
+    quickBtn.disabled = exam.questions.length === 0;
+    quickAction.appendChild(quickBtn);
     if (savedSession) {
-      const resumeBtn = document.createElement("button");
-      resumeBtn.className = "btn";
-      resumeBtn.textContent = "Resume Attempt";
-      resumeBtn.disabled = exam.questions.length === 0;
-      resumeBtn.addEventListener("click", async () => {
+      quickBtn.textContent = "Resume";
+      quickBtn.addEventListener("click", async () => {
         const latest = await loadExamSession(exam.id);
         if (!latest) {
           if (statusEl) statusEl.textContent = "Saved attempt could not be found.";
@@ -16928,22 +17250,49 @@ var Sevenn = (() => {
         setExamSession(session);
         render();
       });
-      actions.appendChild(resumeBtn);
+    } else {
+      quickBtn.textContent = "Start";
+      quickBtn.addEventListener("click", () => {
+        setExamSession(createTakingSession(exam));
+        render();
+      });
     }
-    const startBtn = document.createElement("button");
-    startBtn.className = savedSession ? "btn secondary" : "btn";
-    startBtn.textContent = savedSession ? "Start Fresh" : "Start Exam";
-    startBtn.disabled = exam.questions.length === 0;
-    startBtn.addEventListener("click", async () => {
-      if (savedSession) {
+    const details = document.createElement("div");
+    details.className = "exam-card-details";
+    if (!isExpanded) {
+      details.setAttribute("hidden", "true");
+    }
+    card.appendChild(details);
+    const stats = document.createElement("div");
+    stats.className = "exam-card-stats";
+    stats.appendChild(createStat("Attempts", String(exam.results.length)));
+    stats.appendChild(createStat("Best Score", best ? formatScore(best) : "\u2014"));
+    stats.appendChild(createStat("Last Score", last ? formatScore(last) : "\u2014"));
+    details.appendChild(stats);
+    if (savedSession) {
+      const banner = document.createElement("div");
+      banner.className = "exam-saved-banner";
+      const updated = savedSession.updatedAt ? new Date(savedSession.updatedAt).toLocaleString() : null;
+      banner.textContent = updated ? `Saved attempt \u2022 ${updated}` : "Saved attempt available";
+      details.appendChild(banner);
+    }
+    const actions = document.createElement("div");
+    actions.className = "exam-card-actions";
+    details.appendChild(actions);
+    if (savedSession) {
+      const startFresh = document.createElement("button");
+      startFresh.className = "btn secondary";
+      startFresh.textContent = "Start Fresh";
+      startFresh.disabled = exam.questions.length === 0;
+      startFresh.addEventListener("click", async () => {
         const confirm2 = await confirmModal("Start a new attempt and discard saved progress?");
         if (!confirm2) return;
         await deleteExamSessionProgress(exam.id);
-      }
-      setExamSession(createTakingSession(exam));
-      render();
-    });
-    actions.appendChild(startBtn);
+        setExamSession(createTakingSession(exam));
+        render();
+      });
+      actions.appendChild(startFresh);
+    }
     if (last) {
       const reviewBtn = document.createElement("button");
       reviewBtn.className = "btn secondary";
@@ -16956,21 +17305,34 @@ var Sevenn = (() => {
     }
     const editBtn = document.createElement("button");
     editBtn.className = "btn secondary";
-    editBtn.textContent = "Edit";
+    editBtn.textContent = "Edit Exam";
     editBtn.addEventListener("click", () => openExamEditor(exam, render));
     actions.appendChild(editBtn);
-    const exportBtn = document.createElement("button");
-    exportBtn.className = "btn secondary";
-    exportBtn.textContent = "Export";
-    exportBtn.addEventListener("click", () => {
+    const exportJsonBtn = document.createElement("button");
+    exportJsonBtn.className = "btn secondary";
+    exportJsonBtn.textContent = "Export JSON";
+    exportJsonBtn.addEventListener("click", () => {
       const ok = triggerExamDownload(exam);
       if (!ok && statusEl) {
         statusEl.textContent = "Unable to export exam.";
       } else if (ok && statusEl) {
-        statusEl.textContent = "Exam exported.";
+        statusEl.textContent = "Exam exported as JSON.";
       }
     });
-    actions.appendChild(exportBtn);
+    actions.appendChild(exportJsonBtn);
+    const exportCsvBtn = document.createElement("button");
+    exportCsvBtn.className = "btn secondary";
+    exportCsvBtn.textContent = "Export CSV";
+    exportCsvBtn.addEventListener("click", () => {
+      try {
+        downloadExamCsv(exam);
+        if (statusEl) statusEl.textContent = "Exam exported as CSV.";
+      } catch (err) {
+        console.warn("Failed to export exam CSV", err);
+        if (statusEl) statusEl.textContent = "Unable to export exam CSV.";
+      }
+    });
+    actions.appendChild(exportCsvBtn);
     const delBtn = document.createElement("button");
     delBtn.className = "btn danger";
     delBtn.textContent = "Delete";
@@ -16983,29 +17345,11 @@ var Sevenn = (() => {
       render();
     });
     actions.appendChild(delBtn);
-    card.appendChild(actions);
     const attemptsWrap = document.createElement("div");
     attemptsWrap.className = "exam-attempts";
-    const attemptsHeader = document.createElement("div");
-    attemptsHeader.className = "exam-attempts-header";
     const attemptsTitle = document.createElement("h3");
     attemptsTitle.textContent = "Attempts";
-    attemptsHeader.appendChild(attemptsTitle);
-    const expandedState = state.examAttemptExpanded[exam.id];
-    const isExpanded = expandedState != null ? expandedState : true;
-    if (exam.results.length) {
-      const toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "exam-attempt-toggle";
-      toggle.textContent = isExpanded ? "Hide Attempts" : "Show Attempts";
-      toggle.addEventListener("click", () => {
-        setExamAttemptExpanded(exam.id, !isExpanded);
-        render();
-      });
-      attemptsHeader.appendChild(toggle);
-    }
-    attemptsWrap.appendChild(attemptsHeader);
-    attemptsWrap.classList.toggle("collapsed", !isExpanded && exam.results.length > 0);
+    attemptsWrap.appendChild(attemptsTitle);
     if (!exam.results.length) {
       const none = document.createElement("p");
       none.className = "exam-attempt-empty";
@@ -17019,7 +17363,7 @@ var Sevenn = (() => {
       });
       attemptsWrap.appendChild(list);
     }
-    card.appendChild(attemptsWrap);
+    details.appendChild(attemptsWrap);
     return card;
   }
   function buildAttemptRow(exam, result, render) {
@@ -17027,19 +17371,25 @@ var Sevenn = (() => {
     row.className = "exam-attempt-row";
     const info = document.createElement("div");
     info.className = "exam-attempt-info";
-    const title = document.createElement("div");
-    title.className = "exam-attempt-score";
-    title.textContent = formatScore(result);
-    info.appendChild(title);
+    const badge = createScoreBadge(result);
+    badge.classList.add("exam-attempt-score");
+    badge.title = formatScore(result);
+    info.appendChild(badge);
+    const date = document.createElement("div");
+    date.className = "exam-attempt-date";
+    date.textContent = new Date(result.when).toLocaleString();
+    info.appendChild(date);
     const meta = document.createElement("div");
     meta.className = "exam-attempt-meta";
-    const date = new Date(result.when).toLocaleString();
     const answeredText = `${result.answered}/${result.total} answered`;
     const flaggedText = `${result.flagged.length} flagged`;
     const durationText = result.durationMs ? formatDuration(result.durationMs) : "\u2014";
-    meta.textContent = `${date} \u2022 ${answeredText} \u2022 ${flaggedText} \u2022 ${durationText}`;
+    meta.textContent = `${answeredText} \u2022 ${flaggedText} \u2022 ${durationText}`;
     info.appendChild(meta);
     row.appendChild(info);
+    const actions = document.createElement("div");
+    actions.className = "exam-attempt-actions";
+    row.appendChild(actions);
     const review = document.createElement("button");
     review.className = "btn secondary";
     review.textContent = "Review";
@@ -17047,7 +17397,7 @@ var Sevenn = (() => {
       setExamSession({ mode: "review", exam: clone5(exam), result: clone5(result), idx: 0 });
       render();
     });
-    row.appendChild(review);
+    actions.appendChild(review);
     return row;
   }
   function createStat(label, value) {
@@ -17093,7 +17443,8 @@ var Sevenn = (() => {
     return parts.join(" ");
   }
   function optionText(question, id) {
-    return question.options.find((opt) => opt.id === id)?.text || "";
+    const html = question.options.find((opt) => opt.id === id)?.text || "";
+    return htmlToPlainText(html).trim();
   }
   function mediaElement(source) {
     if (!source) return null;
@@ -17343,7 +17694,8 @@ var Sevenn = (() => {
     main.appendChild(top);
     const stem = document.createElement("div");
     stem.className = "exam-stem";
-    stem.textContent = question.stem || "(No prompt)";
+    const stemHtml = question.stem && !isEmptyHtml(question.stem) ? question.stem : "";
+    stem.innerHTML = stemHtml || '<p class="exam-stem-empty">(No prompt)</p>';
     main.appendChild(stem);
     const media = mediaElement(question.media);
     if (media) main.appendChild(media);
@@ -17376,7 +17728,7 @@ var Sevenn = (() => {
       choice.appendChild(indicator);
       const label = document.createElement("span");
       label.className = "option-text";
-      label.textContent = opt.text || "(Empty option)";
+      label.innerHTML = opt.text || '<span class="exam-option-empty">(Empty option)</span>';
       choice.appendChild(label);
       const isSelected = selected === opt.id;
       if (sess.mode === "taking") {
@@ -17486,13 +17838,14 @@ var Sevenn = (() => {
           main.appendChild(insights);
         }
       }
-      if (question.explanation) {
+      if (question.explanation && !isEmptyHtml(question.explanation)) {
         const explain = document.createElement("div");
         explain.className = "exam-explanation";
         const title = document.createElement("h3");
         title.textContent = "Explanation";
-        const body = document.createElement("p");
-        body.textContent = question.explanation;
+        const body = document.createElement("div");
+        body.className = "exam-explanation-body";
+        body.innerHTML = question.explanation;
         explain.appendChild(title);
         explain.appendChild(body);
         main.appendChild(explain);
@@ -17772,23 +18125,6 @@ var Sevenn = (() => {
     root.appendChild(wrap);
   }
   function openExamEditor(existing, render) {
-    const overlay = document.createElement("div");
-    overlay.className = "modal";
-    const form = document.createElement("form");
-    form.className = "card modal-form exam-editor";
-    let dirty = false;
-    const markDirty = () => {
-      dirty = true;
-    };
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "modal-close";
-    closeBtn.setAttribute("aria-label", "Close exam editor");
-    closeBtn.innerHTML = "&times;";
-    form.appendChild(closeBtn);
-    const removeOverlay = () => {
-      if (overlay.parentNode) document.body.removeChild(overlay);
-    };
     const { exam } = ensureExamShape(existing || {
       id: uid(),
       examTitle: "New Exam",
@@ -17797,13 +18133,40 @@ var Sevenn = (() => {
       questions: [],
       results: []
     });
-    const heading = document.createElement("h2");
-    heading.textContent = existing ? "Edit Exam" : "Create Exam";
-    form.appendChild(heading);
+    let dirty = false;
+    const markDirty = () => {
+      dirty = true;
+    };
+    const floating = createFloatingWindow({
+      title: existing ? "Edit Exam" : "Create Exam",
+      width: 980,
+      onBeforeClose: async (reason) => {
+        if (reason === "saved") return true;
+        if (!dirty) return true;
+        const choice = await promptSaveChoice();
+        if (choice === "cancel") return false;
+        if (choice === "discard") return true;
+        if (choice === "save") {
+          const ok = await persistExam();
+          if (ok) {
+            dirty = false;
+            render();
+          }
+          return ok;
+        }
+        return false;
+      }
+    });
+    const form = document.createElement("form");
+    form.className = "exam-editor";
+    floating.body.appendChild(form);
     const error = document.createElement("div");
     error.className = "exam-error";
     form.appendChild(error);
-    const titleLabel = document.createElement("label");
+    const titleField = document.createElement("label");
+    titleField.className = "exam-field";
+    const titleLabel = document.createElement("span");
+    titleLabel.className = "exam-field-label";
     titleLabel.textContent = "Title";
     const titleInput = document.createElement("input");
     titleInput.className = "input";
@@ -17812,12 +18175,16 @@ var Sevenn = (() => {
       exam.examTitle = titleInput.value;
       markDirty();
     });
-    titleLabel.appendChild(titleInput);
-    form.appendChild(titleLabel);
+    titleField.append(titleLabel, titleInput);
+    form.appendChild(titleField);
     const timerRow = document.createElement("div");
     timerRow.className = "exam-timer-row";
-    const modeLabel = document.createElement("label");
-    modeLabel.textContent = "Timer Mode";
+    form.appendChild(timerRow);
+    const modeField = document.createElement("label");
+    modeField.className = "exam-field";
+    const modeSpan = document.createElement("span");
+    modeSpan.className = "exam-field-label";
+    modeSpan.textContent = "Timer Mode";
     const modeSelect = document.createElement("select");
     modeSelect.className = "input";
     ["untimed", "timed"].forEach((mode) => {
@@ -17829,13 +18196,16 @@ var Sevenn = (() => {
     modeSelect.value = exam.timerMode;
     modeSelect.addEventListener("change", () => {
       exam.timerMode = modeSelect.value;
-      secondsLabel.style.display = exam.timerMode === "timed" ? "flex" : "none";
+      secondsField.classList.toggle("is-hidden", exam.timerMode !== "timed");
       markDirty();
     });
-    modeLabel.appendChild(modeSelect);
-    timerRow.appendChild(modeLabel);
-    const secondsLabel = document.createElement("label");
-    secondsLabel.textContent = "Seconds per question";
+    modeField.append(modeSpan, modeSelect);
+    timerRow.appendChild(modeField);
+    const secondsField = document.createElement("label");
+    secondsField.className = "exam-field";
+    const secondsSpan = document.createElement("span");
+    secondsSpan.className = "exam-field-label";
+    secondsSpan.textContent = "Seconds per question";
     const secondsInput = document.createElement("input");
     secondsInput.type = "number";
     secondsInput.min = "10";
@@ -17848,13 +18218,9 @@ var Sevenn = (() => {
         markDirty();
       }
     });
-    secondsLabel.appendChild(secondsInput);
-    secondsLabel.style.display = exam.timerMode === "timed" ? "flex" : "none";
-    timerRow.appendChild(secondsLabel);
-    form.appendChild(timerRow);
-    const questionSection = document.createElement("div");
-    questionSection.className = "exam-question-section";
-    form.appendChild(questionSection);
+    secondsField.append(secondsSpan, secondsInput);
+    if (exam.timerMode !== "timed") secondsField.classList.add("is-hidden");
+    timerRow.appendChild(secondsField);
     const questionsHeader = document.createElement("div");
     questionsHeader.className = "exam-question-header";
     const qTitle = document.createElement("h3");
@@ -17868,9 +18234,11 @@ var Sevenn = (() => {
       markDirty();
       renderQuestions();
     });
-    questionsHeader.appendChild(qTitle);
-    questionsHeader.appendChild(addQuestion);
+    questionsHeader.append(qTitle, addQuestion);
     form.appendChild(questionsHeader);
+    const questionSection = document.createElement("div");
+    questionSection.className = "exam-question-section";
+    form.appendChild(questionSection);
     function renderQuestions() {
       questionSection.innerHTML = "";
       if (!exam.questions.length) {
@@ -17883,12 +18251,11 @@ var Sevenn = (() => {
       exam.questions.forEach((question, idx) => {
         const card = document.createElement("div");
         card.className = "exam-question-editor";
-        question.tags = Array.isArray(question.tags) ? question.tags : [];
-        if (!Array.isArray(question.options)) question.options = [];
         const header = document.createElement("div");
         header.className = "exam-question-editor-header";
-        const title = document.createElement("h4");
-        title.textContent = `Question ${idx + 1}`;
+        const label = document.createElement("h4");
+        label.textContent = `Question ${idx + 1}`;
+        header.appendChild(label);
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "ghost-btn";
@@ -17898,22 +18265,31 @@ var Sevenn = (() => {
           markDirty();
           renderQuestions();
         });
-        header.appendChild(title);
         header.appendChild(remove);
         card.appendChild(header);
-        const stemLabel = document.createElement("label");
+        const stemField = document.createElement("div");
+        stemField.className = "exam-field exam-field--rich";
+        const stemLabel = document.createElement("span");
+        stemLabel.className = "exam-field-label";
         stemLabel.textContent = "Prompt";
-        const stemInput = document.createElement("textarea");
-        stemInput.className = "input";
-        stemInput.value = question.stem;
-        stemInput.addEventListener("input", () => {
-          question.stem = stemInput.value;
-          markDirty();
+        stemField.appendChild(stemLabel);
+        const stemEditor = createRichTextEditor({
+          value: question.stem,
+          ariaLabel: `Question ${idx + 1} prompt`,
+          onChange: () => {
+            question.stem = stemEditor.getValue();
+            markDirty();
+          }
         });
-        stemLabel.appendChild(stemInput);
-        card.appendChild(stemLabel);
-        const mediaLabel = document.createElement("label");
+        stemEditor.element.classList.add("exam-rich-input");
+        stemField.appendChild(stemEditor.element);
+        card.appendChild(stemField);
+        const mediaField = document.createElement("div");
+        mediaField.className = "exam-field exam-field--media";
+        const mediaLabel = document.createElement("span");
+        mediaLabel.className = "exam-field-label";
         mediaLabel.textContent = "Media (URL or upload)";
+        mediaField.appendChild(mediaLabel);
         const mediaInput = document.createElement("input");
         mediaInput.className = "input";
         mediaInput.placeholder = "https://example.com/image.png";
@@ -17923,7 +18299,7 @@ var Sevenn = (() => {
           updatePreview();
           markDirty();
         });
-        mediaLabel.appendChild(mediaInput);
+        mediaField.appendChild(mediaInput);
         const mediaUpload = document.createElement("input");
         mediaUpload.type = "file";
         mediaUpload.accept = "image/*,video/*,audio/*";
@@ -17940,7 +18316,7 @@ var Sevenn = (() => {
           };
           reader.readAsDataURL(file);
         });
-        mediaLabel.appendChild(mediaUpload);
+        mediaField.appendChild(mediaUpload);
         const clearMedia = document.createElement("button");
         clearMedia.type = "button";
         clearMedia.className = "ghost-btn";
@@ -17952,8 +18328,8 @@ var Sevenn = (() => {
           updatePreview();
           markDirty();
         });
-        mediaLabel.appendChild(clearMedia);
-        card.appendChild(mediaLabel);
+        mediaField.appendChild(clearMedia);
+        card.appendChild(mediaField);
         const preview = document.createElement("div");
         preview.className = "exam-media-preview";
         function updatePreview() {
@@ -17963,28 +18339,37 @@ var Sevenn = (() => {
         }
         updatePreview();
         card.appendChild(preview);
-        const tagsLabel = document.createElement("label");
-        tagsLabel.textContent = "Tags (comma separated)";
+        const tagsField = document.createElement("label");
+        tagsField.className = "exam-field";
+        const tagsLabel = document.createElement("span");
+        tagsLabel.className = "exam-field-label";
+        tagsLabel.textContent = "Tags (comma or | separated)";
         const tagsInput = document.createElement("input");
         tagsInput.className = "input";
         tagsInput.value = question.tags.join(", ");
         tagsInput.addEventListener("input", () => {
-          question.tags = tagsInput.value.split(",").map((t) => t.trim()).filter(Boolean);
+          question.tags = parseTagString(tagsInput.value);
           markDirty();
         });
-        tagsLabel.appendChild(tagsInput);
-        card.appendChild(tagsLabel);
-        const explanationLabel = document.createElement("label");
+        tagsField.append(tagsLabel, tagsInput);
+        card.appendChild(tagsField);
+        const explanationField = document.createElement("div");
+        explanationField.className = "exam-field exam-field--rich";
+        const explanationLabel = document.createElement("span");
+        explanationLabel.className = "exam-field-label";
         explanationLabel.textContent = "Explanation";
-        const explanationInput = document.createElement("textarea");
-        explanationInput.className = "input";
-        explanationInput.value = question.explanation || "";
-        explanationInput.addEventListener("input", () => {
-          question.explanation = explanationInput.value;
-          markDirty();
+        explanationField.appendChild(explanationLabel);
+        const explanationEditor = createRichTextEditor({
+          value: question.explanation,
+          ariaLabel: `Question ${idx + 1} explanation`,
+          onChange: () => {
+            question.explanation = explanationEditor.getValue();
+            markDirty();
+          }
         });
-        explanationLabel.appendChild(explanationInput);
-        card.appendChild(explanationLabel);
+        explanationEditor.element.classList.add("exam-rich-input");
+        explanationField.appendChild(explanationEditor.element);
+        card.appendChild(explanationField);
         const optionsWrap = document.createElement("div");
         optionsWrap.className = "exam-option-editor-list";
         function renderOptions() {
@@ -18000,15 +18385,17 @@ var Sevenn = (() => {
               question.answer = opt.id;
               markDirty();
             });
-            const text = document.createElement("input");
-            text.className = "input";
-            text.type = "text";
-            text.placeholder = `Option ${optIdx + 1}`;
-            text.value = opt.text;
-            text.addEventListener("input", () => {
-              opt.text = text.value;
-              markDirty();
+            row.appendChild(radio);
+            const editor = createRichTextEditor({
+              value: opt.text,
+              ariaLabel: `Option ${optIdx + 1}`,
+              onChange: () => {
+                opt.text = editor.getValue();
+                markDirty();
+              }
             });
+            editor.element.classList.add("exam-option-rich");
+            row.appendChild(editor.element);
             const removeBtn = document.createElement("button");
             removeBtn.type = "button";
             removeBtn.className = "ghost-btn";
@@ -18022,8 +18409,6 @@ var Sevenn = (() => {
               markDirty();
               renderOptions();
             });
-            row.appendChild(radio);
-            row.appendChild(text);
             row.appendChild(removeBtn);
             optionsWrap.appendChild(row);
           });
@@ -18046,12 +18431,20 @@ var Sevenn = (() => {
     }
     renderQuestions();
     const actions = document.createElement("div");
-    actions.className = "modal-actions";
-    const save = document.createElement("button");
-    save.type = "submit";
-    save.className = "btn";
-    save.textContent = "Save Exam";
-    actions.appendChild(save);
+    actions.className = "exam-editor-actions";
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "submit";
+    saveBtn.className = "btn";
+    saveBtn.textContent = "Save Exam";
+    actions.appendChild(saveBtn);
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "btn secondary";
+    closeBtn.textContent = "Close";
+    closeBtn.addEventListener("click", () => {
+      void floating.close("cancel");
+    });
+    actions.appendChild(closeBtn);
     form.appendChild(actions);
     async function persistExam() {
       error.textContent = "";
@@ -18064,21 +18457,27 @@ var Sevenn = (() => {
         error.textContent = "Add at least one question.";
         return false;
       }
-      for (let i = 0; i < exam.questions.length; i++) {
+      for (let i = 0; i < exam.questions.length; i += 1) {
         const question = exam.questions[i];
-        question.stem = question.stem.trim();
-        question.explanation = question.explanation?.trim() || "";
+        question.stem = sanitizeRichText(question.stem);
+        question.explanation = sanitizeRichText(question.explanation);
         question.media = question.media?.trim() || "";
-        question.options = question.options.map((opt) => ({ id: opt.id, text: opt.text.trim() })).filter((opt) => opt.text);
+        question.options = question.options.map((opt) => ({
+          id: opt.id || uid(),
+          text: sanitizeRichText(opt.text)
+        })).filter((opt) => !isEmptyHtml(opt.text));
+        question.tags = ensureArrayTags(question.tags);
+        if (isEmptyHtml(question.stem)) {
+          error.textContent = `Question ${i + 1} needs a prompt.`;
+          return false;
+        }
         if (question.options.length < 2) {
           error.textContent = `Question ${i + 1} needs at least two answer options.`;
           return false;
         }
         if (!question.answer || !question.options.some((opt) => opt.id === question.answer)) {
-          error.textContent = `Select a correct answer for question ${i + 1}.`;
-          return false;
+          question.answer = question.options[0].id;
         }
-        question.tags = question.tags.map((t) => t.trim()).filter(Boolean);
       }
       const payload = {
         ...exam,
@@ -18088,14 +18487,14 @@ var Sevenn = (() => {
       await upsertExam(payload);
       return true;
     }
-    async function saveAndClose() {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
       const ok = await persistExam();
-      if (!ok) return false;
+      if (!ok) return;
       dirty = false;
-      removeOverlay();
+      await floating.close("saved");
       render();
-      return true;
-    }
+    });
     function promptSaveChoice() {
       return new Promise((resolve) => {
         const modal = document.createElement("div");
@@ -18107,11 +18506,11 @@ var Sevenn = (() => {
         card.appendChild(message);
         const actionsRow = document.createElement("div");
         actionsRow.className = "modal-actions";
-        const saveBtn = document.createElement("button");
-        saveBtn.type = "button";
-        saveBtn.className = "btn";
-        saveBtn.textContent = "Save";
-        saveBtn.addEventListener("click", () => {
+        const saveBtn2 = document.createElement("button");
+        saveBtn2.type = "button";
+        saveBtn2.className = "btn";
+        saveBtn2.textContent = "Save";
+        saveBtn2.addEventListener("click", () => {
           cleanup();
           resolve("save");
         });
@@ -18131,9 +18530,7 @@ var Sevenn = (() => {
           cleanup();
           resolve("cancel");
         });
-        actionsRow.appendChild(saveBtn);
-        actionsRow.appendChild(discardBtn);
-        actionsRow.appendChild(cancelBtn);
+        actionsRow.append(saveBtn2, discardBtn, cancelBtn);
         card.appendChild(actionsRow);
         modal.appendChild(card);
         modal.addEventListener("click", (e) => {
@@ -18143,35 +18540,12 @@ var Sevenn = (() => {
           }
         });
         document.body.appendChild(modal);
-        saveBtn.focus();
+        saveBtn2.focus();
         function cleanup() {
           if (modal.parentNode) document.body.removeChild(modal);
         }
       });
     }
-    async function attemptClose() {
-      if (!dirty) {
-        removeOverlay();
-        return;
-      }
-      const choice = await promptSaveChoice();
-      if (choice === "cancel") return;
-      if (choice === "discard") {
-        dirty = false;
-        removeOverlay();
-        return;
-      }
-      if (choice === "save") {
-        await saveAndClose();
-      }
-    }
-    closeBtn.addEventListener("click", attemptClose);
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      await saveAndClose();
-    });
-    overlay.appendChild(form);
-    document.body.appendChild(overlay);
     titleInput.focus();
   }
 
@@ -26088,4 +26462,3 @@ var Sevenn = (() => {
   }
   return __toCommonJS(main_exports);
 })();
-//# sourceMappingURL=bundle.js.map
