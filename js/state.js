@@ -28,6 +28,11 @@ const DEFAULT_ENTRY_LAYOUT = {
   controlsVisible: false
 };
 
+const DEFAULT_EXAM_LAYOUT = {
+  mode: 'grid',
+  detailsVisible: true
+};
+
 const preferences = loadUIPreferences();
 
 function sanitizeEntryFilters(value) {
@@ -119,9 +124,22 @@ function sanitizeEntryLayout(value) {
   return next;
 }
 
+function sanitizeExamLayout(value) {
+  if (!value || typeof value !== 'object') return {};
+  const next = {};
+  if (value.mode === 'row' || value.mode === 'grid') {
+    next.mode = value.mode;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'detailsVisible')) {
+    next.detailsVisible = Boolean(value.detailsVisible);
+  }
+  return next;
+}
+
 const initialFilters = { ...DEFAULT_ENTRY_FILTERS, ...sanitizeEntryFilters(preferences.filters) };
 const initialLectures = { ...DEFAULT_LECTURE_STATE, ...sanitizeLectureState(preferences.lectures || {}) };
 const initialEntryLayout = { ...DEFAULT_ENTRY_LAYOUT, ...sanitizeEntryLayout(preferences.entryLayout) };
+const initialExamLayout = { ...DEFAULT_EXAM_LAYOUT, ...sanitizeExamLayout(preferences.examLayout) };
 
 export const state = {
   tab: "Block Board",
@@ -171,6 +189,7 @@ export const state = {
   flashSession: null,
   examSession: null,
   examAttemptExpanded: {},
+  examLayout: initialExamLayout,
   map: { panzoom:false },
   blockMode: { section:"", assignments:{}, reveal:{}, order:{} },
   study: { selectedMode: 'Flashcards' },
@@ -351,6 +370,18 @@ export function setReviewConfig(patch){ Object.assign(state.review, patch); }
 export function setExamSession(sess){ state.examSession = sess; }
 export function setExamAttemptExpanded(examId, expanded){
   state.examAttemptExpanded[examId] = expanded;
+}
+export function setExamLayout(patch) {
+  if (!patch) return;
+  const current = state.examLayout ? { ...state.examLayout } : { ...DEFAULT_EXAM_LAYOUT };
+  if (patch.mode === 'row' || patch.mode === 'grid') {
+    current.mode = patch.mode;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'detailsVisible')) {
+    current.detailsVisible = Boolean(patch.detailsVisible);
+  }
+  state.examLayout = current;
+  updateUIPreferences({ examLayout: sanitizeExamLayout(current) });
 }
 export function setBlockMode(patch){ Object.assign(state.blockMode, patch); }
 export function resetBlockMode(){ state.blockMode = { section:"", assignments:{}, reveal:{}, order:{} }; }
