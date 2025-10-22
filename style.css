@@ -123,7 +123,7 @@ button:focus-visible {
   outline-offset: 3px;
 }
 
-button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(.list-subtab):not(.question-map__item) {
+button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(.list-subtab) {
   background: rgba(148, 163, 184, 0.14);
   color: var(--text);
   border: 1px solid var(--border);
@@ -132,7 +132,7 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(
   box-shadow: none;
 }
 
-button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(.list-subtab):not(.question-map__item):hover {
+button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(.list-subtab):hover {
   background: rgba(148, 163, 184, 0.22);
 }
 
@@ -6554,13 +6554,11 @@ body.map-toolbox-dragging {
   flex-direction: column;
   gap: var(--pad);
   padding: calc(var(--pad-lg) * 0.85);
-  padding-bottom: calc(var(--pad-lg) * 0.85 + var(--exam-card-menu-gap, 0px));
   border-radius: 18px;
   border: 1px solid rgba(148, 163, 184, 0.28);
   background: linear-gradient(150deg, rgba(15, 23, 42, 0.92), rgba(30, 64, 175, 0.38));
   box-shadow: 0 26px 52px rgba(2, 6, 23, 0.5);
-  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease, background 0.25s ease,
-    padding-bottom 0.25s ease;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease, background 0.25s ease;
   overflow: visible;
 }
 
@@ -7792,24 +7790,16 @@ body.map-toolbox-dragging {
   }
 }
 
-.question-map__flag {
+.question-map__item[data-flagged="true"] {
+  position: relative;
+}
+
+.question-map__item[data-flagged="true"]::after {
+  content: '🚩';
   position: absolute;
   top: -6px;
   right: -6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  background: radial-gradient(circle at 45% 35%, rgba(248, 113, 113, 0.95), rgba(220, 38, 38, 0.85));
-  border: 1px solid rgba(254, 202, 202, 0.85);
-  color: rgba(254, 242, 242, 0.98);
   font-size: 0.72rem;
-  line-height: 1;
-  pointer-events: none;
-  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.55);
-  text-shadow: 0 1px 0 rgba(127, 29, 29, 0.65);
 }
 
 .question-map__item[data-change-direction="right-to-wrong"] {
