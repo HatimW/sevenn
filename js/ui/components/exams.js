@@ -1203,18 +1203,33 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
   menuToggle.className = 'exam-card-menu-toggle';
   menuToggle.setAttribute('aria-haspopup', 'true');
   menuToggle.setAttribute('aria-expanded', 'false');
-  const menuIcon = document.createElement('span');
-  menuIcon.className = 'exam-card-menu-icon';
-  menuToggle.appendChild(menuIcon);
-  const menuLabel = document.createElement('span');
-  menuLabel.className = 'sr-only';
-  menuLabel.textContent = 'More options';
-  menuToggle.appendChild(menuLabel);
+  const menuId = `exam-card-menu-${exam.id}`;
+  menuToggle.setAttribute('aria-controls', menuId);
+
+  const menuToggleIcon = document.createElement('span');
+  menuToggleIcon.className = 'exam-card-menu-toggle__icon';
+  const menuToggleIconBar = document.createElement('span');
+  menuToggleIconBar.className = 'exam-card-menu-toggle__icon-bar';
+  menuToggleIcon.appendChild(menuToggleIconBar);
+  menuToggle.appendChild(menuToggleIcon);
+
+  const menuToggleLabel = document.createElement('span');
+  menuToggleLabel.className = 'exam-card-menu-toggle__label';
+  menuToggleLabel.textContent = 'Actions';
+  menuToggle.appendChild(menuToggleLabel);
+
+  const menuToggleSr = document.createElement('span');
+  menuToggleSr.className = 'sr-only';
+  menuToggleSr.textContent = 'Toggle exam actions';
+  menuToggle.appendChild(menuToggleSr);
+
   menuWrap.appendChild(menuToggle);
 
   const menuPanel = document.createElement('div');
   menuPanel.className = 'exam-card-menu-panel';
-  menuPanel.hidden = true;
+  menuPanel.id = menuId;
+  menuPanel.setAttribute('aria-hidden', 'true');
+  menuPanel.setAttribute('role', 'menu');
   menuWrap.appendChild(menuPanel);
 
   let menuOpen = false;
@@ -1224,22 +1239,41 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     closeMenu();
   };
 
+  const handleKeydown = event => {
+    if (!menuOpen) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeMenu();
+      menuToggle.focus();
+    }
+  };
+
+  const handleFocus = event => {
+    if (!menuOpen) return;
+    if (menuWrap.contains(event.target)) return;
+    closeMenu();
+  };
+
   function openMenu() {
     if (menuOpen) return;
     menuOpen = true;
-    menuPanel.hidden = false;
     menuWrap.classList.add('exam-card-menu--open');
     menuToggle.setAttribute('aria-expanded', 'true');
+    menuPanel.setAttribute('aria-hidden', 'false');
     document.addEventListener('click', handleOutside, true);
+    document.addEventListener('keydown', handleKeydown, true);
+    document.addEventListener('focusin', handleFocus, true);
   }
 
   function closeMenu() {
     if (!menuOpen) return;
     menuOpen = false;
-    menuPanel.hidden = true;
     menuWrap.classList.remove('exam-card-menu--open');
     menuToggle.setAttribute('aria-expanded', 'false');
+    menuPanel.setAttribute('aria-hidden', 'true');
     document.removeEventListener('click', handleOutside, true);
+    document.removeEventListener('keydown', handleKeydown, true);
+    document.removeEventListener('focusin', handleFocus, true);
   }
 
   menuToggle.addEventListener('click', event => {
@@ -1251,10 +1285,15 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     }
   });
 
+  menuPanel.addEventListener('click', event => {
+    event.stopPropagation();
+  });
+
   const addMenuAction = (label, handler, options = {}) => {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'exam-card-menu-item';
+    item.setAttribute('role', 'menuitem');
     if (options.variant === 'danger') {
       item.classList.add('is-danger');
     }
