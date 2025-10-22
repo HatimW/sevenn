@@ -1233,6 +1233,14 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
   menuWrap.appendChild(menuPanel);
 
   let menuOpen = false;
+  const applyMenuGap = () => {
+    const panelHeight = menuPanel.scrollHeight || menuPanel.offsetHeight || 0;
+    const clearance = Math.max(panelHeight + 24, 48);
+    card.style.setProperty('--exam-card-menu-gap', `${clearance}px`);
+  };
+  const clearMenuGap = () => {
+    card.style.removeProperty('--exam-card-menu-gap');
+  };
   const handleOutside = event => {
     if (!menuOpen) return;
     if (menuWrap.contains(event.target)) return;
@@ -1260,6 +1268,14 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     menuWrap.classList.add('exam-card-menu--open');
     menuToggle.setAttribute('aria-expanded', 'true');
     menuPanel.setAttribute('aria-hidden', 'false');
+    const frame = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
+      ? window.requestAnimationFrame
+      : null;
+    if (frame) {
+      frame(() => applyMenuGap());
+    } else {
+      applyMenuGap();
+    }
     document.addEventListener('click', handleOutside, true);
     document.addEventListener('keydown', handleKeydown, true);
     document.addEventListener('focusin', handleFocus, true);
@@ -1271,6 +1287,7 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     menuWrap.classList.remove('exam-card-menu--open');
     menuToggle.setAttribute('aria-expanded', 'false');
     menuPanel.setAttribute('aria-hidden', 'true');
+    clearMenuGap();
     document.removeEventListener('click', handleOutside, true);
     document.removeEventListener('keydown', handleKeydown, true);
     document.removeEventListener('focusin', handleFocus, true);
@@ -1653,8 +1670,15 @@ function renderQuestionMap(sidebar, sess, render) {
       item.classList.add('is-review-unanswered');
     }
 
-    if (flaggedSet.has(idx)) {
+    const isFlagged = flaggedSet.has(idx);
+    if (isFlagged) {
+      tooltipParts.push('Flagged');
       item.dataset.flagged = 'true';
+      const flagIcon = document.createElement('span');
+      flagIcon.className = 'question-map__flag';
+      flagIcon.textContent = '🚩';
+      flagIcon.setAttribute('aria-hidden', 'true');
+      item.appendChild(flagIcon);
     } else {
       item.dataset.flagged = 'false';
     }
