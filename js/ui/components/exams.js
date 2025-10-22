@@ -1233,6 +1233,13 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
   menuWrap.appendChild(menuPanel);
 
   let menuOpen = false;
+  const syncMenuGap = () => {
+    if (!menuOpen) return;
+    const panelHeight = menuPanel.offsetHeight;
+    if (!Number.isFinite(panelHeight)) return;
+    const gap = Math.max(0, Math.ceil(panelHeight + 24));
+    menuWrap.style.setProperty('--exam-card-menu-gap', `${gap}px`);
+  };
   const handleOutside = event => {
     if (!menuOpen) return;
     if (menuWrap.contains(event.target)) return;
@@ -1260,9 +1267,18 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     menuWrap.classList.add('exam-card-menu--open');
     menuToggle.setAttribute('aria-expanded', 'true');
     menuPanel.setAttribute('aria-hidden', 'false');
+    syncMenuGap();
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(syncMenuGap);
+    } else {
+      setTimeout(syncMenuGap, 16);
+    }
     document.addEventListener('click', handleOutside, true);
     document.addEventListener('keydown', handleKeydown, true);
     document.addEventListener('focusin', handleFocus, true);
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('resize', syncMenuGap);
+    }
   }
 
   function closeMenu() {
@@ -1271,9 +1287,13 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     menuWrap.classList.remove('exam-card-menu--open');
     menuToggle.setAttribute('aria-expanded', 'false');
     menuPanel.setAttribute('aria-hidden', 'true');
+    menuWrap.style.removeProperty('--exam-card-menu-gap');
     document.removeEventListener('click', handleOutside, true);
     document.removeEventListener('keydown', handleKeydown, true);
     document.removeEventListener('focusin', handleFocus, true);
+    if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+      window.removeEventListener('resize', syncMenuGap);
+    }
   }
 
   menuToggle.addEventListener('click', event => {
@@ -1584,7 +1604,17 @@ function renderQuestionMap(sidebar, sess, render) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'question-map__item';
-    item.textContent = String(idx + 1);
+
+    const number = document.createElement('span');
+    number.className = 'question-map__number';
+    number.textContent = String(idx + 1);
+    item.appendChild(number);
+
+    const flagBadge = document.createElement('span');
+    flagBadge.className = 'question-map__flag';
+    flagBadge.setAttribute('aria-hidden', 'true');
+    flagBadge.textContent = '🚩';
+    item.appendChild(flagBadge);
     const isCurrent = sess.idx === idx;
     item.classList.toggle('is-current', isCurrent);
     item.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
@@ -1642,6 +1672,7 @@ function renderQuestionMap(sidebar, sess, render) {
     }
 
     item.dataset.status = status;
+    item.dataset.answered = answered ? 'true' : 'false';
     if (status === 'correct' || status === 'incorrect') {
       item.classList.add('is-graded');
     } else if (status === 'answered') {
@@ -1655,6 +1686,7 @@ function renderQuestionMap(sidebar, sess, render) {
 
     if (flaggedSet.has(idx)) {
       item.dataset.flagged = 'true';
+      tooltipParts.push('Flagged');
     } else {
       item.dataset.flagged = 'false';
     }
@@ -1662,6 +1694,12 @@ function renderQuestionMap(sidebar, sess, render) {
     if (tooltipParts.length) {
       item.title = tooltipParts.join(' · ');
     }
+
+    const ariaParts = [`Question ${idx + 1}`];
+    if (tooltipParts.length) {
+      ariaParts.push(tooltipParts.join(', '));
+    }
+    item.setAttribute('aria-label', ariaParts.join('. '));
 
     item.addEventListener('click', () => {
       navigateToQuestion(sess, idx, render);
