@@ -1375,7 +1375,7 @@ input[type="checkbox"]:checked::after {
   gap: var(--pad);
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
   background: linear-gradient(185deg, rgba(15, 23, 42, 0.78), rgba(15, 23, 42, 0.6));
 }
 
@@ -6466,6 +6466,60 @@ body.map-toolbox-dragging {
   align-items: center;
 }
 
+.exam-layout-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pad);
+  align-items: center;
+  width: 100%;
+}
+
+.exam-layout-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.exam-layout-pill {
+  border: none;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.78);
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.exam-layout-pill:hover,
+.exam-layout-pill:focus-visible {
+  color: rgba(226, 232, 240, 0.95);
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.exam-layout-pill.is-active {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.92), rgba(192, 132, 252, 0.85));
+  color: #031327;
+  font-weight: 600;
+  box-shadow: 0 16px 34px rgba(2, 6, 23, 0.4);
+}
+
+.exam-layout-pill.is-active:hover,
+.exam-layout-pill.is-active:focus-visible {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.98), rgba(192, 132, 252, 0.92));
+  color: #020a16;
+}
+
+.exam-details-toggle {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 .exam-status {
   min-height: 1.2em;
   font-size: 0.95rem;
@@ -6477,6 +6531,15 @@ body.map-toolbox-dragging {
   gap: var(--pad-lg);
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   align-items: stretch;
+}
+
+.exam-grid.exam-grid--row {
+  display: flex;
+  flex-direction: column;
+}
+
+.exam-grid.exam-grid--row .exam-card {
+  width: 100%;
 }
 
 .exam-card {
@@ -6491,6 +6554,15 @@ body.map-toolbox-dragging {
   box-shadow: 0 24px 46px rgba(2, 6, 23, 0.5);
   transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
   overflow: hidden;
+}
+
+.exam-card.exam-card--compact {
+  padding: calc(var(--pad-lg) * 0.85);
+  gap: calc(var(--pad) * 0.75);
+}
+
+.exam-card.exam-card--row {
+  width: 100%;
 }
 
 .exam-card:hover {
@@ -6522,6 +6594,15 @@ body.map-toolbox-dragging {
   color: inherit;
   cursor: pointer;
   text-align: left;
+}
+
+.exam-card-summary--static {
+  cursor: default;
+}
+
+.exam-card-summary--static:hover,
+.exam-card-summary--static:focus-visible {
+  transform: none;
 }
 
 .exam-card-summary:focus-visible {
@@ -6645,6 +6726,56 @@ body.map-toolbox-dragging {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
+}
+
+.exam-export {
+  position: relative;
+}
+
+.exam-export-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.exam-export-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.94);
+  box-shadow: 0 20px 36px rgba(2, 6, 23, 0.45);
+  min-width: 160px;
+  z-index: 10;
+}
+
+.exam-export-menu[hidden] {
+  display: none;
+}
+
+.exam-export-option {
+  width: 100%;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: rgba(226, 232, 240, 0.88);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.exam-export-option:hover,
+.exam-export-option:focus-visible {
+  background: rgba(56, 189, 248, 0.18);
+  color: rgba(191, 233, 255, 0.98);
 }
 
 .exam-saved-banner {
@@ -7273,6 +7404,13 @@ body.map-toolbox-dragging {
   color: inherit;
   padding: 6px 0;
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  min-height: 36px;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
   transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
 }
 
@@ -7290,18 +7428,21 @@ body.map-toolbox-dragging {
 }
 
 .palette-button.correct {
-  border-color: rgba(74, 222, 128, 0.6);
-  background: rgba(74, 222, 128, 0.2);
+  border-color: rgba(74, 222, 128, 0.7);
+  background: rgba(74, 222, 128, 0.24);
+  color: rgba(209, 250, 229, 0.98);
 }
 
 .palette-button.incorrect {
-  border-color: rgba(248, 113, 113, 0.6);
-  background: rgba(248, 113, 113, 0.2);
+  border-color: rgba(248, 113, 113, 0.7);
+  background: rgba(248, 113, 113, 0.24);
+  color: rgba(254, 226, 226, 0.96);
 }
 
 .palette-button.answered {
-  border-color: rgba(96, 165, 250, 0.45);
-  background: rgba(96, 165, 250, 0.2);
+  border-color: rgba(148, 163, 184, 0.4);
+  background: rgba(148, 163, 184, 0.28);
+  color: rgba(226, 232, 240, 0.85);
 }
 
 .palette-button.review-unanswered {

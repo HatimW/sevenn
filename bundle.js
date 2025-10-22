@@ -115,6 +115,10 @@ var Sevenn = (() => {
     scale: 1,
     controlsVisible: false
   };
+  var DEFAULT_EXAM_LAYOUT = {
+    mode: "grid",
+    detailsVisible: true
+  };
   var preferences = loadUIPreferences();
   function sanitizeEntryFilters(value) {
     if (!value || typeof value !== "object") return {};
@@ -200,9 +204,21 @@ var Sevenn = (() => {
     }
     return next;
   }
+  function sanitizeExamLayout(value) {
+    if (!value || typeof value !== "object") return {};
+    const next = {};
+    if (value.mode === "row" || value.mode === "grid") {
+      next.mode = value.mode;
+    }
+    if (Object.prototype.hasOwnProperty.call(value, "detailsVisible")) {
+      next.detailsVisible = Boolean(value.detailsVisible);
+    }
+    return next;
+  }
   var initialFilters = { ...DEFAULT_ENTRY_FILTERS, ...sanitizeEntryFilters(preferences.filters) };
   var initialLectures = { ...DEFAULT_LECTURE_STATE, ...sanitizeLectureState(preferences.lectures || {}) };
   var initialEntryLayout = { ...DEFAULT_ENTRY_LAYOUT, ...sanitizeEntryLayout(preferences.entryLayout) };
+  var initialExamLayout = { ...DEFAULT_EXAM_LAYOUT, ...sanitizeExamLayout(preferences.examLayout) };
   var state = {
     tab: "Block Board",
     subtab: {
@@ -252,6 +268,7 @@ var Sevenn = (() => {
     flashSession: null,
     examSession: null,
     examAttemptExpanded: {},
+    examLayout: initialExamLayout,
     map: { panzoom: false },
     blockMode: { section: "", assignments: {}, reveal: {}, order: {} },
     study: { selectedMode: "Flashcards" },
@@ -437,6 +454,18 @@ var Sevenn = (() => {
   }
   function setExamAttemptExpanded(examId, expanded2) {
     state.examAttemptExpanded[examId] = expanded2;
+  }
+  function setExamLayout(patch) {
+    if (!patch) return;
+    const current = state.examLayout ? { ...state.examLayout } : { ...DEFAULT_EXAM_LAYOUT };
+    if (patch.mode === "row" || patch.mode === "grid") {
+      current.mode = patch.mode;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "detailsVisible")) {
+      current.detailsVisible = Boolean(patch.detailsVisible);
+    }
+    state.examLayout = current;
+    updateUIPreferences({ examLayout: sanitizeExamLayout(current) });
   }
   function setBlockMode(patch) {
     Object.assign(state.blockMode, patch);
@@ -17119,6 +17148,55 @@ var Sevenn = (() => {
     newBtn.addEventListener("click", () => openExamEditor(null, render));
     actions.appendChild(newBtn);
     controls.appendChild(actions);
+    const layout = state.examLayout || { mode: "grid", detailsVisible: true };
+    const viewMode = layout.mode === "row" ? "row" : "grid";
+    const detailsVisible = layout.detailsVisible !== false;
+    const layoutControls = document.createElement("div");
+    layoutControls.className = "exam-layout-controls";
+    const pills = document.createElement("div");
+    pills.className = "exam-layout-pills";
+    pills.setAttribute("role", "group");
+    pills.setAttribute("aria-label", "Exam layout view");
+    const applyPillState = (btn, active) => {
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    };
+    const columnsBtn = document.createElement("button");
+    columnsBtn.type = "button";
+    columnsBtn.className = "exam-layout-pill";
+    columnsBtn.textContent = "Columns";
+    applyPillState(columnsBtn, viewMode === "grid");
+    columnsBtn.addEventListener("click", () => {
+      if (state.examLayout?.mode !== "grid") {
+        setExamLayout({ mode: "grid" });
+        render();
+      }
+    });
+    pills.appendChild(columnsBtn);
+    const rowsBtn = document.createElement("button");
+    rowsBtn.type = "button";
+    rowsBtn.className = "exam-layout-pill";
+    rowsBtn.textContent = "Rows";
+    applyPillState(rowsBtn, viewMode === "row");
+    rowsBtn.addEventListener("click", () => {
+      if (state.examLayout?.mode !== "row") {
+        setExamLayout({ mode: "row" });
+        render();
+      }
+    });
+    pills.appendChild(rowsBtn);
+    layoutControls.appendChild(pills);
+    const detailsToggle = document.createElement("button");
+    detailsToggle.type = "button";
+    detailsToggle.className = "btn secondary exam-details-toggle";
+    detailsToggle.textContent = detailsVisible ? "Hide Details" : "Show Details";
+    detailsToggle.setAttribute("aria-pressed", detailsVisible ? "true" : "false");
+    detailsToggle.addEventListener("click", () => {
+      setExamLayout({ detailsVisible: !detailsVisible });
+      render();
+    });
+    layoutControls.appendChild(detailsToggle);
+    controls.appendChild(layoutControls);
     controls.appendChild(status);
     root.appendChild(controls);
     root.appendChild(fileInput);
@@ -17153,32 +17231,54 @@ var Sevenn = (() => {
       root.appendChild(empty);
       return;
     }
+    const layoutSnapshot = { mode: viewMode, detailsVisible };
     const grid = document.createElement("div");
     grid.className = "exam-grid";
+    if (viewMode === "row") {
+      grid.classList.add("exam-grid--row");
+    }
     exams.forEach((exam) => {
-      grid.appendChild(buildExamCard(exam, render, sessionMap.get(exam.id), status));
+      grid.appendChild(buildExamCard(exam, render, sessionMap.get(exam.id), status, layoutSnapshot));
     });
     root.appendChild(grid);
   }
-  function buildExamCard(exam, render, savedSession, statusEl) {
+  function buildExamCard(exam, render, savedSession, statusEl, layout) {
+    const layoutMode = layout?.mode === "row" ? "row" : "grid";
+    const showDetails = layout?.detailsVisible !== false;
+    const forceExpanded = showDetails && layoutMode === "row";
     const expandedState = state.examAttemptExpanded[exam.id];
-    const isExpanded = expandedState != null ? expandedState : false;
+    const isExpanded = forceExpanded ? true : expandedState != null ? expandedState : false;
     const last = latestResult(exam);
     const best = bestResult(exam);
     const card = document.createElement("article");
     card.className = "card exam-card";
-    card.classList.toggle("expanded", isExpanded);
+    if (showDetails && isExpanded) {
+      card.classList.add("expanded");
+    }
+    if (!showDetails) {
+      card.classList.add("exam-card--compact");
+    }
+    if (layoutMode === "row") {
+      card.classList.add("exam-card--row");
+    }
     const header = document.createElement("div");
     header.className = "exam-card-header";
     card.appendChild(header);
     const summaryButton = document.createElement("button");
     summaryButton.type = "button";
     summaryButton.className = "exam-card-summary";
-    summaryButton.setAttribute("aria-expanded", isExpanded ? "true" : "false");
-    summaryButton.addEventListener("click", () => {
-      setExamAttemptExpanded(exam.id, !isExpanded);
-      render();
-    });
+    if (showDetails && !forceExpanded) {
+      summaryButton.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+      summaryButton.addEventListener("click", () => {
+        setExamAttemptExpanded(exam.id, !isExpanded);
+        render();
+      });
+    } else {
+      summaryButton.setAttribute("aria-expanded", forceExpanded ? "true" : "false");
+      summaryButton.setAttribute("aria-disabled", "true");
+      summaryButton.disabled = true;
+      summaryButton.classList.add("exam-card-summary--static");
+    }
     header.appendChild(summaryButton);
     const titleGroup = document.createElement("div");
     titleGroup.className = "exam-card-title-group";
@@ -17199,10 +17299,12 @@ var Sevenn = (() => {
     const glance = document.createElement("div");
     glance.className = "exam-card-glance";
     summaryButton.appendChild(glance);
-    const attemptsChip = document.createElement("span");
-    attemptsChip.className = "exam-chip";
-    attemptsChip.textContent = `${exam.results.length} attempt${exam.results.length === 1 ? "" : "s"}`;
-    glance.appendChild(attemptsChip);
+    if (showDetails) {
+      const attemptsChip = document.createElement("span");
+      attemptsChip.className = "exam-chip";
+      attemptsChip.textContent = `${exam.results.length} attempt${exam.results.length === 1 ? "" : "s"}`;
+      glance.appendChild(attemptsChip);
+    }
     if (best) {
       const badge = createScoreBadge(best, "Best");
       badge.title = formatScore(best);
@@ -17213,14 +17315,14 @@ var Sevenn = (() => {
       badge.title = formatScore(last);
       glance.appendChild(badge);
     }
-    if (last) {
+    if (last && showDetails) {
       const lastChip = document.createElement("span");
       lastChip.className = "exam-chip exam-chip--ghost";
       const date = new Date(last.when);
       lastChip.textContent = `Last \u2022 ${date.toLocaleDateString()}`;
       glance.appendChild(lastChip);
     }
-    if (savedSession) {
+    if (savedSession && showDetails) {
       const progressChip = document.createElement("span");
       progressChip.className = "exam-chip exam-chip--progress";
       progressChip.textContent = "In progress";
@@ -17229,6 +17331,9 @@ var Sevenn = (() => {
     const chevron = document.createElement("span");
     chevron.className = "exam-card-toggle-icon";
     chevron.setAttribute("aria-hidden", "true");
+    if (!showDetails || forceExpanded) {
+      chevron.setAttribute("hidden", "true");
+    }
     summaryButton.appendChild(chevron);
     const quickAction = document.createElement("div");
     quickAction.className = "exam-card-quick-action";
@@ -17257,113 +17362,165 @@ var Sevenn = (() => {
         render();
       });
     }
-    const details = document.createElement("div");
-    details.className = "exam-card-details";
-    if (!isExpanded) {
-      details.setAttribute("hidden", "true");
-    }
-    card.appendChild(details);
-    const stats = document.createElement("div");
-    stats.className = "exam-card-stats";
-    stats.appendChild(createStat("Attempts", String(exam.results.length)));
-    stats.appendChild(createStat("Best Score", best ? formatScore(best) : "\u2014"));
-    stats.appendChild(createStat("Last Score", last ? formatScore(last) : "\u2014"));
-    details.appendChild(stats);
-    if (savedSession) {
-      const banner = document.createElement("div");
-      banner.className = "exam-saved-banner";
-      const updated = savedSession.updatedAt ? new Date(savedSession.updatedAt).toLocaleString() : null;
-      banner.textContent = updated ? `Saved attempt \u2022 ${updated}` : "Saved attempt available";
-      details.appendChild(banner);
-    }
-    const actions = document.createElement("div");
-    actions.className = "exam-card-actions";
-    details.appendChild(actions);
-    if (savedSession) {
-      const startFresh = document.createElement("button");
-      startFresh.className = "btn secondary";
-      startFresh.textContent = "Start Fresh";
-      startFresh.disabled = exam.questions.length === 0;
-      startFresh.addEventListener("click", async () => {
-        const confirm2 = await confirmModal("Start a new attempt and discard saved progress?");
-        if (!confirm2) return;
-        await deleteExamSessionProgress(exam.id);
-        setExamSession(createTakingSession(exam));
+    if (showDetails) {
+      let hideMenu = function() {
+        if (!menuOpen) return;
+        menuOpen = false;
+        exportMenu.hidden = true;
+        exportMenu.classList.remove("open");
+        exportBtn.setAttribute("aria-expanded", "false");
+        document.removeEventListener("click", handleOutside, true);
+      }, showMenu = function() {
+        if (menuOpen) return;
+        menuOpen = true;
+        exportMenu.hidden = false;
+        exportMenu.classList.add("open");
+        exportBtn.setAttribute("aria-expanded", "true");
+        document.addEventListener("click", handleOutside, true);
+      };
+      const details = document.createElement("div");
+      details.className = "exam-card-details";
+      if (!isExpanded) {
+        details.setAttribute("hidden", "true");
+      }
+      card.appendChild(details);
+      const stats = document.createElement("div");
+      stats.className = "exam-card-stats";
+      stats.appendChild(createStat("Attempts", String(exam.results.length)));
+      stats.appendChild(createStat("Best Score", best ? formatScore(best) : "\u2014"));
+      stats.appendChild(createStat("Last Score", last ? formatScore(last) : "\u2014"));
+      details.appendChild(stats);
+      if (savedSession) {
+        const banner = document.createElement("div");
+        banner.className = "exam-saved-banner";
+        const updated = savedSession.updatedAt ? new Date(savedSession.updatedAt).toLocaleString() : null;
+        banner.textContent = updated ? `Saved attempt \u2022 ${updated}` : "Saved attempt available";
+        details.appendChild(banner);
+      }
+      const actions = document.createElement("div");
+      actions.className = "exam-card-actions";
+      details.appendChild(actions);
+      if (savedSession) {
+        const startFresh = document.createElement("button");
+        startFresh.className = "btn secondary";
+        startFresh.textContent = "Start Fresh";
+        startFresh.disabled = exam.questions.length === 0;
+        startFresh.addEventListener("click", async () => {
+          const confirm2 = await confirmModal("Start a new attempt and discard saved progress?");
+          if (!confirm2) return;
+          await deleteExamSessionProgress(exam.id);
+          setExamSession(createTakingSession(exam));
+          render();
+        });
+        actions.appendChild(startFresh);
+      }
+      if (last) {
+        const reviewBtn = document.createElement("button");
+        reviewBtn.className = "btn secondary";
+        reviewBtn.textContent = "Review Last Attempt";
+        reviewBtn.addEventListener("click", () => {
+          setExamSession({ mode: "review", exam: clone5(exam), result: clone5(last), idx: 0 });
+          render();
+        });
+        actions.appendChild(reviewBtn);
+      }
+      const editBtn = document.createElement("button");
+      editBtn.className = "btn secondary";
+      editBtn.textContent = "Edit Exam";
+      editBtn.addEventListener("click", () => openExamEditor(exam, render));
+      actions.appendChild(editBtn);
+      const exportWrap = document.createElement("div");
+      exportWrap.className = "exam-export";
+      actions.appendChild(exportWrap);
+      const exportBtn = document.createElement("button");
+      exportBtn.type = "button";
+      exportBtn.className = "btn secondary exam-export-toggle";
+      exportBtn.textContent = "Export";
+      exportBtn.setAttribute("aria-haspopup", "true");
+      exportBtn.setAttribute("aria-expanded", "false");
+      exportWrap.appendChild(exportBtn);
+      const exportMenu = document.createElement("div");
+      exportMenu.className = "exam-export-menu";
+      exportMenu.setAttribute("role", "menu");
+      exportMenu.hidden = true;
+      const exportJson = document.createElement("button");
+      exportJson.type = "button";
+      exportJson.className = "exam-export-option";
+      exportJson.setAttribute("role", "menuitem");
+      exportJson.textContent = "JSON (.json)";
+      exportJson.addEventListener("click", () => {
+        const ok = triggerExamDownload(exam);
+        if (!ok && statusEl) {
+          statusEl.textContent = "Unable to export exam.";
+        } else if (ok && statusEl) {
+          statusEl.textContent = "Exam exported as JSON.";
+        }
+        hideMenu();
+      });
+      exportMenu.appendChild(exportJson);
+      const exportCsv = document.createElement("button");
+      exportCsv.type = "button";
+      exportCsv.className = "exam-export-option";
+      exportCsv.setAttribute("role", "menuitem");
+      exportCsv.textContent = "CSV (.csv)";
+      exportCsv.addEventListener("click", () => {
+        try {
+          downloadExamCsv(exam);
+          if (statusEl) statusEl.textContent = "Exam exported as CSV.";
+        } catch (err) {
+          console.warn("Failed to export exam CSV", err);
+          if (statusEl) statusEl.textContent = "Unable to export exam CSV.";
+        }
+        hideMenu();
+      });
+      exportMenu.appendChild(exportCsv);
+      exportWrap.appendChild(exportMenu);
+      let menuOpen = false;
+      const handleOutside = (event) => {
+        if (!menuOpen) return;
+        if (exportWrap.contains(event.target)) return;
+        hideMenu();
+      };
+      exportBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (menuOpen) {
+          hideMenu();
+        } else {
+          showMenu();
+        }
+      });
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn danger";
+      delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", async () => {
+        const ok = await confirmModal(`Delete "${exam.examTitle}"? This will remove all attempts.`);
+        if (!ok) return;
+        await deleteExamSessionProgress(exam.id).catch(() => {
+        });
+        await deleteExam(exam.id);
         render();
       });
-      actions.appendChild(startFresh);
-    }
-    if (last) {
-      const reviewBtn = document.createElement("button");
-      reviewBtn.className = "btn secondary";
-      reviewBtn.textContent = "Review Last Attempt";
-      reviewBtn.addEventListener("click", () => {
-        setExamSession({ mode: "review", exam: clone5(exam), result: clone5(last), idx: 0 });
-        render();
-      });
-      actions.appendChild(reviewBtn);
-    }
-    const editBtn = document.createElement("button");
-    editBtn.className = "btn secondary";
-    editBtn.textContent = "Edit Exam";
-    editBtn.addEventListener("click", () => openExamEditor(exam, render));
-    actions.appendChild(editBtn);
-    const exportJsonBtn = document.createElement("button");
-    exportJsonBtn.className = "btn secondary";
-    exportJsonBtn.textContent = "Export JSON";
-    exportJsonBtn.addEventListener("click", () => {
-      const ok = triggerExamDownload(exam);
-      if (!ok && statusEl) {
-        statusEl.textContent = "Unable to export exam.";
-      } else if (ok && statusEl) {
-        statusEl.textContent = "Exam exported as JSON.";
+      actions.appendChild(delBtn);
+      const attemptsWrap = document.createElement("div");
+      attemptsWrap.className = "exam-attempts";
+      const attemptsTitle = document.createElement("h3");
+      attemptsTitle.textContent = "Attempts";
+      attemptsWrap.appendChild(attemptsTitle);
+      if (!exam.results.length) {
+        const none = document.createElement("p");
+        none.className = "exam-attempt-empty";
+        none.textContent = "No attempts yet.";
+        attemptsWrap.appendChild(none);
+      } else {
+        const list = document.createElement("div");
+        list.className = "exam-attempt-list";
+        [...exam.results].sort((a, b) => b.when - a.when).forEach((result) => {
+          list.appendChild(buildAttemptRow(exam, result, render));
+        });
+        attemptsWrap.appendChild(list);
       }
-    });
-    actions.appendChild(exportJsonBtn);
-    const exportCsvBtn = document.createElement("button");
-    exportCsvBtn.className = "btn secondary";
-    exportCsvBtn.textContent = "Export CSV";
-    exportCsvBtn.addEventListener("click", () => {
-      try {
-        downloadExamCsv(exam);
-        if (statusEl) statusEl.textContent = "Exam exported as CSV.";
-      } catch (err) {
-        console.warn("Failed to export exam CSV", err);
-        if (statusEl) statusEl.textContent = "Unable to export exam CSV.";
-      }
-    });
-    actions.appendChild(exportCsvBtn);
-    const delBtn = document.createElement("button");
-    delBtn.className = "btn danger";
-    delBtn.textContent = "Delete";
-    delBtn.addEventListener("click", async () => {
-      const ok = await confirmModal(`Delete "${exam.examTitle}"? This will remove all attempts.`);
-      if (!ok) return;
-      await deleteExamSessionProgress(exam.id).catch(() => {
-      });
-      await deleteExam(exam.id);
-      render();
-    });
-    actions.appendChild(delBtn);
-    const attemptsWrap = document.createElement("div");
-    attemptsWrap.className = "exam-attempts";
-    const attemptsTitle = document.createElement("h3");
-    attemptsTitle.textContent = "Attempts";
-    attemptsWrap.appendChild(attemptsTitle);
-    if (!exam.results.length) {
-      const none = document.createElement("p");
-      none.className = "exam-attempt-empty";
-      none.textContent = "No attempts yet.";
-      attemptsWrap.appendChild(none);
-    } else {
-      const list = document.createElement("div");
-      list.className = "exam-attempt-list";
-      [...exam.results].sort((a, b) => b.when - a.when).forEach((result) => {
-        list.appendChild(buildAttemptRow(exam, result, render));
-      });
-      attemptsWrap.appendChild(list);
+      details.appendChild(attemptsWrap);
     }
-    details.appendChild(attemptsWrap);
     return card;
   }
   function buildAttemptRow(exam, result, render) {
@@ -17503,6 +17660,7 @@ var Sevenn = (() => {
       const answered = answer != null && question.options.some((opt) => opt.id === answer);
       const tooltipParts = [];
       let status = "unanswered";
+      const wasChecked = !isReview && Boolean(sess.checked?.[idx]);
       if (isReview) {
         if (answered) {
           const isCorrect = answer === question.answer;
@@ -17532,13 +17690,21 @@ var Sevenn = (() => {
           tooltipParts.push("Changed answers but returned to start");
         }
       } else {
-        status = answered ? "answered" : "unanswered";
-        tooltipParts.push(answered ? "Answered" : "Not answered");
+        if (wasChecked && answered) {
+          const isCorrect = answer === question.answer;
+          status = isCorrect ? "correct" : "incorrect";
+          tooltipParts.push(isCorrect ? "Checked correct" : "Checked incorrect");
+        } else if (answered) {
+          status = "answered";
+          tooltipParts.push("Answered");
+        } else {
+          tooltipParts.push(wasChecked ? "Checked without answer" : "Not answered");
+        }
       }
       if (status === "correct") {
-        btn.classList.add("correct");
+        btn.classList.add("correct", "answered");
       } else if (status === "incorrect") {
-        btn.classList.add("incorrect");
+        btn.classList.add("incorrect", "answered");
       } else if (status === "answered") {
         btn.classList.add("answered");
       } else if (status === "review-unanswered") {
@@ -26462,3 +26628,4 @@ var Sevenn = (() => {
   }
   return __toCommonJS(main_exports);
 })();
+//# sourceMappingURL=bundle.js.map
