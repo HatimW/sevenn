@@ -1233,6 +1233,25 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
   menuWrap.appendChild(menuPanel);
 
   let menuOpen = false;
+  let menuResizeHandler = null;
+  const runAfterFrame = typeof requestAnimationFrame === 'function'
+    ? requestAnimationFrame
+    : (cb => setTimeout(cb, 0));
+  const updateMenuGap = () => {
+    if (!menuOpen) return;
+    const height = menuPanel.offsetHeight;
+    if (height > 0) {
+      const offset = Math.ceil(height + 24);
+      card.style.setProperty('--exam-card-menu-gap', `${offset}px`);
+    } else {
+      card.style.setProperty('--exam-card-menu-gap', '32px');
+    }
+  };
+  const scheduleMenuGap = () => {
+    runAfterFrame(() => {
+      updateMenuGap();
+    });
+  };
   const handleOutside = event => {
     if (!menuOpen) return;
     if (menuWrap.contains(event.target)) return;
@@ -1260,6 +1279,12 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     menuWrap.classList.add('exam-card-menu--open');
     menuToggle.setAttribute('aria-expanded', 'true');
     menuPanel.setAttribute('aria-hidden', 'false');
+    card.classList.add('exam-card--menu-open');
+    scheduleMenuGap();
+    if (typeof window !== 'undefined') {
+      menuResizeHandler = () => updateMenuGap();
+      window.addEventListener('resize', menuResizeHandler);
+    }
     document.addEventListener('click', handleOutside, true);
     document.addEventListener('keydown', handleKeydown, true);
     document.addEventListener('focusin', handleFocus, true);
@@ -1271,6 +1296,12 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     menuWrap.classList.remove('exam-card-menu--open');
     menuToggle.setAttribute('aria-expanded', 'false');
     menuPanel.setAttribute('aria-hidden', 'true');
+    card.classList.remove('exam-card--menu-open');
+    card.style.removeProperty('--exam-card-menu-gap');
+    if (typeof window !== 'undefined' && menuResizeHandler) {
+      window.removeEventListener('resize', menuResizeHandler);
+    }
+    menuResizeHandler = null;
     document.removeEventListener('click', handleOutside, true);
     document.removeEventListener('keydown', handleKeydown, true);
     document.removeEventListener('focusin', handleFocus, true);
@@ -1576,9 +1607,10 @@ function renderQuestionMap(sidebar, sess, render) {
     sess.result.changeSummary = summary;
   }
 
-  const flaggedSet = new Set(sess.mode === 'review'
-    ? (sess.result.flagged || [])
-    : Object.entries(sess.flagged || {}).filter(([_, v]) => v).map(([idx]) => Number(idx)));
+  const flaggedSource = sess.mode === 'review'
+    ? (Array.isArray(sess.result?.flagged) ? sess.result.flagged : [])
+    : Object.entries(sess.flagged || {}).filter(([_, v]) => v).map(([idx]) => idx);
+  const flaggedSet = new Set(flaggedSource.map(idx => Number(idx)));
 
   sess.exam.questions.forEach((question, idx) => {
     const item = document.createElement('button');
@@ -1653,10 +1685,19 @@ function renderQuestionMap(sidebar, sess, render) {
       item.classList.add('is-review-unanswered');
     }
 
-    if (flaggedSet.has(idx)) {
+    const isFlagged = flaggedSet.has(idx);
+    if (isFlagged) {
       item.dataset.flagged = 'true';
+      item.classList.add('is-flagged');
+      tooltipParts.push('Flagged');
+      const flagIcon = document.createElement('span');
+      flagIcon.className = 'question-map__flag';
+      flagIcon.setAttribute('aria-hidden', 'true');
+      flagIcon.textContent = '🚩';
+      item.appendChild(flagIcon);
     } else {
       item.dataset.flagged = 'false';
+      item.classList.remove('is-flagged');
     }
 
     if (tooltipParts.length) {
