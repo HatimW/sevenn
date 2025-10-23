@@ -1254,19 +1254,6 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     closeMenu();
   };
 
-  const updateMenuOffset = () => {
-    if (!menuOpen) return;
-    const panelHeight = menuPanel.scrollHeight || menuPanel.offsetHeight || 0;
-    const offset = Math.max(panelHeight + 24, 160);
-    menuWrap.style.setProperty('--menu-open-offset', `${offset}px`);
-    card.classList.add('exam-card--menu-open');
-  };
-
-  const handleResize = () => {
-    if (!menuOpen) return;
-    requestAnimationFrame(updateMenuOffset);
-  };
-
   function openMenu() {
     if (menuOpen) return;
     menuOpen = true;
@@ -1276,8 +1263,6 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     document.addEventListener('click', handleOutside, true);
     document.addEventListener('keydown', handleKeydown, true);
     document.addEventListener('focusin', handleFocus, true);
-    requestAnimationFrame(updateMenuOffset);
-    window.addEventListener('resize', handleResize);
   }
 
   function closeMenu() {
@@ -1286,12 +1271,9 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     menuWrap.classList.remove('exam-card-menu--open');
     menuToggle.setAttribute('aria-expanded', 'false');
     menuPanel.setAttribute('aria-hidden', 'true');
-    menuWrap.style.removeProperty('--menu-open-offset');
-    card.classList.remove('exam-card--menu-open');
     document.removeEventListener('click', handleOutside, true);
     document.removeEventListener('keydown', handleKeydown, true);
     document.removeEventListener('focusin', handleFocus, true);
-    window.removeEventListener('resize', handleResize);
   }
 
   menuToggle.addEventListener('click', event => {
@@ -1597,28 +1579,12 @@ function renderQuestionMap(sidebar, sess, render) {
   const flaggedSet = new Set(sess.mode === 'review'
     ? (sess.result.flagged || [])
     : Object.entries(sess.flagged || {}).filter(([_, v]) => v).map(([idx]) => Number(idx)));
-  const statusDescriptions = {
-    correct: 'Answered correctly',
-    incorrect: 'Answered incorrectly',
-    answered: 'Answered',
-    unanswered: 'Not answered yet',
-    'review-unanswered': 'Not answered'
-  };
 
   sess.exam.questions.forEach((question, idx) => {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'question-map__item';
-    const label = document.createElement('span');
-    label.className = 'question-map__number';
-    label.textContent = String(idx + 1);
-    item.appendChild(label);
-
-    const flagIcon = document.createElement('span');
-    flagIcon.className = 'question-map__flag';
-    flagIcon.textContent = '🚩';
-    flagIcon.setAttribute('aria-hidden', 'true');
-    item.appendChild(flagIcon);
+    item.textContent = String(idx + 1);
     const isCurrent = sess.idx === idx;
     item.classList.toggle('is-current', isCurrent);
     item.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
@@ -1687,26 +1653,15 @@ function renderQuestionMap(sidebar, sess, render) {
       item.classList.add('is-review-unanswered');
     }
 
-    const isFlagged = flaggedSet.has(idx);
-    item.dataset.flagged = isFlagged ? 'true' : 'false';
-    flagIcon.hidden = !isFlagged;
-    if (isFlagged) {
-      tooltipParts.push('Flagged');
+    if (flaggedSet.has(idx)) {
+      item.dataset.flagged = 'true';
+    } else {
+      item.dataset.flagged = 'false';
     }
 
     if (tooltipParts.length) {
       item.title = tooltipParts.join(' · ');
     }
-
-    const statusLabel = statusDescriptions[status];
-    const ariaParts = [`Question ${idx + 1}`];
-    if (statusLabel) ariaParts.push(statusLabel);
-    if (isFlagged) ariaParts.push('Flagged');
-    const tooltipForAria = tooltipParts.filter(part => part !== 'Flagged');
-    if (tooltipForAria.length) {
-      ariaParts.push(tooltipForAria.join(', '));
-    }
-    item.setAttribute('aria-label', ariaParts.join('. '));
 
     item.addEventListener('click', () => {
       navigateToQuestion(sess, idx, render);
