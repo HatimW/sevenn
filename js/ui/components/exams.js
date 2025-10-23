@@ -1258,9 +1258,6 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     if (menuOpen) return;
     menuOpen = true;
     menuWrap.classList.add('exam-card-menu--open');
-    const panelHeight = menuPanel.offsetHeight;
-    const extraSpace = Math.max(panelHeight + 16, 0);
-    menuWrap.style.setProperty('--exam-menu-open-space', `${extraSpace}px`);
     menuToggle.setAttribute('aria-expanded', 'true');
     menuPanel.setAttribute('aria-hidden', 'false');
     document.addEventListener('click', handleOutside, true);
@@ -1272,7 +1269,6 @@ function buildExamCard(exam, render, savedSession, statusEl, layout) {
     if (!menuOpen) return;
     menuOpen = false;
     menuWrap.classList.remove('exam-card-menu--open');
-    menuWrap.style.removeProperty('--exam-menu-open-space');
     menuToggle.setAttribute('aria-expanded', 'false');
     menuPanel.setAttribute('aria-hidden', 'true');
     document.removeEventListener('click', handleOutside, true);
@@ -1588,26 +1584,12 @@ function renderQuestionMap(sidebar, sess, render) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'question-map__item';
-    const questionNumber = idx + 1;
-
-    const label = document.createElement('span');
-    label.className = 'question-map__item-label';
-    label.textContent = String(questionNumber);
-    item.appendChild(label);
-
-    const flagIcon = document.createElement('span');
-    flagIcon.className = 'question-map__item-flag';
-    flagIcon.setAttribute('aria-hidden', 'true');
-    flagIcon.textContent = '🚩';
-    item.appendChild(flagIcon);
-
-    const accessibleParts = [`Question ${questionNumber}`];
+    item.textContent = String(idx + 1);
     const isCurrent = sess.idx === idx;
     item.classList.toggle('is-current', isCurrent);
     item.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
     if (isCurrent) {
       item.setAttribute('aria-current', 'true');
-      accessibleParts.push('Current question');
     } else {
       item.removeAttribute('aria-current');
     }
@@ -1615,10 +1597,6 @@ function renderQuestionMap(sidebar, sess, render) {
     const answer = answers[idx];
     const answered = answer != null && question.options.some(opt => opt.id === answer);
     const tooltipParts = [];
-    const addStatus = text => {
-      tooltipParts.push(text);
-      accessibleParts.push(text);
-    };
     let status = 'unanswered';
     const wasChecked = !isReview && Boolean(sess.checked?.[idx]);
 
@@ -1626,10 +1604,10 @@ function renderQuestionMap(sidebar, sess, render) {
       if (answered) {
         const isCorrect = answer === question.answer;
         status = isCorrect ? 'correct' : 'incorrect';
-        addStatus(isCorrect ? 'Answered correctly' : 'Answered incorrectly');
+        tooltipParts.push(isCorrect ? 'Answered correctly' : 'Answered incorrectly');
       } else {
         status = 'review-unanswered';
-        addStatus('Not answered');
+        tooltipParts.push('Not answered');
       }
 
       const stat = statsList[idx];
@@ -1638,28 +1616,28 @@ function renderQuestionMap(sidebar, sess, render) {
       if (changeDetails.changed) {
         if (changeDetails.direction === 'right-to-wrong') {
           item.dataset.changeDirection = 'right-to-wrong';
-          addStatus('Changed from correct to incorrect');
+          tooltipParts.push('Changed from correct to incorrect');
         } else if (changeDetails.direction === 'wrong-to-right') {
           item.dataset.changeDirection = 'wrong-to-right';
-          addStatus('Changed from incorrect to correct');
+          tooltipParts.push('Changed from incorrect to correct');
         } else {
           item.dataset.changeDirection = 'changed';
-          addStatus('Changed answer');
+          tooltipParts.push('Changed answer');
         }
       } else if (changeDetails.switched) {
         item.dataset.changeDirection = 'returned';
-        addStatus('Changed answers but returned to start');
+        tooltipParts.push('Changed answers but returned to start');
       }
     } else {
       if (wasChecked && answered) {
         const isCorrect = answer === question.answer;
         status = isCorrect ? 'correct' : 'incorrect';
-        addStatus(isCorrect ? 'Checked correct' : 'Checked incorrect');
+        tooltipParts.push(isCorrect ? 'Checked correct' : 'Checked incorrect');
       } else if (answered) {
         status = 'answered';
-        addStatus('Answered');
+        tooltipParts.push('Answered');
       } else {
-        addStatus(wasChecked ? 'Checked without answer' : 'Not answered');
+        tooltipParts.push(wasChecked ? 'Checked without answer' : 'Not answered');
       }
     }
 
@@ -1675,26 +1653,14 @@ function renderQuestionMap(sidebar, sess, render) {
       item.classList.add('is-review-unanswered');
     }
 
-    const flagged = flaggedSet.has(idx);
-    if (flagged) {
+    if (flaggedSet.has(idx)) {
       item.dataset.flagged = 'true';
-      item.classList.add('is-flagged');
-      addStatus('Flagged');
     } else {
       item.dataset.flagged = 'false';
-      item.classList.remove('is-flagged');
     }
 
     if (tooltipParts.length) {
       item.title = tooltipParts.join(' · ');
-    } else {
-      item.removeAttribute('title');
-    }
-
-    if (accessibleParts.length) {
-      item.setAttribute('aria-label', accessibleParts.join(', '));
-    } else {
-      item.removeAttribute('aria-label');
     }
 
     item.addEventListener('click', () => {
