@@ -123,7 +123,7 @@ button:focus-visible {
   outline-offset: 3px;
 }
 
-button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(.list-subtab) {
+button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(.list-subtab):not(.question-map__item) {
   background: rgba(148, 163, 184, 0.14);
   color: var(--text);
   border: 1px solid var(--border);
@@ -132,7 +132,7 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(
   box-shadow: none;
 }
 
-button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(.list-subtab):hover {
+button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(.list-subtab):not(.question-map__item):hover {
   background: rgba(148, 163, 184, 0.22);
 }
 
@@ -6562,6 +6562,10 @@ body.map-toolbox-dragging {
   overflow: visible;
 }
 
+.exam-card--menu-open {
+  z-index: 5;
+}
+
 .exam-card--row {
   width: 100%;
 }
@@ -6748,6 +6752,7 @@ body.map-toolbox-dragging {
   position: relative;
   display: flex;
   justify-content: flex-end;
+  padding-bottom: var(--menu-open-offset, 0px);
 }
 
 .exam-card-menu-toggle {
@@ -7677,9 +7682,9 @@ body.map-toolbox-dragging {
 }
 
 .question-map__item {
-  --qm-background: linear-gradient(150deg, rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.6));
-  --qm-border: rgba(148, 163, 184, 0.32);
-  --qm-text: rgba(226, 232, 240, 0.85);
+  --qm-background: linear-gradient(150deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.72));
+  --qm-border: rgba(100, 116, 139, 0.4);
+  --qm-text: rgba(203, 213, 225, 0.82);
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -7745,29 +7750,29 @@ body.map-toolbox-dragging {
 
 .question-map__item[data-status="answered"],
 .question-map__item.is-answered {
-  --qm-background: linear-gradient(135deg, rgba(37, 99, 235, 0.5), rgba(29, 78, 216, 0.65));
-  --qm-border: rgba(96, 165, 250, 0.75);
+  --qm-background: linear-gradient(135deg, rgba(59, 130, 246, 0.74), rgba(29, 78, 216, 0.88));
+  --qm-border: rgba(96, 165, 250, 0.95);
   --qm-text: rgba(224, 242, 254, 0.98);
 }
 
 .question-map__item[data-status="correct"] {
-  --qm-background: linear-gradient(135deg, rgba(34, 197, 94, 0.48), rgba(16, 185, 129, 0.68));
-  --qm-border: rgba(134, 239, 172, 0.85);
-  --qm-text: rgba(240, 253, 244, 0.96);
+  --qm-background: linear-gradient(135deg, rgba(34, 197, 94, 0.72), rgba(16, 185, 129, 0.88));
+  --qm-border: rgba(187, 247, 208, 0.95);
+  --qm-text: rgba(240, 253, 244, 0.98);
 }
 
 .question-map__item[data-status="incorrect"] {
-  --qm-background: linear-gradient(135deg, rgba(239, 68, 68, 0.5), rgba(220, 38, 38, 0.68));
-  --qm-border: rgba(248, 113, 113, 0.85);
-  --qm-text: rgba(254, 226, 226, 0.96);
+  --qm-background: linear-gradient(135deg, rgba(239, 68, 68, 0.72), rgba(220, 38, 38, 0.88));
+  --qm-border: rgba(252, 165, 165, 0.95);
+  --qm-text: rgba(254, 226, 226, 0.98);
 }
 
 .question-map__item[data-status="unanswered"],
 .question-map__item.is-unanswered,
 .question-map__item[data-status="review-unanswered"] {
-  --qm-background: linear-gradient(150deg, rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.6));
-  --qm-border: rgba(100, 116, 139, 0.38);
-  --qm-text: rgba(148, 163, 184, 0.78);
+  --qm-background: linear-gradient(150deg, rgba(15, 23, 42, 0.72), rgba(15, 23, 42, 0.58));
+  --qm-border: rgba(71, 85, 105, 0.48);
+  --qm-text: rgba(148, 163, 184, 0.75);
 }
 
 .question-map__item.is-review-unanswered,
@@ -7790,16 +7795,25 @@ body.map-toolbox-dragging {
   }
 }
 
-.question-map__item[data-flagged="true"] {
+.question-map__number {
+  pointer-events: none;
   position: relative;
+  z-index: 2;
 }
 
-.question-map__item[data-flagged="true"]::after {
-  content: '🚩';
+.question-map__flag {
   position: absolute;
-  top: -6px;
-  right: -6px;
+  top: 2px;
+  right: 2px;
   font-size: 0.72rem;
+  filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.65));
+  pointer-events: none;
+  display: none;
+  z-index: 3;
+}
+
+.question-map__item[data-flagged="true"] .question-map__flag {
+  display: block;
 }
 
 .question-map__item[data-change-direction="right-to-wrong"] {
