@@ -21,3 +21,9 @@ test('buildTokens includes rich text content', () => {
     assert(tokens.includes(tok));
   });
 });
+
+test('buildTokens tolerates incomplete lecture data', () => {
+  const item = { lectures: [null, undefined, { name: 'Delta' }, {}] };
+  const tokens = buildTokens(item).split(' ');
+  assert(tokens.includes('delta'));
+});
