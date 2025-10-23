@@ -1584,7 +1584,17 @@ function renderQuestionMap(sidebar, sess, render) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'question-map__item';
-    item.textContent = String(idx + 1);
+
+    const label = document.createElement('span');
+    label.className = 'question-map__label';
+    label.textContent = String(idx + 1);
+    item.appendChild(label);
+
+    const flagIndicator = document.createElement('span');
+    flagIndicator.className = 'question-map__flag';
+    flagIndicator.setAttribute('aria-hidden', 'true');
+    flagIndicator.textContent = '🚩';
+    item.appendChild(flagIndicator);
     const isCurrent = sess.idx === idx;
     item.classList.toggle('is-current', isCurrent);
     item.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
@@ -1653,10 +1663,10 @@ function renderQuestionMap(sidebar, sess, render) {
       item.classList.add('is-review-unanswered');
     }
 
-    if (flaggedSet.has(idx)) {
-      item.dataset.flagged = 'true';
-    } else {
-      item.dataset.flagged = 'false';
+    const isFlagged = flaggedSet.has(idx);
+    item.dataset.flagged = isFlagged ? 'true' : 'false';
+    if (isFlagged) {
+      tooltipParts.push('Flagged');
     }
 
     if (tooltipParts.length) {
