@@ -30,7 +30,13 @@ export function buildTokens(item) {
   } else if (item.facts && item.facts.length) {
     fields.push(...item.facts);
   }
-  if (item.lectures) fields.push(...item.lectures.map(l => l.name));
+  if (Array.isArray(item.lectures)) {
+    item.lectures.forEach(lecture => {
+      if (lecture && typeof lecture.name === 'string' && lecture.name) {
+        fields.push(lecture.name);
+      }
+    });
+  }
   contentFields.forEach(field => {
     if (typeof item[field] === 'string' && item[field]) {
       fields.push(stripHtml(item[field]));
