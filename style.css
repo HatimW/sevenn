@@ -123,7 +123,7 @@ button:focus-visible {
   outline-offset: 3px;
 }
 
-button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(.list-subtab):not(.question-map__item) {
+button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(.list-subtab) {
   background: rgba(148, 163, 184, 0.14);
   color: var(--text);
   border: 1px solid var(--border);
@@ -132,7 +132,7 @@ button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(
   box-shadow: none;
 }
 
-button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(.list-subtab):not(.question-map__item):hover {
+button:not(.tab):not(.fab-btn):not(.builder-pill):not(.builder-mode-toggle):not(.list-subtab):hover {
   background: rgba(148, 163, 184, 0.22);
 }
 
@@ -6549,28 +6549,21 @@ body.map-toolbox-dragging {
 }
 
 .exam-card {
-  --exam-card-base-padding: calc(var(--pad-lg) * 0.85);
-  --exam-card-menu-gap: 0px;
   position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--pad);
-  padding: var(--exam-card-base-padding);
-  padding-bottom: calc(var(--exam-card-base-padding) + var(--exam-card-menu-gap));
+  padding: calc(var(--pad-lg) * 0.85);
   border-radius: 18px;
   border: 1px solid rgba(148, 163, 184, 0.28);
   background: linear-gradient(150deg, rgba(15, 23, 42, 0.92), rgba(30, 64, 175, 0.38));
   box-shadow: 0 26px 52px rgba(2, 6, 23, 0.5);
-  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease, background 0.25s ease, padding-bottom 0.25s ease;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease, background 0.25s ease;
   overflow: visible;
 }
 
 .exam-card--row {
   width: 100%;
-}
-
-.exam-card--menu-open {
-  z-index: 5;
 }
 
 .exam-card:hover {
@@ -7704,7 +7697,7 @@ body.map-toolbox-dragging {
   color: var(--qm-text);
   text-shadow: 0 1px 0 rgba(15, 23, 42, 0.32);
   transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease, border-color 0.2s ease;
-  overflow: visible;
+  overflow: hidden;
   isolation: isolate;
 }
 
@@ -7801,15 +7794,12 @@ body.map-toolbox-dragging {
   position: relative;
 }
 
-.question-map__flag {
+.question-map__item[data-flagged="true"]::after {
+  content: '🚩';
   position: absolute;
   top: -6px;
   right: -6px;
   font-size: 0.72rem;
-  line-height: 1;
-  filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.6));
-  z-index: 2;
-  pointer-events: none;
 }
 
 .question-map__item[data-change-direction="right-to-wrong"] {
